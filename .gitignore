@@ -14,3 +14,4 @@ poetry.lock
 # folders
 docs/
 images/
+PyCuda/
