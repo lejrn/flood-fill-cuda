@@ -1,1 +1,16 @@
+# Virtual Environment
 .venv
+
+# IDE
+.vscode/
+
+# Poetry stuff
+poetry.lock
+
+# photos
+*.png
+*.jpg
+
+# folders
+docs/
+images/
