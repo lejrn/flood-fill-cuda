@@ -1,0 +1,27 @@
+[project]
+name = "flood-fill-cuda"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "TL"}
+]
+package-mode = "false"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numba (>=0.61.0,<0.62.0)",
+    "matplotlib (>=3.10.0,<4.0.0)",
+    "rich (>=13.9.4,<14.0.0)",
+    "ipykernel (>=6.29.5,<7.0.0)",
+    "opencv-python (>=4.11.0.86,<5.0.0.0)",
+    "pathlib (>=1.0.1,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
