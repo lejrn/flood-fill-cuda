@@ -53,9 +53,14 @@ def process_image(image_path):
 
 
 from pathlib import Path
+import timeit
 HOME = Path.cwd()
 image_path = HOME / "images" / "input" / "input_blobs.png"
 output_path = HOME / "images" / "output" / "colored_blobs_cpu_mvp.png"
+
+
+start_time = timeit.default_timer()
 result_img, blob_count = process_image(image_path)
-print(f"Detected {blob_count} blobs")
+elapsed = timeit.default_timer() - start_time
+print(f"Detected {blob_count} blobs in {elapsed:.2f} seconds")
 result_img.save(output_path)
