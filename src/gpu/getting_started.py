@@ -22,3 +22,6 @@ start = time.time()
 go_fast(x)
 end = time.time()
 print("Elapsed (after compilation) = %s" % (end - start))
+
+import timeit
+print(timeit.timeit('go_fast(x)', globals=globals(), number=1000))
