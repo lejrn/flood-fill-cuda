@@ -3,6 +3,7 @@
 
 # IDE
 .vscode/
+.cache/
 
 # Poetry stuff
 poetry.lock
