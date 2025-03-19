@@ -4,7 +4,7 @@
 # IDE
 .vscode/
 .cache/
-
+.cursor/
 # Poetry stuff
 poetry.lock
 
@@ -15,4 +15,5 @@ poetry.lock
 # folders
 docs/
 images/
+profiling/
 PyCuda/
