@@ -63,8 +63,8 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
     global_tid = bid * block_size + tid
 
     # shared memory for queue (each element stores an x-y coordinate)
-    queue_x = cuda.shared.array(shape=1024, dtype=nb.int32)
-    queue_y = cuda.shared.array(shape=1024, dtype=nb.int32)
+    queue_x = cuda.shared.array(shape=2024, dtype=nb.int32)
+    queue_y = cuda.shared.array(shape=2024, dtype=nb.int32)
     queue_front = cuda.shared.array(shape=1, dtype=nb.int32)
     queue_rear = cuda.shared.array(shape=1, dtype=nb.int32)
     
@@ -80,12 +80,24 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
     # while the queue is not empty
     while queue_front[0] < queue_rear[0]:
         cuda.syncthreads()
+        
+        # Check if queue is empty
+        if queue_front[0] >= queue_rear[0]:
+            # print(queue_rear[0])
+            # print(queue_front[0])
+            break
+        
         current_size = queue_rear[0] - queue_front[0]
 
-        # Each thread processes some queue items
-        items_per_thread = (current_size + block_size - 1) // block_size
+        # # Each thread processes some queue items
+        # items_per_thread = (current_size + block_size - 1) // block_size
+        # start_idx = queue_front[0] + tid * items_per_thread
+        # end_idx = start_idx + items_per_thread if start_idx + items_per_thread < queue_rear[0] else queue_rear[0]
+        
+                # Calculate items per thread
+        items_per_thread = max(1, (current_size + block_size - 1) // block_size)
         start_idx = queue_front[0] + tid * items_per_thread
-        end_idx = start_idx + items_per_thread if start_idx + items_per_thread < queue_rear[0] else queue_rear[0]
+        end_idx = min(start_idx + items_per_thread, queue_rear[0])
         
         for idx in range(start_idx, end_idx):
             # Retrieve the pixel from the queue
@@ -103,18 +115,24 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
                 if is_valid_pixel(nx, ny, width, height):
                     if is_not_visited(visited, nx, ny, width):
                         if is_red(img, nx, ny, width, height):
-                            # Use cuda.atomic.cas on the visited array with x,y order
+                            # Safely mark as visited
                             old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
                             if old == 0:
+                                # Add to queue
                                 pos = cuda.atomic.add(queue_rear, 0, 1)
-                                queue_x[pos] = nx
-                                queue_y[pos] = ny
+                                # Check queue capacity
+                                if pos < 1024:  # Using the queue capacity
+                                    queue_x[pos] = nx
+                                    queue_y[pos] = ny
         
         cuda.syncthreads()
         # Update queue front pointer once all threads complete processing
-        if tid == 0 and bid == 0:
-            queue_front[0] = queue_rear[0]
+        if global_tid == 0:
+            queue_front[0] += current_size
+    
         cuda.syncthreads()
+
+    print(queue_front[0])
 
 # Main function
 def main():
@@ -156,7 +174,7 @@ def main():
         if start_x != -1:
             break
 
-    print(f"{start_x=},{start_y=}")
+    # print(f"{start_x=},{start_y=}")
 
     # Create visited as a 2D array with x,y indexing
     visited = np.zeros((width, height), dtype=np.int32)
