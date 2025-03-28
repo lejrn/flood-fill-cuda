@@ -63,8 +63,8 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
     global_tid = bid * block_size + tid
 
     # shared memory for queue (each element stores an x-y coordinate)
-    queue_x = cuda.shared.array(shape=2024, dtype=nb.int32)
-    queue_y = cuda.shared.array(shape=2024, dtype=nb.int32)
+    queue_x = cuda.shared.array(shape=4096, dtype=nb.int32)
+    queue_y = cuda.shared.array(shape=4096, dtype=nb.int32)
     queue_front = cuda.shared.array(shape=1, dtype=nb.int32)
     queue_rear = cuda.shared.array(shape=1, dtype=nb.int32)
     
@@ -121,7 +121,7 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
                                 # Add to queue
                                 pos = cuda.atomic.add(queue_rear, 0, 1)
                                 # Check queue capacity
-                                if pos < 1024:  # Using the queue capacity
+                                if pos < 4096:  # Using the queue capacity
                                     queue_x[pos] = nx
                                     queue_y[pos] = ny
         
@@ -132,7 +132,8 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
     
         cuda.syncthreads()
 
-    print(queue_front[0])
+    # print(queue_front[0])
+    # print(queue_rear[0])
 
 # Main function
 def main():
