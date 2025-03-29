@@ -106,7 +106,8 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
             # Mark the pixel with new_color
             img[x, y, 0] = new_color[0]
             img[x, y, 1] = new_color[1]
-            img[x, y, 2] = new_color[2]
+            # img[x, y, 2] = new_color[2]
+            img[x, y, 2] = (tid*16) % 255
             
             # Process 4-connected neighbors (up, down, left, right) using global direction arrays
             for i in range(4):
