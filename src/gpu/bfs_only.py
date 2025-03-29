@@ -75,6 +75,9 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
     queue_front = cuda.shared.array(shape=1, dtype=nb.int32)
     queue_rear = cuda.shared.array(shape=1, dtype=nb.int32)
     
+    DX_const = cuda.const.array_like(DX_host)
+    DY_const = cuda.const.array_like(DY_host)
+    
     # Initialization using x,y indexing for visited
     if global_tid == 0:
         queue_x[0] = start_x
@@ -118,8 +121,11 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
             
             # Process 4-connected neighbors (up, down, left, right) using global direction arrays
             for i in range(4):
-                nx = x + DX[i]
-                ny = y + DY[i]
+                # nx = x + DX[i]
+                # ny = y + DY[i]
+                nx = x + DX_const[i]
+                ny = y + DY_const[i]
+                
                 if is_valid_pixel(nx, ny, width, height):
                     if is_not_visited(visited, nx, ny, width):
                         old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
