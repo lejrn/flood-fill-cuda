@@ -37,21 +37,15 @@ DY_host = np.array([0, 1, 1,  1,  0, -1, -1, -1], dtype=np.int32)
 
 # Kernel Helper functions
 @cuda.jit(device=True,inline=True)
-def is_red(img, x, y, width, height):
-    # Check if pixel (x,y) is red: (255,0,0)
-    # if x < 0 or x >= width or y < 0 or y >= height:
-    #     return False
+def is_red(img, x, y):
     return img[x, y, 0] == 255 and img[x, y, 1] == 0 and img[x, y, 2] == 0
 
 @cuda.jit(device=True,inline=True)
-def is_white(img, x, y, width, height):
-    # if x < 0 or x >= width or y < 0 or y >= height:
-    #     return False
+def is_white(img, x, y):
     return img[x, y, 0] == 255 and img[x, y, 1] == 255 and img[x, y, 2] == 255
 
 @cuda.jit(device=True,inline=True)
-def is_not_visited(visited, x, y, width):
-    # Use x,y order for visited array
+def is_not_visited(visited, x, y):
     return visited[x, y] == 0
 
 @cuda.jit(device=True,inline=True)
@@ -127,9 +121,9 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
                 ny = y + DY_const[i]
                 
                 if is_valid_pixel(nx, ny, width, height):
-                    if is_not_visited(visited, nx, ny, width):
+                    if is_not_visited(visited, nx, ny):
                         old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
-                        if is_red(img, nx, ny, width, height):
+                        if is_red(img, nx, ny):
                             # Safely mark as visited
                             if old == 0:
                                 # Add to queue
