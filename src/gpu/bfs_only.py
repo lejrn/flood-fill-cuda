@@ -114,9 +114,9 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
                 ny = y + DY[i]
                 if is_valid_pixel(nx, ny, width, height):
                     if is_not_visited(visited, nx, ny, width):
+                        old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
                         if is_red(img, nx, ny, width, height):
                             # Safely mark as visited
-                            old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
                             if old == 0:
                                 # Add to queue
                                 pos = cuda.atomic.add(queue_rear, 0, 1)
