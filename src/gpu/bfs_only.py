@@ -26,9 +26,9 @@ The kernel will use the Shared Memory to store the queue of neighbors pixels to 
 """
 
 
-# Place direction arrays in constant memory (read-only) # 4 directions
-DX_host = np.array([1, 0, -1, 0], dtype=np.int32)
-DY_host = np.array([0, 1, 0, -1], dtype=np.int32)
+# # Place direction arrays in constant memory (read-only) # 4 directions
+# DX_host = np.array([1, 0, -1, 0], dtype=np.int32)
+# DY_host = np.array([0, 1, 0, -1], dtype=np.int32)
 
 # Place direction arrays in constant memory (read-only) # 8 directions
 DX_host = np.array([1, 1, 0, -1, -1, -1,  0, 1], dtype=np.int32)
@@ -169,8 +169,8 @@ def setup_scene():
     
     x = np.random.randint(100, 300)
     y = np.random.randint(100, 300)
-    w = np.random.randint(50, 100)
-    h = np.random.randint(50, 100)
+    w = np.random.randint(50, 60)
+    h = np.random.randint(50, 60)
     img[y:y+h, x:x+w] = [255, 0, 0]
     
     # Find starting red pixel
@@ -203,13 +203,8 @@ def profile_kernel(num_runs=100, explore_configs=False):
     Returns:
         The processed image and visited array from the last run
     """
-
-    # The base configuration
-    threads_per_block = 32
-    blocks_per_grid = 1
-
     # First run for warm-up (compilation)
-    img, visited, start_x, start_y, width, height, new_color, _, _ = setup_scene()
+    img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid = setup_scene()
     d_img = cuda.to_device(img)
     d_visited = cuda.to_device(visited)
     flood_fill[blocks_per_grid, threads_per_block](d_img, d_visited, start_x, start_y, width, height, new_color)
