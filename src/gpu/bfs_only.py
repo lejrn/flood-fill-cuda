@@ -145,22 +145,16 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
         print(queue_front[0])
 
 
-# Main function
-def main():
+def setup_scene():
     # Image dimensions and initialization
     width, height = 400, 400
-    # Create image with x,y indexing (width, height)
     img = np.full((width, height, 3), 255, dtype=np.uint8)
-    
     # Create a red blob (~100x100) in the image
-    blob_center_x = random.randint(100, 300)
-    blob_center_y = random.randint(100, 300)
-    
-    # Create an irregular, continuous red blob using multiple random walks
-    num_walks = 10
-    walk_length = 1000
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-    
+    # blob_center_x = random.randint(100, 300)
+    # blob_center_y = random.randint(100, 300)
+    # num_walks = 10
+    # walk_length = 1000
+    # directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
     # for _ in range(num_walks):
     #     x, y = blob_center_x, blob_center_y
     #     img[x, y] = [255, 0, 0]
@@ -168,20 +162,18 @@ def main():
     #         dx, dy = random.choice(directions)
     #         new_x = x + dx
     #         new_y = y + dy
-    #         # Ensure the new pixel stays within image bounds and near the blob center
     #         if 0 <= new_x < width and 0 <= new_y < height:
-    #             # Constrain the blob's spread to a rough radius (e.g., 60 pixels) around the center
     #             if ((new_x - blob_center_x)**2 + (new_y - blob_center_y)**2) < (60**2):
     #                 x, y = new_x, new_y
     #                 img[x, y] = [255, 0, 0]
-
+    
     x = np.random.randint(100, 300)
     y = np.random.randint(100, 300)
     w = np.random.randint(50, 100)
     h = np.random.randint(50, 100)
     img[y:y+h, x:x+w] = [255, 0, 0]
-
-    # Find a starting red pixel
+    
+    # Find starting red pixel
     start_x, start_y = -1, -1
     for x in range(width):
         for y in range(height):
@@ -190,10 +182,8 @@ def main():
                 break
         if start_x != -1:
             break
-
-    # print(f"{start_x=},{start_y=}")
-
-    # Create visited as a 2D array with x,y indexing
+    
+    # Create visited array
     visited = np.zeros((width, height), dtype=np.int32)
     # New fill color (blue)
     new_color = np.array([0, 0, 255], dtype=np.uint8)
@@ -201,105 +191,72 @@ def main():
     threads_per_block = 32
     blocks_per_grid = 1
     return img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid
+
+
+def profile_kernel(num_runs=100, explore_configs=False):
+    """
+    Profile the flood fill kernel performance.
+    
+    Args:
+        num_runs: Number of times to run the kernel for averaging
+    
+    Returns:
+        The processed image and visited array from the last run
+    """
+
+    # The base configuration
+    threads_per_block = 32
+    blocks_per_grid = 1
+
+    # First run for warm-up (compilation)
+    img, visited, start_x, start_y, width, height, new_color, _, _ = setup_scene()
     d_img = cuda.to_device(img)
     d_visited = cuda.to_device(visited)
-    
-    # New color to fill with (blue)
-    new_color = np.array([0, 0, 255], dtype=np.uint8)
-    
-    # Launch kernel with multiple blocks to better utilize the GPU
-    threads_per_block = 64
-    blocks_per_grid = 1  # Using all 20 multiprocessors on your RTX 3050
     flood_fill[blocks_per_grid, threads_per_block](d_img, d_visited, start_x, start_y, width, height, new_color)
+    cuda.synchronize()
     
-    # Copy result back to host
-    img_result = d_img.copy_to_host()
-    visited_result = d_visited.copy_to_host()
-    img_result = Image.fromarray(img_result)
-    img_result.save('./images/results/bfs_only.png')
+    # For accurate timing, create fresh data for each run
+    run_times = []
     
-    # # Display results
-    # fig, axs = plt.subplots(1, 2)
-    # # Need to transpose for imshow since we've changed to x,y indexing
-    # axs[0].imshow(np.transpose(img_result, (1, 0, 2)))
-    # axs[0].set_title("Image with Recolored Blob")
-    # axs[0].scatter([start_x], [start_y], color='green', s=50, marker='o')  # Flipped for scatter plot
-    # axs[0].text(start_x+1, start_y+1, "Start", color='green')
-    # axs[1].imshow(np.transpose(visited_result, (1, 0)), cmap='gray')
-    # axs[1].set_title("Visited Pixels")
-    # axs[1].scatter([start_x], [start_y], color='red', s=50, marker='x')  # Flipped for scatter plot
-    # plt.show()
+    for i in range(num_runs):
+        # Generate new scene for each run
+        img, visited, start_x, start_y, width, height, new_color, _, _ = setup_scene()
+        d_img = cuda.to_device(img)
+        d_visited = cuda.to_device(visited)
+        
+        # Time this run
+        start_time = timeit.default_timer()
+        flood_fill[blocks_per_grid, threads_per_block](d_img, d_visited, start_x, start_y, width, height, new_color)
+        cuda.synchronize()
+        end_time = timeit.default_timer()
+        
+        run_times.append((end_time - start_time) * 1000)  # Convert to ms
+    
+    # Calculate statistics
+    avg_time = sum(run_times) / len(run_times)
+    min_time = min(run_times)
+    max_time = max(run_times)
+    std_dev = (sum((t - avg_time) ** 2 for t in run_times) / len(run_times)) ** 0.5
+    
+    # Print results
+    print(f"Kernel execution time over {num_runs} runs:")
+    print(f"  Average: {avg_time:.2f} ms")
+    print(f"  Min: {min_time:.2f} ms")
+    print(f"  Max: {max_time:.2f} ms")
+    print(f"  Std Dev: {std_dev:.2f} ms")
+    
+    # Return results from the last run
+    return d_img.copy_to_host(), d_visited.copy_to_host()
 
 if __name__ == '__main__':
-    main()
-
-# def setup_scene():
-#     # Image dimensions and initialization
-#     width, height = 400, 400
-#     img = np.full((width, height, 3), 255, dtype=np.uint8)
-#     # Create a red blob (~100x100) in the image
-#     blob_center_x = random.randint(100, 300)
-#     blob_center_y = random.randint(100, 300)
-#     num_walks = 10
-#     walk_length = 1000
-#     directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-#     for _ in range(num_walks):
-#         x, y = blob_center_x, blob_center_y
-#         img[x, y] = [255, 0, 0]
-#         for i in range(walk_length):
-#             dx, dy = random.choice(directions)
-#             new_x = x + dx
-#             new_y = y + dy
-#             if 0 <= new_x < width and 0 <= new_y < height:
-#                 if ((new_x - blob_center_x)**2 + (new_y - blob_center_y)**2) < (60**2):
-#                     x, y = new_x, new_y
-#                     img[x, y] = [255, 0, 0]
-#     # Find starting red pixel
-#     start_x, start_y = -1, -1
-#     for x in range(width):
-#         for y in range(height):
-#             if (img[x, y, 0] == 255 and img[x, y, 1] == 0 and img[x, y, 2] == 0):
-#                 start_x, start_y = x, y
-#                 break
-#         if start_x != -1:
-#             break
+    img_result, visited_result = profile_kernel()
+    img_result = Image.fromarray(img_result)
+    img_result.save('./images/results/bfs_only_timeit.png')
     
-#     # Create visited array
-#     visited = np.zeros((width, height), dtype=np.int32)
-#     # New fill color (blue)
-#     new_color = np.array([0, 0, 255], dtype=np.uint8)
-#     # GPU setup
-#     threads_per_block = 256
-#     blocks_per_grid = 20
-#     return img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid
-
-# def profile_kernel():
-#     img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid = setup_scene()
-#     # Copy arrays to device
-#     d_img = cuda.to_device(img)
-#     d_visited = cuda.to_device(visited)
-
-#     # Define a wrapper to launch the kernel and force synchronization
-#     def kernel_run():
-#         flood_fill[blocks_per_grid, threads_per_block](d_img, d_visited, start_x, start_y, width, height, new_color)
-#         cuda.synchronize()
-
-#     # Run the kernel several times for an average timing
-#     num_runs = 100
-#     total_time = timeit.timeit(kernel_run, number=num_runs)
-#     print(f"Average kernel execution time over {num_runs} runs: {(total_time / num_runs) * 1000:.2f} ms")
-    
-#     # Fetch results for visualization if needed
-#     img_result = d_img.copy_to_host()
-#     visited_result = d_visited.copy_to_host()
-#     return img_result, visited_result
-
-# if __name__ == '__main__':
-#     img_result, visited_result = profile_kernel()
-#     fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-#     # Transpose image for proper orientation
-#     axs[0].imshow(np.transpose(img_result, (1, 0, 2)))
-#     axs[0].set_title("Image with Recolored Blob")
-#     axs[1].imshow(np.transpose(visited_result, (1, 0)), cmap='gray')
-#     axs[1].set_title("Visited Pixels")
-#     plt.show()
+    # fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+    # # Transpose image for proper orientation
+    # axs[0].imshow(np.transpose(img_result, (1, 0, 2)))
+    # axs[0].set_title("Image with Recolored Blob")
+    # axs[1].imshow(np.transpose(visited_result, (1, 0)), cmap='gray')
+    # axs[1].set_title("Visited Pixels")
+    # plt.show()
