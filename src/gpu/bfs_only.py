@@ -83,22 +83,17 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
     
     # while the queue is not empty
     while queue_front[0] < queue_rear[0]:
-        cuda.syncthreads()
+        # cuda.syncthreads()
         
-        # Check if queue is empty
-        if queue_front[0] >= queue_rear[0]:
-            # print(queue_rear[0])
-            # print(queue_front[0])
-            break
+        # # Check if queue is empty
+        # if queue_front[0] >= queue_rear[0]:
+        #     # print(queue_rear[0])
+        #     # print(queue_front[0])
+        #     break
         
         current_size = queue_rear[0] - queue_front[0]
 
-        # # Each thread processes some queue items
-        # items_per_thread = (current_size + block_size - 1) // block_size
-        # start_idx = queue_front[0] + tid * items_per_thread
-        # end_idx = start_idx + items_per_thread if start_idx + items_per_thread < queue_rear[0] else queue_rear[0]
-        
-                # Calculate items per thread
+        # Calculate items per thread
         items_per_thread = max(1, (current_size + block_size - 1) // block_size)
         start_idx = queue_front[0] + tid * items_per_thread
         end_idx = min(start_idx + items_per_thread, queue_rear[0])
@@ -111,12 +106,10 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
             img[x, y, 0] = new_color[0]
             img[x, y, 1] = new_color[1]
             # img[x, y, 2] = new_color[2]
-            img[x, y, 2] = (tid*8) % 255
+            img[x, y, 2] = (tid*4) % 255
             
-            # Process 4-connected neighbors (up, down, left, right) using global direction arrays
-            for i in range(4):
-                # nx = x + DX[i]
-                # ny = y + DY[i]
+            # Process 8-connected neighbors (including diagonals) using global direction arrays
+            for i in range(8):  # Change loop to iterate over 8 directions
                 nx = x + DX_const[i]
                 ny = y + DY_const[i]
                 
@@ -150,28 +143,28 @@ def setup_scene():
     width, height = 400, 400
     img = np.full((width, height, 3), 255, dtype=np.uint8)
     # Create a red blob (~100x100) in the image
-    # blob_center_x = random.randint(100, 300)
-    # blob_center_y = random.randint(100, 300)
-    # num_walks = 10
-    # walk_length = 1000
-    # directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-    # for _ in range(num_walks):
-    #     x, y = blob_center_x, blob_center_y
-    #     img[x, y] = [255, 0, 0]
-    #     for i in range(walk_length):
-    #         dx, dy = random.choice(directions)
-    #         new_x = x + dx
-    #         new_y = y + dy
-    #         if 0 <= new_x < width and 0 <= new_y < height:
-    #             if ((new_x - blob_center_x)**2 + (new_y - blob_center_y)**2) < (60**2):
-    #                 x, y = new_x, new_y
-    #                 img[x, y] = [255, 0, 0]
+    blob_center_x = random.randint(100, 300)
+    blob_center_y = random.randint(100, 300)
+    num_walks = 10
+    walk_length = 1000
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    for _ in range(num_walks):
+        x, y = blob_center_x, blob_center_y
+        img[x, y] = [255, 0, 0]
+        for i in range(walk_length):
+            dx, dy = random.choice(directions)
+            new_x = x + dx
+            new_y = y + dy
+            if 0 <= new_x < width and 0 <= new_y < height:
+                if ((new_x - blob_center_x)**2 + (new_y - blob_center_y)**2) < (60**2):
+                    x, y = new_x, new_y
+                    img[x, y] = [255, 0, 0]
     
-    x = np.random.randint(100, 300)
-    y = np.random.randint(100, 300)
-    w = np.random.randint(50, 60)
-    h = np.random.randint(50, 60)
-    img[y:y+h, x:x+w] = [255, 0, 0]
+    # x = np.random.randint(100, 300)
+    # y = np.random.randint(100, 300)
+    # w = np.random.randint(50, 60)
+    # h = np.random.randint(50, 60)
+    # img[y:y+h, x:x+w] = [255, 0, 0]
     
     # Find starting red pixel
     start_x, start_y = -1, -1
@@ -188,7 +181,7 @@ def setup_scene():
     # New fill color (blue)
     new_color = np.array([0, 0, 255], dtype=np.uint8)
     # GPU setup
-    threads_per_block = 32
+    threads_per_block = 64
     blocks_per_grid = 1
     return img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid
 
@@ -215,7 +208,7 @@ def profile_kernel(num_runs=100, explore_configs=False):
     
     for i in range(num_runs):
         # Generate new scene for each run
-        img, visited, start_x, start_y, width, height, new_color, _, _ = setup_scene()
+        img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid = setup_scene()
         d_img = cuda.to_device(img)
         d_visited = cuda.to_device(visited)
         
@@ -247,6 +240,8 @@ if __name__ == '__main__':
     img_result, visited_result = profile_kernel()
     img_result = Image.fromarray(img_result)
     img_result.save('./images/results/bfs_only_timeit.png')
+    visited_result = Image.fromarray(visited_result.astype(np.uint8) * 255)
+    visited_result.save('./images/results/bfs_only_timeit_visited.png')
     
     # fig, axs = plt.subplots(1, 2, figsize=(12, 6))
     # # Transpose image for proper orientation
