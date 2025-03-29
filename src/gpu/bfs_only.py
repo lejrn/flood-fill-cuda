@@ -111,7 +111,7 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
             img[x, y, 0] = new_color[0]
             img[x, y, 1] = new_color[1]
             # img[x, y, 2] = new_color[2]
-            img[x, y, 2] = (tid*4) % 255
+            img[x, y, 2] = (tid*8) % 255
             
             # Process 4-connected neighbors (up, down, left, right) using global direction arrays
             for i in range(4):
@@ -137,11 +137,13 @@ def flood_fill(img, visited, start_x, start_y, width, height, new_color):
         # Update queue front pointer once all threads complete processing
         if global_tid == 0:
             queue_front[0] += current_size
-            print(current_size)
+            # print(current_size)
     
         cuda.syncthreads()
 
-    # print(queue_front[0])
+    if global_tid == 0:
+        print(queue_front[0])
+
 
 # Main function
 def main():
@@ -193,8 +195,12 @@ def main():
 
     # Create visited as a 2D array with x,y indexing
     visited = np.zeros((width, height), dtype=np.int32)
-    
-    # Copy arrays to device
+    # New fill color (blue)
+    new_color = np.array([0, 0, 255], dtype=np.uint8)
+    # GPU setup
+    threads_per_block = 32
+    blocks_per_grid = 1
+    return img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid
     d_img = cuda.to_device(img)
     d_visited = cuda.to_device(visited)
     
