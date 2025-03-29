@@ -25,20 +25,14 @@ We can assume that each blob size is no bigger than 100x100 pixels.
 The kernel will use the Shared Memory to store the queue of neighbors pixels to be traversed.
 """
 
-# Define direction arrays as regular numpy arrays
-# DX = np.array([0, 0, -1, 1], dtype=np.int32)
-# DY = np.array([-1, 1, 0, 0], dtype=np.int32)
 
-# DX = np.array([1, 0, -1, 0], dtype=np.int32)
-# DY = np.array([0, 1, 0, -1], dtype=np.int32)
+# Place direction arrays in constant memory (read-only) # 4 directions
+DX_host = np.array([1, 0, -1, 0], dtype=np.int32)
+DY_host = np.array([0, 1, 0, -1], dtype=np.int32)
 
-
-DX = np.array([1, 1, 0, -1, -1, -1,  0, 1], dtype=np.int32)
-DY = np.array([0, 1, 1,  1,  0, -1, -1, -1], dtype=np.int32)
-
-# DX = np.array([1, -1, -1, 1, -1,  1, 0,  0], dtype=np.int32)
-# DY = np.array([0,  1, -1, 1,  0, -1,  1, -1], dtype=np.int32)
-
+# Place direction arrays in constant memory (read-only) # 8 directions
+DX_host = np.array([1, 1, 0, -1, -1, -1,  0, 1], dtype=np.int32)
+DY_host = np.array([0, 1, 1,  1,  0, -1, -1, -1], dtype=np.int32)
 
 
 # Kernel Helper functions
