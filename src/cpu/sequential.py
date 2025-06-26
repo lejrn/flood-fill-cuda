@@ -2,6 +2,9 @@ import numpy as np
 from PIL import Image
 import random
 from collections import deque
+from pathlib import Path
+import timeit
+import time
 
 # Constants
 RED_THRESHOLD = 200  # Threshold for red detection
@@ -41,26 +44,42 @@ def process_image(image_path):
     blob_count = 0
     
     # Scan for blobs
+    print(f"Starting to scan {height}x{width} image for red blobs...")
+    scan_start = time.time()
+    
     for x in range(height):
+        # Progress indicator every 1000 rows
+        if x % 1000 == 0:
+            elapsed = time.time() - scan_start
+            progress = (x / height) * 100
+            print(f"Progress: {progress:.1f}% (row {x}/{height}) - {blob_count} blobs found so far - {elapsed:.1f}s elapsed")
+        
         for y in range(width):
             if is_red(output[x, y]) and not visited[x, y]:
                 # Generate random color (0-254 ensures not white or bright red)
                 new_color = (random.randint(0, 254), random.randint(0, 254), random.randint(0, 254))
                 bfs_flood_fill(output, visited, x, y, new_color)
                 blob_count += 1
+                print(f"Found blob #{blob_count} at position ({x}, {y})")
+    
+    print(f"Scan complete! Found {blob_count} total blobs.")
     
     return Image.fromarray(output), blob_count
 
 
-from pathlib import Path
-import timeit
 HOME = Path.cwd()
 image_path = HOME / "images" / "input" / "input_blobs.png"
 output_path = HOME / "images" / "output" / "colored_blobs_cpu_mvp.png"
 
+print(f"Starting flood fill processing...")
+print(f"Input image: {image_path}")
+print(f"Output image: {output_path}")
 
 start_time = timeit.default_timer()
 result_img, blob_count = process_image(image_path)
 elapsed = timeit.default_timer() - start_time
+print(f"\n=== FINAL RESULTS ===")
 print(f"Detected {blob_count} blobs in {elapsed:.2f} seconds")
+print(f"Saving result to: {output_path}")
 result_img.save(output_path)
+print("Done!")
