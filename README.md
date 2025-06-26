@@ -1,8 +1,8 @@
-# CUDA Flood Fill - Evolution Roadmap 🚀
+# CUDA Flood Fill - Evolution Roadmap
 
 > **Vision**: Demonstrate the evolution from simple sequential CPU algorithms to complex parallel GPU implementations
 
-## 🎯 Project Philosophy
+## Project Philosophy
 
 This project showcases the journey from simple to complex, sequential to parallel:
 
@@ -11,9 +11,9 @@ This project showcases the journey from simple to complex, sequential to paralle
 3. **Introduce Parallelism**: Move the simple algorithm to GPU
 4. **Optimize**: Combine the best of both worlds (GPU + advanced algorithms)
 
-## 📖 Evolution Path (The Main Story)
+## Evolution Path (The Main Story)
 
-### Step 1: `cpu-bfs-flood-fill` - The Foundation 🌱
+### Step 1: `cpu-bfs-flood-fill` - The Foundation
 **Goal**: Create the simplest possible flood-fill implementation
 
 - **Algorithm**: Basic Breadth-First Search (BFS)
@@ -27,7 +27,7 @@ This project showcases the journey from simple to complex, sequential to paralle
 
 **Key Learning**: Understanding the core flood-fill problem
 
-### Step 2: `cpu-scan-flood-fill` - Algorithm Evolution 🧠
+### Step 2: `cpu-scan-flood-fill` - Algorithm Evolution
 **Goal**: Introduce more sophisticated algorithms while staying on CPU
 
 - **Algorithm**: Connected Component Labeling with scanning techniques
@@ -41,7 +41,7 @@ This project showcases the journey from simple to complex, sequential to paralle
 
 **Key Learning**: How algorithm choice affects performance, even on the same hardware
 
-### Step 3: `gpu-bfs-flood-fill` - Platform Evolution ⚡
+### Step 3: `gpu-bfs-flood-fill` - Platform Evolution
 **Goal**: Take the simple algorithm and make it parallel
 
 - **Algorithm**: BFS (same as Step 1)
@@ -55,7 +55,7 @@ This project showcases the journey from simple to complex, sequential to paralle
 
 **Key Learning**: How parallelization can speed up the same algorithm
 
-### Step 4: `gpu-scan-flood-fill` - Full Optimization 🏆
+### Step 4: `gpu-scan-flood-fill` - Full Optimization
 **Goal**: Combine the best algorithms with the best hardware
 
 - **Algorithm**: Advanced scanning techniques
@@ -69,7 +69,7 @@ This project showcases the journey from simple to complex, sequential to paralle
 
 **Key Learning**: How hardware and algorithms work together for optimal performance
 
-## 🔧 Supporting Development
+## Supporting Development
 
 ### Development Branches (`dev-*`)
 - `dev-profiling`: Performance measurement and analysis tools
@@ -88,7 +88,7 @@ This project showcases the journey from simple to complex, sequential to paralle
 - `infra-poetry-setup`: Dependency management
 - `infra-ci-cd`: Continuous integration setup
 
-## 📊 Benchmarking Strategy
+## Benchmarking Strategy
 
 ### Performance Metrics to Track
 1. **Execution Time**: How fast each approach runs
@@ -99,17 +99,7 @@ This project showcases the journey from simple to complex, sequential to paralle
 6. **Thread Efficiency**: Warp utilization and divergence analysis
 7. **Shared Memory Usage**: Efficiency of 48 KB per block allocation
 
-### Comparison Matrix
-```
-                │ CPU BFS │ CPU Scan │ GPU BFS │ GPU Scan │
-────────────────┼─────────┼──────────┼─────────┼──────────┤
-Simplicity      │    ⭐⭐⭐⭐⭐ │    ⭐⭐⭐    │   ⭐⭐⭐   │    ⭐⭐    │
-Speed (Small)   │    ⭐⭐   │    ⭐⭐⭐   │   ⭐⭐⭐   │   ⭐⭐⭐⭐  │
-Speed (Large)   │    ⭐    │    ⭐⭐    │   ⭐⭐⭐⭐  │   ⭐⭐⭐⭐⭐ │
-Memory Usage    │   ⭐⭐⭐⭐  │   ⭐⭐⭐⭐   │   ⭐⭐⭐   │    ⭐⭐   │
-```
-
-## � Target Hardware: NVIDIA RTX 4060 Laptop GPU
+## Target Hardware: NVIDIA RTX 4060 Laptop GPU
 
 ### GPU Specifications
 - **Device**: NVIDIA GeForce RTX 4060 Laptop GPU
@@ -192,7 +182,7 @@ Block Size Options:
 4. **Synchronization**: Coordinating queue operations across threads
 5. **Occupancy**: Balancing register usage vs. thread count per SM
 
-## 🚀 Implementation Phases
+## Implementation Phases
 
 ### Phase 1: Foundation
 - [ ] Implement `cpu-bfs-flood-fill`
@@ -224,7 +214,7 @@ Block Size Options:
 - [ ] Performance visualization
 - [ ] Project presentation materials
 
-## 📚 Educational Value
+## Educational Value
 
 ### For Beginners
 - Start with `cpu-bfs-flood-fill` to understand the problem
@@ -241,7 +231,7 @@ Block Size Options:
 - Master `gpu-scan-flood-fill` for high-performance computing
 - Understand memory optimization and CUDA best practices
 
-## 🎓 Learning Outcomes
+## Learning Outcomes
 
 By the end of this evolution path, developers will understand:
 
@@ -252,27 +242,17 @@ By the end of this evolution path, developers will understand:
 5. **Benchmarking**: How to measure and compare performance
 6. **Real-world Trade-offs**: Complexity vs. performance vs. maintainability
 
-## 🔄 Branch Workflow
+## Branch Workflow
 
 ```mermaid
-graph TD
-    A[main] --> B[develop]
-    B --> C[cpu-bfs-flood-fill]
-    B --> D[cpu-scan-flood-fill]
-    B --> E[gpu-bfs-flood-fill]
-    B --> F[gpu-scan-flood-fill]
-    
-    C --> B
-    D --> B
-    E --> B
-    F --> B
-    
-    G[dev-profiling] --> B
-    H[exp-pycuda] --> B
-    I[infra-ci-cd] --> B
+graph LR
+    A[main] --> B[cpu/bfs-flood-fill]
+    B --> C[cpu/scanning+bfs-flood-fill]
+    C --> D[gpu/bfs-flood-fill]
+    D --> E[gpu/scanning+bfs-flood-fill]
 ```
 
-## 🏁 Success Criteria
+## Success Criteria
 
 - [ ] All four evolution steps implemented and documented
 - [ ] Clear performance progression demonstrated
