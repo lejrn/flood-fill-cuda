@@ -4,6 +4,7 @@
 # IDE
 .vscode/
 .cache/
+.__pycache__/
 .cursor/
 # Poetry stuff
 poetry.lock
@@ -17,3 +18,4 @@ docs/
 images/
 profiling/
 PyCuda/
+
