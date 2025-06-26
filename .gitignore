@@ -1,0 +1,19 @@
+# Virtual Environment
+.venv
+
+# IDE
+.vscode/
+.cache/
+.cursor/
+# Poetry stuff
+poetry.lock
+
+# photos
+*.png
+*.jpg
+
+# folders
+docs/
+images/
+profiling/
+PyCuda/

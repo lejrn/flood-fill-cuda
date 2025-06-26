@@ -1,0 +1,31 @@
+[project]
+name = "flood-fill-cuda"
+version = "0.1.0"
+description = "GPU-accelerated flood fill algorithm implementation using CUDA and Numba"
+authors = [
+    {name = "TL"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numba>=0.60.0",
+    "matplotlib>=3.10.0,<4.0.0",
+    "rich>=13.9.4,<14.0.0",
+    "ipykernel>=6.29.5,<7.0.0",
+    "opencv-python>=4.11.0.86,<5.0.0.0",
+    "pillow>=10.0.0,<11.0.0",
+    "numpy>=1.24.0,<2.0.0",
+    "nvtx>=0.2.11,<0.3.0",
+    "cuda-python>=12.0.0"
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+jupyter = "^1.0.0"
