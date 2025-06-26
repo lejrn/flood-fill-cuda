@@ -152,11 +152,207 @@ Grid (up to 2^31-1 × 65,535 × 65,535)
     └── Thread (individual processing unit)
 ```
 
+#### Execution Hierarchy with Constraints and Memory Levels
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               GRID LEVEL                                    │
+│  Memory: Global Memory (8 GB), Constant Memory (64 KB)                     │
+│  Constraints: Max dimensions (2^31-1 × 65,535 × 65,535)                    │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                         SM LEVEL (24 SMs)                            │ │
+│  │  Memory: L2 Cache (32 MB shared across all SMs)                      │ │
+│  │  Constraints: Max blocks per SM depends on resource usage             │ │
+│  │  Resource Limits:                                                     │ │
+│  │    • 65,536 registers per SM                                          │ │
+│  │    • 102,400 bytes (100 KB) shared memory per SM                     │ │
+│  │    • Max 1024 threads per block                                       │ │
+│  │                                                                       │ │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │ │
+│  │  │                    BLOCK LEVEL                                  │ │ │
+│  │  │  Memory: Shared Memory (48 KB per block, up to 99 KB opt-in)   │ │ │
+│  │  │  Constraints:                                                   │ │ │
+│  │  │    • Max 1024 threads per block                                 │ │ │
+│  │  │    • Max dimensions (1024 × 1024 × 64)                         │ │ │
+│  │  │    • Max 65,536 registers per block                            │ │ │
+│  │  │    • Shared memory allocation affects occupancy               │ │ │
+│  │  │                                                                 │ │ │
+│  │  │  ┌───────────────────────────────────────────────────────────┐ │ │ │
+│  │  │  │                   WARP LEVEL (32 threads)                 │ │ │ │
+│  │  │  │  Memory: L1 Cache, Texture Cache                          │ │ │ │
+│  │  │  │  Constraints:                                              │ │ │ │
+│  │  │  │    • Fixed size: exactly 32 threads                       │ │ │ │
+│  │  │  │    • SIMD execution (lock-step)                           │ │ │ │
+│  │  │  │    • Branch divergence causes serialization               │ │ │ │
+│  │  │  │    • Memory coalescing requirements                       │ │ │ │
+│  │  │  │                                                            │ │ │ │
+│  │  │  │  ┌─────────────────────────────────────────────────────┐ │ │ │ │
+│  │  │  │  │              THREAD LEVEL                           │ │ │ │ │
+│  │  │  │  │  Memory: Registers (per-thread private)             │ │ │ │ │
+│  │  │  │  │  Constraints:                                        │ │ │ │ │
+│  │  │  │  │    • Max registers limited by total per block       │ │ │ │ │
+│  │  │  │  │    • Local memory spillover for excess variables    │ │ │ │ │
+│  │  │  │  │    • Private register space                         │ │ │ │ │
+│  │  │  │  └─────────────────────────────────────────────────────┘ │ │ │ │
+│  │  │  └───────────────────────────────────────────────────────────┘ │ │ │
+│  │  └─────────────────────────────────────────────────────────────────┘ │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Resource Allocation Examples for RTX 4060
+
+**Scenario 1: Memory-Bound Configuration**
+```
+Block Configuration: 512 threads, 48 KB shared memory
+├── SM Capacity: 2 blocks per SM (48 KB × 2 = 96 KB < 100 KB limit)
+├── Warp Count: 16 warps per block (512 ÷ 32)
+└── Register Usage: ~127 registers per thread (65,536 ÷ 512)
+```
+
+**Scenario 2: Register-Bound Configuration**
+```
+Block Configuration: 1024 threads, 24 KB shared memory  
+├── SM Capacity: 4 blocks per SM (24 KB × 4 = 96 KB < 100 KB limit)
+├── Warp Count: 32 warps per block (1024 ÷ 32)
+└── Register Usage: ~64 registers per thread (65,536 ÷ 1024)
+```
+
+**Scenario 3: Thread-Bound Configuration**
+```
+Block Configuration: 256 threads, 12 KB shared memory
+├── SM Capacity: 8 blocks per SM (limited by other factors)
+├── Warp Count: 8 warps per block (256 ÷ 32)  
+└── Register Usage: ~256 registers per thread (65,536 ÷ 256)
+```
+
 #### Memory Access Patterns
 - **Coalesced Access**: Maximize memory throughput with aligned, contiguous access
 - **Shared Memory Banks**: 32 banks, avoid bank conflicts
 - **Texture Cache**: Available for 2D spatial locality
 - **Constant Cache**: Optimized for uniform access across warps
+
+### GPU Execution Model Deep Dive
+
+#### How SMs Manage Blocks
+
+Each Streaming Multiprocessor (SM) is responsible for executing one or more thread blocks. The GPU scheduler distributes blocks across the 24 available SMs based on resource availability:
+
+```
+SM Resource Allocation:
+┌─────────────────────────────────────────┐
+│ SM 0: Block 0, Block 4, Block 8, ...   │
+│ SM 1: Block 1, Block 5, Block 9, ...   │ 
+│ SM 2: Block 2, Block 6, Block 10, ...  │
+│ SM 3: Block 3, Block 7, Block 11, ...  │
+│ ...                                     │
+│ SM 23: Block 23, Block 47, ...         │
+└─────────────────────────────────────────┘
+```
+
+**Block Assignment Constraints:**
+- **Shared Memory**: Each block needs ≤48 KB, so max 2 blocks per SM if using full allocation
+- **Registers**: 65,536 registers per SM limits concurrent blocks based on register usage per thread
+- **Threads**: Max 1024 threads per block, with SM supporting multiple blocks simultaneously
+
+#### How Blocks Manage Warps
+
+Within each block, threads are organized into warps of 32 threads each. The warp scheduler executes warps in a round-robin fashion:
+
+```cuda
+// Example: 512-thread block organization
+Block (16×32 threads):
+├── Warp 0:  threads [0-31]     (row 0: columns 0-31)
+├── Warp 1:  threads [32-63]    (row 1: columns 0-31) 
+├── Warp 2:  threads [64-95]    (row 2: columns 0-31)
+├── ...
+└── Warp 15: threads [480-511]  (row 15: columns 0-31)
+```
+
+#### Spatial Distribution Examples for Flood Fill
+
+**Example 1: 2D Image Processing Distribution**
+```cuda
+// Grid: (25, 25) blocks for 400×400 image
+// Block: (16, 16) threads per block
+__global__ void flood_fill_kernel(int* image, int width, int height) {
+    // SM assignment based on block coordinates
+    int blockId = blockIdx.y * gridDim.x + blockIdx.x;
+    int smId = blockId % 24;  // Round-robin across 24 SMs
+    
+    // Thread coordinates within image
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    // Warp assignment within block
+    int warpId = (threadIdx.y * blockDim.x + threadIdx.x) / 32;
+    int laneId = (threadIdx.y * blockDim.x + threadIdx.x) % 32;
+}
+```
+
+**Example 2: Load Balancing for Irregular Workloads**
+```cuda
+// Dynamic work distribution for variable blob sizes
+__global__ void dynamic_flood_fill(int* work_queue, int queue_size) {
+    // Global thread ID for work stealing
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_threads = gridDim.x * blockDim.x;
+    
+    // Each thread processes multiple work items
+    for (int work_id = tid; work_id < queue_size; work_id += total_threads) {
+        // Process work_queue[work_id]
+        // This ensures load balancing across all threads
+    }
+}
+```
+
+#### Problem-Solving Applications
+
+**1. SM-Level Problem Solving:**
+- **Parallel Processing**: Multiple independent regions processed simultaneously
+- **Resource Management**: Balancing memory and compute resources across blocks
+- **Fault Tolerance**: If one SM stalls, others continue processing
+
+**2. Block-Level Problem Solving:**
+- **Shared Memory Coordination**: BFS queue shared among threads in a block
+- **Synchronization**: `__syncthreads()` coordinates within-block operations
+- **Local Communication**: Fast inter-thread communication via shared memory
+
+**3. Warp-Level Problem Solving:**
+- **SIMD Execution**: All 32 threads execute same instruction simultaneously
+- **Memory Coalescing**: Contiguous memory access across warp lanes
+- **Branch Divergence Handling**: Different execution paths within warps
+
+#### Real-World Flood Fill Distribution Strategies
+
+**Strategy 1: Spatial Decomposition**
+```
+Image divided into 16×16 pixel tiles:
+┌─────┬─────┬─────┬─────┐
+│ B0  │ B1  │ B2  │ B3  │  ← Blocks 0-3 → SM 0-3
+├─────┼─────┼─────┼─────┤
+│ B4  │ B5  │ B6  │ B7  │  ← Blocks 4-7 → SM 0-3
+├─────┼─────┼─────┼─────┤
+│ B8  │ B9  │ B10 │ B11 │  ← Blocks 8-11 → SM 0-3
+└─────┴─────┴─────┴─────┘
+```
+
+**Strategy 2: Work Queue Distribution**
+```
+Global work queue with blob starting points:
+Queue: [blob1, blob2, blob3, blob4, ...]
+       ↓      ↓      ↓      ↓
+     SM0    SM1    SM2    SM3   (round-robin assignment)
+```
+
+**Strategy 3: Hierarchical Processing**
+```
+Level 1: SMs process different image regions
+Level 2: Blocks within SM handle sub-regions  
+Level 3: Warps process scanlines or pixel groups
+Level 4: Threads handle individual pixels
+```
 
 ### Implementation Considerations for Flood Fill
 
