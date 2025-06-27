@@ -13,61 +13,58 @@ This project showcases the journey from simple to complex, sequential to paralle
 
 ## Evolution Path (The Main Story)
 
-### Step 1: `cpu-bfs-flood-fill` - The Foundation
+### Stage 1: **CPU Sequential - Single Blob BFS** 🌱
 **Goal**: Create the simplest possible flood-fill implementation
+**Status**: ✅ **COMPLETED**
 
-- **Algorithm**: Basic Breadth-First Search (BFS)
+- **Algorithm**: Basic Breadth-First Search (BFS) for a single blob
 - **Platform**: CPU (Sequential)
 - **Focus**: Clarity and correctness
-- **Deliverables**:
-  - Simple, readable BFS implementation
-  - Basic visualization
-  - Performance baseline
-  - Documentation explaining the algorithm
+- **Implementation**: `src/cpu/sequential.py` (single blob portion)
+- **Key Learning**: Understanding the core flood-fill problem
 
-**Key Learning**: Understanding the core flood-fill problem
+### Stage 2: **CPU Sequential - Multi-Blob Scanning** 🧠
+**Goal**: Extend to handle multiple blobs through scanning
+**Status**: ✅ **COMPLETED**
 
-### Step 2: `cpu-scan-flood-fill` - Algorithm Evolution
-**Goal**: Introduce more sophisticated algorithms while staying on CPU
+- **Algorithm**: Image scanning + BFS flood fill for each detected blob
+- **Platform**: CPU (Sequential)
+- **Focus**: Multi-blob detection and processing
+- **Implementation**: `src/cpu/sequential.py` (full implementation)
+- **Key Learning**: How scanning algorithms work and their computational complexity
 
-- **Algorithm**: Connected Component Labeling with scanning techniques
-- **Platform**: CPU (Still sequential, but more advanced)
-- **Focus**: Algorithm sophistication
-- **Deliverables**:
-  - Scan-based flood fill implementation
-  - Comparison with BFS approach
-  - Performance analysis (algorithm complexity)
-  - Documentation of scan techniques
+### Stage 3: **GPU Parallel - Single Blob, Single Block** ⚡
+**Goal**: Parallelize single blob flood fill within one CUDA block
+**Status**: ✅ **COMPLETED**
 
-**Key Learning**: How algorithm choice affects performance, even on the same hardware
+- **Algorithm**: Parallel BFS using shared memory queue
+- **Platform**: GPU (Single block, shared memory)
+- **Focus**: Intra-block parallelization and shared memory management
+- **Implementation**: `src/gpu/bfs_only.py`
+- **Memory Strategy**: Queue stored in shared memory (~48KB limit)
+- **Constraint**: Blob size limited by shared memory capacity
+- **Key Learning**: CUDA basics, shared memory, thread synchronization
 
-### Step 3: `gpu-bfs-flood-fill` - Platform Evolution
-**Goal**: Take the simple algorithm and make it parallel
+### Stage 4: **GPU Parallel - Single Blob, Multi-Block** 🚀
+**Goal**: Scale single blob flood fill across multiple CUDA blocks
+**Status**: 🔄 **IN PROGRESS** ← *Current Stage*
 
-- **Algorithm**: BFS (same as Step 1)
-- **Platform**: GPU (Parallel)
-- **Focus**: Parallelization strategies
-- **Deliverables**:
-  - CUDA kernel for parallel BFS
-  - Memory management strategies
-  - Thread block optimization
-  - Performance comparison with CPU version
+- **Algorithm**: Parallel BFS using global memory queue
+- **Platform**: GPU (Multiple blocks, global memory)
+- **Focus**: Inter-block coordination and global memory management
+- **Memory Strategy**: Queue stored in global/L2 cache memory
+- **Constraint**: Can handle larger blobs (up to GPU memory limits)
+- **Key Learning**: Global memory patterns, inter-block synchronization
 
-**Key Learning**: How parallelization can speed up the same algorithm
+### Stage 5: **GPU Parallel - Multi-Blob Detection & Processing** 🏆
+**Goal**: Combine scanning for multiple blobs with parallel processing
+**Status**: ⏳ **PLANNED**
 
-### Step 4: `gpu-scan-flood-fill` - Full Optimization
-**Goal**: Combine the best algorithms with the best hardware
-
-- **Algorithm**: Advanced scanning techniques
+- **Algorithm**: Parallel scanning + parallel BFS for each blob
 - **Platform**: GPU (Fully optimized)
-- **Focus**: Maximum performance
-- **Deliverables**:
-  - Optimized CUDA kernels
-  - Advanced memory usage patterns
-  - Benchmark suite
-  - Performance analysis report
-
-**Key Learning**: How hardware and algorithms work together for optimal performance
+- **Focus**: Maximum throughput and GPU utilization
+- **Memory Strategy**: Advanced memory management and load balancing
+- **Key Learning**: Complex GPU algorithms, optimal resource utilization
 
 ## Supporting Development
 
