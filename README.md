@@ -152,311 +152,274 @@ Grid (up to 2^31-1 × 65,535 × 65,535)
     └── Thread (individual processing unit)
 ```
 
-#### Execution Hierarchy with Constraints and Memory Levels
+#### Concurrency vs True Parallelism in CUDA Hierarchy
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               GRID LEVEL                                    │
-│  Memory: Global Memory (8 GB), Constant Memory (64 KB)                     │
-│  Constraints: Max dimensions (2^31-1 × 65,535 × 65,535)                    │
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                         SM LEVEL (24 SMs)                            │ │
-│  │  Memory: L2 Cache (32 MB shared across all SMs)                      │ │
-│  │  Constraints: Max blocks per SM depends on resource usage             │ │
-│  │  Resource Limits:                                                     │ │
-│  │    • 65,536 registers per SM                                          │ │
-│  │    • 102,400 bytes (100 KB) shared memory per SM                     │ │
-│  │    • Max 1024 threads per block                                       │ │
-│  │                                                                       │ │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │ │
-│  │  │                    BLOCK LEVEL                                  │ │ │
-│  │  │  Memory: Shared Memory (48 KB per block, up to 99 KB opt-in)   │ │ │
-│  │  │  Constraints:                                                   │ │ │
-│  │  │    • Max 1024 threads per block                                 │ │ │
-│  │  │    • Max dimensions (1024 × 1024 × 64)                         │ │ │
-│  │  │    • Max 65,536 registers per block                            │ │ │
-│  │  │    • Shared memory allocation affects occupancy               │ │ │
-│  │  │                                                                 │ │ │
-│  │  │  ┌───────────────────────────────────────────────────────────┐ │ │ │
-│  │  │  │                   WARP LEVEL (32 threads)                 │ │ │ │
-│  │  │  │  Memory: L1 Cache, Texture Cache                          │ │ │ │
-│  │  │  │  Constraints:                                              │ │ │ │
-│  │  │  │    • Fixed size: exactly 32 threads                       │ │ │ │
-│  │  │  │    • SIMD execution (lock-step)                           │ │ │ │
-│  │  │  │    • Branch divergence causes serialization               │ │ │ │
-│  │  │  │    • Memory coalescing requirements                       │ │ │ │
-│  │  │  │                                                            │ │ │ │
-│  │  │  │  ┌─────────────────────────────────────────────────────┐ │ │ │ │
-│  │  │  │  │              THREAD LEVEL                           │ │ │ │ │
-│  │  │  │  │  Memory: Registers (per-thread private)             │ │ │ │ │
-│  │  │  │  │  Constraints:                                        │ │ │ │ │
-│  │  │  │  │    • Max registers limited by total per block       │ │ │ │ │
-│  │  │  │  │    • Local memory spillover for excess variables    │ │ │ │ │
-│  │  │  │  │    • Private register space                         │ │ │ │ │
-│  │  │  │  └─────────────────────────────────────────────────────┘ │ │ │ │
-│  │  │  └───────────────────────────────────────────────────────────┘ │ │ │
-│  │  └─────────────────────────────────────────────────────────────────┘ │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Understanding the difference between **concurrency** (time-sliced execution) and **true parallelism** (simultaneous execution) is crucial for CUDA optimization:
 
-#### Resource Allocation Examples for RTX 4060
+##### **1. Threads in a Warp**
+**Type**: **True Parallelism** (SIMD)
 
-**Scenario 1: Memory-Bound Configuration**
-```
-Block Configuration: 512 threads, 48 KB shared memory
-├── SM Capacity: 2 blocks per SM (48 KB × 2 = 96 KB < 100 KB limit)
-├── Warp Count: 16 warps per block (512 ÷ 32)
-└── Register Usage: ~127 registers per thread (65,536 ÷ 512)
-```
+**Explanation**:
+- All **32 threads** execute the **same instruction simultaneously**
+- Each thread processes different data (SIMD: Single Instruction, Multiple Data)
+- Hardware executes them in **lockstep** on separate ALUs
+- True parallel execution at the instruction level
+- **No time-slicing** - all threads execute together
 
-**Scenario 2: Register-Bound Configuration**
-```
-Block Configuration: 1024 threads, 24 KB shared memory  
-├── SM Capacity: 4 blocks per SM (24 KB × 4 = 96 KB < 100 KB limit)
-├── Warp Count: 32 warps per block (1024 ÷ 32)
-└── Register Usage: ~64 registers per thread (65,536 ÷ 1024)
-```
-
-**Scenario 3: Thread-Bound Configuration**
-```
-Block Configuration: 256 threads, 12 KB shared memory
-├── SM Capacity: 8 blocks per SM (limited by other factors)
-├── Warp Count: 8 warps per block (256 ÷ 32)  
-└── Register Usage: ~256 registers per thread (65,536 ÷ 256)
-```
-
-#### Memory Access Patterns
-- **Coalesced Access**: Maximize memory throughput with aligned, contiguous access
-- **Shared Memory Banks**: 32 banks, avoid bank conflicts
-- **Texture Cache**: Available for 2D spatial locality
-- **Constant Cache**: Optimized for uniform access across warps
-
-### GPU Execution Model Deep Dive
-
-#### How SMs Manage Blocks
-
-Each Streaming Multiprocessor (SM) is responsible for executing one or more thread blocks. The GPU scheduler distributes blocks across the 24 available SMs based on resource availability:
-
-```
-SM Resource Allocation:
-┌─────────────────────────────────────────┐
-│ SM 0: Block 0, Block 4, Block 8, ...   │
-│ SM 1: Block 1, Block 5, Block 9, ...   │ 
-│ SM 2: Block 2, Block 6, Block 10, ...  │
-│ SM 3: Block 3, Block 7, Block 11, ...  │
-│ ...                                     │
-│ SM 23: Block 23, Block 47, ...         │
-└─────────────────────────────────────────┘
-```
-
-**Block Assignment Constraints:**
-- **Shared Memory**: Each block needs ≤48 KB, so max 2 blocks per SM if using full allocation
-- **Registers**: 65,536 registers per SM limits concurrent blocks based on register usage per thread
-- **Threads**: Max 1024 threads per block, with SM supporting multiple blocks simultaneously
-
-#### How Blocks Manage Warps
-
-Within each block, threads are organized into warps of 32 threads each. The warp scheduler executes warps in a round-robin fashion:
-
+**Example**:
 ```cuda
-// Example: 512-thread block organization
-Block (16×32 threads):
-├── Warp 0:  threads [0-31]     (row 0: columns 0-31)
-├── Warp 1:  threads [32-63]    (row 1: columns 0-31) 
-├── Warp 2:  threads [64-95]    (row 2: columns 0-31)
-├── ...
-└── Warp 15: threads [480-511]  (row 15: columns 0-31)
+// All 32 threads in warp execute this simultaneously
+int pixel_value = image[threadIdx.x];  // Different data per thread
 ```
 
-#### Spatial Distribution Examples for Flood Fill
+##### **2. Warps in a Block**
+**Type**: **Concurrency** (Time-sliced)
 
-**Example 1: 2D Image Processing Distribution**
+**Explanation**:
+- Only **one warp executes at a time** on an SM
+- Warps are **scheduled sequentially** by the warp scheduler
+- When one warp stalls (memory access), another warp is scheduled
+- Multiple warps share the same execution units through **time-multiplexing**
+- **Resource sharing**: Same compute cores, same shared memory
+
+**Example**:
 ```cuda
-// Grid: (25, 25) blocks for 400×400 image
-// Block: (16, 16) threads per block
-__global__ void flood_fill_kernel(int* image, int width, int height) {
-    // SM assignment based on block coordinates
-    int blockId = blockIdx.y * gridDim.x + blockIdx.x;
-    int smId = blockId % 24;  // Round-robin across 24 SMs
-    
-    // Thread coordinates within image
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    
-    // Warp assignment within block
-    int warpId = (threadIdx.y * blockDim.x + threadIdx.x) / 32;
-    int laneId = (threadIdx.y * blockDim.x + threadIdx.x) % 32;
-}
+// Timeline on one SM:
+// Cycle 1-10:  Warp 0 executes arithmetic
+// Cycle 11:    Warp 0 stalls on memory access
+// Cycle 12-20: Warp 1 executes (hides Warp 0's latency)
+// Cycle 21:    Warp 0 resumes (memory arrived)
 ```
 
-**Example 2: Load Balancing for Irregular Workloads**
+##### **3. Blocks in a Streaming Multiprocessor (SM)**
+**Type**: **Concurrency** (Resource sharing)
+
+**Explanation**:
+- Multiple blocks **share the same SM resources** (cores, shared memory, registers)
+- Blocks are scheduled concurrently but compete for resources
+- Limited by shared memory (100KB) and register count (64K)
+- **Time-sliced execution**: When one block's warps stall, another block's warps execute
+- In RTX 4060: up to 6 blocks per SM with optimal resource allocation
+
+**Example**:
 ```cuda
-// Dynamic work distribution for variable blob sizes
-__global__ void dynamic_flood_fill(int* work_queue, int queue_size) {
-    // Global thread ID for work stealing
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_threads = gridDim.x * blockDim.x;
-    
-    // Each thread processes multiple work items
-    for (int work_id = tid; work_id < queue_size; work_id += total_threads) {
-        // Process work_queue[work_id]
-        // This ensures load balancing across all threads
-    }
-}
+// SM Resource Allocation:
+// Block 0: Uses 48KB shared memory, 8 warps
+// Block 1: Uses 48KB shared memory, 8 warps  
+// Total: 96KB < 100KB limit, so both blocks fit
+// Execution: Block 0 and Block 1 warps interleave
 ```
 
-#### Problem-Solving Applications
+##### **4. SMs in a Grid (GPU)**
+**Type**: **True Parallelism** (Physical separation)
 
-**1. SM-Level Problem Solving:**
-- **Parallel Processing**: Multiple independent regions processed simultaneously
-- **Resource Management**: Balancing memory and compute resources across blocks
-- **Fault Tolerance**: If one SM stalls, others continue processing
+**Explanation**:
+- Each of the **24 SMs** is a physically separate processor
+- All SMs can execute **simultaneously and independently**
+- No resource sharing between SMs (except global memory and L2 cache)
+- True parallel execution at the hardware level
+- **Maximum parallelism**: 24 blocks can execute truly in parallel
 
-**2. Block-Level Problem Solving:**
-- **Shared Memory Coordination**: BFS queue shared among threads in a block
-- **Synchronization**: `__syncthreads()` coordinates within-block operations
-- **Local Communication**: Fast inter-thread communication via shared memory
-
-**3. Warp-Level Problem Solving:**
-- **SIMD Execution**: All 32 threads execute same instruction simultaneously
-- **Memory Coalescing**: Contiguous memory access across warp lanes
-- **Branch Divergence Handling**: Different execution paths within warps
-
-#### Real-World Flood Fill Distribution Strategies
-
-**Strategy 1: Spatial Decomposition**
-```
-Image divided into 16×16 pixel tiles:
-┌─────┬─────┬─────┬─────┐
-│ B0  │ B1  │ B2  │ B3  │  ← Blocks 0-3 → SM 0-3
-├─────┼─────┼─────┼─────┤
-│ B4  │ B5  │ B6  │ B7  │  ← Blocks 4-7 → SM 0-3
-├─────┼─────┼─────┼─────┤
-│ B8  │ B9  │ B10 │ B11 │  ← Blocks 8-11 → SM 0-3
-└─────┴─────┴─────┴─────┘
-```
-
-**Strategy 2: Work Queue Distribution**
-```
-Global work queue with blob starting points:
-Queue: [blob1, blob2, blob3, blob4, ...]
-       ↓      ↓      ↓      ↓
-     SM0    SM1    SM2    SM3   (round-robin assignment)
-```
-
-**Strategy 3: Hierarchical Processing**
-```
-Level 1: SMs process different image regions
-Level 2: Blocks within SM handle sub-regions  
-Level 3: Warps process scanlines or pixel groups
-Level 4: Threads handle individual pixels
-```
-
-### Implementation Considerations for Flood Fill
-
-#### Thread Block Design
+**Example**:
 ```cuda
-// Optimal configurations for RTX 4060
-Block Size Options:
-├── 16×16 = 256 threads (good for 2D problems)
-├── 32×16 = 512 threads (balanced approach)  
-└── 32×32 = 1024 threads (maximum occupancy)
+// All execute simultaneously on different SMs:
+// SM 0:  Block 0 processes image region (0,0) to (16,16)
+// SM 1:  Block 1 processes image region (16,0) to (32,16)
+// SM 2:  Block 2 processes image region (32,0) to (48,16)
+// ...
+// SM 23: Block 23 processes image region (368,0) to (384,16)
 ```
 
-#### Memory Usage Strategy
-- **Global Memory**: Store input/output images (utilize 8 GB capacity)
-- **Shared Memory**: Queue storage for BFS (48 KB per block)
-- **Constant Memory**: Direction vectors and small lookup tables (64 KB)
-- **Registers**: Temporary variables and loop counters (65K per block)
+#### Summary: Concurrency vs Parallelism in CUDA
 
-#### Parallelization Challenges
-1. **Load Balancing**: Different blob sizes create uneven work distribution
-2. **Memory Coalescing**: 2D image access patterns can cause uncoalesced reads
-3. **Thread Divergence**: Conditional processing based on pixel colors
-4. **Synchronization**: Coordinating queue operations across threads
-5. **Occupancy**: Balancing register usage vs. thread count per SM
+| **Execution Level** | **Type** | **Execution Model** | **Key Characteristics** |
+|---------------------|----------|---------------------|-------------------------|
+| **Threads in Warp** | **True Parallelism** | SIMD (32 threads) | Same instruction, parallel ALUs, lockstep execution |
+| **Warps in Block** | **Concurrency** | Time-sliced scheduling | Warp scheduler, zero-overhead context switch, resource sharing |
+| **Blocks in SM** | **Concurrency** | Resource sharing | Compete for shared memory/registers, interleaved execution |
+| **SMs in GPU** | **True Parallelism** | Physical separation | Independent processors, simultaneous execution |
 
-## Implementation Phases
+#### Memory Access Hierarchy and Latencies
 
-### Phase 1: Foundation
-- [ ] Implement `cpu-bfs-flood-fill`
-- [ ] Create basic test images
-- [ ] Set up benchmarking framework
-- [ ] Document the BFS algorithm
+Understanding memory access patterns and latencies is critical for optimizing CUDA applications:
 
-### Phase 2: Algorithm Evolution
-- [ ] Implement `cpu-scan-flood-fill`
-- [ ] Compare algorithms on CPU
-- [ ] Document scanning techniques
-- [ ] Create performance comparison
-
-### Phase 3: Parallelization
-- [ ] Implement `gpu-bfs-flood-fill`
-- [ ] Optimize CUDA kernels for RTX 4060
-- [ ] Memory management optimization
-- [ ] GPU vs CPU performance analysis
-
-### Phase 4: Full Optimization
-- [ ] Implement `gpu-scan-flood-fill`
-- [ ] Advanced CUDA optimizations for Ada Lovelace
-- [ ] Complete benchmark suite
-- [ ] Final performance report
-
-### Phase 5: Polish & Documentation
-- [ ] Complete documentation
-- [ ] Create demo notebooks
-- [ ] Performance visualization
-- [ ] Project presentation materials
-
-## Educational Value
-
-### For Beginners
-- Start with `cpu-bfs-flood-fill` to understand the problem
-- See clear, simple code that solves the problem
-- Learn basic flood-fill concepts
-
-### For Intermediate Developers
-- Progress through `cpu-scan-flood-fill` to see algorithm alternatives
-- Understand how algorithm choice affects performance
-- Learn about connected component labeling
-
-### For Advanced Developers
-- Dive into `gpu-bfs-flood-fill` for parallelization techniques
-- Master `gpu-scan-flood-fill` for high-performance computing
-- Understand memory optimization and CUDA best practices
-
-## Learning Outcomes
-
-By the end of this evolution path, developers will understand:
-
-1. **Problem Decomposition**: How to break down a complex problem
-2. **Algorithm Selection**: When to use different algorithms
-3. **Platform Migration**: How to move from CPU to GPU
-4. **Performance Optimization**: Memory, threading, and hardware optimization
-5. **Benchmarking**: How to measure and compare performance
-6. **Real-world Trade-offs**: Complexity vs. performance vs. maintainability
-
-## Branch Workflow
-
-```mermaid
-graph LR
-    A[main] --> B[cpu/bfs-flood-fill]
-    B --> C[cpu/scanning+bfs-flood-fill]
-    C --> D[gpu/bfs-flood-fill]
-    D --> E[gpu/scanning+bfs-flood-fill]
+##### **Memory Hierarchy Overview**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Global Memory (8 GB)                     │
+│                   Latency: 400-800 cycles                   │
+│                   Bandwidth: 128-bit @ 8001 MHz            │
+├─────────────────────────────────────────────────────────────┤
+│                   L2 Cache (32 MB)                         │
+│                   Latency: 200-400 cycles                   │
+│                   Shared across all 24 SMs                 │
+├─────────────────────────────────────────────────────────────┤
+│  L1 Cache + Shared Memory (per SM)                         │
+│  L1 Cache Latency: 80-120 cycles                           │
+│  Shared Memory Latency: 1-32 cycles                        │
+│  Combined: 128KB (configurable split)                      │
+├─────────────────────────────────────────────────────────────┤
+│          Constant Memory: 64 KB (cached)                   │
+│          Latency: 1-2 cycles (if cached)                   │
+├─────────────────────────────────────────────────────────────┤
+│               Registers: 65,536 per SM                     │
+│               Latency: 1 cycle (immediate)                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Success Criteria
+##### **Memory Access by Execution Unit**
 
-- [ ] All four evolution steps implemented and documented
-- [ ] Clear performance progression demonstrated
-- [ ] Educational materials created for each step
-- [ ] Comprehensive benchmark results
-- [ ] Working demo for each evolution step
-- [ ] Documentation that tells the complete story
+**Threads (within a warp) - Memory Access**:
+- **Registers**: 1 cycle (immediate, private per thread)
+- **Shared Memory**: 1-32 cycles (potential bank conflicts)
+- **L1 Cache**: 80-120 cycles (if hit)
+- **L2 Cache**: 200-400 cycles (if L1 miss)
+- **Global Memory**: 400-800 cycles (if L2 miss)
+
+**Key Insight**: Memory coalescing across 32 threads in a warp is crucial
+
+**Warps (within a block) - Memory Access**:
+- **Shared Memory Contention**: When multiple warps access same banks
+- **Memory Coalescing**: Optimal when 32 threads access contiguous memory
+- **Cache Locality**: L1 cache shared among warps in same block
+- **Latency Hiding**: While one warp waits for memory, others execute
+
+**Blocks (within an SM) - Memory Access**:
+- **Shared Memory**: Isolated (each block has own allocation)
+- **L1 Cache**: Shared among all blocks in same SM
+- **Resource Competition**: Multiple blocks compete for cache space
+- **Memory Bandwidth**: Blocks share SM's memory controllers
+
+**SMs (across GPU) - Memory Access**:
+- **L2 Cache**: Shared resource, potential contention across 24 SMs
+- **Global Memory**: All SMs compete for memory bandwidth
+- **Memory Controllers**: Multiple controllers distribute access
+- **NUMA Effects**: Memory locality can affect performance
+
+##### **Latency Hiding Through Concurrency**
+
+**The Power of Multiple Warps**:
+```cuda
+// Timeline showing latency hiding:
+// Cycle 1-10:  Warp 0 executes arithmetic operations
+// Cycle 11:    Warp 0 issues global memory load (400+ cycle latency)
+// Cycle 12-20: Warp 1 executes (hides Warp 0's memory latency)
+// Cycle 21-30: Warp 2 executes (continues hiding latency)
+// Cycle 31-40: Warp 3 executes (latency still hidden)
+// ...
+// Cycle 400+:  Warp 0's memory data arrives, ready to execute
+```
+
+**Optimal Configuration for RTX 4060**:
+```cuda
+// Maximize latency hiding:
+threads_per_block = 256;  // 8 warps per block
+blocks_per_grid = 24;     // All SMs utilized
+// Total: 192 warps across GPU for maximum latency hiding
+```
+
+##### **Resource Sharing and Time-Slicing Details**
+
+**Within a Block (Warp Concurrency)**:
+- **Shared Resources**: 
+  - Compute cores (CUDA cores, special function units)
+  - Shared memory (48KB divided among all warps)
+  - Register file (65,536 registers shared by all threads)
+- **Time-Slicing Mechanism**:
+  - Warp scheduler maintains ready queue of warps
+  - Round-robin scheduling with priority for ready warps
+  - Stalled warps (memory access) moved to wait queue
+  - Context switching between warps has zero overhead
+
+**Within an SM (Block Concurrency)**:
+- **Shared Resources**:
+  - All execution units (schedulers, cores, memory controllers)
+  - L1 cache/shared memory complex (128KB total)
+  - Register file (65,536 total across all blocks)
+- **Resource Allocation**:
+  - Blocks compete for shared memory allocation
+  - Register usage per thread affects max blocks per SM
+  - Memory bandwidth shared among all resident blocks
+
+#### Summary: Memory Access Latencies
+
+| **Memory Type** | **Latency (cycles)** | **Latency (ns)** | **Access Scope** | **Size (RTX 4060)** |
+|-----------------|---------------------|------------------|------------------|---------------------|
+| **Registers** | 1 | ~0.7 | Per-thread | 65,536 per SM |
+| **Shared Memory** | 1-32 | ~0.7-22 | Per-block | 48 KB per block |
+| **L1 Cache** | 80-120 | ~55-82 | Per-SM | Part of 128KB |
+| **L2 Cache** | 200-400 | ~136-272 | GPU-wide | 32 MB |
+| **Global Memory** | 400-800 | ~272-545 | GPU-wide | 8 GB |
+
+#### Performance Optimization Principles
+
+**1. Maximize True Parallelism**:
+- Use all 24 SMs simultaneously
+- Configure blocks to utilize full GPU capacity
+- Prefer `blocks_per_grid = 24` or multiples
+
+**2. Leverage Concurrency for Latency Hiding**:
+- Use 8+ warps per block for effective latency hiding
+- Balance register usage to maximize occupancy
+- Optimize shared memory access patterns
+
+**3. Optimize Memory Access Hierarchy**:
+- Minimize global memory access through data locality
+- Use shared memory for frequently accessed data
+- Ensure coalesced memory access patterns
+- Avoid bank conflicts in shared memory
+
+**4. Balance Resource Utilization**:
+- Monitor occupancy vs. resource usage trade-offs
+- Use profiling tools to identify bottlenecks
+- Consider memory bandwidth vs. compute intensity
+
+**For Your Flood Fill Implementation**:
+```cuda
+// Optimal configuration for RTX 4060:
+threads_per_block = 256;  // 8 warps (good concurrency)
+blocks_per_grid = 24;     // Full SM utilization (true parallelism)
+shared_memory_per_block = 24576;  // 24KB (half of available)
+
+// This gives you:
+// - 6,144 threads total (good utilization)
+// - 192 warps across GPU (excellent latency hiding)
+// - 24 independent processing units (maximum parallelism)
+// - Balanced resource usage (registers, shared memory, occupancy)
+```
 
 ---
 
-*This roadmap ensures that every step builds logically on the previous one, creating a compelling narrative of optimization and scaling.*
+#### Performance Implications
+
+1. **Memory Coalescing**: 
+   - Coalesced access: 1 transaction for 32 threads
+   - Non-coalesced: Up to 32 transactions for 32 threads
+   - **Performance difference**: Up to 32x
+
+2. **Bank Conflicts in Shared Memory**:
+   - No conflicts: 1 cycle access
+   - 2-way conflict: 2 cycles (serialized)
+   - 32-way conflict: 32 cycles (fully serialized)
+
+3. **Occupancy vs Resource Usage**:
+   - More registers per thread → fewer threads per SM
+   - More shared memory per block → fewer blocks per SM
+   - **Sweet spot**: Balance occupancy with resource needs
+
+**Flood Fill Optimization Strategy**:
+
+```cuda
+// Resource allocation for optimal performance:
+Block Configuration:
+├── 256 threads per block (8 warps for latency hiding)
+├── 24KB shared memory per block (queue storage)
+├── ~100 registers per thread (balanced usage)
+└── 4 blocks per SM (good occupancy)
+
+Memory Strategy:
+├── Coalesced global memory reads for image data
+├── Shared memory for BFS queue (low latency)
+├── Register spilling minimized (keep < 100 registers/thread)
+└── Atomic operations on shared memory (avoid global atomics)
+```
