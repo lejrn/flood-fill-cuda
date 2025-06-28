@@ -83,6 +83,7 @@ def run_optimized_flood_fill_with_debug():
     debug_warp_usage = cuda.device_array(total_warps, dtype=np.int32)
     debug_pixel_count = cuda.device_array(1, dtype=np.int32)
     debug_queue_usage = cuda.device_array(1, dtype=np.int32)
+    debug_iteration_count = cuda.device_array(1, dtype=np.int32)
 
     # Copy image data to GPU
     img_gpu = cuda.to_device(img)
@@ -98,7 +99,7 @@ def run_optimized_flood_fill_with_debug():
     optimized_flood_fill[blocks_per_grid, threads_per_block](
         img_gpu, visited_gpu, start_x, start_y, width, height, new_color_gpu,
         global_queue_x, global_queue_y, global_queue_front, global_queue_rear,
-        debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count, debug_queue_usage
+        debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count, debug_queue_usage, debug_iteration_count
     )
     
     cuda.synchronize()
@@ -116,11 +117,12 @@ def run_optimized_flood_fill_with_debug():
     debug_warp_usage_host = debug_warp_usage.copy_to_host()
     debug_pixel_count_host = debug_pixel_count.copy_to_host()
     debug_queue_usage_host = debug_queue_usage.copy_to_host()
+    debug_iteration_count_host = debug_iteration_count.copy_to_host()
     
     # Analyze debug arrays
     debug_stats = analyze_debug_arrays(
         debug_block_usage_host, debug_thread_usage_host, debug_warp_usage_host,
-        debug_pixel_count_host, debug_queue_usage_host, blocks_per_grid, threads_per_block
+        debug_pixel_count_host, debug_queue_usage_host, debug_iteration_count_host, blocks_per_grid, threads_per_block
     )
     
     return img_result, visited_result, debug_stats
@@ -151,6 +153,7 @@ def main():
               f"{debug_stats['thread_utilization']:.1f}% threads, {debug_stats['warp_utilization']:.1f}% warps")
         print(f"   • Pixels Processed: {debug_stats['pixels_processed']:,}")
         print(f"   • Queue Peak Usage: {debug_stats['max_queue_usage']:,} ({debug_stats['queue_utilization']:.1f}%)")
+        print(f"   • Iterations Executed: {debug_stats['iterations_executed']:,}")
         print(f"   • Efficiency: {debug_stats['pixels_processed']/debug_stats['threads_used']:.1f} pixels/thread")
         
         perf_logger.log_counters()

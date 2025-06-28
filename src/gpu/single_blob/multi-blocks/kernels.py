@@ -17,13 +17,13 @@ perf_logger = PerformanceLogger()
 @cuda.jit
 def optimized_flood_fill(img, visited, start_x, start_y, width, height, new_color, 
                         global_queue_x, global_queue_y, global_queue_front, global_queue_rear,
-                        debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count, debug_queue_usage):
+                        debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count, debug_queue_usage, debug_iteration_count):
     """
     Optimized flood fill kernel using global memory queue and multiple SMs.
     
-    This kernel utilizes all 24 SMs of the RTX 4060 for maximum parallelism.
-    Each warp processes different portions of the global queue, enabling
-    efficient work distribution across the entire GPU.
+    This kernel utilizes 20 SMs of the RTX 4060 with 2 blocks per SM (40 total blocks)
+    and 2 warps per block (80 total warps) for balanced parallelism. Each warp processes 
+    different portions of the global queue, enabling efficient work distribution.
     
     Key optimizations:
     - Global memory queue cached in L2 (32MB)
@@ -45,6 +45,7 @@ def optimized_flood_fill(img, visited, start_x, start_y, width, height, new_colo
         debug_warp_usage: Debug array to track which warps were active
         debug_pixel_count: Debug counter for pixels processed
         debug_queue_usage: Debug counter for maximum queue usage
+        debug_iteration_count: Debug counter for total iterations executed
     """
     # Block and warp identification for work distribution
     block_id = cuda.blockIdx.x
@@ -144,6 +145,8 @@ def optimized_flood_fill(img, visited, start_x, start_y, width, height, new_colo
         # Update queue front pointer (only one thread does this to prevent conflicts)
         if cuda.threadIdx.x == 0 and cuda.blockIdx.x == 0:
             global_queue_front[0] = iteration_rear
+            # Track total iterations executed
+            debug_iteration_count[0] = iteration + 1
         
         # Final synchronization before next iteration
         cuda.syncthreads()

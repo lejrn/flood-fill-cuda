@@ -3,24 +3,26 @@ from numba import cuda
 import time
 
 # Configuration constants
-IMAGE_SIZE = 400 * 400  # For 400x400 image
-QUEUE_CAPACITY = IMAGE_SIZE // 4  # Conservative: 25% of image could be blob
-TOTAL_WARPS = 144 * 8  # 144 blocks × 8 warps per block = 1,152 warps
+IMAGE_SIZE = 8000 * 8000  # For 8000x8000 large scene
+QUEUE_CAPACITY = 1000000  # 1M queue capacity for large blobs (adjust based on available memory)
+TOTAL_WARPS = 40 * 2  # 40 blocks × 2 warps per block = 80 warps
 
 # Place direction arrays in constant memory (read-only) - 8 directions
 DX_host = np.array([1, 1, 0, -1, -1, -1,  0, 1], dtype=np.int32)
 DY_host = np.array([0, 1, 1,  1,  0, -1, -1, -1], dtype=np.int32)
 
-# RTX 4060 optimal configuration
+# Simplified RTX 4060 Configuration:
 RTX_4060_CONFIG = {
-    'threads_per_block': 256,  # 8 warps per block
-    'blocks_per_grid': 144,    # 6 blocks per SM × 24 SMs
-    'num_sms': 24,
-    'blocks_per_sm': 6,
-    'warps_per_block': 8,
-    'total_warps': 1152,
+    'threads_per_block': 64,   # 2 warps per block (64 threads = 2 × 32)
+    'blocks_per_grid': 40,     # 2 blocks per SM × 20 SMs
+    'num_sms': 20,             # Using 20 out of 24 available SMs
+    'blocks_per_sm': 2,        # 2 blocks per SM
+    'warps_per_block': 2,      # 2 warps per block
+    'total_warps': 80,         # 40 blocks × 2 warps = 80 warps
+    'total_threads': 2560,     # 40 blocks × 64 threads = 2,560 threads
     'shared_memory_per_block': 48 * 1024,  # 48KB
     'max_threads_per_sm': 1536,
+    'max_threads_per_block': 1024,  # Hardware limit for RTX 4060
     'max_shared_memory_per_sm': 100 * 1024  # 100KB
 }
 
