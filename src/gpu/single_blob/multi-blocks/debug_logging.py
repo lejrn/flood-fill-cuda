@@ -51,7 +51,7 @@ def create_global_queue_arrays():
 
 
 def analyze_debug_arrays(debug_block_usage, debug_thread_usage, debug_warp_usage, 
-                        debug_pixel_count, debug_queue_usage, blocks_per_grid, threads_per_block):
+                        debug_pixel_count, debug_queue_usage, debug_iteration_count, blocks_per_grid, threads_per_block):
     """Analyze debug arrays to provide GPU utilization statistics"""
     print("\n📊 GPU Utilization Analysis:")
     
@@ -90,6 +90,12 @@ def analyze_debug_arrays(debug_block_usage, debug_thread_usage, debug_warp_usage
     print(f"       • Maximum Queue Size: {max_queue_usage:,}")
     print(f"       • Queue Utilization: {queue_utilization:.1f}%")
     
+    # Iteration count
+    iterations_executed = debug_iteration_count[0]
+    print(f"    🔄 Algorithm Progress:")
+    print(f"       • Iterations Executed: {iterations_executed:,}")
+    print(f"       • Pixels per Iteration: {pixels_processed/max(iterations_executed, 1):.1f}")
+    
     # Overall efficiency metrics
     print(f"    ⚡ Efficiency Metrics:")
     print(f"       • Pixels per Thread: {pixels_processed/threads_used:.1f}")
@@ -104,7 +110,8 @@ def analyze_debug_arrays(debug_block_usage, debug_thread_usage, debug_warp_usage
         'warp_utilization': warp_utilization,
         'pixels_processed': pixels_processed,
         'max_queue_usage': max_queue_usage,
-        'queue_utilization': queue_utilization
+        'queue_utilization': queue_utilization,
+        'iterations_executed': iterations_executed
     }
 
 
