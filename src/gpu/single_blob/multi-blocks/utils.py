@@ -4,22 +4,26 @@ import time
 
 # Configuration constants
 IMAGE_SIZE = 8000 * 8000  # For 8000x8000 large scene
-QUEUE_CAPACITY = 1000000  # 1M queue capacity for large blobs (adjust based on available memory)
+QUEUE_CAPACITY = 16000000  # 16M queue capacity for large blobs (adjust based on available memory)
 TOTAL_WARPS = 40 * 2  # 40 blocks × 2 warps per block = 80 warps
 
 # Place direction arrays in constant memory (read-only) - 8 directions
 DX_host = np.array([1, 1, 0, -1, -1, -1,  0, 1], dtype=np.int32)
 DY_host = np.array([0, 1, 1,  1,  0, -1, -1, -1], dtype=np.int32)
 
+# DX_host = np.array([1,-1, 0,  0, 1, -1, -1, 1], dtype=np.int32)
+# DY_host = np.array([0, 0, 1, -1, 1, -1,  1, -1], dtype=np.int32)
+
+
 # Simplified RTX 4060 Configuration:
 RTX_4060_CONFIG = {
-    'threads_per_block': 64,   # 2 warps per block (64 threads = 2 × 32)
-    'blocks_per_grid': 40,     # 2 blocks per SM × 20 SMs
-    'num_sms': 20,             # Using 20 out of 24 available SMs
-    'blocks_per_sm': 2,        # 2 blocks per SM
-    'warps_per_block': 2,      # 2 warps per block
-    'total_warps': 80,         # 40 blocks × 2 warps = 80 warps
-    'total_threads': 2560,     # 40 blocks × 64 threads = 2,560 threads
+    'threads_per_block': 512,   # 2 warps per block (64 threads = 2 × 32)
+    'blocks_per_grid': 96,     # 2 blocks per SM × 24 SMs
+    'num_sms': 24,             # Using 24 out of 24 available SMs
+    'blocks_per_sm': 4,        # 4 blocks per SM
+    'warps_per_block': 16,      # 16 warps per block
+    'total_warps': 640,          # 96 blocks × 16 warps = 640 warps
+    'total_threads': 49152,     # 96 blocks × 512 threads = 49,152 threads
     'shared_memory_per_block': 48 * 1024,  # 48KB
     'max_threads_per_sm': 1536,
     'max_threads_per_block': 1024,  # Hardware limit for RTX 4060
