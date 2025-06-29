@@ -1,0 +1,69 @@
+{
+  "test_timestamp": "2025-06-29 06:21:07",
+  "configuration": {
+    "blocks_per_grid": 24,
+    "threads_per_block": 128,
+    "chunk_size": 32,
+    "total_threads": 3072
+  },
+  "improvement_claim": "+4.2% over previous best",
+  "test_results": [
+    {
+      "scene_size": "2000x2000",
+      "total_pixels": 4000000,
+      "blob_pixels": 1000000,
+      "execution_time_ms": 312.4697208404541,
+      "iterations": 550,
+      "pixels_processed": 1000000,
+      "pixels_per_second": 3200310.088639265,
+      "block_utilization_pct": 100.0,
+      "thread_utilization_pct": 100.0,
+      "time_per_iteration_ms": 0.568126765164462,
+      "memory_efficiency": 0.25
+    },
+    {
+      "scene_size": "4000x4000",
+      "total_pixels": 16000000,
+      "blob_pixels": 4000000,
+      "execution_time_ms": 135.32471656799316,
+      "iterations": 1050,
+      "pixels_processed": 4000000,
+      "pixels_per_second": 29558532.258149765,
+      "block_utilization_pct": 100.0,
+      "thread_utilization_pct": 100.0,
+      "time_per_iteration_ms": 0.12888068244570777,
+      "memory_efficiency": 0.25
+    },
+    {
+      "scene_size": "6000x6000",
+      "total_pixels": 36000000,
+      "blob_pixels": 9000000,
+      "execution_time_ms": 171.63562774658203,
+      "iterations": 1550,
+      "pixels_processed": 9000000,
+      "pixels_per_second": 52436665.49982497,
+      "block_utilization_pct": 100.0,
+      "thread_utilization_pct": 100.0,
+      "time_per_iteration_ms": 0.11073266306231098,
+      "memory_efficiency": 0.25
+    },
+    {
+      "scene_size": "8000x8000",
+      "total_pixels": 64000000,
+      "blob_pixels": 16000000,
+      "execution_time_ms": 217.27347373962402,
+      "iterations": 2050,
+      "pixels_processed": 16000000,
+      "pixels_per_second": 73639914.36512892,
+      "block_utilization_pct": 100.0,
+      "thread_utilization_pct": 100.0,
+      "time_per_iteration_ms": 0.10598706036079221,
+      "memory_efficiency": 0.25
+    }
+  ],
+  "performance_summary": {
+    "average_pixels_per_second": 39708855.552935734,
+    "maximum_pixels_per_second": 73639914.36512892,
+    "scenes_tested": 4
+  }
+}
