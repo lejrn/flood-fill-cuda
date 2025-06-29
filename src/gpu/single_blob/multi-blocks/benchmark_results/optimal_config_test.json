@@ -1,0 +1,8 @@
+[
+  {
+    "scene_size": "4000x4000",
+    "total_pixels": 16000000,
+    "blob_pixels": 4000000,
+    "execution_time_ms": 386.8730068206787,
+    "iterations": 1050,
+    "pixels_processed": 

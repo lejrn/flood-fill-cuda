@@ -1,0 +1,43 @@
+{
+  "total_configs": 48,
+  "best_performance": {
+    "pixels_per_second": 18694923.612130046,
+    "config": "24\u00d7128, chunk=32"
+  },
+  "best_utilization": {
+    "block_utilization_pct": 100.0,
+    "config": "24\u00d764, chunk=16"
+  },
+  "recommended_configs": [
+    {
+      "blocks": 24,
+      "threads": 128,
+      "chunk": 32,
+      "pixels_per_second": 19641112.099450756
+    },
+    {
+      "blocks": 24,
+      "threads": 128,
+      "chunk": 64,
+      "pixels_per_second": 19600385.533038475
+    },
+    {
+      "blocks": 24,
+      "threads": 128,
+      "chunk": 16,
+      "pixels_per_second": 19376200.12995033
+    },
+    {
+      "blocks": 40,
+      "threads": 64,
+      "chunk": 32,
+      "pixels_per_second": 18938390.399373103
+    },
+    {
+      "blocks": 48,
+      "threads": 128,
+      "chunk": 128,
+      "pixels_per_second": 18694923.612130046
+    }
+  ]
+}
