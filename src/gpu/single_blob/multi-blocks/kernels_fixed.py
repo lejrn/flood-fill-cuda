@@ -152,26 +152,24 @@ def flood_fill_iteration(img, visited, width, height, new_color,
                     # Track pixel processing
                     cuda.atomic.add(debug_pixel_count, 0, 1)
                     
-                    # Recolor pixel with thread-specific blue variation
-                    img[x, y, 0] = new_color[0]  # Red component
-                    img[x, y, 1] = new_color[1]  # Green component  
-                    img[x, y, 2] = (global_thread_id * 4) % 255  # Blue: thread ID encoding
-                    
+                    # Spatial gradient coloring: RGB derived from pixel position
+                    img[x, y, 0] = x * 255 // width
+                    img[x, y, 1] = y * 255 // height
+                    img[x, y, 2] = (x + y) * 255 // (width + height)
+
                     # Process 8-connected neighbors
                     for i in range(8):
                         nx = x + DX_const[i]
                         ny = y + DY_const[i]
-                        
+
                         if is_valid_pixel(nx, ny, width, height):
-                            # Use atomic compare-and-swap to mark as visited (thread-safe)
                             old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
                             if old == 0 and is_red(img, nx, ny):
-                                # Add to global queue atomically
                                 pos = cuda.atomic.add(global_queue_rear, 0, 1)
                                 if pos < QUEUE_CAPACITY:
                                     global_queue_x[pos] = nx
                                     global_queue_y[pos] = ny
-    
+
     # Update queue front pointer (only one thread does this)
     if cuda.threadIdx.x == 0 and cuda.blockIdx.x == 0:
         # Mark processed items as consumed by updating front pointer
@@ -201,14 +199,13 @@ def run_flood_fill_kernel(img, visited, start_x, start_y, width, height, new_col
                          debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count,
                          iteration_counter, global_sync_flag, max_iterations=50000):
     """
-    Pure device-side flood fill kernel that handles the entire algorithm.
-    
-    Uses a coordination mechanism where all blocks work together:
-    - Block 0 manages the iteration loop and queue state
-    - All blocks participate in flood fill work
-    - Uses global memory flag for inter-block coordination
-    
-    This completely eliminates host-device transfers!
+    EXPERIMENTAL — broken for multi-block use.
+
+    cuda.syncthreads() only synchronizes threads within a single block; it does not
+    provide the cross-block barrier this kernel assumes. As a result, blocks can read
+    stale queue-front/rear values and produce incorrect output when gridDim.x > 1.
+
+    Use run_multi_iteration_flood_fill (separate kernel launches) instead.
     """
     block_id = cuda.blockIdx.x
     thread_id = cuda.threadIdx.x
@@ -323,17 +320,17 @@ def run_flood_fill_kernel(img, visited, start_x, start_y, width, height, new_col
                     if x >= 0 and y >= 0 and x < width and y < height:
                         debug_thread_usage[global_thread_id] = 1
                         cuda.atomic.add(debug_pixel_count, 0, 1)
-                        
-                        # Recolor pixel
-                        img[x, y, 0] = new_color[0]
-                        img[x, y, 1] = new_color[1]
-                        img[x, y, 2] = (global_thread_id * 4) % 255
-                        
+
+                        # Spatial gradient coloring: RGB derived from pixel position
+                        img[x, y, 0] = x * 255 // width
+                        img[x, y, 1] = y * 255 // height
+                        img[x, y, 2] = (x + y) * 255 // (width + height)
+
                         # Process 8-connected neighbors
                         for i in range(8):
                             nx = x + DX_const[i]
                             ny = y + DY_const[i]
-                            
+
                             if is_valid_pixel(nx, ny, width, height):
                                 old = cuda.atomic.cas(visited, (nx, ny), 0, 1)
                                 if old == 0 and is_red(img, nx, ny):
@@ -352,11 +349,9 @@ def run_flood_fill_kernel(img, visited, start_x, start_y, width, height, new_col
 
 
 def reset_global_queue(global_queue_front, global_queue_rear):
-    """Reset global queue pointers"""
-    print("🔄 Resetting Global Queue:")
+    """Reset global queue pointers."""
     global_queue_front[0] = 0
     global_queue_rear[0] = 0
-    print("    ✅ Queue pointers reset to 0")
 
 
 def run_multi_iteration_flood_fill(img, visited, start_x, start_y, width, height, new_color,

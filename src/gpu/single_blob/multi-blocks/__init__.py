@@ -19,10 +19,3 @@ Modules:
 - main: Main execution script
 """
 
-from .main import main
-from .profiling import profile_kernel
-from .setup import setup_simple_scene, setup_large_scene
-from .utils import RTX_4060_CONFIG
-
-__version__ = "1.0.0"
-__all__ = ['main', 'profile_kernel', 'setup_simple_scene', 'setup_large_scene', 'RTX_4060_CONFIG']
