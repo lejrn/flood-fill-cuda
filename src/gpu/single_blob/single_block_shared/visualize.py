@@ -1,11 +1,12 @@
 """
 Generate a self-contained HTML dashboard from benchmark.py's JSON output.
 
-Renders the runtime comparison (log-scale dot plot), the GPU end-to-end time
-decomposition (100% stacked), the per-level frontier traces, the per-level
-warp/thread activity traces (lanes busy vs lanes woken), the
-threads-per-block sweep, and the full results table — with hover tooltips
-and light/dark theming, no external dependencies.
+Renders the runtime comparison (log-scale dot plot, v1 ring and v2 spill
+kernels vs the CPU baselines), the peak-queue-occupancy-vs-ring-capacity
+chart, the GPU end-to-end time decomposition (100% stacked), the per-level
+frontier traces, the per-level warp/thread activity traces (lanes busy vs
+lanes woken), the threads-per-block sweep, and the full results table —
+with hover tooltips and light/dark theming, no external dependencies.
 
 Usage:
     uv run python src/gpu/single_blob/single_block_shared/visualize.py [results.json]
@@ -44,9 +45,17 @@ SCENE_LABELS = {
     "sq_4000_corner": "square 4000² · corner seed",
     "serpentine_256": "serpentine 256²",
     "disk_1024": "disk r=480",
+    "sq_2600_full_center": "square 2600² full · center seed",
+    "sq_4000_center": "square 4000² · center seed",
+    "sq_5000_center": "square 5000² · center seed",
+    "sq_6000_center": "square 6000² · center seed",
 }
 ROWS = DATA["scenes"]
 SWEEP = DATA["tpb_sweep"]
+
+
+def scene_label(name):
+    return SCENE_LABELS.get(name, name)
 
 
 def fmt_ms(v):
@@ -65,7 +74,14 @@ def fmt_int(v):
 
 # ---------------------------------------------------------------- dot plot
 DOT_W, ROW_H, GUT_L, GUT_R, AX_H = 860, 40, 200, 30, 26
-LOG_MIN, LOG_MAX = 0.1, 2000.0
+DOT_SERIES = [("gpu_kernel_ms", "GPU v1 ring kernel", "s1"),
+              ("spill_kernel_ms", "GPU v2 spill kernel", "s4"),
+              ("njit_ms", "@njit CPU", "s2"),
+              ("pure_ms", "pure Python", "s3")]
+LOG_MIN = 0.1
+_max_ms = max(row[key] for row in ROWS for key, _, _ in DOT_SERIES
+              if row.get(key))
+LOG_MAX = 10 ** math.ceil(math.log10(_max_ms))
 
 
 def log_x(ms):
@@ -79,28 +95,28 @@ def dot_plot():
     h = n * ROW_H + AX_H + 8
     parts = [f'<svg viewBox="0 0 {DOT_W} {h}" role="img" '
              f'aria-label="Runtime per scene, log scale">']
-    # gridlines + ticks at decades
-    for tick in (0.1, 1, 10, 100, 1000):
+    # gridlines + ticks at decades (no text on the last tick — the axis-unit
+    # label owns the right edge)
+    tick = LOG_MIN
+    while tick <= LOG_MAX:
         x = log_x(tick)
         parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
                      f'y2="{n * ROW_H}" class="grid"/>')
-        lab = f"{tick:g}"
-        parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
-                     f'class="tick" text-anchor="middle">{lab}</text>')
+        if x < DOT_W - GUT_R - 70:
+            parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                         f'class="tick" text-anchor="middle">{tick:g}</text>')
+        tick *= 10
     parts.append(f'<text x="{DOT_W - GUT_R}" y="{n * ROW_H + 18}" class="tick" '
                  f'text-anchor="end">ms (log)</text>')
-    series = [("gpu_kernel_ms", "GPU kernel", "s1"),
-              ("njit_ms", "@njit CPU", "s2"),
-              ("pure_ms", "pure Python", "s3")]
     for i, row in enumerate(ROWS):
         cy = i * ROW_H + ROW_H / 2
-        label = SCENE_LABELS[row["scene"]]
+        label = scene_label(row["scene"])
         parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{DOT_W - GUT_R}" '
                      f'y2="{cy:.1f}" class="rowline"/>')
         parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
                      f'text-anchor="end">{label}</text>')
-        for key, name, cls in series:
-            v = row[key]
+        for key, name, cls in DOT_SERIES:
+            v = row.get(key)
             if v is None:
                 continue
             x = log_x(v)
@@ -120,34 +136,42 @@ def stacked():
     n = len(ROWS)
     bar_h, row_h = 20, 40
     h = n * row_h + 30
+    gut_l = 230  # wider than the dot plots: labels carry a " · v2" suffix
     # kernel reuses the GPU-blue slot from the runtime chart (color follows
     # the entity); this exact adjacency order was validated in both modes.
-    segs = [("gpu_alloc_ms", "alloc", "s2", "w"),
-            ("gpu_h2d_ms", "H2D copy", "s3", "k"),
-            ("gpu_kernel_ms", "kernel", "s1", "w"),
-            ("gpu_d2h_ms", "D2H copy", "s4", "k")]
+    segs = [("alloc_ms", "alloc", "s2", "w"),
+            ("h2d_ms", "H2D copy", "s3", "k"),
+            ("kernel_ms", "kernel", "s1", "w"),
+            ("d2h_ms", "D2H copy", "s4", "k")]
     parts = [f'<svg viewBox="0 0 {STK_W} {h}" role="img" '
              f'aria-label="GPU time decomposition, share of total">',
              '<defs>']
-    span = STK_W - GUT_L - 90
+    span = STK_W - gut_l - 90
     for i in range(n):
         y = i * row_h + (row_h - bar_h) / 2
-        parts.append(f'<clipPath id="rc{i}"><rect x="{GUT_L}" y="{y:.1f}" '
+        parts.append(f'<clipPath id="rc{i}"><rect x="{gut_l}" y="{y:.1f}" '
                      f'width="{span}" height="{bar_h}" rx="4"/></clipPath>')
     parts.append('</defs>')
     for i, row in enumerate(ROWS):
-        label = SCENE_LABELS[row["scene"]]
-        total = row["gpu_total_ms"]
+        label = scene_label(row["scene"])
+        # Ring decomposition where v1 completed; spill decomposition where
+        # only the v2 kernel could run the scene.
+        if row.get("gpu_total_ms"):
+            prefix, total = "gpu_", row["gpu_total_ms"]
+        else:
+            prefix, total = "spill_", row["spill_total_ms"]
+            label += " · v2"
         y = i * row_h + (row_h - bar_h) / 2
         cy = y + bar_h / 2 + 4
-        parts.append(f'<text x="{GUT_L - 10}" y="{cy:.1f}" class="rowlab" '
+        parts.append(f'<text x="{gut_l - 10}" y="{cy:.1f}" class="rowlab" '
                      f'text-anchor="end">{label}</text>')
-        x = GUT_L
+        x = gut_l
         parts.append(f'<g clip-path="url(#rc{i})">')
         for key, name, cls, ink in segs:
-            w = row[key] / total * span
-            pct = row[key] / total * 100
-            tip = f"{label} — {name}: {fmt_ms(row[key])} ms ({pct:.0f}%)"
+            v = row[prefix + key]
+            w = v / total * span
+            pct = v / total * 100
+            tip = f"{label} — {name}: {fmt_ms(v)} ms ({pct:.0f}%)"
             parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{max(w - 2, 0.5):.1f}" '
                          f'height="{bar_h}" class="seg {cls}" data-tip="{tip}"/>')
             if w > 60:
@@ -155,14 +179,74 @@ def stacked():
                              f'class="seglab {ink}" text-anchor="middle">{pct:.0f}%</text>')
             x += w
         parts.append('</g>')
-        parts.append(f'<text x="{GUT_L + span + 8}" y="{cy:.1f}" class="rowval">'
+        parts.append(f'<text x="{gut_l + span + 8}" y="{cy:.1f}" class="rowval">'
                      f'{fmt_ms(total)} ms</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 
 
+# ------------------------------------------------- occupancy vs ring capacity
+def occ_chart():
+    """Log-scale dot per scene: peak queue occupancy vs the 8192-slot ring.
+
+    Dots left of the dashed capacity line fit v1's pure-shared ring; dots
+    right of it are only possible because the v2 spill tier absorbed the
+    excess — the tooltip carries the spilled-pixel count.
+    """
+    n = len(ROWS)
+    h = n * ROW_H + AX_H + 8
+    cap = ROWS[0]["ring_capacity"]
+    omax = max(r["peak_occupancy"] for r in ROWS)
+    lo, hi = 1.0, 10 ** math.ceil(math.log10(omax))
+    span = DOT_W - GUT_L - GUT_R
+
+    def ox(v):
+        return GUT_L + (math.log10(v) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    parts = [f'<svg viewBox="0 0 {DOT_W} {h}" role="img" '
+             f'aria-label="Peak queue occupancy per scene vs ring capacity">']
+    tick = lo
+    while tick <= hi:
+        x = ox(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * ROW_H}" class="grid"/>')
+        if x < DOT_W - GUT_R - 110:
+            parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                         f'class="tick" text-anchor="middle">{fmt_int(int(tick))}</text>')
+        tick *= 10
+    parts.append(f'<text x="{DOT_W - GUT_R}" y="{n * ROW_H + 18}" class="tick" '
+                 f'text-anchor="end">queue slots (log)</text>')
+    cx = ox(cap)
+    parts.append(f'<line x1="{cx:.1f}" y1="4" x2="{cx:.1f}" '
+                 f'y2="{n * ROW_H}" class="satline"/>')
+    parts.append(f'<text x="{cx + 6:.1f}" y="16" class="anno" '
+                 f'text-anchor="start">shared ring capacity {fmt_int(cap)}</text>')
+    for i, row in enumerate(ROWS):
+        cy = i * ROW_H + ROW_H / 2
+        label = scene_label(row["scene"])
+        parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{DOT_W - GUT_R}" '
+                     f'y2="{cy:.1f}" class="rowline"/>')
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{label}</text>')
+        occ = row["peak_occupancy"]
+        spilled = row.get("spilled_px", 0)
+        if spilled:
+            tip = (f"{label} — peak occupancy {fmt_int(occ)} of {fmt_int(cap)} "
+                   f"ring slots: v1 trips; v2 spilled {fmt_int(spilled)} px "
+                   f"({row['spill_pct']:.0f}% of the blob)")
+        else:
+            tip = (f"{label} — peak occupancy {fmt_int(occ)} of {fmt_int(cap)}: "
+                   f"fits the shared ring, spill tier untouched")
+        parts.append(f'<circle cx="{ox(occ):.1f}" cy="{cy:.1f}" r="5.5" '
+                     f'class="dot s1" data-tip="{tip}"/>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
 # ------------------------------------------------------------ frontier panels
-PANEL_SCENES = ["sq_2000_center", "sq_4000_corner", "disk_1024", "serpentine_256"]
+PANEL_SCENES = ["sq_2000_center", "sq_4000_corner", "disk_1024",
+                "serpentine_256", "sq_6000_center"]
 
 
 def decimate(values, max_pts=600):
@@ -185,7 +269,7 @@ def panels():
         if row["scene"] not in PANEL_SCENES:
             continue
         name = row["scene"]
-        label = SCENE_LABELS[name]
+        label = scene_label(name)
         sizes = row["level_sizes"]
         xs, ys = decimate(sizes)
         w, h, pl, pr, pt, pb = 420, 170, 52, 14, 26, 26
@@ -245,7 +329,7 @@ def activity_panels():
         if row["scene"] not in PANEL_SCENES:
             continue
         name = row["scene"]
-        label = SCENE_LABELS[name]
+        label = scene_label(name)
         cap = row["threads_per_block"]
         n_warps = cap // 32
         sizes = row["level_sizes"]
@@ -353,24 +437,31 @@ def sweep_chart():
 
 
 # ------------------------------------------------------------------ table
+def fmt_x(v):
+    return f"{v:.2f}×" if v is not None else "—"
+
+
 def table():
     head = ("<tr><th>scene</th><th>filled px</th><th>levels</th>"
-            "<th>peak occ.</th><th>GPU kernel ms</th><th>GPU total ms</th>"
-            "<th>@njit ms</th><th>pure ms</th><th>GPU vs @njit</th>"
+            "<th>peak occ.</th><th>ring ms</th><th>spill ms</th>"
+            "<th>spilled px</th><th>@njit ms</th><th>pure ms</th>"
+            "<th>ring vs @njit</th><th>spill vs @njit</th>"
             "<th>thread util %</th><th>disc. redund.</th></tr>")
     body = []
     for r in ROWS:
         body.append(
             "<tr>"
-            f"<td>{SCENE_LABELS[r['scene']]}</td>"
+            f"<td>{scene_label(r['scene'])}</td>"
             f"<td>{fmt_int(r['filled'])}</td>"
             f"<td>{fmt_int(r['levels'])}</td>"
             f"<td>{fmt_int(r['peak_occupancy'])}</td>"
             f"<td>{fmt_ms(r['gpu_kernel_ms'])}</td>"
-            f"<td>{fmt_ms(r['gpu_total_ms'])}</td>"
+            f"<td>{fmt_ms(r['spill_kernel_ms'])}</td>"
+            f"<td>{fmt_int(r['spilled_px'])}</td>"
             f"<td>{fmt_ms(r['njit_ms'])}</td>"
             f"<td>{fmt_ms(r['pure_ms'])}</td>"
-            f"<td>{r['speedup_kernel_vs_njit']:.2f}×</td>"
+            f"<td>{fmt_x(r['speedup_kernel_vs_njit'])}</td>"
+            f"<td>{fmt_x(r['speedup_spill_vs_njit'])}</td>"
             f"<td>{r['thread_util_pct']:.1f}</td>"
             f"<td>{r['discovery_redundancy']:.2f}</td>"
             "</tr>")
@@ -378,21 +469,30 @@ def table():
 
 
 # -------------------------------------------------------------- stat tiles
-best_thr = max(ROWS, key=lambda r: r["gpu_mpx_s_kernel"])
-best_speed = max(ROWS, key=lambda r: r["speedup_kernel_vs_njit"])
-worst_speed = min(ROWS, key=lambda r: r["speedup_kernel_vs_njit"])
-occ_row = max(ROWS, key=lambda r: r["peak_occupancy"])
+def _best_kernel_mpx(r):
+    return max(r.get("gpu_mpx_s_kernel") or 0.0, r["spill_mpx_s_kernel"])
+
+
+def _best_speedup(r):
+    return max(r.get("speedup_kernel_vs_njit") or 0.0, r["speedup_spill_vs_njit"])
+
+
+best_thr = max(ROWS, key=_best_kernel_mpx)
+best_speed = max(ROWS, key=_best_speedup)
+worst_speed = min(ROWS, key=_best_speedup)
+big_row = max(ROWS, key=lambda r: r["filled"])
 TILES = [
-    (f"{best_thr['gpu_mpx_s_kernel']:.1f} Mpx/s",
-     f"peak kernel throughput · {SCENE_LABELS[best_thr['scene']]}"),
-    (f"{best_speed['speedup_kernel_vs_njit']:.2f}× vs @njit",
-     f"first GPU win · {SCENE_LABELS[best_speed['scene']]} "
-     f"({fmt_int(best_speed['filled'])} px)"),
-    (f"{worst_speed['speedup_kernel_vs_njit']:.3f}× vs @njit",
-     f"worst case · {SCENE_LABELS[worst_speed['scene']]}: "
+    (f"{_best_kernel_mpx(best_thr):.1f} Mpx/s",
+     f"peak kernel throughput · {scene_label(best_thr['scene'])}"),
+    (f"{_best_speedup(best_speed):.2f}× vs @njit",
+     f"best GPU win · {scene_label(best_speed['scene'])} "
+     f"({fmt_int(best_speed['filled'])} px, v2 spill kernel)"),
+    (f"{_best_speedup(worst_speed):.3f}× vs @njit",
+     f"worst case · {scene_label(worst_speed['scene'])}: "
      f"{fmt_int(worst_speed['levels'])} tiny frontiers"),
-    (f"{fmt_int(occ_row['peak_occupancy'])} / {fmt_int(occ_row['ring_capacity'])}",
-     "peak ring occupancy vs capacity · predicted 2W−1 exactly"),
+    (f"{fmt_int(big_row['filled'])} px",
+     f"biggest blob · impossible for v1 (needs {fmt_int(big_row['peak_occupancy'])} "
+     f"queue slots) — v2 spilled {fmt_int(big_row['spilled_px'])} px"),
 ]
 tiles_html = "".join(
     f'<div class="tile"><div class="tile-v">{v}</div>'
@@ -475,6 +575,7 @@ svg { width: 100%; height: auto; display: block; }
 }
 details { margin-top: 4px; }
 summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; font-size: 12px; margin-top: 10px; width: 100%; }
 th, td { text-align: right; padding: 5px 9px; border-bottom: 1px solid var(--grid);
          font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -570,7 +671,8 @@ document.querySelectorAll('.ahover-capture').forEach(el => {
 """.replace("__PANELS__", panels_js).replace("__APANELS__", act_js)
 
 legend3 = ('<div class="legend">'
-           '<span><i class="chip" style="background:var(--s1)"></i>GPU kernel (median of 5)</span>'
+           '<span><i class="chip" style="background:var(--s1)"></i>GPU v1 ring kernel (median of 5)</span>'
+           '<span><i class="chip" style="background:var(--s4)"></i>GPU v2 spill kernel</span>'
            '<span><i class="chip" style="background:var(--s2)"></i>@njit CPU</span>'
            '<span><i class="chip" style="background:var(--s3)"></i>pure Python</span>'
            '</div>')
@@ -594,26 +696,40 @@ html = f"""<!doctype html>
 <style>{CSS}</style></head>
 <body><div class="viz-root">
 <h1>Single-block shared-memory BFS flood fill — benchmark</h1>
-<div class="sub">{DATA['device']} · {DATA['sm_count']} SMs · this kernel
-uses 1 block = 1 SM (4.2% of the GPU) by design · 4-connectivity ·
-tpb=256 unless noted</div>
+<div class="sub">{DATA['device']} · {DATA['sm_count']} SMs · one block = 1 SM
+(4.2% of the GPU) by design · 4-connectivity · tpb=256 unless noted ·
+v1 "ring" = pure shared-memory queue, v2 "spill" = two-tier queue
+(shared ring + global spill) with warp-aggregated enqueue</div>
 
 <div class="tiles">{tiles_html}</div>
 
 <div class="card">
 <h2>Runtime per scene</h2>
-<p class="note">Log scale — each decade gridline is 10×. The GPU dot
-sits left of green only on the 16M-pixel scene; on the serpentine it is two
-decades right of the CPU. Pure Python was skipped on 4000².</p>
+<p class="note">Log scale — each decade gridline is 10×. Missing blue dots
+are scenes v1 cannot run (ring overflow): only the v2 spill kernel has a
+time there, and its lead over @njit grows with blob size. Pure Python was
+skipped above 2M px.</p>
 {legend3}
 {dot_plot()}
 </div>
 
 <div class="card">
+<h2>Peak queue occupancy vs the shared ring</h2>
+<p class="note">How much frontier each scene's BFS actually queued
+(spanning two adjacent levels), against the 8192-slot shared ring. Scenes
+right of the dashed line are exactly the ones where v1 trips its overflow
+tripwire; v2 routes the excess through the global spill tier instead —
+hover for spilled-pixel counts.</p>
+{occ_chart()}
+</div>
+
+<div class="card">
 <h2>Where the GPU's end-to-end time goes</h2>
 <p class="note">Share of total wall time per scene (100% = the value at the
-right). On small scenes allocation + transfers dominate — the kernel is
-not the bottleneck until the image is large.</p>
+right). Rows marked "· v2" show the spill kernel (v1 cannot run those
+scenes); others show the v1 ring kernel. On small scenes allocation +
+transfers dominate — the kernel is not the bottleneck until the image is
+large.</p>
 {legend4}
 {stacked()}
 </div>
@@ -653,7 +769,8 @@ theoretical occupancy.</p>
 
 <div class="card">
 <h2>All numbers</h2>
-<details open><summary>Per-scene results table</summary>{table()}</details>
+<details open><summary>Per-scene results table</summary>
+<div class="tablewrap">{table()}</div></details>
 </div>
 
 <div id="tooltip"></div>
