@@ -207,6 +207,10 @@ uv run pytest src/gpu/single_blob/dual_block/test_correctness.py -v
 # Benchmark: three partitionings vs single-block v2 vs @njit, plus the
 # tpb sweep, the placement experiment, and instrumentation overhead.
 uv run python src/gpu/single_blob/dual_block/benchmark.py
+
+# Render the combined dashboard (dual-block + appended single-block stage)
+# from the newest JSONs of both packages — open the HTML in a browser.
+uv run python src/gpu/single_blob/dual_block/visualize.py
 ```
 
 ```python
@@ -253,7 +257,10 @@ flood_fill(img, x, y, kernel="pinned",
 
 ## Roadmap
 
-- Dashboard (deferred by decision): 5-series runtime plot, balance-over-
-  time panels, inbox/spill columns, placement comparison chart.
+- ~~Dashboard~~ — done: `visualize.py` renders
+  `benchmark_results/dual_block_benchmark.html` (runtime comparison,
+  speedup-vs-v2, the placement experiment with observed smids,
+  balance-over-time panels, the merged tpb sweep, instrumentation
+  overhead, and the appended single-block stage).
 - The natural next stage: N blocks (the `../multi-blocks/` and
   `../persistent/` designs, revisited with this package's rigor).
