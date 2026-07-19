@@ -1,13 +1,15 @@
 """
-Generate the combined dual-block + single-block benchmark dashboard.
+Generate the combined multi-block + dual-block + single-block dashboard.
 
-Renders, from the newest dual_block benchmark JSON (or argv[1]) and the
-newest single_block_shared benchmark JSON: stat tiles, the 5-series runtime
-comparison, per-kernel speedup vs the single-block v2 baseline, the
-placement experiment (with observed %smid annotations), balance-over-time
-small multiples (cumulative per-block work), the merged tpb sweep, the
-instrumentation-overhead chart, the appended single-block stage section,
-and full results tables — self-contained HTML, hover tooltips, light/dark.
+Renders, newest stage first, from the newest multi_block, dual_block (or
+argv[1]) and single_block_shared benchmark JSONs: the N-block stage (stat
+tiles, 4-series runtime, speedup vs three baselines, the blocks x tpb
+sweep panels, the bandwidth chart against the measured copy peak), the
+dual-block stage (5-series runtime, speedup vs v2, the placement
+experiment with observed %smid annotations, balance-over-time small
+multiples, the merged tpb sweep, instrumentation overhead), the appended
+single-block stage, and full results tables — self-contained HTML, hover
+tooltips, light/dark.
 
 Usage:
     uv run python src/gpu/single_blob/dual_block/visualize.py [dual.json]
@@ -25,6 +27,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
 SBS_RESULTS_DIR = os.path.join(_HERE, os.pardir, "single_block_shared",
                                "benchmark_results")
+MB_RESULTS_DIR = os.path.join(_HERE, os.pardir, "multi_block",
+                              "benchmark_results")
 
 
 def _newest(pattern, folder):
@@ -37,18 +41,25 @@ def _newest(pattern, folder):
 DUAL_PATH = sys.argv[1] if len(sys.argv) > 1 else _newest("dual_block_*.json",
                                                           RESULTS_DIR)
 SBS_PATH = _newest("single_block_shared_*.json", SBS_RESULTS_DIR)
+MB_PATH = _newest("multi_block_*.json", MB_RESULTS_DIR)
 OUT_PATH = os.path.join(RESULTS_DIR, "dual_block_benchmark.html")
 
 with open(DUAL_PATH) as f:
     DUAL = json.load(f)
 with open(SBS_PATH) as f:
     SBS = json.load(f)
+with open(MB_PATH) as f:
+    MB = json.load(f)
 
 ROWS = DUAL["scenes"]
 SWEEP = DUAL["tpb_sweep"]
 PLACEMENT = DUAL["placement"]
 SBS_ROWS = SBS["scenes"]
 SBS_SWEEP = SBS["tpb_sweep"]
+MB_ROWS = [r for r in MB["scenes"] if "skipped" not in r]
+MB_SWEEP = [r for r in MB["block_tpb_sweep"] if "skipped" not in r]
+MB_PEAK = MB["measured_peak_gb_s"]
+MB_TPBS = MB["config"]["tpb_sweep"]
 
 KERNELS = ["split", "global", "dirsplit"]
 # Entity -> color slot, constant across every dual chart: s1 = single-block
@@ -67,6 +78,10 @@ SCENE_LABELS = {
     "sq_4600_full_center": "square 4600² full · center",
     "sq_5000_center": "square 5000² · center",
     "sq_6000_center": "square 6000² · center",
+    # multi-block stage additions
+    "disk_2001_r950": "disk r=950",
+    "disk_4001_r1900": "disk r=1900",
+    "sq_8000_center": "square 8000² · center",
 }
 SBS_LABELS = {
     "sq_256_center": "square 256² · center",
@@ -440,6 +455,226 @@ def overhead_chart():
     return "\n".join(parts)
 
 
+# ------------------------------------------------------- multi-block stage
+def mb_runtime_chart():
+    series = [(lambda r: r["njit_ms"], "@njit CPU", "s2"),
+              (lambda r: r["v2_kernel_ms"], "single-block v2", "s1"),
+              (lambda r: r["dual_global_kernel_ms"], "dual global (2 blocks)",
+               "s4"),
+              (lambda r: r["multi_kernel_ms"],
+               f"multi ({MB_ROWS[0]['multi_blocks']} blocks)", "s6")]
+    return log_dot_plot(MB_ROWS, series,
+                        "N-block stage runtime per scene, log scale",
+                        lambda r: label(r["scene"]))
+
+
+def mb_speedup_chart():
+    """Multi-block speedup vs each baseline entity, log scale (0.09x-15x)."""
+    keys = [("multi_speedup_vs_v2", "vs single-block v2", "s1",
+             "v2_kernel_ms"),
+            ("multi_speedup_vs_dual", "vs dual global", "s4",
+             "dual_global_kernel_ms"),
+            ("multi_speedup_vs_njit", "vs @njit CPU", "s2", "njit_ms")]
+    vals = [r[k] for r in MB_ROWS for k, _, _, _ in keys]
+    lo = 10 ** math.floor(math.log10(min(vals)))
+    hi = max(vals) * 1.3
+    n = len(MB_ROWS)
+    h = n * ROW_H + 34
+    span = W - GUT_L - GUT_R
+
+    def x_of(v):
+        return GUT_L + (math.log10(v) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" '
+             f'aria-label="N-block speedup vs three baselines, log scale">']
+    tick = lo
+    while tick <= hi:
+        x = x_of(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * ROW_H}" class="grid"/>')
+        parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                     f'class="tick" text-anchor="middle">{tick:g}×</text>')
+        tick *= 10
+    px = x_of(1.0)
+    parts.append(f'<line x1="{px:.1f}" y1="4" x2="{px:.1f}" '
+                 f'y2="{n * ROW_H}" class="satline"/>')
+    for i, r in enumerate(MB_ROWS):
+        cy = i * ROW_H + ROW_H / 2
+        parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{W - GUT_R}" '
+                     f'y2="{cy:.1f}" class="rowline"/>')
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{label(r["scene"])}</text>')
+        for si, (k, name, cls, base_key) in enumerate(keys):
+            v = r[k]
+            dy = (si - 1) * 6.5
+            tip = (f"{label(r['scene'])} — {v:.2f}× {name} "
+                   f"({fmt_ms(r['multi_kernel_ms'])} vs "
+                   f"{fmt_ms(r[base_key])} ms)")
+            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy + dy:.1f}" '
+                         f'r="5" class="dot {cls}" data-tip="{tip}"/>')
+    # annotation painted last so the top row's dots cannot overprint it
+    parts.append(f'<text x="{px - 6:.1f}" y="14" class="anno" '
+                 f'text-anchor="end">right of this line, the N blocks beat '
+                 f'that baseline — parity</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+# (scene, metric, panel title): the serpentine panel plots kernel ms — its
+# Mpx/s is a flat ~0.2 and the story is "no configuration helps".
+MB_SWEEP_PANELS = [
+    ("sq_4000_corner", "mpx_s", "square 4000² corner (16M px) — Mpx/s"),
+    ("disk_4001_r1900", "mpx_s", "disk r=1900 (11.3M px) — Mpx/s"),
+    ("serpentine_256", "kernel_ms", "serpentine 256² — kernel ms"),
+]
+
+
+def mb_sweep_panels():
+    """Per-scene panels: metric vs blocks (log2 x), one line per tpb."""
+    html = []
+    for sname, metric, title in MB_SWEEP_PANELS:
+        rows = [r for r in MB_SWEEP if r["scene"] == sname]
+        blocks_all = sorted({r["blocks"] for r in rows})
+        bmax = blocks_all[-1]
+        vmax = max(r[metric] for r in rows) * 1.14
+        w, h, pl, pr, pt, pb = 420, 230, 56, 64, 26, 34
+        span = w - pl - pr
+
+        def x_of(b):
+            return pl + math.log2(b) / math.log2(bmax) * span
+
+        def y_of(v):
+            return pt + (1 - v / vmax) * (h - pt - pb)
+
+        svg = [f'<svg viewBox="0 0 {w} {h}" role="img" '
+               f'aria-label="Blocks × tpb sweep, {title}">']
+        svg.append(f'<text x="{pl}" y="14" class="paneltitle">{title}</text>')
+        for frac in (0, 0.5, 1):
+            yy = pt + frac * (h - pt - pb)
+            svg.append(f'<line x1="{pl}" y1="{yy:.1f}" x2="{w - pr}" '
+                       f'y2="{yy:.1f}" class="grid"/>')
+            svg.append(f'<text x="{pl - 6}" y="{yy + 4:.1f}" class="tick" '
+                       f'text-anchor="end">{round(vmax * (1 - frac)):g}</text>')
+        for b in (1, 4, 16, 48, bmax):
+            svg.append(f'<text x="{x_of(b):.1f}" y="{h - pb + 15}" '
+                       f'class="tick" text-anchor="middle">{b}</text>')
+        svg.append(f'<text x="{(pl + w - pr) / 2:.1f}" y="{h - 6}" '
+                   f'class="tick" text-anchor="middle">blocks (log₂)</text>')
+
+        ends = []
+        for ti, tpb in enumerate(MB_TPBS):
+            pts = sorted(((r["blocks"], r) for r in rows if r["tpb"] == tpb))
+            poly = " ".join(f"{x_of(b):.1f},{y_of(r[metric]):.1f}"
+                            for b, r in pts)
+            svg.append(f'<polyline points="{poly}" class="line m{ti + 1}l"/>')
+            for b, r in pts:
+                unit = "Mpx/s" if metric == "mpx_s" else "ms"
+                star = (" · coop max for this tpb"
+                        if r.get("is_coop_max") else "")
+                tip = (f"{b}×{tpb}: {r[metric]:.1f} {unit} · "
+                       f"{r['model_gb_s']:.1f} GB/s "
+                       f"({r['pct_of_peak']:.1f}% of peak){star}")
+                svg.append(f'<circle cx="{x_of(b):.1f}" '
+                           f'cy="{y_of(r[metric]):.1f}" r="4" '
+                           f'class="dot m{ti + 1}" data-tip="{tip}"/>')
+            last_b, last_r = pts[-1]
+            ends.append([y_of(last_r[metric]), x_of(last_b), f"tpb {tpb}"])
+        ends.sort()
+        prev = -99.0
+        for ey, ex, name in ends:
+            ey = max(ey, prev + 12)
+            prev = ey
+            svg.append(f'<text x="{w - pr + 6}" y="{ey + 4:.1f}" class="anno" '
+                       f'text-anchor="start">{name}</text>')
+        svg.append("</svg>")
+        html.append('<div class="panel">' + "\n".join(svg) + "</div>")
+    return '<div class="panels">' + "\n".join(html) + "</div>"
+
+
+def mb_bandwidth_chart():
+    """Model GB/s per scene against the measured copy peak — the gap IS the
+    finding (or the model's sector-blindness; ncu decides)."""
+    hi = MB_PEAK * 1.04
+    n = len(MB_ROWS)
+    bar_h = 14
+    h = n * ROW_H + 34
+    span = W - GUT_L - GUT_R
+
+    def x_of(v):
+        return GUT_L + v / hi * span
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" '
+             f'aria-label="Modeled bandwidth per scene vs measured peak">']
+    tick = 0
+    while tick <= hi:
+        x = x_of(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * ROW_H}" class="grid"/>')
+        parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                     f'class="tick" text-anchor="middle">{tick:g}</text>')
+        tick += 50
+    px = x_of(MB_PEAK)
+    parts.append(f'<line x1="{px:.1f}" y1="4" x2="{px:.1f}" '
+                 f'y2="{n * ROW_H}" class="satline"/>')
+    parts.append(f'<text x="{px - 6:.1f}" y="14" class="anno" '
+                 f'text-anchor="end">measured D2D copy peak '
+                 f'{MB_PEAK:.0f} GB/s</text>')
+    for i, r in enumerate(MB_ROWS):
+        y = i * ROW_H + (ROW_H - bar_h) / 2
+        cy = i * ROW_H + ROW_H / 2
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{label(r["scene"])}</text>')
+        v = r["multi_model_gb_s"]
+        bw = max(v / hi * span, 1.5)
+        tip = (f"{label(r['scene'])} — model {v:.1f} GB/s = "
+               f"{r['multi_pct_of_peak']:.1f}% of the measured peak · "
+               f"{r['multi_mpx_s_kernel']:.0f} Mpx/s · lower-bound model")
+        parts.append(f'<rect x="{GUT_L}" y="{y:.1f}" width="{bw:.1f}" '
+                     f'height="{bar_h}" rx="4" class="seg s6" '
+                     f'data-tip="{tip}"/>')
+        note = (f"{v:.1f} GB/s · {r['multi_pct_of_peak']:.1f}%"
+                if v >= 0.05 else "≈0 — barrier-bound")
+        parts.append(f'<text x="{GUT_L + bw + 6:.1f}" y="{cy + 4:.1f}" '
+                     f'class="rowval">{note}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def mb_table():
+    head = ("<tr><th>scene</th><th>filled px</th><th>levels</th>"
+            "<th>@njit ms</th><th>v2 ms</th><th>dual ms</th>"
+            "<th>multi ms</th><th>bare ms</th><th>ovh %</th>"
+            "<th>vs v2</th><th>vs @njit</th><th>grid</th><th>SMs</th>"
+            "<th>bal CV %</th><th>GB/s</th><th>% peak</th></tr>")
+    body = []
+    for r in MB_ROWS:
+        body.append(
+            "<tr>"
+            f"<td>{label(r['scene'])}</td>"
+            f"<td>{fmt_int(r['filled'])}</td>"
+            f"<td>{fmt_int(r['levels'])}</td>"
+            f"<td>{fmt_ms(r['njit_ms'])}</td>"
+            f"<td>{fmt_ms(r['v2_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['dual_global_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['multi_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['multi_bare_kernel_ms'])}</td>"
+            f"<td>{r['multi_instrumentation_overhead_pct']:+.1f}</td>"
+            f"<td>{r['multi_speedup_vs_v2']:.2f}×</td>"
+            f"<td>{r['multi_speedup_vs_njit']:.2f}×</td>"
+            f"<td>{r['multi_blocks']}×{r['multi_tpb']}</td>"
+            f"<td>{r['multi_distinct_sms']}</td>"
+            f"<td>{r['multi_balance_cv_pct']:.0f}</td>"
+            f"<td>{r['multi_model_gb_s']:.1f}</td>"
+            f"<td>{r['multi_pct_of_peak']:.1f}</td>"
+            "</tr>")
+    skipped = [r for r in MB["scenes"] if "skipped" in r]
+    foot = "".join(f'<tr><td>{label(r["scene"])}</td>'
+                   f'<td colspan="15">skipped — {r["skipped"]}</td></tr>'
+                   for r in skipped)
+    return f"<table>{head}{''.join(body)}{foot}</table>"
+
+
 def sbs_chart():
     series = [(lambda r: r["njit_ms"], "@njit CPU", "s2"),
               (lambda r: r.get("pure_ms"), "pure Python", "s3"),
@@ -529,6 +764,31 @@ tiles_html = "".join(
     f'<div class="tile"><div class="tile-v">{v}</div>'
     f'<div class="tile-l">{l}</div></div>' for v, l in TILES)
 
+# ------------------------------------------------- multi-block stat tiles
+_mb_best_v2 = max(MB_ROWS, key=lambda r: r["multi_speedup_vs_v2"])
+_mb_best_njit = max(MB_ROWS, key=lambda r: r["multi_speedup_vs_njit"])
+_mb_best_cell = max(MB_SWEEP, key=lambda r: r["mpx_s"])
+_mb_peak_pct = max(r["multi_pct_of_peak"] for r in MB_ROWS)
+MB_TILES = [
+    (f"{_mb_best_v2['multi_speedup_vs_v2']:.1f}× vs 1 block",
+     f"the N blocks' best payoff · {label(_mb_best_v2['scene'])} "
+     f"({fmt_int(_mb_best_v2['filled'])} px)"),
+    (f"{_mb_best_njit['multi_speedup_vs_njit']:.1f}× vs @njit",
+     f"{label(_mb_best_njit['scene'])} in "
+     f"{fmt_ms(_mb_best_njit['multi_kernel_ms'])} ms vs "
+     f"{fmt_ms(_mb_best_njit['njit_ms'])} ms on the CPU"),
+    (f"{_mb_best_cell['mpx_s']:.0f} Mpx/s plateau",
+     f"scaling stops at ~8–16 blocks · best cell "
+     f"{_mb_best_cell['blocks']}×{_mb_best_cell['tpb']} "
+     f"({label(_mb_best_cell['scene'])})"),
+    (f"{MB_PEAK:.0f} GB/s measured peak",
+     f"modeled traffic plateaus at ≈{_mb_peak_pct:.0f}% of it — a lower "
+     f"bound; ncu is the arbiter"),
+]
+mb_tiles_html = "".join(
+    f'<div class="tile"><div class="tile-v">{v}</div>'
+    f'<div class="tile-l">{l}</div></div>' for v, l in MB_TILES)
+
 balance_html, balance_js = balance_panels()
 
 CSS = """
@@ -543,6 +803,8 @@ body {
   --muted: #898781; --grid: #e1e0d9; --baseline: #c3c2b7;
   --border: rgba(11,11,11,0.10);
   --s1: #2a78d6; --s2: #008300; --s3: #e87ba4; --s4: #eda100; --s5: #1baf7a;
+  --s6: #8257d8;
+  --m1: #b9a3ec; --m2: #9678db; --m3: #7350c9; --m4: #50309f;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) .viz-root {
@@ -550,6 +812,8 @@ body {
     --muted: #898781; --grid: #2c2c2a; --baseline: #383835;
     --border: rgba(255,255,255,0.10);
     --s1: #3987e5; --s2: #008300; --s3: #d55181; --s4: #c98500; --s5: #199e70;
+    --s6: #9678db;
+    --m1: #cbbcf2; --m2: #ab93e6; --m3: #8f6cd8; --m4: #7350c9;
   }
 }
 :root[data-theme="dark"] .viz-root {
@@ -557,6 +821,8 @@ body {
   --muted: #898781; --grid: #2c2c2a; --baseline: #383835;
   --border: rgba(255,255,255,0.10);
   --s1: #3987e5; --s2: #008300; --s3: #d55181; --s4: #c98500; --s5: #199e70;
+  --s6: #9678db;
+  --m1: #cbbcf2; --m2: #ab93e6; --m3: #8f6cd8; --m4: #7350c9;
 }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .sub { color: var(--ink-2); font-size: 13px; margin-bottom: 20px; }
@@ -583,10 +849,14 @@ svg { width: 100%; height: auto; display: block; }
 .dot { stroke: var(--surface-1); stroke-width: 2; }
 .seg { }
 .s1 { fill: var(--s1); } .s2 { fill: var(--s2); } .s3 { fill: var(--s3); }
-.s4 { fill: var(--s4); } .s5 { fill: var(--s5); }
+.s4 { fill: var(--s4); } .s5 { fill: var(--s5); } .s6 { fill: var(--s6); }
+.m1 { fill: var(--m1); } .m2 { fill: var(--m2); }
+.m3 { fill: var(--m3); } .m4 { fill: var(--m4); }
 .line { fill: none; stroke-width: 2; }
 .s1l { stroke: var(--s1); } .s3l { stroke: var(--s3); }
 .s4l { stroke: var(--s4); } .s5l { stroke: var(--s5); }
+.m1l { stroke: var(--m1); } .m2l { stroke: var(--m2); }
+.m3l { stroke: var(--m3); } .m4l { stroke: var(--m4); }
 .trace { fill: none; stroke: var(--s1); stroke-width: 2; }
 .trace4 { fill: none; stroke: var(--s4); stroke-width: 2; }
 .satline { stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -683,18 +953,90 @@ LEG3 = legend([("split", "s3"), ("global", "s4"), ("dirsplit", "s5")])
 LEG_BAL = legend([("block 0", "s1"), ("block 1", "s4")])
 LEG_SBS = legend([("@njit CPU", "s2"), ("pure Python", "s3"),
                   ("v1 ring kernel", "s4"), ("v2 spill kernel", "s1")])
+LEG_MB = legend([("@njit CPU", "s2"), ("single-block v2", "s1"),
+                 ("dual global (2 blocks)", "s4"),
+                 (f"multi ({MB_ROWS[0]['multi_blocks']} blocks)", "s6")])
+LEG_MB_SPD = legend([("vs single-block v2", "s1"), ("vs dual global", "s4"),
+                     ("vs @njit CPU", "s2")])
+LEG_MB_TPB = legend([(f"tpb {t}", f"m{i + 1}")
+                     for i, t in enumerate(MB_TPBS)])
 
 html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dual-block flood fill — benchmark</title>
+<title>Flood fill — 1 → 2 → N blocks, benchmarked</title>
 <style>{CSS}</style></head>
 <body><div class="viz-root">
-<h1>Dual-block BFS flood fill — 1 block → 2 blocks, benchmarked</h1>
-<div class="sub">{DUAL['device']} · {DUAL['sm_count']} SMs · three
-partitionings (space / index / direction) × 2 cooperative blocks ·
-4-connectivity · tpb=256 unless noted · placement observed via %smid ·
-single-block stage appended below</div>
+<h1>BFS flood fill — 1 block → 2 blocks → N blocks, benchmarked</h1>
+<div class="sub">{DUAL['device']} · {DUAL['sm_count']} SMs · newest stage
+first: the N-block global-queue kernel (blocks=None → cooperative max),
+then the dual-block partitionings, then the single-block stage ·
+4-connectivity · tpb=256 unless noted · placement observed via %smid</div>
+
+<div class="tiles">{mb_tiles_html}</div>
+
+<div class="card">
+<h2>N blocks — runtime per scene</h2>
+<p class="note">Log scale — each decade gridline is 10×. The lineage on
+one chart: CPU (green) → one block (blue) → two blocks (yellow) → the
+cooperative maximum, {MB_ROWS[0]['multi_blocks']} blocks at tpb=256
+(violet). The gap widens with blob size to
+{_mb_best_v2['multi_speedup_vs_v2']:.1f}× vs one block; on the serpentine
+the ordering inverts — more blocks means a costlier barrier and nothing to
+feed. Hover any dot; exact numbers in the table below.</p>
+{LEG_MB}
+{mb_runtime_chart()}
+</div>
+
+<div class="card">
+<h2>What N blocks buy — speedup vs each baseline</h2>
+<p class="note">Log scale. Each dot color is the baseline being compared
+against. Right of the parity line the N blocks win; the payoff vs the CPU
+reaches {_mb_best_njit['multi_speedup_vs_njit']:.1f}× at 64M px. Left of
+it: the tiny scene (barrier tax beats 16K pixels) and the serpentine
+(0.0007× vs the CPU — 65,792 grid-wide barriers at ~2 µs each ARE the
+runtime).</p>
+{LEG_MB_SPD}
+{mb_speedup_chart()}
+</div>
+
+<div class="card">
+<h2>The centerpiece — blocks × threads-per-block sweep</h2>
+<p class="note">Throughput vs block count (log₂ axis), one line per
+threads-per-block; line ends mark each tpb's cooperative-capacity limit
+(registers: ~104/thread cap every configuration at 12,288 total threads =
+512 per SM). Near-linear scaling to ~8–16 blocks, then the plateau: 96 or
+192 blocks move nothing, and tpb=512 anti-scales past ~8 blocks — at
+equal thread counts many small blocks beat few big ones (best cell:
+{_mb_best_cell['blocks']}×{_mb_best_cell['tpb']}). The serpentine panel is
+in kernel ms: flat everywhere — no configuration helps a shape that
+starves every block between barriers.</p>
+{LEG_MB_TPB}
+{mb_sweep_panels()}
+</div>
+
+<div class="card">
+<h2>Bandwidth — the modeled traffic vs the measured ceiling</h2>
+<p class="note">Violet bars: algorithmic bytes moved (from each run's
+exactly-once counters, ≈61 B/pixel) ÷ kernel time. The dashed line is the
+MEASURED device-to-device copy peak — the honest ceiling, not a spec
+sheet. The plateau tops out at ≈{_mb_peak_pct:.0f}% of it <i>by a
+lower-bound model</i>: 32 B DRAM sectors can inflate the real traffic of
+scattered 3–4 B accesses several-fold, which would put the true figure
+near the ceiling — consistent with bandwidth saturation, but only ncu can
+close that attribution gap.</p>
+{mb_bandwidth_chart()}
+</div>
+
+<div class="card">
+<h2>All numbers — N-block stage</h2>
+<details open><summary>Per-scene results table</summary>
+<div class="tablewrap">{mb_table()}</div></details>
+</div>
+
+<div class="sub" style="margin-top:26px">Below: the dual-block stage
+(previous chapter — how two blocks should share one BFS, and where they
+should live), then the single-block stage.</div>
 
 <div class="tiles">{tiles_html}</div>
 
@@ -790,5 +1132,5 @@ skipped above 2M px.</p>
 
 with open(OUT_PATH, "w") as f:
     f.write(html)
-print(f"rendered {os.path.basename(DUAL_PATH)} + {os.path.basename(SBS_PATH)}"
-      f" -> {OUT_PATH} ({len(html):,} bytes)")
+print(f"rendered {os.path.basename(MB_PATH)} + {os.path.basename(DUAL_PATH)}"
+      f" + {os.path.basename(SBS_PATH)} -> {OUT_PATH} ({len(html):,} bytes)")
