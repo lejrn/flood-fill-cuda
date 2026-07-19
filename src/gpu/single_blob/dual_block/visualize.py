@@ -556,7 +556,9 @@ def mb_sweep_panels():
                        f'y2="{yy:.1f}" class="grid"/>')
             svg.append(f'<text x="{pl - 6}" y="{yy + 4:.1f}" class="tick" '
                        f'text-anchor="end">{round(vmax * (1 - frac)):g}</text>')
-        for b in (1, 4, 16, 48, bmax):
+        for b in (1, 4, 16, 48, 128, bmax):
+            if b > bmax:
+                continue
             svg.append(f'<text x="{x_of(b):.1f}" y="{h - pb + 15}" '
                        f'class="tick" text-anchor="middle">{b}</text>')
         svg.append(f'<text x="{(pl + w - pr) / 2:.1f}" y="{h - 6}" '
@@ -804,7 +806,7 @@ body {
   --border: rgba(11,11,11,0.10);
   --s1: #2a78d6; --s2: #008300; --s3: #e87ba4; --s4: #eda100; --s5: #1baf7a;
   --s6: #8257d8;
-  --m1: #b9a3ec; --m2: #9678db; --m3: #7350c9; --m4: #50309f;
+  --m1: #c4b1ef; --m2: #a488e2; --m3: #8257d8; --m4: #633cb8; --m5: #452683;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) .viz-root {
@@ -813,7 +815,7 @@ body {
     --border: rgba(255,255,255,0.10);
     --s1: #3987e5; --s2: #008300; --s3: #d55181; --s4: #c98500; --s5: #199e70;
     --s6: #9678db;
-    --m1: #cbbcf2; --m2: #ab93e6; --m3: #8f6cd8; --m4: #7350c9;
+    --m1: #d6caf5; --m2: #b8a2ea; --m3: #9678db; --m4: #7d5bd0; --m5: #6743bb;
   }
 }
 :root[data-theme="dark"] .viz-root {
@@ -822,7 +824,7 @@ body {
   --border: rgba(255,255,255,0.10);
   --s1: #3987e5; --s2: #008300; --s3: #d55181; --s4: #c98500; --s5: #199e70;
   --s6: #9678db;
-  --m1: #cbbcf2; --m2: #ab93e6; --m3: #8f6cd8; --m4: #7350c9;
+  --m1: #d6caf5; --m2: #b8a2ea; --m3: #9678db; --m4: #7d5bd0; --m5: #6743bb;
 }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .sub { color: var(--ink-2); font-size: 13px; margin-bottom: 20px; }
@@ -851,12 +853,13 @@ svg { width: 100%; height: auto; display: block; }
 .s1 { fill: var(--s1); } .s2 { fill: var(--s2); } .s3 { fill: var(--s3); }
 .s4 { fill: var(--s4); } .s5 { fill: var(--s5); } .s6 { fill: var(--s6); }
 .m1 { fill: var(--m1); } .m2 { fill: var(--m2); }
-.m3 { fill: var(--m3); } .m4 { fill: var(--m4); }
+.m3 { fill: var(--m3); } .m4 { fill: var(--m4); } .m5 { fill: var(--m5); }
 .line { fill: none; stroke-width: 2; }
 .s1l { stroke: var(--s1); } .s3l { stroke: var(--s3); }
 .s4l { stroke: var(--s4); } .s5l { stroke: var(--s5); }
 .m1l { stroke: var(--m1); } .m2l { stroke: var(--m2); }
 .m3l { stroke: var(--m3); } .m4l { stroke: var(--m4); }
+.m5l { stroke: var(--m5); }
 .trace { fill: none; stroke: var(--s1); stroke-width: 2; }
 .trace4 { fill: none; stroke: var(--s4); stroke-width: 2; }
 .satline { stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -1005,12 +1008,16 @@ runtime).</p>
 <p class="note">Throughput vs block count (log₂ axis), one line per
 threads-per-block; line ends mark each tpb's cooperative-capacity limit
 (registers: ~104/thread cap every configuration at 12,288 total threads =
-512 per SM). Near-linear scaling to ~8–16 blocks, then the plateau: 96 or
-192 blocks move nothing, and tpb=512 anti-scales past ~8 blocks — at
-equal thread counts many small blocks beat few big ones (best cell:
-{_mb_best_cell['blocks']}×{_mb_best_cell['tpb']}). The serpentine panel is
-in kernel ms: flat everywhere — no configuration helps a shape that
-starves every block between barriers.</p>
+512 per SM; tpb=32 reaches the 384-block ceiling). Near-linear scaling to
+~8–16 blocks, then a plateau — and past it a decline: the capacity ends
+(384×32, 192×64) run measurably slower, every extra block being another
+barrier arrival. The best cell
+({_mb_best_cell['blocks']}×{_mb_best_cell['tpb']}) obeys the rule: the
+smallest tpb whose grid still covers the peak frontier in one stride
+pass, with the block count maxed so the same frontier spreads across
+more SMs. The serpentine panel is in kernel ms — no configuration helps
+a shape that starves every block between barriers; it only gets worse as
+the barrier population grows.</p>
 {LEG_MB_TPB}
 {mb_sweep_panels()}
 </div>
