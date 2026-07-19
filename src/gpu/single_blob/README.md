@@ -8,11 +8,13 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──► N blocks…
-                                     │                                      │
-                          "the queue doesn't fit"                "how should two blocks share
-                                     ▼                            one BFS? where do they run?"
-                                v2 spill tier                     split / global / dirsplit / pinned
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──► …
+                                     │                                      │                            │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?
+                                     ▼                            one BFS? where do they run?"    what stops it — and is
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"
+                                                                  pinned                          global queue × 48 blocks;
+                                                                                                  plateau at 512 threads/SM
 ```
 
 ---
@@ -158,7 +160,7 @@ it down?" into a measured 0–3% (global/dirsplit) and 1.4–8.7% (split).
    with this project's rigor (exact tests, bare twins, smid observation,
    per-block traces). Expected new problems: barrier cost grows with grid
    size; the global queue's single rear counter becomes a contention point
-   (warp-aggregation may not be enough).
+   (warp-aggregation may not be enough). *→ became Chapter 3.*
 2. **The serpentine remains unbeaten** by everything GPU: candidate
    answer is tile-based BFS (iterate inside a shared-memory tile between
    global syncs) — trade barrier count for redundant tile work.
@@ -171,6 +173,79 @@ it down?" into a measured 0–3% (global/dirsplit) and 1.4–8.7% (split).
 
 ---
 
+## Chapter 3 — one blob, N blocks (`multi_block/`)
+
+### Inherited problems
+1. Two blocks are 2 of 24 SMs ≈ 8% of the GPU; the 1→2 payoff curve
+   (≈ 2×) begs for N.
+2. Chapter 2 crowned the plainest design — the global-memory queue — so
+   there is exactly one kernel worth scaling.
+3. Feared costs of N: the two-per-level `grid.sync` across a bigger grid,
+   and the single global rear atomic under 48-way pressure.
+4. The stage hypothesis (the user's inference from Chapter 2): the queue's
+   hot window fits L2 outright (even a 10000² blob's frontier ≈ 160 KB ≪
+   32 MB), and with enough blocks in flight latency stops mattering — so
+   **bandwidth becomes the constraint**. That demanded new instruments:
+   bandwidth metrics.
+
+### The approach
+One kernel — the dual global kernel generalized to any cooperative grid —
+plus the instruments N requires: per-block counters as a `(blocks, 2)`
+array instead of fixed slots, the per-level trace collapsed to one
+grid-wide row (a per-block trace would cost 0.4–4.8 GB at these grid
+sizes — a documented loss), `owner` widened to int16, `blocks=None`
+resolving to the queried cooperative maximum. And the repo's first
+bandwidth instrumentation: a **measured D2D copy peak** (192 GB/s here) as
+the operational reference, plus a **derived bytes-moved model** (~61
+B/pixel, honestly labeled a lower bound) on every run. The experiment is a
+blocks × tpb sweep: {1…192} × {64…512} on a big square, a big disk, and
+the serpentine.
+
+### Results
+| finding | number |
+|---|---|
+| cooperative capacity, instrumented | 192/96/48/24 blocks at tpb 64/128/256/512 — **every one = 12,288 threads**: ~104 regs/thread cap the whole grid at 512 threads/SM (the bare twin fits 768) |
+| the N blocks pay off | **7.9× vs v2 and 3.9× vs dual-global** at 36–64M px; **15.3× vs `@njit`** at 64M px (132 ms vs 2.03 s) |
+| scaling shape | near-linear to ~8–16 blocks, then a **hard plateau** (~316/~467 Mpx/s square/disk); 96 and 192 blocks move nothing |
+| best configuration | **48 × 128** in both big scenes — at equal thread counts, many small blocks beat few big ones; tpb=512 anti-scales past ~8 blocks |
+| `grid.sync` re-priced | ~1.73 µs at 1 block → ~2.2 µs at 192 — the barrier's cost is mostly *fixed*, prediction "grows with grid" barely materialized |
+| serpentine | **worse than ever**: 145 ms vs the single-block kernel's 71 ms — 65,792 barriers × ~2 µs *is* the runtime |
+| bandwidth verdict | plateau at ~11% of measured peak *by the lower-bound model*; ×8 sector inflation puts it ≈ 90% — **consistent with saturation, not yet proof** |
+| the stretch scene | 64M px (8000²) completes at 132 ms; **10000² cannot even be attempted** — ~3 GB of host arrays exceed this laptop's free RAM |
+| instrumentation overhead | below run-to-run clock noise (−36%…+11% swings); serpentine's +1.9% is the cleanest signal |
+
+### New problems and lessons this chapter exposed
+- **Registers now cap the grid, not just the block.** Chapter 2's tpb ≤
+  512 finding scaled up: every instrumented configuration lands on the
+  same 512 threads/SM ceiling. Register dieting graduated from a nicety to
+  the lever that could move the plateau.
+- **The plateau is real but unattributed.** The derived model can show a
+  plateau exists; it cannot say whether DRAM sectors, L2 behavior, or the
+  rear atomic causes it. The model earned its keep — and hit its limit.
+  Only `ncu` closes the gap.
+- **The scheduler beats big blocks.** 48×128 outruns 24×256 and every
+  tpb=512 configuration at the same thread count — granularity helps the
+  hardware hide stalls.
+- **Grid-stride balance is structural.** Levels smaller than the grid feed
+  low block ids first; per-block CV reads 686% on tiny scenes and 42% at
+  64M px, and none of it is a defect. (Chapter 2's "aggregate metrics can
+  lie" lesson, third appearance.)
+- **The host-RAM ceiling is now binding.** The GPU dispatches 64M px in
+  132 ms and could go far bigger; the laptop cannot hold the arrays.
+
+### Open problems → Chapter 4 candidates
+1. **`ncu` profiling** — arbitrate the plateau (DRAM sector traffic, L2
+   hit rates, rear-atomic contention); the derived model's attribution gap
+   is now the project's central open question.
+2. **Register dieting** — the bare twin proves 768 threads/SM fit; a
+   slimmer instrumented kernel tests whether residency moves the plateau.
+3. **Tile-based BFS** for the serpentine — N blocks made the worst case
+   worse; only fewer barriers can fix it.
+4. **Multi-blob** (connected-component labeling) — unchanged from
+   Chapter 2's list.
+
+---
+
 ## The instruments (how every chapter sees)
 
 Each stage ships the same observability kit, and it keeps paying off:
@@ -180,8 +255,11 @@ honest losses; interactive dashboards (`single_block_shared/visualize.py`,
 `dual_block/visualize.py` — the latter renders both stages);
 **wavefront renders** (`dual_block/wavefront.py`) that replay the recorded
 `depth`/`owner` maps as GIFs — the same BFS, but each partitioning's
-territories visibly different; and **bare twin kernels** so the
-instrumentation itself stays priced.
+territories visibly different; **bare twin kernels** so the
+instrumentation itself stays priced; and, since Chapter 3, **bandwidth
+instruments** (`multi_block/bandwidth.py`) — a measured D2D copy peak as
+the only reference figures are compared against, and a per-run derived
+bytes-moved model that is always labeled the lower bound it is.
 
 ## Extending this file
 
