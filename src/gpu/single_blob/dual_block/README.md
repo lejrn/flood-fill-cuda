@@ -288,5 +288,6 @@ flood_fill(img, x, y, kernel="pinned",
   speedup-vs-v2, the placement experiment with observed smids,
   balance-over-time panels, the merged tpb sweep, instrumentation
   overhead, and the appended single-block stage).
-- The natural next stage: N blocks (the `../multi-blocks/` and
-  `../persistent/` designs, revisited with this package's rigor).
+- ~~The natural next stage: N blocks~~ — done: `../multi_block/` scales
+  the global-queue winner to the cooperative maximum (48 blocks at
+  tpb=256), adds bandwidth instrumentation, and finds the scaling plateau.
