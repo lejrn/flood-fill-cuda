@@ -204,8 +204,8 @@ def _pair_barrier(barrier_state, n_workers):
 
 
 @cuda.jit(link=[SMID_CU])
-def dual_block_global_kernel(img, visited, depth, queue, q_state, counters,
-                             level_sizes):
+def dual_block_global_kernel(img, visited, depth, owner, queue, q_state,
+                             counters, level_sizes):
     """One shared global queue, both blocks grid-stride each level window.
 
     Host contract: launch [2, tpb] (cooperative — grid.sync inside);
@@ -255,6 +255,7 @@ def dual_block_global_kernel(img, visited, depth, queue, q_state, counters,
             img[x, y, 1] = 0
             img[x, y, 2] = 255
             depth[x, y] = level
+            owner[x, y] = bx  # per-pixel block-owner map (wavefront viz)
             my_processed += 1
 
             for d in range(4):
@@ -297,7 +298,7 @@ def dual_block_global_kernel(img, visited, depth, queue, q_state, counters,
 # 120 keeps every supported tpb resident. The bare twin gets the same
 # cap so the instrumentation-overhead comparison stays register-fair.
 @cuda.jit(link=[SMID_CU], max_registers=120)
-def dual_block_split_kernel(img, visited, depth, seed_x, seed_y,
+def dual_block_split_kernel(img, visited, depth, owner, seed_x, seed_y,
                             spill0, spill1, inbox0, inbox1, g_state,
                             counters, level_sizes):
     """Domain decomposition: block 0 owns x < width//2, block 1 the rest.
@@ -350,10 +351,10 @@ def dual_block_split_kernel(img, visited, depth, seed_x, seed_y,
         their_inbox = inbox0
         their_rear_slot = G_INBOX_REAR0
 
-    owner = 0 if seed_x < half else 1
+    seed_owner = 0 if seed_x < half else 1
     if ltid == 0:
         s_spill_rear[0] = 0
-        if bx == owner:
+        if bx == seed_owner:
             ring[0] = seed_x * height + seed_y
             s_rear[0] = 1
         else:
@@ -361,7 +362,7 @@ def dual_block_split_kernel(img, visited, depth, seed_x, seed_y,
     cuda.syncthreads()
 
     sf = 0                          # own ring window (virtual tickets)
-    sr = 1 if bx == owner else 0
+    sr = 1 if bx == seed_owner else 0
     gf = 0                          # own spill window
     gr = 0
     inf_ = 0                        # own inbox window
@@ -405,6 +406,7 @@ def dual_block_split_kernel(img, visited, depth, seed_x, seed_y,
             img[x, y, 1] = 0
             img[x, y, 2] = 255
             depth[x, y] = level
+            owner[x, y] = bx  # per-pixel block-owner map (wavefront viz)
             my_processed += 1
 
             for d in range(4):
@@ -491,8 +493,8 @@ def dual_block_split_kernel(img, visited, depth, seed_x, seed_y,
 
 
 @cuda.jit(link=[SMID_CU])
-def dual_block_dirsplit_kernel(img, visited, depth, queue, q_state, counters,
-                               level_sizes):
+def dual_block_dirsplit_kernel(img, visited, depth, owner, queue, q_state,
+                               counters, level_sizes):
     """Partition by discovery direction: right/up claims -> queue 0 (block 0),
     down/left claims -> queue 1 (block 1).
 
@@ -560,6 +562,7 @@ def dual_block_dirsplit_kernel(img, visited, depth, queue, q_state, counters,
             img[x, y, 1] = 0
             img[x, y, 2] = 255
             depth[x, y] = level
+            owner[x, y] = bx  # per-pixel block-owner map (wavefront viz)
             my_processed += 1
 
             for d in range(4):
@@ -785,10 +788,10 @@ def dual_block_split_bare_kernel(img, visited, depth, seed_x, seed_y,
         their_inbox = inbox0
         their_rear_slot = G_INBOX_REAR0
 
-    owner = 0 if seed_x < half else 1
+    seed_owner = 0 if seed_x < half else 1
     if ltid == 0:
         s_spill_rear[0] = 0
-        if bx == owner:
+        if bx == seed_owner:
             ring[0] = seed_x * height + seed_y
             s_rear[0] = 1
         else:
@@ -796,7 +799,7 @@ def dual_block_split_bare_kernel(img, visited, depth, seed_x, seed_y,
     cuda.syncthreads()
 
     sf = 0
-    sr = 1 if bx == owner else 0
+    sr = 1 if bx == seed_owner else 0
     gf = 0
     gr = 0
     inf_ = 0

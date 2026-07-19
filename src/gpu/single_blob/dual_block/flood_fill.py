@@ -54,6 +54,8 @@ class DualFloodFillResult:
     img: np.ndarray        # (width, height, 3) uint8, blob recolored blue
     visited: np.ndarray    # (width, height) int32, 1 where reached
     depth: np.ndarray      # (width, height) int32, BFS level per pixel
+    owner: np.ndarray      # (width, height) int8, processing block id, -1
+                           # unreached; empty for bare/pinned runs
     levels: int
     filled: int
     peak_level: int        # largest single global frontier
@@ -140,6 +142,7 @@ def _warmup(kernel, bare, placement=None):
         return
     d_img, d_visited, d_depth, d_counters = _tiny_args()
     d_trace = cuda.device_array((2, 4), dtype=np.int32)
+    d_owner = cuda.to_device(np.full((8, 8), -1, dtype=np.int8))
     seed_lin = np.array([1 * 8 + 1], dtype=np.int32)
     if kernel == "split":
         d_spill0 = cuda.device_array(32, dtype=np.int32)
@@ -147,18 +150,24 @@ def _warmup(kernel, bare, placement=None):
         d_inbox0 = cuda.device_array(8, dtype=np.int32)
         d_inbox1 = cuda.device_array(8, dtype=np.int32)
         d_g = cuda.to_device(np.zeros(6, dtype=np.int32))
-        args = (d_img, d_visited, d_depth, 1, 1, d_spill0, d_spill1,
-                d_inbox0, d_inbox1, d_g, d_counters)
         fn = _KERNELS[(kernel, bare)]
-        fn[1, 32](*args) if bare else fn[1, 32](*args, d_trace)
+        tail = (d_spill0, d_spill1, d_inbox0, d_inbox1, d_g, d_counters)
+        if bare:
+            fn[1, 32](d_img, d_visited, d_depth, 1, 1, *tail)
+        else:
+            fn[1, 32](d_img, d_visited, d_depth, d_owner, 1, 1, *tail,
+                      d_trace)
     elif kernel in ("global", "dirsplit"):
         d_queue = cuda.device_array(64, dtype=np.int32)
         d_queue[:1].copy_to_device(seed_lin)
         init = [1] if kernel == "global" else [1, 0]
         d_q = cuda.to_device(np.array(init, dtype=np.int32))
-        args = (d_img, d_visited, d_depth, d_queue, d_q, d_counters)
         fn = _KERNELS[(kernel, bare)]
-        fn[1, 32](*args) if bare else fn[1, 32](*args, d_trace)
+        if bare:
+            fn[1, 32](d_img, d_visited, d_depth, d_queue, d_q, d_counters)
+        else:
+            fn[1, 32](d_img, d_visited, d_depth, d_owner, d_queue, d_q,
+                      d_counters, d_trace)
     else:  # pinned — compile via a 2-block spread run (1 block would spin)
         d_queue = cuda.device_array(64, dtype=np.int32)
         d_queue[:1].copy_to_device(seed_lin)
@@ -267,6 +276,8 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
         d_queue = cuda.device_array(width * height, dtype=np.int32)
     if instrumented:
         d_trace = cuda.device_array((2, trace_capacity), dtype=np.int32)
+        owner_host = np.full((width, height), -1, dtype=np.int8)
+        d_owner = cuda.device_array_like(owner_host)
     cuda.synchronize()
     t_h2d0 = time.perf_counter()
 
@@ -274,6 +285,8 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     d_visited.copy_to_device(visited_host)
     d_depth.copy_to_device(depth_host)
     d_counters.copy_to_device(counters_host)
+    if instrumented:
+        d_owner.copy_to_device(owner_host)
     if kernel == "split":
         d_g_state = cuda.to_device(np.zeros(6, dtype=np.int32))
     elif kernel == "global":
@@ -292,18 +305,23 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     t_kernel0 = time.perf_counter()
 
     if kernel == "split":
-        args = (d_img, d_visited, d_depth, seed_x, seed_y, d_spill0, d_spill1,
-                d_inbox0, d_inbox1, d_g_state, d_counters)
+        tail = (d_spill0, d_spill1, d_inbox0, d_inbox1, d_g_state,
+                d_counters)
         if instrumented:
-            kernel_fn[2, threads_per_block](*args, d_trace)
+            kernel_fn[2, threads_per_block](
+                d_img, d_visited, d_depth, d_owner, seed_x, seed_y, *tail,
+                d_trace)
         else:
-            kernel_fn[2, threads_per_block](*args)
+            kernel_fn[2, threads_per_block](
+                d_img, d_visited, d_depth, seed_x, seed_y, *tail)
     elif kernel in ("global", "dirsplit"):
-        args = (d_img, d_visited, d_depth, d_queue, d_q_state, d_counters)
         if instrumented:
-            kernel_fn[2, threads_per_block](*args, d_trace)
+            kernel_fn[2, threads_per_block](
+                d_img, d_visited, d_depth, d_owner, d_queue, d_q_state,
+                d_counters, d_trace)
         else:
-            kernel_fn[2, threads_per_block](*args)
+            kernel_fn[2, threads_per_block](
+                d_img, d_visited, d_depth, d_queue, d_q_state, d_counters)
     else:  # pinned
         kernel_fn[launch_blocks, threads_per_block](
             d_img, d_visited, d_depth, d_queue, d_q_state, d_barrier, d_pin,
@@ -321,6 +339,8 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     img_out = d_img.copy_to_host()
     visited_out = d_visited.copy_to_host()
     depth_out = d_depth.copy_to_host()
+    owner_out = (d_owner.copy_to_host() if instrumented
+                 else np.zeros((0, 0), dtype=np.int8))
     if instrumented:
         n = min(levels, trace_capacity)
         row0 = d_trace[0, :n].copy_to_host()
@@ -350,6 +370,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
         img=img_out,
         visited=visited_out,
         depth=depth_out,
+        owner=owner_out,
         levels=levels,
         filled=filled,
         peak_level=int(counters[PEAK_LEVEL]),
