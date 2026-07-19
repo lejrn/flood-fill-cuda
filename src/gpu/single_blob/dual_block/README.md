@@ -128,10 +128,74 @@ registers cost residency.
   counters/traces stripped) so the instrumentation overhead is measured,
   not assumed.
 
-## Results
+## Results (RTX 4060 Laptop GPU, median of 5, tpb=256, kernel-only ms)
 
-Run `benchmark.py` to (re)generate; the measured tables live in the
-benchmark commit alongside the JSON/CSV in `benchmark_results/`.
+| scene | filled | @njit | v2 1-block | split | global | dirsplit | best vs v2 |
+|---|---|---|---|---|---|---|---|
+| sq_256 center | 16K | 0.13 | 0.76 | 1.08 | 1.03 | 1.05 | 0.74× (v2 wins) |
+| sq_1024 center | 262K | 5.3 | 7.4 | 5.9 | 4.3 | 4.4 | 1.71× |
+| sq_2000 center | 1M | 21.8 | 19.2 | 12.6 | 11.9 | 12.5 | 1.62× |
+| sq_4000 corner | 16M | 358 | 257 | 208 | 139 | 186 | 1.84× |
+| serpentine 256² | 33K | 0.37 | 77 | 126 | 122 | 134 | 0.63× (v2 wins) |
+| seam serpentine 256² | 33K | 0.30 | 57 | 126 | 122 | 134 | 0.47× (v2 wins) |
+| offcenter 2000² | 810K | 20.5 | 15.3 | 17.3 | 10.2 | 10.3 | 1.50× |
+| sq_2600 full center | 6.8M | 131 | 112 | 65 | 59 | 64 | 1.88× |
+| sq_4600 full center | 21M | 520 | 345 | 187 | 169 | 183 | 2.04× |
+| sq_5000 center | 25M | 625 | 408 | 221 | 198 | 215 | 2.06× |
+| sq_6000 center | 36M | 1,015 | 590 | 314 | 280 | 305 | **2.10×** |
+
+What the numbers settled:
+
+- **The second block pays for itself from ~262K px up**, and the win grows
+  with size to a near-perfect 2.10× at 36M px (280 ms vs 590 ms; 3.6× vs
+  @njit). Below that, the grid.sync tax loses to v2's `syncthreads`-only
+  loop.
+- **The serpentines price grid.sync directly**: ~122 ms over 32,896 levels
+  × 2 barriers ≈ **1.9 µs per grid.sync** — the ~100×-a-syncthreads
+  estimate, measured. Narrow frontiers make every dual kernel worse than
+  v2, and the seam-serpentine adds nothing on top: the barrier, not the
+  seam, is the cost.
+- **The plain global queue wins everywhere.** split's shared rings never
+  beat it (L2 absorbs the queue traffic; split pays extra choreography and
+  registers), and dirsplit's contiguous-arcs locality hypothesis didn't
+  materialize against the interleaved grid-stride — but dirsplit's
+  *balance* claim held: 83% on the off-center blob where split drops to 0%
+  (17.3 vs 10.3 ms — spatial agnosticism worth 1.7× right there).
+- **Two rings really do double capacity**: the 2600² scene that forced v2
+  to spill 304,702 px runs spill-free on split; at 4600²+ both halves
+  spill in near-perfect symmetry (127,008 + 127,008 at 4600²; 1.81M each
+  at 6000² — vs v2's 15.6M single-tier spill).
+- **Inbox traffic is as tiny as the structural bound promised**: ≤ 215
+  handoffs on multi-million-pixel scenes (bound: height), and 3,884 on the
+  corner-seeded scene whose wave sweeps the seam column from one side.
+- **Instrumentation overhead, measured**: global/dirsplit 0–3%
+  (indistinguishable from noise at scale), split 1.4–8.7% (its per-level
+  publish/clamp choreography is the extra fixed cost; worst on tiny
+  scenes).
+
+**tpb sweep** (sq_2000, 2 blocks each): all three kernels scale 64→512 to
+~97–100 Mpx/s — split peaks at 100.5 Mpx/s at 2×512 = 1,024 total threads,
+edging the single-block sweep's 86 Mpx/s at 1×1024.
+
+### The placement verdict (the question this stage was built to answer)
+
+| config | resident threads | sq_2000 ms | sq_6000 ms | Mpx/s (6000²) |
+|---|---|---|---|---|
+| v2 single block 1×768 | 768 on 1 SM | 11.8 | 342 | 105 |
+| v2 single block 1×1024 | 1,024 on 1 SM | 12.0 | 348 | 103 |
+| pinned pair 2×768 **same SM** | 1,536 on 1 SM (100%) | 12.0 | 308 | 117 |
+| pinned pair 2×768 **spread** | 768 on each of 2 SMs | 10.1 | **184** | **196** |
+
+(smids observed per run: same-SM pairs reported (22,22)/(23,23); spread
+pairs (0,2).)
+
+Both hypotheses were right — at different magnitudes. Filling one SM to
+its full 1,536-thread residency (possible **only** with two blocks — one
+block caps at 1,024) buys a real but modest ~12% at 36M px: deeper latency
+hiding on the same 128 cores. Letting the scheduler spread the same two
+blocks across two SMs buys 1.68× over the same-SM pair: at this scale the
+BFS is throughput-bound, and nothing substitutes for a second set of
+execution units. Concurrency helps; parallelism wins.
 
 ## Run
 
