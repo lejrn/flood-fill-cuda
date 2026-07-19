@@ -1,6 +1,6 @@
 [project]
 name = "flood-fill-cuda"
-version = "0.5.0"
+version = "0.6.0"
 description = "GPU-accelerated flood fill algorithm implementation using CUDA and Numba"
 authors = [
     {name = "TL"}
