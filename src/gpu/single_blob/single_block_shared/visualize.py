@@ -2,7 +2,8 @@
 Generate a self-contained HTML dashboard from benchmark.py's JSON output.
 
 Renders the runtime comparison (log-scale dot plot), the GPU end-to-end time
-decomposition (100% stacked), the per-level frontier traces, the
+decomposition (100% stacked), the per-level frontier traces, the per-level
+warp/thread activity traces (lanes busy vs lanes woken), the
 threads-per-block sweep, and the full results table — with hover tooltips
 and light/dark theming, no external dependencies.
 
@@ -210,12 +211,13 @@ def panels():
         svg.append(f'<text x="{w - pr}" y="{h - 8}" class="tick" '
                    f'text-anchor="end">BFS level →</text>')
         svg.append(f'<polyline points="{pts}" class="trace"/>')
-        svg.append(f'<circle cx="{peak_x:.1f}" cy="{peak_y:.1f}" r="4" '
-                   f'class="dot s1"/>')
-        anchor = "start" if peak_x < w * 0.6 else "end"
-        dx = 8 if anchor == "start" else -8
-        svg.append(f'<text x="{peak_x + dx:.1f}" y="{max(peak_y - 8, 12):.1f}" '
-                   f'class="anno" text-anchor="{anchor}">peak {fmt_int(peak)}</text>')
+        if peak > min(ys):  # a flat trace has no peak worth marking
+            svg.append(f'<circle cx="{peak_x:.1f}" cy="{peak_y:.1f}" r="4" '
+                       f'class="dot s1"/>')
+            anchor = "start" if peak_x < w * 0.6 else "end"
+            dx = 8 if anchor == "start" else -8
+            svg.append(f'<text x="{peak_x + dx:.1f}" y="{max(peak_y - 8, pt + 4):.1f}" '
+                       f'class="anno" text-anchor="{anchor}">peak {fmt_int(peak)}</text>')
         svg.append(f'<line class="xhair" id="xh_{name}" x1="0" x2="0" '
                    f'y1="{pt}" y2="{h - pb}" visibility="hidden"/>')
         svg.append(f'<circle class="xdot" id="xd_{name}" r="4" visibility="hidden"/>')
@@ -226,6 +228,89 @@ def panels():
         html.append('<div class="panel">' + "\n".join(svg) + "</div>")
         js[name] = {"xs": xs, "ys": ys, "w": w, "h": h, "pl": pl, "pr": pr,
                     "pt": pt, "pb": pb, "peak": peak, "n": n_levels}
+    return "\n".join(html), json.dumps(js)
+
+
+# ------------------------------------------------ warp/thread activity panels
+def activity_panels():
+    """Per-level lanes-busy vs lanes-woken traces, one panel per PANEL_SCENE.
+
+    Both series share the lane unit (0..tpb) so one axis carries both:
+    busy = min(frontier, tpb) threads have a pixel; woken = engaged warps
+    x 32 lanes are burning an issue slot because a warp with any active
+    thread runs all 32 lanes. The vertical gap between them is pure waste.
+    """
+    html, js = [], {}
+    for row in ROWS:
+        if row["scene"] not in PANEL_SCENES:
+            continue
+        name = row["scene"]
+        label = SCENE_LABELS[name]
+        cap = row["threads_per_block"]
+        n_warps = cap // 32
+        sizes = row["level_sizes"]
+        xs, sampled = decimate(sizes)
+        busy = [min(s, cap) for s in sampled]
+        woken = [-(-min(s, cap) // 32) * 32 for s in sampled]
+        n_levels = row["levels"]
+        sat = next((i for i, s in enumerate(sizes) if s >= cap), None)
+        peak_busy = min(max(sizes), cap)
+        w, h, pl, pr, pt, pb = 420, 170, 52, 46, 26, 26
+        px = lambda x: pl + x / max(n_levels - 1, 1) * (w - pl - pr)
+        py = lambda v: pt + (1 - v / cap) * (h - pt - pb)
+        svg = [f'<svg viewBox="0 0 {w} {h}" class="panel-svg" id="a_{name}" '
+               f'role="img" aria-label="Lanes busy and lanes woken per BFS '
+               f'level, {label}">']
+        for frac in (0, 0.5, 1):
+            yy = pt + frac * (h - pt - pb)
+            lanes = round(cap * (1 - frac))
+            svg.append(f'<line x1="{pl}" y1="{yy:.1f}" x2="{w - pr}" '
+                       f'y2="{yy:.1f}" class="grid"/>')
+            svg.append(f'<text x="{pl - 6}" y="{yy + 4:.1f}" class="tick" '
+                       f'text-anchor="end">{lanes}</text>')
+            svg.append(f'<text x="{w - pr + 6}" y="{yy + 4:.1f}" class="tick" '
+                       f'text-anchor="start">{lanes // 32}</text>')
+        svg.append(f'<text x="{w - pr + 6}" y="{pt - 6}" class="tick" '
+                   f'text-anchor="start">warps</text>')
+        svg.append(f'<text x="{pl}" y="14" class="paneltitle">{label}</text>')
+        svg.append(f'<text x="{w - pr}" y="{h - 8}" class="tick" '
+                   f'text-anchor="end">BFS level →</text>')
+        if sat is not None:
+            sx = px(sat)
+            svg.append(f'<line x1="{sx:.1f}" y1="{pt}" x2="{sx:.1f}" '
+                       f'y2="{h - pb}" class="satline"/>')
+            svg.append(f'<text x="{sx + 6:.1f}" y="{pt + 12}" class="anno" '
+                       f'text-anchor="start">all {n_warps} warps have work '
+                       f'from level {fmt_int(sat)}</text>')
+        else:
+            svg.append(f'<text x="{pl + 4}" y="{pt + 12}" class="anno" '
+                       f'text-anchor="start">peak {fmt_int(peak_busy)} of '
+                       f'{cap} lanes busy — {-(-peak_busy // 32)} of '
+                       f'{n_warps} warps</text>')
+        wok_pts = " ".join(f"{px(x):.1f},{py(v):.1f}" for x, v in zip(xs, woken))
+        busy_pts = " ".join(f"{px(x):.1f},{py(v):.1f}" for x, v in zip(xs, busy))
+        svg.append(f'<polyline points="{wok_pts}" class="trace4"/>')
+        svg.append(f'<polyline points="{busy_pts}" class="trace"/>')
+        busy_med = sorted(busy)[len(busy) // 2]
+        wok_med = sorted(woken)[len(woken) // 2]
+        if py(busy_med) - py(wok_med) >= 12:  # visibly separated → direct labels
+            lx = pl + 0.4 * (w - pl - pr)
+            svg.append(f'<text x="{lx:.1f}" y="{py(wok_med) - 6:.1f}" '
+                       f'class="anno" text-anchor="middle">lanes woken</text>')
+            svg.append(f'<text x="{lx:.1f}" y="{py(busy_med) + 14:.1f}" '
+                       f'class="anno" text-anchor="middle">lanes busy</text>')
+        svg.append(f'<line class="xhair" id="axh_{name}" x1="0" x2="0" '
+                   f'y1="{pt}" y2="{h - pb}" visibility="hidden"/>')
+        svg.append(f'<circle class="xdot2" id="axd2_{name}" r="4" visibility="hidden"/>')
+        svg.append(f'<circle class="xdot" id="axd1_{name}" r="4" visibility="hidden"/>')
+        svg.append(f'<rect x="{pl}" y="{pt}" width="{w - pl - pr}" '
+                   f'height="{h - pt - pb}" fill="transparent" '
+                   f'class="ahover-capture" data-panel="{name}"/>')
+        svg.append("</svg>")
+        html.append('<div class="panel">' + "\n".join(svg) + "</div>")
+        js[name] = {"xs": xs, "fr": sampled, "busy": busy, "wok": woken,
+                    "w": w, "h": h, "pl": pl, "pr": pr, "pt": pt, "pb": pb,
+                    "cap": cap, "n": n_levels}
     return "\n".join(html), json.dumps(js)
 
 
@@ -314,6 +399,7 @@ tiles_html = "".join(
     f'<div class="tile-l">{l}</div></div>' for v, l in TILES)
 
 panels_html, panels_js = panels()
+act_html, act_js = activity_panels()
 
 CSS = """
 :root { color-scheme: light dark; }
@@ -371,8 +457,11 @@ svg { width: 100%; height: auto; display: block; }
 .s1 { fill: var(--s1); } .s2 { fill: var(--s2); }
 .s3 { fill: var(--s3); } .s4 { fill: var(--s4); }
 .trace { fill: none; stroke: var(--s1); stroke-width: 2; }
+.trace4 { fill: none; stroke: var(--s4); stroke-width: 2; }
+.satline { stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; }
 .xhair { stroke: var(--baseline); stroke-width: 1; }
 .xdot { fill: var(--s1); stroke: var(--surface-1); stroke-width: 2; }
+.xdot2 { fill: var(--s4); stroke: var(--surface-1); stroke-width: 2; }
 .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px;
           color: var(--ink-2); margin-bottom: 8px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -441,7 +530,44 @@ document.querySelectorAll('.hover-capture').forEach(el => {
     hideTip();
   });
 });
-""".replace("__PANELS__", panels_js)
+const APANELS = __APANELS__;
+document.querySelectorAll('.ahover-capture').forEach(el => {
+  const name = el.dataset.panel, p = APANELS[name];
+  const svg = document.getElementById('a_' + name);
+  const xh = document.getElementById('axh_' + name);
+  const d1 = document.getElementById('axd1_' + name);
+  const d2 = document.getElementById('axd2_' + name);
+  const toX = lv => p.pl + lv / Math.max(p.n - 1, 1) * (p.w - p.pl - p.pr);
+  const toY = v => p.pt + (1 - v / p.cap) * (p.h - p.pt - p.pb);
+  el.addEventListener('mousemove', ev => {
+    const box = svg.getBoundingClientRect();
+    const sx = (ev.clientX - box.left) / box.width * p.w;
+    let lo = 0, hi = p.xs.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (toX(p.xs[mid]) < sx) lo = mid; else hi = mid;
+    }
+    const i = (sx - toX(p.xs[lo]) < toX(p.xs[hi]) - sx) ? lo : hi;
+    const cx = toX(p.xs[i]);
+    xh.setAttribute('x1', cx); xh.setAttribute('x2', cx);
+    xh.setAttribute('visibility', 'visible');
+    d2.setAttribute('cx', cx); d2.setAttribute('cy', toY(p.wok[i]));
+    d2.setAttribute('visibility', 'visible');
+    d1.setAttribute('cx', cx); d1.setAttribute('cy', toY(p.busy[i]));
+    d1.setAttribute('visibility', 'visible');
+    showTip('level ' + p.xs[i].toLocaleString() + ' \\u2014 frontier ' +
+            p.fr[i].toLocaleString() + ' px \\u00b7 ' + p.busy[i] + ' of ' +
+            p.cap + ' lanes busy \\u00b7 ' + (p.wok[i] / 32) + ' of ' +
+            (p.cap / 32) + ' warps woken', ev);
+  });
+  el.addEventListener('mouseleave', () => {
+    xh.setAttribute('visibility', 'hidden');
+    d1.setAttribute('visibility', 'hidden');
+    d2.setAttribute('visibility', 'hidden');
+    hideTip();
+  });
+});
+""".replace("__PANELS__", panels_js).replace("__APANELS__", act_js)
 
 legend3 = ('<div class="legend">'
            '<span><i class="chip" style="background:var(--s1)"></i>GPU kernel (median of 5)</span>'
@@ -454,6 +580,12 @@ legend4 = ('<div class="legend">'
            '<span><i class="chip" style="background:var(--s1)"></i>kernel</span>'
            '<span><i class="chip" style="background:var(--s4)"></i>D2H copy</span>'
            '</div>')
+legend_act = ('<div class="legend">'
+              '<span><i class="chip" style="background:var(--s1)"></i>'
+              'lanes busy — threads with a pixel to process</span>'
+              '<span><i class="chip" style="background:var(--s4)"></i>'
+              'lanes woken — engaged warps × 32</span>'
+              '</div>')
 
 html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -492,6 +624,23 @@ not the bottleneck until the image is large.</p>
 step. Wide diamonds (squares, disk) keep 256 threads busy; the serpentine's
 ~1&#8209;pixel frontier starves them — hover for exact values.</p>
 <div class="panels">{panels_html}</div>
+</div>
+
+<div class="card">
+<h2>Warp &amp; thread activity over BFS levels</h2>
+<p class="note">Allocation never changes: the single block's 256 threads =
+8 warps sit resident on their SM from launch to exit. What varies per level
+is how many have work. Blue is lanes with a pixel to process
+(min(frontier,&nbsp;256)); yellow is lanes woken because their warp has at
+least one active thread (engaged warps&nbsp;×&nbsp;32) — a warp always runs
+all 32 lanes together. The vertical gap between yellow and blue is lanes
+burning issue slots with nothing to do. Squares and the disk saturate all
+8 warps within the first levels (dashed marker) and the lines fuse at the
+256 ceiling; the serpentine wakes one full warp for a 1-pixel frontier, so
+31 of 32 lanes idle for all 32,896 levels. Right axis: warps. Hover for
+exact values.</p>
+{legend_act}
+<div class="panels">{act_html}</div>
 </div>
 
 <div class="card">
