@@ -224,6 +224,57 @@ uv run python src/gpu/single_blob/multi_block/benchmark.py
 uv run python src/gpu/single_blob/multi_block/wavefront.py
 ```
 
+## Glossary (the stage's load-bearing terms)
+
+- **Throughput** (תפוקה) — finished work per second: **Mpx/s**, pixels
+  recolored per second. **Bandwidth** (רוחב פס) — bytes carried per second
+  between the GPU cores and memory: **GB/s**. Throughput is the product
+  coming off the line; bandwidth is the trucking capacity feeding it.
+  Every pixel needs ~dozens of bytes moved, so saturated trucks cap the
+  line even with idle workers.
+- **Register** — a thread's private scratch slot, the fastest storage on
+  the chip. The compiler counts how many live variables one thread of the
+  kernel needs (`x, y, pixel, front, rear, level`, loop state…) — this
+  kernel needs **~104 per thread**. Per *thread* because in SIMT every
+  thread holds its own copy of every variable.
+- **Register file** — each SM's fixed supply of **65,536 registers**,
+  shared by all threads seated on it. 65,536 ÷ 104 ≈ 630, rounded down by
+  the hardware's coarse allocation granularity to **512 threads per SM**
+  (that's threads per SM — the registers per SM are the fixed 65,536).
+  ×24 SMs = the ubiquitous **12,288 threads**: every capacity number in
+  this stage (384×32, 192×64, 96×128, 48×256, 24×512) is this one wall in
+  different clothing.
+- **Resident / co-resident** — a thread (or block) is *resident* when its
+  seat and registers are physically allocated on an SM right now, rather
+  than waiting in the scheduler's queue. Blocks are *co-resident* when all
+  of them are seated simultaneously — the precondition for `grid.sync`:
+  a block that never gets a seat can never arrive at the barrier, so the
+  seated ones would wait forever. That is why cooperative launch refuses
+  more blocks than can all be seated at once (the queried max), and why
+  exceeding it is deadlock, not slowness.
+- **`grid.sync`** — the all-blocks checkpoint: nobody starts level L+1
+  until everyone finished level L. Block-local `syncthreads` costs tens of
+  cycles; `grid.sync` spans all SMs and costs **~1.7–2.6 µs (~4,000
+  cycles)**, growing with the block count. Two per level (publish the new
+  queue rear; everyone reads it) × 7,999 levels of the corner square ≈
+  **16,000 syncs ≈ 32 ms** — most of that scene's runtime is the ritual.
+- **Bare twin** — the same kernel with every measurement counter deleted;
+  exists so instrumentation cost is measured, not assumed. Fewer variables
+  → fewer registers → 768 threads/SM fit. **Register diet** — capping
+  registers at compile time (`max_registers=N`); excess variables spill to
+  slow memory. The bare twin proves the diet buys residency; the open
+  question is whether the spills cost more than the residency pays.
+- **Hard architectural caps** — independent of registers, an Ada SM seats
+  at most **24 blocks** and **1,536 threads**; 24 blocks × 24 SMs = 576 is
+  a ceiling no kernel can pass.
+- **Equal-thread diagonal** — the sweep-table cells with blocks × tpb =
+  12,288 (24×512 … 384×32). Total threads identical, only the grouping
+  differs, so comparing along it isolates the grouping effect.
+- **Plateau** — the flat part of the scaling curve: once the grid covers
+  the typical frontier and every SM is fed, extra blocks add barrier
+  arrivals and nothing else, so Mpx/s stops rising (and past ~128 blocks,
+  falls).
+
 ## Open problems (Chapter 4 candidates)
 
 1. **`ncu` ground truth** — arbitrate the plateau: DRAM sector traffic,
