@@ -197,6 +197,32 @@ blocks across two SMs buys 1.68× over the same-SM pair: at this scale the
 BFS is throughput-bound, and nothing substitutes for a second set of
 execution units. Concurrency helps; parallelism wins.
 
+## Wavefront visualization
+
+The kernels record the fill's complete timeline as they run — `depth[x,y]`
+is the level each pixel was filled at, `owner[x,y]` the block that
+processed it — and `wavefront.py` replays them with zero extra GPU work.
+Each animated GIF sweeps a light frontier band across the blob; behind it
+every pixel keeps a color encoding **when** it was filled (light → dark
+with level) and **who** filled it (block 0 = blues, block 1 = greens). The
+final frame is the static first→last gradient, also saved as a PNG.
+
+All three kernels compute the identical BFS, so the *timeline* is the same
+everywhere — the owner hues are what make the approaches distinct:
+
+| artifact (`wavefront/`) | what it shows |
+|---|---|
+| `split_square256` | two solid territories meeting at the seam |
+| `global_square256` | block 0 owns every frontier smaller than tpb; green speckle appears only once rings exceed 256 px |
+| `dirsplit_square256` | direction-arcs with honest race speckle where both directions compete |
+| `split_offcenter256` | all blue — block 1 never works |
+| `dirsplit_serpentine128` | the snake crawls, alternating hue line by line |
+| `split_disk512`, `split_seamserp256` | static gradients: radial timeline; per-line seam ping-pong |
+
+```bash
+uv run python src/gpu/single_blob/dual_block/wavefront.py
+```
+
 ## Run
 
 ```bash
