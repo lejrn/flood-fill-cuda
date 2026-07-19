@@ -159,7 +159,8 @@ fill results are not comparable across connectivity.
 Done in v2: spill-to-global overflow (two-tier queue) and the
 warp-aggregated enqueue. Remaining ideas:
 
-- **Wavefront visualization**: color by the recorded `depth` map / animate
-  from `level_sizes`.
+- ~~Wavefront visualization~~ — done at the dual-block stage:
+  `../dual_block/wavefront.py` animates the recorded `depth` map (the BFS
+  is identical, so its renders cover this stage's kernels too).
 - **ncu profiling guide**: measured (not derived) occupancy, memory
   throughput, and atomic contention for both kernels.
