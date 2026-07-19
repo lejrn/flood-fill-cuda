@@ -8,6 +8,17 @@ global memory. This is the clean successor to the historical
 overflow drop, CAS-before-red-check bug, debug coloring, and hardcoded
 thread count.
 
+Two kernels, selected by `flood_fill(..., variant=...)`:
+
+- **v1 `"ring"`** — pure shared-memory queue. Fastest possible frontier
+  access, but scenes whose peak frontier exceeds 8192 slots abort loudly
+  (the overflow tripwire).
+- **v2 `"spill"`** — two-tier queue: the same shared ring as the fast path
+  plus a **global-memory spill tier** that absorbs whatever the ring cannot
+  hold, with a **warp-aggregated enqueue** (one shared atomic per warp per
+  tier, ported from `../persistent/`). Oversized frontiers become slower,
+  not fatal — any blob that fits in memory completes.
+
 ## Design in three sentences
 
 Each BFS level occupies the virtual index window `[front, rear)` of a ring
@@ -23,23 +34,48 @@ next level's atomics begin (block-local analogue of `persistent/`'s two
 
 If an enqueue ever finds the ring full it sets an **overflow tripwire**; the
 kernel aborts at the next level boundary and the host raises `RuntimeError`
-instead of returning a silently partial fill.
+instead of returning a silently partial fill. (v1 only — v2 has nothing to
+trip, see below.)
 
-## Capacity limits (v1, pure shared memory)
+## The v2 two-tier queue
+
+Enqueues reserve **warp-aggregated ticket slabs**: all lanes of a warp that
+won their CAS together aggregate via `activemask`/`popc`/`shfl_sync`; the
+lowest lane does one `atomic.add` on the shared rear for the whole group.
+Tickets inside the ring window `[front, front + 8192)` go to shared slots —
+the v1 distinct-slot safety argument holds unchanged because `front` stays
+frozen per level. Lanes whose tickets fall past the window are exactly the
+ones active in the else branch, so they aggregate a second time and append
+to the **global spill tier**. At the level boundary a third `syncthreads()`
+publishes thread 0's rear clamp (tickets that diverted to the spill tier
+are retracted so the next level's ring window stays contiguous), and the
+next frontier is the fused window: ring entries first, then the spill
+slice, one flat index space.
+
+Spill safety is **structural, not tripwired**: the spill array holds
+width×height int32 entries, appends are monotonic (slots are never
+reused), and every pixel is enqueued at most once (CAS-claimed) with the
+seed living in the ring — so total spill appends ≤ filled − 1 < width×height.
+The v2 kernel cannot overflow and never aborts.
+
+## Capacity limits (v1 ring; v2 removes them)
 
 Peak ring occupancy spans two adjacent BFS levels:
 
-| scene family                        | peak occupancy | fits 8192?   |
-|-------------------------------------|----------------|--------------|
-| center-seeded solid square, side W  | ~4W            | W ≤ ~2048    |
-| corner-seeded solid square, side W  | ~2W            | W ≤ ~4096    |
-| center-seeded disk, radius R        | ~5.7R          | R ≤ ~1400    |
-| serpentine                          | O(width)       | always       |
+| scene family                        | peak occupancy | v1 fits 8192? |
+|-------------------------------------|----------------|---------------|
+| center-seeded solid square, side W  | ~4W            | W ≤ ~2048     |
+| corner-seeded solid square, side W  | ~2W            | W ≤ ~4096     |
+| center-seeded disk, radius R        | ~5.7R          | R ≤ ~1400     |
+| serpentine                          | O(width)       | always        |
 
 Measured proof: the corner-seeded 4000×4000 full-red scene peaks at
 **7999** occupied slots — exactly the predicted 2W−1, 193 slots under
 capacity. The overflow test (center-seeded 2600² full-bleed) trips the wire
-at ~level 1024 as predicted by 8r+4 > 8192.
+at ~level 1024 as predicted by 8r+4 > 8192. Under v2 those same rules just
+predict *spilled pixels* instead of failure: the center-seeded 6000² scene
+peaks at 23,994 queued pixels (~4W) and completes with 15.6M pixels routed
+through the spill tier.
 
 ## Metrics reported (`FloodFillResult`)
 
@@ -57,6 +93,11 @@ at ~level 1024 as predicted by 8r+4 > 8192.
   asserted in tests), `cas_attempts`, `discovery_redundancy`
   (attempts/(filled−1): how many threads raced to claim each pixel; 1.0 =
   zero duplicated discovery), `neighbor_check_efficiency_pct`.
+- **Spill tier** (v2; zero under v1 or when the scene fits): `spilled`
+  (total pixels routed through the global tier), `peak_spill_window`
+  (largest single-level spill count). For v2, `peak_occupancy` counts both
+  tiers — compare it against `ring_capacity` to see how far past the ring
+  a scene went.
 
 ## Results (RTX 4060 Laptop GPU, median of 5, tpb=256)
 
@@ -101,11 +142,12 @@ Note: this package is 4-connected (matching `src/cpu/sequential.py` and its
 own `reference.py`); `persistent/` and `multi-blocks/` are 8-connected, so
 fill results are not comparable across connectivity.
 
-## v2 roadmap (not implemented)
+## Roadmap
 
-- **Spill-to-global overflow**: two-tier queue (shared ring + global backup)
-  removes the 8192-slot cap — oversized frontiers become slower, not fatal.
-- **Warp-aggregated enqueue**: port `persistent/`'s `_warp_enqueue`
-  (ballot/shuffle, one atomic per warp) to the shared rear counter.
+Done in v2: spill-to-global overflow (two-tier queue) and the
+warp-aggregated enqueue. Remaining ideas:
+
 - **Wavefront visualization**: color by the recorded `depth` map / animate
   from `level_sizes`.
+- **ncu profiling guide**: measured (not derived) occupancy, memory
+  throughput, and atomic contention for both kernels.

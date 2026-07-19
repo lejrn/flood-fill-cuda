@@ -39,7 +39,17 @@ power of two under the 48 KB static shared-memory limit (16384 would need
 64 KB); power-of-two enables ticket & RING_MASK instead of modulo. Peak ring
 occupancy spans two adjacent BFS levels: ~4W for a center-seeded solid WxW
 square (fits W <= ~2048), ~2W corner-seeded (fits W <= ~4096), O(width) for
-serpentines. v2 (not implemented): spill-to-global overflow removes the cap.
+serpentines.
+
+v2: the spill kernel below removes the capacity limit with a two-tier
+frontier — the same shared ring as the fast path plus a global-memory spill
+tier that absorbs whatever the ring cannot hold. Oversized frontiers become
+slower, not fatal. Its enqueue is warp-aggregated (one shared atomic per
+warp per tier, ported from persistent/'s _warp_enqueue). Spill-tier safety
+is structural rather than tripwired: the spill array holds width*height
+int32 entries, appends are monotonic (never reused), and every pixel is
+enqueued at most once (CAS-claimed) with the seed living in the ring, so
+total spill appends <= filled - 1 < width*height. Nothing to trip.
 """
 
 import os
@@ -67,7 +77,9 @@ ACTIVE_THREAD_SUM = 5  # sum over levels of min(level_size, threads)
 ACTIVE_WARP_SUM = 6    # sum over levels of ceil(min(level_size, threads) / 32)
 PROCESSED = 7          # pixels dequeued/recolored (== FILLED iff exactly-once)
 CAS_ATTEMPTS = 8       # visited-CAS ops tried (attempts - wins = redundant work)
-NUM_COUNTERS = 9
+SPILLED = 9            # spill kernel only: total pixels sent to the global tier
+PEAK_SPILL_WINDOW = 10  # spill kernel only: largest single-level spill count
+NUM_COUNTERS = 11
 
 
 @cuda.jit(device=True, inline=True)
@@ -182,3 +194,164 @@ def single_block_bfs_kernel(img, visited, depth, seed_x, seed_y, counters,
         counters[PEAK_OCC] = peak_occ
         counters[ACTIVE_THREAD_SUM] = active_thread_sum
         counters[ACTIVE_WARP_SUM] = active_warp_sum
+
+
+@cuda.jit(device=True, inline=True)
+def _warp_enqueue_two_tier(ring, spill, s_rear, s_spill_rear, front, item):
+    """Two-tier enqueue with one shared atomic per warp per tier.
+
+    All lanes that reach this call together aggregate: the lowest active lane
+    reserves a slab of virtual tickets with a single atomic.add on the shared
+    rear, broadcasts the base, and each lane takes base + its rank. Tickets
+    inside the ring window [front, front + RING_CAPACITY) go to shared slots
+    (front is frozen per level, so the v1 distinct-slot argument holds
+    unchanged). The remaining lanes are exactly the ones active in the else
+    branch, so they aggregate a second time and append to the global spill
+    tier. Safe under divergence: whatever subset of a warp arrives here
+    together forms the active mask; straggler subsets aggregate separately.
+    """
+    mask = cuda.activemask()
+    count = cuda.popc(mask)
+    rank = cuda.popc(mask & cuda.lanemask_lt())
+    leader = cuda.ffs(mask) - 1  # ffs is 1-based; mask always has a bit set
+    base = 0
+    if cuda.laneid == leader:
+        base = cuda.atomic.add(s_rear, 0, count)
+    base = cuda.shfl_sync(mask, base, leader)
+    ticket = base + rank
+    if ticket - front < RING_CAPACITY:
+        ring[ticket & RING_MASK] = item
+    else:
+        mask2 = cuda.activemask()
+        count2 = cuda.popc(mask2)
+        rank2 = cuda.popc(mask2 & cuda.lanemask_lt())
+        leader2 = cuda.ffs(mask2) - 1
+        gbase = 0
+        if cuda.laneid == leader2:
+            gbase = cuda.atomic.add(s_spill_rear, 0, count2)
+        gbase = cuda.shfl_sync(mask2, gbase, leader2)
+        spill[gbase + rank2] = item
+
+
+@cuda.jit
+def single_block_bfs_spill_kernel(img, visited, depth, seed_x, seed_y, spill,
+                                  counters, level_sizes):
+    """v2: two-tier frontier — shared ring fast path + global spill tier.
+
+    Same host contract as single_block_bfs_kernel, plus `spill`: an int32
+    device array of width*height entries (see the module docstring for why
+    that makes spill overflow structurally impossible — this kernel has no
+    tripwire and never aborts).
+
+    Each level's frontier is the fused window: n_shared ring entries at
+    virtual tickets [sf, sr) followed by the spill slice [gf, gr). Enqueues
+    reserve warp-aggregated ticket slabs; a slab can straddle the ring
+    boundary, in which case the overflowing lanes divert to the spill tier.
+    Levels are separated by three syncthreads() — the v1 pair plus one that
+    publishes thread 0's rear clamp: tickets handed out past the ring window
+    landed in the spill tier, so the shared rear is pulled back to the last
+    ticket the ring actually stores before the next level's reservations
+    begin (otherwise the next window would contain ghost tickets that no one
+    wrote).
+    """
+    tid = cuda.threadIdx.x
+    nthreads = cuda.blockDim.x
+
+    width = img.shape[0]
+    height = img.shape[1]
+
+    ring = cuda.shared.array(RING_CAPACITY, int32)
+    s_rear = cuda.shared.array(1, int32)
+    s_spill_rear = cuda.shared.array(1, int32)
+
+    dx = cuda.const.array_like(DX_HOST)
+    dy = cuda.const.array_like(DY_HOST)
+
+    if tid == 0:
+        ring[0] = seed_x * height + seed_y
+        s_rear[0] = 1
+        s_spill_rear[0] = 0
+        visited[seed_x, seed_y] = 1
+    cuda.syncthreads()
+
+    sf = 0   # ring window start (virtual ticket index), frozen per level
+    sr = 1   # ring window end
+    gf = 0   # spill window start (flat index; the spill tier is append-only)
+    gr = 0   # spill window end
+    level = 0
+    peak_level = 1
+    peak_occ = 1
+    peak_spill_window = 0
+    active_thread_sum = 0
+    active_warp_sum = 0
+    my_processed = 0
+    my_cas_attempts = 0
+
+    while (sr - sf) + (gr - gf) > 0:
+        n_shared = sr - sf
+        level_size = n_shared + (gr - gf)
+        if level_size > peak_level:
+            peak_level = level_size
+        if gr - gf > peak_spill_window:
+            peak_spill_window = gr - gf
+        active = min(level_size, nthreads)
+        active_thread_sum += active
+        active_warp_sum += (active + 31) // 32
+        if tid == 0 and level < level_sizes.shape[0]:
+            level_sizes[level] = level_size
+
+        # Block-stride over the fused frontier: ring entries first, then the
+        # spill slice, one flat index space [0, level_size).
+        for i in range(tid, level_size, nthreads):
+            if i < n_shared:
+                pixel = ring[(sf + i) & RING_MASK]
+            else:
+                pixel = spill[gf + (i - n_shared)]
+            x = pixel // height
+            y = pixel % height
+
+            img[x, y, 0] = 0
+            img[x, y, 1] = 0
+            img[x, y, 2] = 255
+            depth[x, y] = level
+            my_processed += 1
+
+            for d in range(4):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    my_cas_attempts += 1
+                    if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                        _warp_enqueue_two_tier(ring, spill, s_rear,
+                                               s_spill_rear, sf,
+                                               nx * height + ny)
+
+        cuda.syncthreads()  # all enqueues + final tier counters visible
+        sr_raw = s_rear[0]
+        gr_new = s_spill_rear[0]
+        cuda.syncthreads()  # everyone has read them
+        sr_eff = min(sr_raw, sf + RING_CAPACITY)
+        if tid == 0 and sr_eff != sr_raw:
+            s_rear[0] = sr_eff  # retract tickets that diverted to the spill tier
+        cuda.syncthreads()  # clamp visible before next level's reservations
+
+        level += 1
+        occ = (sr_eff - sf) + (gr_new - gf)
+        if occ > peak_occ:
+            peak_occ = occ
+        sf = sr
+        sr = sr_eff
+        gf = gr
+        gr = gr_new
+
+    cuda.atomic.add(counters, PROCESSED, my_processed)
+    cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
+    if tid == 0:
+        counters[FILLED] = s_rear[0] + s_spill_rear[0]
+        counters[LEVELS] = level
+        counters[PEAK_LEVEL] = peak_level
+        counters[PEAK_OCC] = peak_occ
+        counters[ACTIVE_THREAD_SUM] = active_thread_sum
+        counters[ACTIVE_WARP_SUM] = active_warp_sum
+        counters[SPILLED] = s_spill_rear[0]
+        counters[PEAK_SPILL_WINDOW] = peak_spill_window
