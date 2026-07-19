@@ -101,25 +101,37 @@ through the spill tier.
 
 ## Results (RTX 4060 Laptop GPU, median of 5, tpb=256)
 
-| scene            | filled | levels | GPU kernel | @njit CPU | GPU vs @njit | vs pure Python |
-|------------------|--------|--------|-----------|-----------|--------------|----------------|
-| sq_256 center    | 16K    | 129    | 0.9 ms    | 0.13 ms   | 0.15× (CPU wins) | 7× |
-| sq_1024 center   | 262K   | 513    | 10.2 ms   | 4.3 ms    | 0.42× | 13× |
-| sq_2000 center   | 1M     | 1001   | 32.8 ms   | 18.3 ms   | 0.56× | 16× |
-| sq_4000 corner   | 16M    | 7999   | 302 ms    | 485 ms    | **1.61× (GPU wins)** | — |
-| serpentine_256   | 33K    | 32896  | 74.5 ms   | 0.31 ms   | 0.004× (worst case) | 0.6× |
-| disk_1024        | 724K   | 679    | 12.3 ms   | 9.5 ms    | 0.77× | 45× |
+"trip" = the v1 ring kernel's overflow tripwire fired; those scenes exist
+only on v2. Best GPU-vs-@njit speedup per row in bold where the GPU wins.
 
-The honest story this stage exists to tell: one block (1/24 of the GPU)
-crushes pure-Python BFS, only beats compiled CPU code once the image is
-large enough (~16M px) to amortize per-level sync and launch overhead, and
-is catastrophically wrong for serpentines — 32,896 levels of ~1-pixel
+| scene              | filled | levels | ring ms | spill ms | spilled px | @njit ms | best vs @njit |
+|--------------------|--------|--------|---------|----------|------------|----------|---------------|
+| sq_256 center      | 16K    | 129    | 0.8     | 0.8      | 0          | 0.14     | 0.18× (CPU wins) |
+| sq_1024 center     | 262K   | 513    | 6.5     | 7.1      | 0          | 2.5      | 0.38× |
+| sq_2000 center     | 1M     | 1001   | 25.6    | 20.0     | 0          | 14.9     | 0.75× |
+| sq_4000 corner     | 16M    | 7999   | 243     | 258      | 0          | 327      | **1.35×** |
+| serpentine_256     | 33K    | 32896  | 55.9    | 55.1     | 0          | 0.33     | 0.006× (worst case) |
+| disk_1024          | 724K   | 679    | 11.2    | 12.4     | 0          | 9.0      | 0.80× |
+| sq_2600 full center| 6.8M   | 2601   | trip    | 113      | 304,702    | 137      | **1.21×** |
+| sq_4000 center     | 16M    | 4001   | trip    | 267      | 3,810,302  | 385      | **1.44×** |
+| sq_5000 center     | 25M    | 5001   | trip    | 416      | 8,714,302  | 762      | **1.83×** |
+| sq_6000 center     | 36M    | 6001   | trip    | 596      | 15,618,302 | 1,212    | **2.03×** |
+
+The honest story this stage tells: one block (1/24 of the GPU) crushes
+pure-Python BFS, only beats compiled CPU code once the image is large
+enough (~16M px) to amortize per-level sync and launch overhead, and is
+catastrophically wrong for serpentines — 32,896 levels of ~1-pixel
 frontiers leave 255 of 256 threads idle (thread utilization < 1%) while
-pure Python wins on the same scene. The tpb sweep on sq_2000 shows wide
-frontiers reward more threads (64 → 11 Mpx/s, 1024 → 69 Mpx/s). These
-ceilings — 1 SM, per-level `syncthreads`, frontier-starved parallelism —
-are precisely what the multi-block (`../multi-blocks/`) and persistent
-cooperative (`../persistent/`) stages remove.
+pure Python wins on the same scene. The v2 columns extend it: on scenes
+that fit the ring, the spill machinery costs roughly nothing (its
+warp-aggregated enqueue even wins on sq_2000), and on the center-seeded
+giants v1 cannot run at all, the GPU's lead over @njit *grows* with blob
+size — 2.03× at 36M px even with 43% of the blob routed through the
+global tier. The tpb sweep on sq_2000 shows wide frontiers reward more
+threads (64 → 18 Mpx/s, 1024 → 86 Mpx/s). The remaining ceilings — 1 SM,
+per-level `syncthreads`, frontier-starved parallelism — are precisely what
+the multi-block (`../multi-blocks/`) and persistent cooperative
+(`../persistent/`) stages remove.
 
 ## Run
 
