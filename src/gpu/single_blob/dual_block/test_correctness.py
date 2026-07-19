@@ -270,6 +270,34 @@ def test_dirsplit_starves_on_direction_degenerate_shape():
     assert both_active < 0.05  # ...but the blocks almost never work together
 
 
+@pytest.mark.parametrize("kernel", KERNELS)
+def test_owner_map(kernel):
+    """The per-pixel block-owner map (wavefront viz) must be complete and
+    consistent: every reached pixel owned by exactly one block, nothing
+    else touched, and the per-pixel census must reproduce the balance
+    counters exactly. For split, ownership IS the spatial partition."""
+    img, sx, sy = scenes.random_scene(200, 200, 0.65, rng_seed=13)
+    r = flood_fill(img, sx, sy, kernel=kernel)
+    reached = r.visited == 1
+    assert np.isin(r.owner[reached], (0, 1)).all()
+    assert (r.owner[~reached] == -1).all()
+    counts = np.bincount(r.owner[reached].astype(np.int64), minlength=2)
+    assert counts[0] == r.processed_b0
+    assert counts[1] == r.processed_b1
+    if kernel == "split":
+        half = img.shape[0] // 2
+        xs = np.arange(img.shape[0])[:, None]
+        np.testing.assert_array_equal(r.owner[reached],
+                                      (xs >= half).astype(np.int8)
+                                      .repeat(img.shape[1], axis=1)[reached])
+
+
+def test_owner_map_absent_on_bare():
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    r = flood_fill(img, sx, sy, bare=True)
+    assert r.owner.size == 0
+
+
 # ------------------------------------------------------------------ bare twins
 
 @pytest.mark.parametrize("kernel", KERNELS)
