@@ -13,7 +13,7 @@ because the stage hypothesis says bandwidth is what the scaling will hit.
 | # | prediction | verdict |
 |---|---|---|
 | 0 | The frontier queue's hot window fits L2 even at huge blob sizes (a 10000² blob's frontier ≈ 40K px × 4 B ≈ 160 KB ≪ 32 MB), so queue traffic stays cheap | consistent with everything measured; direct proof needs `ncu` |
-| 1 | `grid.sync` costs more across 24 SMs than across 2 | **barely** — ~1.73 µs at 1 block → ~2.2 µs at 192 (serpentine-derived); the cost is mostly fixed |
+| 1 | `grid.sync` costs more across 24 SMs than across 2 | **mildly** — ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 (serpentine-derived); mostly fixed, but the growth is real and turns the capacity ends into losses |
 | 2 | The single global rear becomes an atomic hotspot at 48+ blocks | unproven — a plateau exists but cannot be attributed without `ncu` |
 | 3 | The serpentine still loses | **confirmed, emphatically** — it got *worse* (145 ms vs the single-block kernel's 71 ms) |
 | 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** — flat from 48 → 96 → 192 blocks; attribution open (see below) |
@@ -43,6 +43,7 @@ Measured on the RTX 4060 Laptop GPU (24 SMs, 64 K registers/SM):
 
 | tpb | instrumented max blocks | = grid threads | bare max blocks | = grid threads |
 |----:|----:|----:|----:|----:|
+| 32  | 384 | 12,288 | 576 | 18,432 |
 | 64  | 192 | 12,288 | 288 | 18,432 |
 | 128 |  96 | 12,288 | 144 | 18,432 |
 | 256 |  48 | 12,288 |  72 | 18,432 |
@@ -51,16 +52,21 @@ Measured on the RTX 4060 Laptop GPU (24 SMs, 64 K registers/SM):
 Every instrumented column multiplies out to the same **12,288 threads =
 512 per SM**: the kernel's ~104 registers/thread exhaust the register file
 at exactly 512 resident threads regardless of how they are grouped into
-blocks. At the dual stage register pressure capped the *block* (tpb ≤ 512);
-here it caps the *whole grid*. The leaner bare twin fits 768/SM — living
-proof that register dieting buys residency.
+blocks — so the smallest legal block size yields the most blocks, and
+**384 (tpb=32) is this kernel's absolute block ceiling**. At the dual
+stage register pressure capped the *block* (tpb ≤ 512); here it caps the
+*whole grid*. The leaner bare twin fits 768/SM, and at tpb=32 its 576
+blocks are **Ada's hard architectural cap of 24 blocks per SM** — no
+kernel on this GPU can place more; only a register diet gets the
+instrumented kernel near it.
 
 ## Bandwidth instrumentation (`bandwidth.py`)
 
 1. **Measured peak** — a saturating D2D grid-stride copy (two 256 MB int64
-   buffers, CUDA-event timed, median of 10): **192 GB/s** on this machine.
-   Every derived figure is expressed against this operational reference,
-   never a spec-sheet number.
+   buffers, CUDA-event timed, median of 10): **187–193 GB/s** across
+   sessions on this machine (laptop clocks). Every derived figure is
+   expressed against the same-session measurement, never a spec-sheet
+   number.
 2. **Derived model** — algorithmic bytes from the kernel's own
    exactly-once counters: `processed × (4 queue-read + 3 img-recolor + 4
    depth [+ 2 owner]) + processed × 4 neighbors × 3 img-read +
@@ -73,17 +79,21 @@ proof that register dieting buys residency.
 
 | scene | filled | @njit ms | v2 ms | dual ms | **multi ms** | vs v2 | vs @njit | model GB/s (% peak) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| sq_256 center | 16K | 0.1 | 1.0 | 1.3 | 1.4 | 0.70× | CPU wins | 0.6 (0.3%) |
-| sq_1024 center | 262K | 5.8 | 11.0 | 6.9 | **4.2** | 2.64× | 1.40× | 2.9 (1.5%) |
-| sq_2000 center | 1M | 29.8 | 27.9 | 15.1 | **8.5** | 3.28× | 3.51× | 4.9 (2.6%) |
-| sq_4000 corner | 16M | 311.7 | 278.0 | 148.9 | **60.0** | 4.63× | 5.20× | 12.3 (6.4%) |
-| disk r=950 | 2.8M | 38.4 | 71.3 | 29.6 | **10.8** | 6.58× | 3.54× | 12.2 (6.3%) |
-| disk r=1900 | 11.3M | 277.3 | 186.4 | 97.2 | **26.8** | 6.97× | 10.37× | 18.9 (9.8%) |
-| serpentine_256 | 33K | 0.3 | 70.8 | 147.5 | 145.1 | 0.49× | 0.00× | ~0 |
-| sq_4600 full | 21.2M | 519.6 | 355.7 | 188.5 | **49.7** | 7.15× | 10.45× | 19.2 (10.0%) |
-| sq_5000 center | 25M | 674.5 | 432.1 | 213.6 | **54.6** | 7.91× | 12.35× | 20.6 (10.7%) |
-| sq_6000 center | 36M | 1012.0 | 592.5 | 294.1 | **74.9** | 7.91× | 13.51× | 21.6 (11.2%) |
-| sq_8000 center | 64M | 2026.0 | 1041.9 | 510.8 | **132.2** | 7.88× | **15.33×** | 21.9 (11.4%) |
+| sq_256 center | 16K | 0.1 | 0.9 | 1.1 | 1.3 | 0.66× | CPU wins | 0.6 (0.3%) |
+| sq_1024 center | 262K | 4.7 | 6.9 | 5.5 | **5.0** | 1.39× | 0.95× | 2.3 (1.2%) |
+| sq_2000 center | 1M | 23.2 | 25.5 | 12.8 | **8.2** | 3.10× | 2.83× | 5.4 (2.9%) |
+| sq_4000 corner | 16M | 316.0 | 270.3 | 150.1 | **59.5** | 4.54× | 5.31× | 12.1 (6.5%) |
+| disk r=950 | 2.8M | 40.4 | 63.5 | 27.7 | **11.2** | 5.66× | 3.60× | 10.0 (5.4%) |
+| disk r=1900 | 11.3M | 284.1 | 191.3 | 97.6 | **27.0** | 7.09× | 10.52× | 18.7 (10.0%) |
+| serpentine_256 | 33K | 0.3 | 57.4 | 127.2 | 151.6 | 0.38× | 0.00× | ~0 |
+| sq_4600 full | 21.2M | 540.2 | 341.9 | 176.2 | **46.3** | 7.38× | 11.66× | 17.1 (9.1%) |
+| sq_5000 center | 25M | 567.2 | 421.2 | 217.7 | **54.4** | 7.75× | 10.43× | 20.9 (11.2%) |
+| sq_6000 center | 36M | 885.6 | 589.5 | 302.8 | **85.4** | 6.90× | 10.37× | 18.7 (10.0%) |
+| sq_8000 center | 64M | 2041.2 | 1062.6 | 516.9 | **133.7** | 7.95× | **15.27×** | 21.6 (11.6%) |
+
+(Numbers are the newest committed run; medians move a few percent between
+sessions with this laptop's clocks — earlier runs' JSON/CSVs remain in
+`benchmark_results/` as the durable record.)
 
 v2 = single-block spill kernel; dual = dual-block global kernel, both
 re-measured fresh in the same session. The 64M px scene is the guarded
@@ -95,50 +105,70 @@ Chapter 1 host-RAM ceiling, not the GPU, is the binding constraint.
 
 `*` = that tpb's cooperative maximum; `-` = beyond capacity.
 
-**sq_4000_corner (16M px):**
+**sq_4000_corner (16M px), Mpx/s:**
 
-| blocks | tpb 64 | tpb 128 | tpb 256 | tpb 512 |
-|---:|---:|---:|---:|---:|
-| 1 | 20.7 | 39.1 | 62.8 | 75.4 |
-| 2 | 41.0 | 71.8 | 107.1 | 114.9 |
-| 4 | 75.5 | 127.8 | 176.3 | 145.1 |
-| 8 | 134.4 | 201.9 | 252.3 | 185.8 |
-| 16 | 213.6 | 274.5 | 303.0 | 211.3 |
-| 24 | 265.0 | 295.5 | 270.6 | 204.9* |
-| 48 | 298.9 | **315.8** | 243.9* | - |
-| 96 | - | 263.6* | - | - |
-| 192 | 265.4* | - | - | - |
+| blocks | tpb 32 | tpb 64 | tpb 128 | tpb 256 | tpb 512 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 10.3 | 20.5 | 39.2 | 64.2 | 85.7 |
+| 2 | 21.0 | 40.6 | 71.7 | 111.0 | 135.1 |
+| 4 | 41.7 | 75.4 | 123.7 | 177.8 | 195.4 |
+| 8 | 77.1 | 134.2 | 206.3 | 252.8 | 220.0 |
+| 16 | 136.7 | 212.6 | 278.2 | 297.7 | 216.6 |
+| 24 | - | - | - | - | 202.7* |
+| 32 | 214.7 | 285.8 | 308.6 | 287.2 | - |
+| 48 | 261.2 | 311.6 | 314.0 | 280.3* | - |
+| 96 | 302.7 | 303.6 | 262.5* | - | - |
+| 128 | **317.0** | 295.2 | - | - | - |
+| 192 | 299.1 | 273.0* | - | - | - |
+| 384 | 223.9* | - | - | - | - |
 
-**disk_4001_r1900 (11.3M px):**
+**disk_4001_r1900 (11.3M px), Mpx/s:**
 
-| blocks | tpb 64 | tpb 128 | tpb 256 | tpb 512 |
-|---:|---:|---:|---:|---:|
-| 1 | 19.0 | 36.7 | 61.1 | 89.0 |
-| 2 | 38.6 | 69.2 | 104.0 | 153.1 |
-| 4 | 76.4 | 131.2 | 191.0 | 242.5 |
-| 8 | 138.7 | 216.7 | 256.2 | 331.1 |
-| 16 | 235.9 | 331.1 | 361.9 | 400.7 |
-| 24 | 307.0 | 387.2 | 458.8 | 415.3* |
-| 48 | 400.9 | **467.4** | 452.9* | - |
-| 96 | - | 422.2* | - | - |
-| 192 | 395.6* | - | - | - |
+| blocks | tpb 32 | tpb 64 | tpb 128 | tpb 256 | tpb 512 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 10.0 | 20.8 | 39.3 | 65.3 | 89.2 |
+| 2 | 20.4 | 42.0 | 76.2 | 118.4 | 153.3 |
+| 4 | 42.8 | 82.5 | 140.4 | 203.7 | 242.3 |
+| 8 | 84.3 | 154.3 | 243.3 | 320.6 | 347.9 |
+| 16 | 156.8 | 254.3 | 354.2 | 422.0 | 421.9 |
+| 24 | - | - | - | - | 416.6* |
+| 32 | 260.5 | 370.5 | 452.3 | 462.5 | - |
+| 48 | 330.2 | 426.8 | 476.6 | 454.0* | - |
+| 96 | 421.8 | 461.1 | 426.9* | - | - |
+| 128 | 448.5 | **477.7** | - | - | - |
+| 192 | 430.1 | 443.2* | - | - | - |
+| 384 | 358.4* | - | - | - | - |
 
-**serpentine_256** (kernel ms — lower is better): flat ~114–146 ms across
-the entire grid, worst at the biggest grids. 65,792 `grid.sync`s at ~2 µs
-each *are* the runtime; no configuration of blocks and threads can help a
-shape that starves every block between barriers.
+**serpentine_256** (kernel ms — lower is better): ~113 ms at 1 block,
+drifting up to **169 ms at 384 blocks**. 65,792 `grid.sync`s *are* the
+runtime (1.7 → 2.6 µs each as the barrier population grows); no
+configuration of blocks and threads can help a shape that starves every
+block between barriers — more blocks only make the barrier costlier.
 
 ### What the sweep says
 
-- **Near-linear scaling to ~8–16 blocks, then a hard plateau** (~316 Mpx/s
-  square, ~467 Mpx/s disk). Doubling 48 → 96 → 192 blocks moves nothing
-  (slightly negative) — prediction 4's plateau is real.
-- **The best cell is 48 × 128 in both big scenes.** At equal thread
-  counts, many smaller blocks beat fewer bigger ones, and tpb=512
-  anti-scales beyond ~8 blocks — the scheduler juggles small blocks better
-  than big ones.
+- **Near-linear scaling to ~8–16 blocks, then a plateau — and past it a
+  measured decline.** The capacity ends (384×32, 192×64) run 10–30% below
+  the best cells: every extra block is another barrier arrival, and past
+  ~48 blocks that is all it is. Prediction 4's plateau is real, and the
+  block ceiling overshoots it.
+- **The best cells obey a rule: the smallest tpb whose grid still covers
+  the peak frontier in one stride pass, with blocks maxed.** The square's
+  levels peak at 4,000 px → best is 128×32 = 4,096 threads (317 Mpx/s);
+  the disk's peak ring is ~7,600 px → best is 128×64 = 8,192 threads
+  (478 Mpx/s). Mid-plateau neighbors (48×128, 96×64…) sit within clock
+  noise of them.
+- **Why smaller blocks win — spreading, observed via %smid.** The
+  scheduler places consecutive block ids on *different* SMs (blocks 0–7
+  land on SMs 0, 2, 4, …, 14), and grid-stride work goes to the first
+  ⌈level/tpb⌉ blocks — so a 2,000-px level runs on 4 SMs at tpb=512 but
+  ~16 SMs at tpb=128: same pixels, four times the L1s, load/store units
+  and issue slots. At a fixed 12,288 threads the square reads 202.7
+  (24×512) → 280.3 (48×256) → 262.5–273.0 (96×128 / 192×64) → 223.9
+  (384×32): small blocks beat big blocks until barrier arrivals eat the
+  gain — the optimum is interior.
 - **Attribution is honestly open.** At the plateau the *model* says only
-  ~7–11% of the measured 192 GB/s copy peak. But the model is a lower
+  ~7–11% of the measured ~190 GB/s copy peak. But the model is a lower
   bound: with 32 B sectors, the kernel's scattered 3–4 B accesses can
   inflate real DRAM traffic ~8×, and 11% × 8 ≈ 90% of peak — *consistent
   with* bandwidth saturation, but consistency is not proof. Candidate
