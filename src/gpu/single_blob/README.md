@@ -204,11 +204,11 @@ the serpentine.
 ### Results
 | finding | number |
 |---|---|
-| cooperative capacity, instrumented | 192/96/48/24 blocks at tpb 64/128/256/512 — **every one = 12,288 threads**: ~104 regs/thread cap the whole grid at 512 threads/SM (the bare twin fits 768) |
+| cooperative capacity, instrumented | 384/192/96/48/24 blocks at tpb 32/64/128/256/512 — **every one = 12,288 threads**: ~104 regs/thread cap the whole grid at 512 threads/SM. The bare twin fits 768/SM, and its 576 blocks at tpb=32 are Ada's hard 24-blocks/SM architectural cap |
 | the N blocks pay off | **7.9× vs v2 and 3.9× vs dual-global** at 36–64M px; **15.3× vs `@njit`** at 64M px (132 ms vs 2.03 s) |
-| scaling shape | near-linear to ~8–16 blocks, then a **hard plateau** (~316/~467 Mpx/s square/disk); 96 and 192 blocks move nothing |
-| best configuration | **48 × 128** in both big scenes — at equal thread counts, many small blocks beat few big ones; tpb=512 anti-scales past ~8 blocks |
-| `grid.sync` re-priced | ~1.73 µs at 1 block → ~2.2 µs at 192 — the barrier's cost is mostly *fixed*, prediction "grows with grid" barely materialized |
+| scaling shape | near-linear to ~8–16 blocks, then a **plateau** (~317/~478 Mpx/s square/disk) — and past it a decline: the capacity ends (192–384 blocks) run 10–30% slower |
+| best configuration | the rule: **smallest tpb whose grid covers the peak frontier in one pass, blocks maxed for SM-spreading** — 128×32 on the square (4,096 ≥ 4,000-px peak), 128×64 on the disk (8,192 ≥ ~7,600); tpb=512 anti-scales past ~8 blocks |
+| `grid.sync` re-priced | ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 — mostly fixed, but the growth is what sinks the capacity-end configs |
 | serpentine | **worse than ever**: 145 ms vs the single-block kernel's 71 ms — 65,792 barriers × ~2 µs *is* the runtime |
 | bandwidth verdict | plateau at ~11% of measured peak *by the lower-bound model*; ×8 sector inflation puts it ≈ 90% — **consistent with saturation, not yet proof** |
 | the stretch scene | 64M px (8000²) completes at 132 ms; **10000² cannot even be attempted** — ~3 GB of host arrays exceed this laptop's free RAM |
@@ -223,9 +223,12 @@ the serpentine.
   plateau exists; it cannot say whether DRAM sectors, L2 behavior, or the
   rear atomic causes it. The model earned its keep — and hit its limit.
   Only `ncu` closes the gap.
-- **The scheduler beats big blocks.** 48×128 outruns 24×256 and every
-  tpb=512 configuration at the same thread count — granularity helps the
-  hardware hide stalls.
+- **Small blocks spread the frontier across SMs.** The observed %smid map
+  shows consecutive block ids placed on *different* SMs, and grid-stride
+  work goes to the first ⌈level/tpb⌉ blocks — so the same 2,000-px level
+  runs on 4 SMs at tpb=512 but ~16 at tpb=128. That, plus one-pass
+  frontier coverage, picks the winners; past ~48 blocks the growing
+  barrier-arrival cost takes the gains back (the optimum is interior).
 - **Grid-stride balance is structural.** Levels smaller than the grid feed
   low block ids first; per-block CV reads 686% on tiny scenes and 42% at
   64M px, and none of it is a defect. (Chapter 2's "aggregate metrics can
