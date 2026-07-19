@@ -91,6 +91,10 @@ uv run pytest src/gpu/single_blob/single_block_shared/test_correctness.py -v
 # (with per-level frontier traces) to benchmark_results/ next to the script.
 uv run python src/gpu/single_blob/single_block_shared/benchmark.py
 uv run python src/gpu/single_blob/single_block_shared/benchmark.py --slow  # + pure Python on 16M px
+
+# Render the newest benchmark JSON as an interactive HTML dashboard
+# (benchmark_results/single_block_benchmark.html — open in a browser).
+uv run python src/gpu/single_blob/single_block_shared/visualize.py
 ```
 
 Note: this package is 4-connected (matching `src/cpu/sequential.py` and its
