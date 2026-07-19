@@ -50,8 +50,11 @@ RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
 GPU_REPEATS = 5
 NJIT_REPEATS = 5
 SWEEP_REPEATS = 3
-TPB_SWEEP = [64, 128, 256, 512]
-BLOCKS_SWEEP = [1, 2, 4, 8, 16, 24, 48, "max"]
+# tpb=32 is the block-count ceiling: ~104 regs/thread cap every tpb at
+# 12,288 resident threads (512/SM), so the smallest legal block size
+# yields the most blocks — 384 cooperative blocks (16/SM).
+TPB_SWEEP = [32, 64, 128, 256, 512]
+BLOCKS_SWEEP = [1, 2, 4, 8, 16, 32, 48, 96, 128, 192, "max"]
 SWEEP_SCENES = ["sq_4000_corner", "disk_4001_r1900", "serpentine_256"]
 
 
