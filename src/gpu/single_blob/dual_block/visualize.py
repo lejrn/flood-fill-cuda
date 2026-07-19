@@ -151,13 +151,16 @@ def log_dot_plot(rows, series, aria, row_label):
                      f'y2="{cy:.1f}" class="rowline"/>')
         parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
                      f'text-anchor="end">{row_label(r)}</text>')
-        for fn, name, cls in series:
+        for si, (fn, name, cls) in enumerate(series):
             v = fn(r)
             if v is None:
                 continue
+            # dodge: fixed per-series vertical offset within the row, so
+            # near-identical values sit side by side instead of occluding
+            dy = (si - (len(series) - 1) / 2) * 6.5
             tip = f"{row_label(r)} — {name}: {fmt_ms(v)} ms"
-            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy:.1f}" r="5.5" '
-                         f'class="dot {cls}" data-tip="{tip}"/>')
+            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy + dy:.1f}" '
+                         f'r="5" class="dot {cls}" data-tip="{tip}"/>')
     parts.append("</svg>")
     return "\n".join(parts)
 
@@ -205,13 +208,14 @@ def speedup_chart():
                      f'y2="{cy:.1f}" class="rowline"/>')
         parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
                      f'text-anchor="end">{label(r["scene"])}</text>')
-        for k in KERNELS:
+        for si, k in enumerate(KERNELS):
             v = r[f"{k}_speedup_vs_v2"]
+            dy = (si - 1) * 6.5
             tip = (f"{label(r['scene'])} — {k}: {v:.2f}× vs single-block v2 "
                    f"({fmt_ms(r[f'{k}_kernel_ms'])} vs "
                    f"{fmt_ms(r['v2_kernel_ms'])} ms)")
-            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy:.1f}" r="5.5" '
-                         f'class="dot {KCLS[k]}" data-tip="{tip}"/>')
+            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy + dy:.1f}" '
+                         f'r="5" class="dot {KCLS[k]}" data-tip="{tip}"/>')
     parts.append("</svg>")
     return "\n".join(parts)
 
@@ -424,13 +428,14 @@ def overhead_chart():
                      f'y2="{cy:.1f}" class="rowline"/>')
         parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
                      f'text-anchor="end">{label(r["scene"])}</text>')
-        for k in KERNELS:
+        for si, k in enumerate(KERNELS):
             v = r[f"{k}_instrumentation_overhead_pct"]
+            dy = (si - 1) * 6.5
             tip = (f"{label(r['scene'])} — {k}: {v:+.1f}% vs its bare twin "
                    f"({fmt_ms(r[f'{k}_kernel_ms'])} vs "
                    f"{fmt_ms(r[f'{k}_bare_kernel_ms'])} ms)")
-            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy:.1f}" r="5.5" '
-                         f'class="dot {KCLS[k]}" data-tip="{tip}"/>')
+            parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy + dy:.1f}" '
+                         f'r="5" class="dot {KCLS[k]}" data-tip="{tip}"/>')
     parts.append("</svg>")
     return "\n".join(parts)
 
