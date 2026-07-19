@@ -58,23 +58,30 @@ SCENES = {
 }
 
 
+VARIANTS = ["ring", "spill"]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 @pytest.mark.parametrize("name", SCENES.keys())
-def test_matches_cpu_reference(name):
+def test_matches_cpu_reference(name, variant):
     img, sx, sy = SCENES[name]()
-    assert_matches_reference(img, sx, sy)
+    assert_matches_reference(img, sx, sy, variant=variant)
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
 @pytest.mark.parametrize("tpb", [64, 256, 1024])
-def test_block_size_invariance(tpb):
+def test_block_size_invariance(tpb, variant):
     img, sx, sy = scenes.random_scene(256, 256, 0.65, rng_seed=3)
-    assert_matches_reference(img, sx, sy, threads_per_block=tpb)
+    assert_matches_reference(img, sx, sy, threads_per_block=tpb,
+                             variant=variant)
 
 
-def test_deterministic_across_runs():
-    """Ring order is nondeterministic; visited/depth/counts must not be."""
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_deterministic_across_runs(variant):
+    """Queue order is nondeterministic; visited/depth/counts must not be."""
     img, sx, sy = scenes.random_scene(200, 200, 0.65, rng_seed=11)
-    a = flood_fill(img, sx, sy)
-    b = flood_fill(img, sx, sy)
+    a = flood_fill(img, sx, sy, variant=variant)
+    b = flood_fill(img, sx, sy, variant=variant)
     np.testing.assert_array_equal(a.visited, b.visited)
     np.testing.assert_array_equal(a.depth, b.depth)
     assert a.levels == b.levels and a.filled == b.filled
@@ -192,3 +199,53 @@ def test_overflow_tripwire_raises():
     img, sx, sy = scenes.overflow_scene()
     with pytest.raises(RuntimeError, match="overflow"):
         flood_fill(img, sx, sy)
+
+
+def test_bad_variant_raises():
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="variant"):
+        flood_fill(img, sx, sy, variant="turbo")
+
+
+def test_spill_untouched_when_scene_fits():
+    """On a ring-sized scene the v2 kernel must behave exactly like v1: the
+    spill tier stays empty and the results are identical."""
+    img, sx, sy = scenes.square_scene(256, 256, 128, 128)
+    ring = flood_fill(img, sx, sy, variant="ring")
+    spill = flood_fill(img, sx, sy, variant="spill")
+    np.testing.assert_array_equal(ring.visited, spill.visited)
+    np.testing.assert_array_equal(ring.depth, spill.depth)
+    assert ring.levels == spill.levels and ring.filled == spill.filled
+    assert ring.peak_occupancy == spill.peak_occupancy
+    assert spill.spilled == 0
+    assert spill.peak_spill_window == 0
+
+
+def test_spill_completes_the_tripwire_scene():
+    """The exact scene that trips v1's ring must complete on v2 with a
+    reference-exact result, spilled work accounted, and every guarantee the
+    ring kernel makes (exactly-once processing, trace consistency) intact."""
+    img, sx, sy = scenes.overflow_scene()
+    ref_visited, ref_depth, ref_levels, ref_filled = cpu_flood_fill(img, sx, sy)
+    result = flood_fill(img, sx, sy, variant="spill")
+
+    np.testing.assert_array_equal(result.visited, ref_visited)
+    np.testing.assert_array_equal(result.depth, ref_depth)
+    assert result.levels == ref_levels
+    assert result.filled == ref_filled
+    # The scene overflows the ring by design, so the tier must have been used
+    # and the two tiers together must account for every filled pixel.
+    assert result.spilled > 0
+    assert result.peak_spill_window > 0
+    assert result.peak_occupancy > result.ring_capacity
+    # Exactly-once processing holds through the spill path too.
+    assert result.processed == result.filled == ref_filled
+    assert result.filled - 1 <= result.cas_attempts <= 4 * result.filled
+    # The fused two-tier frontier trace still accounts for every pixel.
+    sizes = result.level_sizes.astype(np.int64)
+    assert not result.level_trace_truncated
+    assert sizes.sum() == result.filled
+    assert sizes.max() == result.peak_level
+    depth_counts = np.bincount(result.depth[result.depth >= 0].ravel(),
+                               minlength=result.levels)
+    np.testing.assert_array_equal(depth_counts, sizes)

@@ -1,8 +1,15 @@
 """
 Host driver for the single-block shared-memory-ring flood fill.
 
-Public API: flood_fill(img, seed_x, seed_y, threads_per_block=256)
-            -> FloodFillResult
+Public API: flood_fill(img, seed_x, seed_y, threads_per_block=256,
+                       variant="ring") -> FloodFillResult
+
+variant="ring"  — v1: pure shared-memory ring; raises RuntimeError when a
+                  scene's frontier exceeds the 8192-slot capacity.
+variant="spill" — v2: two-tier frontier (shared ring + global spill tier
+                  sized width*height, so it cannot overflow) with
+                  warp-aggregated enqueue. Any blob that fits in memory
+                  completes; ring-sized scenes just never touch the tier.
 
 Handles validation, allocation, the single 1-block kernel launch, the
 overflow tripwire, and a full timing decomposition (alloc / H2D / kernel /
@@ -19,9 +26,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from kernels import (
-    single_block_bfs_kernel, RING_CAPACITY, NUM_COUNTERS,
+    single_block_bfs_kernel, single_block_bfs_spill_kernel,
+    RING_CAPACITY, NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
     ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS,
+    SPILLED, PEAK_SPILL_WINDOW,
 )
 from numba import cuda
 
@@ -38,9 +47,12 @@ class FloodFillResult:
     levels: int            # BFS levels processed
     filled: int            # pixels reached
     peak_level: int        # largest single frontier
-    peak_occupancy: int    # max ring occupancy (compare against ring_capacity)
+    peak_occupancy: int    # max queue occupancy: ring for v1, both tiers for v2
     ring_capacity: int     # = RING_CAPACITY, for reporting
     threads_per_block: int
+    variant: str           # "ring" (v1) or "spill" (v2 two-tier)
+    spilled: int           # total pixels routed to the global tier (0 for ring)
+    peak_spill_window: int  # largest single-level spill count (0 for ring)
     # Per-level frontier sizes (len == levels unless truncated)
     level_sizes: np.ndarray = field(repr=False)
     level_trace_truncated: bool
@@ -63,21 +75,20 @@ class FloodFillResult:
     neighbor_check_efficiency_pct: float  # filled / (4 * processed)
 
 
-_warmed_up = False
+_warmed_up = {"ring": False, "spill": False}
 
 
 def _is_red(img, x, y):
     return img[x, y, 0] == 255 and img[x, y, 1] == 0 and img[x, y, 2] == 0
 
 
-def _warmup():
+def _warmup(variant):
     """JIT-compile the kernel on a tiny scene so timings never include compile."""
-    global _warmed_up
-    if _warmed_up:
+    if _warmed_up[variant]:
         return
     tiny = np.full((8, 8, 3), 255, dtype=np.uint8)
     tiny[4, 4] = (255, 0, 0)
-    single_block_bfs_kernel[1, 32](
+    args = (
         cuda.to_device(tiny),
         cuda.to_device(np.zeros((8, 8), dtype=np.int32)),
         cuda.to_device(np.full((8, 8), -1, dtype=np.int32)),
@@ -85,16 +96,23 @@ def _warmup():
         cuda.to_device(np.zeros(NUM_COUNTERS, dtype=np.int64)),
         cuda.device_array(4, dtype=np.int32),
     )
+    if variant == "ring":
+        single_block_bfs_kernel[1, 32](*args)
+    else:
+        single_block_bfs_spill_kernel[1, 32](
+            *args[:5], cuda.device_array(64, dtype=np.int32), *args[5:])
     cuda.synchronize()
-    _warmed_up = True
+    _warmed_up[variant] = True
 
 
-def flood_fill(img_host, seed_x, seed_y, threads_per_block=256):
+def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, variant="ring"):
     """Flood-fill the red blob containing (seed_x, seed_y) with one CUDA block.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
-    returned. Raises ValueError for bad inputs and RuntimeError if the scene's
-    peak frontier overflows the shared-memory ring.
+    returned. Raises ValueError for bad inputs. variant="ring" raises
+    RuntimeError if the scene's peak frontier overflows the shared-memory
+    ring; variant="spill" completes any scene (the global tier absorbs the
+    excess) at the cost of a width*height int32 spill allocation.
     """
     if img_host.ndim != 3 or img_host.shape[2] != 3 or img_host.dtype != np.uint8:
         raise ValueError("img must be a (width, height, 3) uint8 array")
@@ -109,8 +127,10 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256):
         raise ValueError(
             f"threads_per_block must be a multiple of 32 in [32, 1024], "
             f"got {threads_per_block}")
+    if variant not in ("ring", "spill"):
+        raise ValueError(f'variant must be "ring" or "spill", got {variant!r}')
 
-    _warmup()
+    _warmup(variant)
     device = cuda.get_current_device()
 
     trace_capacity = min(width * height, LEVEL_TRACE_CAPACITY)
@@ -125,6 +145,11 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256):
     d_depth = cuda.device_array_like(depth_host)
     d_counters = cuda.device_array_like(counters_host)
     d_level_sizes = cuda.device_array(trace_capacity, dtype=np.int32)
+    if variant == "spill":
+        # width*height entries make spill overflow structurally impossible
+        # (every pixel is enqueued at most once). The allocation cost is part
+        # of the honest v2 story and lands in alloc_ms.
+        d_spill = cuda.device_array(width * height, dtype=np.int32)
     cuda.synchronize()
     t_h2d0 = time.perf_counter()
 
@@ -135,21 +160,27 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256):
     cuda.synchronize()
     t_kernel0 = time.perf_counter()
 
-    single_block_bfs_kernel[1, threads_per_block](
-        d_img, d_visited, d_depth, seed_x, seed_y, d_counters, d_level_sizes)
+    if variant == "ring":
+        single_block_bfs_kernel[1, threads_per_block](
+            d_img, d_visited, d_depth, seed_x, seed_y, d_counters,
+            d_level_sizes)
+    else:
+        single_block_bfs_spill_kernel[1, threads_per_block](
+            d_img, d_visited, d_depth, seed_x, seed_y, d_spill, d_counters,
+            d_level_sizes)
     cuda.synchronize()
     t_d2h0 = time.perf_counter()
 
     counters = d_counters.copy_to_host()
-    if counters[OVERFLOW]:
+    if variant == "ring" and counters[OVERFLOW]:
         raise RuntimeError(
             f"shared-memory ring overflow: this scene's frontier needs more than "
             f"the {RING_CAPACITY} slots available "
             f"(largest completed-level occupancy: {int(counters[PEAK_OCC])}). "
             f"Rule of thumb: a center-seeded solid square of side W needs ~4W "
-            f"slots, corner-seeded ~2W. Use a scene that fits, or the "
-            f"multi-block/persistent implementations; v2 spill-to-global will "
-            f"remove this limit.")
+            f"slots, corner-seeded ~2W. Rerun with variant=\"spill\" (the v2 "
+            f"two-tier kernel), or use the multi-block/persistent "
+            f"implementations.")
     levels = int(counters[LEVELS])
     truncated = levels > trace_capacity
     img_out = d_img.copy_to_host()
@@ -175,6 +206,9 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256):
         peak_occupancy=int(counters[PEAK_OCC]),
         ring_capacity=RING_CAPACITY,
         threads_per_block=threads_per_block,
+        variant=variant,
+        spilled=int(counters[SPILLED]),
+        peak_spill_window=int(counters[PEAK_SPILL_WINDOW]),
         level_sizes=level_sizes,
         level_trace_truncated=truncated,
         processed=processed,
