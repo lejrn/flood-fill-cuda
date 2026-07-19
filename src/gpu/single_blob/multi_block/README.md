@@ -154,6 +154,32 @@ shape that starves every block between barriers.
   between runs. The serpentine's +1.9% on a barrier-dominated scene is the
   cleanest signal that the counters cost roughly nothing.
 
+## Wavefront renders (`wavefront.py` → `wavefront/`)
+
+The kernel records `depth[x,y]` (when) and `owner[x,y]` (which block), so
+the BFS replays as animation with zero extra GPU work. Color legend: **hue
+= block** (golden-angle spacing inside 30°–330° — the red band is excluded
+because unfilled scene pixels ARE red), **lightness = fill level**
+(light → dark), frontier band = near-white tint of the owner's hue.
+
+| artifact | config | what it shows |
+|---|---|---|
+| `square256_b8_t32.gif/.png` | 8×32 | all 8 blocks share the wave; per-block coherence near the seed decays into speckle |
+| `fullred256_b8_t32.gif/.png` | 8×32, corner seed | blocks come online one by one as the frontier outgrows the threads in front of them |
+| `disk512_b8_t64.gif/.png` | 8×64 | the frontier ring sweeping a disk, 8-hue trail behind it |
+| `square256_b48_t256.png` | 48×256 — the benchmark's own config | a ~440 px frontier feeds exactly 2 of 48 blocks; 46 idle at every barrier |
+| `serpentine128_b8_t32.png` | 8×32 | starvation itself: block 0 owns every single pixel |
+
+**The speckle is a finding, not an artifact.** A block owns contiguous
+chunks of the queue window, but queue order is warp-aggregated discovery
+order, which spatially scrambles within a few levels — ownership becomes
+fine-grained noise (with visible horizontal streaks: individual warp
+slabs). That scatter is the picture behind the bandwidth section's
+sector-inflation argument: adjacent pixels are touched by unrelated warps,
+so small scattered accesses drag whole 32 B sectors. Compare the dual
+stage's `split` render (two solid territories) — spatial coherence was the
+one thing its losing kernel had that the winner doesn't.
+
 ## Run
 
 ```bash
@@ -163,6 +189,9 @@ uv run pytest src/gpu/single_blob/multi_block/test_correctness.py -v
 # Benchmark: measured copy peak, scene suite vs @njit/v2/dual-global,
 # blocks x tpb sweep; writes JSON + two CSVs to benchmark_results/.
 uv run python src/gpu/single_blob/multi_block/benchmark.py
+
+# Wavefront GIFs + gradient PNGs (block hues) into wavefront/.
+uv run python src/gpu/single_blob/multi_block/wavefront.py
 ```
 
 ## Open problems (Chapter 4 candidates)

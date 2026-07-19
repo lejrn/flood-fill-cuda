@@ -253,9 +253,12 @@ pixel-exact tests against the CPU reference (visited + **depth maps** —
 level-mixing races can't hide); benchmarks with JSON/CSV records and
 honest losses; interactive dashboards (`single_block_shared/visualize.py`,
 `dual_block/visualize.py` — the latter renders both stages);
-**wavefront renders** (`dual_block/wavefront.py`) that replay the recorded
-`depth`/`owner` maps as GIFs — the same BFS, but each partitioning's
-territories visibly different; **bare twin kernels** so the
+**wavefront renders** (`dual_block/wavefront.py`,
+`multi_block/wavefront.py`) that replay the recorded `depth`/`owner` maps
+as GIFs — the same BFS, but each partitioning's territories visibly
+different (the N-block render's ownership *speckle* is itself evidence:
+spatial scatter is the bandwidth chapter's sector-inflation story made
+visible); **bare twin kernels** so the
 instrumentation itself stays priced; and, since Chapter 3, **bandwidth
 instruments** (`multi_block/bandwidth.py`) — a measured D2D copy peak as
 the only reference figures are compared against, and a per-run derived
