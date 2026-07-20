@@ -2,13 +2,28 @@
 
 Public API:
     flood_fill(img, seed_x, seed_y, threads_per_block=256, blocks=None,
-               bare=False, connectivity=4) -> MultiFloodFillResult
+               bare=False, connectivity=4, radius=1,
+               probe_layout="thread") -> MultiFloodFillResult
 
 connectivity=4 explores right/down/left/up (Manhattan-distance waves,
 diamond fronts); connectivity=8 adds the diagonals (Chebyshev waves,
 square fronts — fewer, wider levels for the same blob). The two are
 different algorithms: fills agree only on scenes without diagonal-only
 gaps, and depth/levels always differ.
+
+radius=2 (requires connectivity=8) selects the guarded radius-2 twin:
+ring-1 is always probed first with the unchanged protocol; only pixels
+whose entire ring-1 is in-bounds blob material additionally probe the 16
+ring-2 cells. Fill set identical to plain conn8 (the guard keeps every
+jump inside true 8-connectivity); depth/levels are its own — roughly
+half the levels on solid blobs. Instrumented results report `interior`
+(guard passes; ring-2 probes == 16 * interior).
+
+probe_layout="warp" (requires connectivity=8, radius=1) selects the
+warp-cooperative twin: each warp takes 4 queue entries and assigns each
+lane one (entry, direction) pair, so all 32 probes issue in one round
+instead of 8 lockstep loop iterations. Results are bit-identical to the
+plain conn8 twin (same BFS graph — only work distribution changes).
 
 blocks=None launches the maximum cooperative grid the GPU can host for the
 chosen threads_per_block (queried from the compiled kernel, never hardcoded
@@ -35,20 +50,27 @@ from bandwidth import model_bytes as _model_bytes, model_gb_s as _model_gb_s
 from kernels import (
     multi_block_global_kernel, multi_block_global_bare_kernel,
     multi_block_global8_kernel, multi_block_global8_bare_kernel,
+    multi_block_global8r2_kernel, multi_block_global8r2_bare_kernel,
+    multi_block_global8wc_kernel, multi_block_global8wc_bare_kernel,
     NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
-    ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS,
+    ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS, INTERIOR,
     BS_PROCESSED, BS_SMID,
 )
 from numba import cuda
 
-# (bare, connectivity) -> kernel. The conn8 kernels are verbatim twins; the
-# 4-conn pair is never touched by the connectivity experiment.
+# (bare, connectivity, radius, probe_layout) -> kernel. All variants are
+# twins of the 4-conn/conn8 pair; the baselines are never touched by the
+# experiments.
 _KERNELS = {
-    (False, 4): multi_block_global_kernel,
-    (True, 4): multi_block_global_bare_kernel,
-    (False, 8): multi_block_global8_kernel,
-    (True, 8): multi_block_global8_bare_kernel,
+    (False, 4, 1, "thread"): multi_block_global_kernel,
+    (True, 4, 1, "thread"): multi_block_global_bare_kernel,
+    (False, 8, 1, "thread"): multi_block_global8_kernel,
+    (True, 8, 1, "thread"): multi_block_global8_bare_kernel,
+    (False, 8, 2, "thread"): multi_block_global8r2_kernel,
+    (True, 8, 2, "thread"): multi_block_global8r2_bare_kernel,
+    (False, 8, 1, "warp"): multi_block_global8wc_kernel,
+    (True, 8, 1, "warp"): multi_block_global8wc_bare_kernel,
 }
 
 # Cap on the recorded per-level trace (1D int32 -> 8 MB max)
@@ -70,9 +92,13 @@ class MultiFloodFillResult:
     blocks: int            # resolved launch size (None -> cooperative max)
     bare: bool
     connectivity: int      # 4 (Manhattan waves) or 8 (Chebyshev waves)
+    radius: int            # 1, or 2 for the guarded radius-2 twin
+    probe_layout: str      # "thread" (each thread loops its 8 dirs) or
+                           # "warp" (4 entries x 8 dirs across 32 lanes)
     # Work / balance
     processed: int
     cas_attempts: int
+    interior: int          # radius-2 only: guard passes (else 0)
     processed_per_block: np.ndarray = field(repr=False)  # (blocks,) int64
     balance_min_max_pct: float  # 100 * min / max of per-block processed
     balance_cv_pct: float       # 100 * std / mean — N-way imbalance in one number
@@ -126,11 +152,11 @@ def _tiny_args():
     return d_img, d_visited, d_depth, d_counters, d_queue, d_q
 
 
-def _warmup(bare, connectivity=4):
+def _warmup(bare, connectivity=4, radius=1, probe_layout="thread"):
     """JIT-compile (and NVRTC-link) each kernel once, off the clock. The
     instrumented warmup also exercises the tuple-indexed int64 atomic on
     block_stats so any numba regression fails here, not mid-benchmark."""
-    key = (bare, connectivity)
+    key = (bare, connectivity, radius, probe_layout)
     if key in _warmed:
         return
     d_img, d_visited, d_depth, d_counters, d_queue, d_q = _tiny_args()
@@ -156,17 +182,20 @@ def _coop_max_blocks(kernel_fn, tpb):
     return _coop_cache[key]
 
 
-def max_blocks(threads_per_block=256, bare=False, connectivity=4):
+def max_blocks(threads_per_block=256, bare=False, connectivity=4, radius=1,
+               probe_layout="thread"):
     """The largest cooperative grid this GPU can host at threads_per_block
     (what blocks=None resolves to). Compiles the kernel on first call.
-    Queried per kernel — the conn8 twins' capacity is never assumed equal
-    to the 4-conn pair's (a register-count difference would change it)."""
-    _warmup(bare, connectivity)
-    return _coop_max_blocks(_KERNELS[(bare, connectivity)], threads_per_block)
+    Queried per kernel — no twin's capacity is ever assumed equal to
+    another's (a register-count difference would change it)."""
+    _warmup(bare, connectivity, radius, probe_layout)
+    return _coop_max_blocks(
+        _KERNELS[(bare, connectivity, radius, probe_layout)],
+        threads_per_block)
 
 
 def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
-               bare=False, connectivity=4):
+               bare=False, connectivity=4, radius=1, probe_layout="thread"):
     """Flood-fill the red blob containing (seed_x, seed_y) with N blocks.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
@@ -197,13 +226,31 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
             raise ValueError(f"blocks must be >= 1, got {blocks}")
     if connectivity not in (4, 8):
         raise ValueError(f"connectivity must be 4 or 8, got {connectivity!r}")
+    if radius not in (1, 2):
+        raise ValueError(f"radius must be 1 or 2, got {radius!r}")
+    if radius == 2 and connectivity != 8:
+        raise ValueError(
+            "radius=2 requires connectivity=8 (the guarded ring-2 twin is "
+            "built on the 8-connectivity kernel)")
+    if probe_layout not in ("thread", "warp"):
+        raise ValueError(
+            f"probe_layout must be 'thread' or 'warp', got {probe_layout!r}")
+    if probe_layout == "warp" and (connectivity != 8 or radius != 1):
+        raise ValueError(
+            "probe_layout='warp' requires connectivity=8 and radius=1 (the "
+            "warp-cooperative twin exists only for the plain conn8 kernel)")
 
-    _warmup(bare, connectivity)
+    _warmup(bare, connectivity, radius, probe_layout)
     device = cuda.get_current_device()
     sm_count = int(device.MULTIPROCESSOR_COUNT)
 
-    kernel_fn = _KERNELS[(bare, connectivity)]
+    kernel_fn = _KERNELS[(bare, connectivity, radius, probe_layout)]
     coop_max = _coop_max_blocks(kernel_fn, threads_per_block)
+    if coop_max < 1:
+        raise RuntimeError(
+            f"this GPU cannot host even one cooperative block of this "
+            f"kernel at {threads_per_block} threads (register pressure); "
+            f"try a smaller threads_per_block")
     if blocks is None:
         launch_blocks = coop_max
     elif blocks > coop_max:
@@ -285,6 +332,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     filled = int(counters[FILLED])
     processed = int(counters[PROCESSED])
     cas_attempts = int(counters[CAS_ATTEMPTS])
+    interior = int(counters[INTERIOR])
     ppb = stats[:, BS_PROCESSED].copy()
     sm_ids = [int(s) for s in stats[:, BS_SMID]]
     distinct_sms = len({s for s in sm_ids if s >= 0})
@@ -296,8 +344,11 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     warps = grid_threads // 32
     ats = int(counters[ACTIVE_THREAD_SUM])
     aws = int(counters[ACTIVE_WARP_SUM])
+    # Exact probe count: radius-2 pixels probe 8 always + 16 when interior.
+    eff_probes = (8 * processed + 16 * interior if radius == 2
+                  else connectivity * processed)
     mbytes = (_model_bytes(processed, cas_attempts, filled, True,
-                           n_dirs=connectivity)
+                           n_dirs=connectivity, probe_reads=eff_probes)
               if instrumented else 0)
 
     return MultiFloodFillResult(
@@ -313,8 +364,11 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
         blocks=launch_blocks,
         bare=bare,
         connectivity=connectivity,
+        radius=radius,
+        probe_layout=probe_layout,
         processed=processed,
         cas_attempts=cas_attempts,
+        interior=interior,
         processed_per_block=ppb,
         balance_min_max_pct=(100.0 * p_min / p_max if p_max > 0 else 0.0),
         balance_cv_pct=(100.0 * float(ppb.std()) / p_mean
@@ -339,8 +393,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
         sm_utilization_pct=100.0 * distinct_sms / sm_count,
         discovery_redundancy=(cas_attempts / max(filled - 1, 1)
                               if instrumented else 0.0),
-        neighbor_check_efficiency_pct=(100.0 * filled
-                                       / (connectivity * processed)
+        neighbor_check_efficiency_pct=(100.0 * filled / eff_probes
                                        if instrumented and processed else 0.0),
         model_bytes=mbytes,
         model_gb_s=_model_gb_s(mbytes, kernel_ms),

@@ -25,21 +25,33 @@ from numba import cuda
 
 MODEL_NOTE = (
     "model_bytes = processed*(4 queue-read + 3 img-recolor + 4 depth-write"
-    " [+ 2 owner-write if instrumented]) + processed*n_dirs*3 img-read"
-    " (n_dirs = connectivity) + cas_attempts*8 (visited CAS RMW) +"
-    " (filled-1)*4 (enqueue writes). Derived lower-bound model of"
-    " algorithmic traffic: ~61 B/pixel on solid interiors at 4-conn, ~105"
-    " B/pixel at 8-conn (double the probes, roughly double the interior CAS"
-    " attempts). L2 caching deflates real DRAM bytes, 32B sectors inflate"
-    " them. Compare only against the measured copy peak; ncu is ground truth."
+    " [+ 2 owner-write if instrumented]) + probe_reads*3 img-read"
+    " (probe_reads defaults to processed*n_dirs, n_dirs = connectivity; the"
+    " radius-2 twins pass the exact 8*processed + 16*interior) +"
+    " cas_attempts*8 (visited CAS RMW) + (filled-1)*4 (enqueue writes)."
+    " Derived lower-bound model of algorithmic traffic: ~61 B/pixel on"
+    " solid interiors at 4-conn, ~105 B/pixel at 8-conn (double the probes,"
+    " roughly double the interior CAS attempts). NOT modeled: the radius-2"
+    " guard's visited loads on non-red ring-1 neighbors (up to 8x4 B per"
+    " processed pixel, zero on solid interiors where all ring-1 is red)."
+    " L2 caching deflates real DRAM bytes, 32B sectors inflate them."
+    " Compare only against the measured copy peak; ncu is ground truth."
 )
 
 
-def model_bytes(processed, cas_attempts, filled, instrumented, n_dirs=4):
-    """Algorithmic bytes moved, from the kernel's own exactly-once counters."""
+def model_bytes(processed, cas_attempts, filled, instrumented, n_dirs=4,
+                probe_reads=None):
+    """Algorithmic bytes moved, from the kernel's own exactly-once counters.
+
+    probe_reads: exact neighbor-probe count when the kernel's probes are not
+    a fixed n_dirs per pixel (the radius-2 twins); None means
+    processed * n_dirs.
+    """
     per_dequeue = 4 + 3 + 4 + (2 if instrumented else 0)
+    if probe_reads is None:
+        probe_reads = processed * n_dirs
     return (processed * per_dequeue
-            + processed * n_dirs * 3      # neighbor is_red probes x 3B read
+            + probe_reads * 3             # neighbor is_red probes x 3B read
             + cas_attempts * 8            # visited int32 CAS read+write
             + max(filled - 1, 0) * 4)     # enqueue writes (seed set by host)
 
