@@ -288,6 +288,46 @@ not a hard DRAM wall** — the same machine just sustained 2× the modeled
 traffic. The plateau's cause shifts toward level-width/latency/barrier
 structure. `ncu` remains the arbiter, but the evidence moved.
 
+## The per-barrier work experiments (`radius=2`, `probe_layout="warp"`)
+
+Two independent bets on the same question — can a level do more work
+before paying its two `grid.sync` barriers? — attacking opposite regimes:
+
+- **Radius-2** (`multi_block_global8r2_kernel` + bare): ring-1 probed
+  first, unconditionally, unchanged protocol; only pixels whose entire
+  ring-1 is in-bounds blob material also probe the 16 ring-2 cells. The
+  guard is static ("all 8 ring-1 in-bounds and originally red"), which
+  keeps every jump inside true 8-connectivity — fill sets identical to
+  conn8 (tested against the oracle plus a two-stripe 1-px-gap leak
+  detector), depth/levels deterministic. Levels ≈ halve on solid blobs.
+- **Warp-coop** (`multi_block_global8wc_kernel` + bare): each warp takes
+  4 queue entries and assigns each lane one (entry, direction) pair, so
+  all 32 probes for 4 pixels issue in ONE round instead of 8 lockstep
+  loop iterations. Same BFS graph — results bit-identical to conn8
+  (asserted, depth and levels included); only work distribution changes.
+
+Measured before benchmarking (the register question): conn8 104
+regs/thread, r2 112 (cooperative capacity unchanged — 48 @ tpb256), wc
+**96** (capacity at tpb64 rises to 240 vs conn8's 192 — the benchmark
+pins all configs to a common grid so ratios never compare unequal grids).
+
+### Predictions (stated before measuring) and verdicts
+
+| bet | arithmetic | prediction | verdict |
+|---|---|---|---|
+| r2 barriers | levels halve again (sq_8000 4,001→~2,001; disk 1,901→~951) → saves ~2,000 levels × 2 syncs × ~1.4 µs ≈ 6 ms of sq_8000's 100 ms | mild win alone (~6%) — the real lever is width, as in the conn8 experiment | *(pending)* |
+| r2 width | peak frontier doubles again, but utilization is already 81% at 64M px | less headroom than conn8 had: solid scenes 1.05–1.25×, best where util was lowest (mid-size squares) | *(pending)* |
+| r2 traffic | probes 8→24 per interior pixel: model ~105 → ~153 B/px (+46%), CAS attempts ~triple | after the conn8 sector-locality post-mortem: real cost far below modeled (ring-2 spans 5 rows vs ring-1's 3) — traffic does not decide it | *(pending)* |
+| r2 serpentine | interior == 0 (proven in tests) — pure guard cost: ~8 extra visited loads per pixel | 0.85–1.0×, the losing scene | *(pending)* |
+| wc narrow | serpentine spends ~5.5 µs/level at conn8; ~2.8 µs is syncs, most of the rest is 8 serial probe rounds → collapse to 1 | serpentine 1.3–1.6× vs conn8 — the headline bet | *(pending)* |
+| wc wide | same loads in flight, reshuffled; 8× more loop trips + redundant decode | wash to slightly slower on big solid scenes (0.9–1.05×) | *(pending)* |
+
+Both experiments are benchmarked head-to-head against conn4/conn8 in ONE
+interleaved round-robin per scene (`benchmark_neighbors.py`) — the
+dual_blob stage's Finding-3 lesson: sequential A-then-B timing on this
+drifting GPU produces sign-flipping artifacts; only interleaving makes
+the ratios trustworthy.
+
 ## Wavefront renders (`wavefront.py` → `wavefront/`)
 
 The kernel records `depth[x,y]` (when) and `owner[x,y]` (which block), so
@@ -318,8 +358,9 @@ one thing its losing kernel had that the winner doesn't.
 ## Run
 
 ```bash
-# Correctness (81 tests: 4-conn vs the sbs @njit reference, 8-conn vs
-# persistent/'s, plus 4-vs-8 cross-checks).
+# Correctness (133 tests: 4-conn vs the sbs @njit reference, 8-conn vs
+# persistent/'s, 4-vs-8 cross-checks, radius-2 guard/leak/interior tests,
+# warp-coop bit-identity tests).
 uv run pytest src/gpu/single_blob/multi_block/test_correctness.py -v
 
 # Benchmark: measured copy peak, scene suite vs @njit/v2/dual-global with
