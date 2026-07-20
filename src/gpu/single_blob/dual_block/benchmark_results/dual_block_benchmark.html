@@ -131,6 +131,10 @@ th { color: var(--ink-2); font-weight: 600; }
 .dot-o { fill: var(--surface-1); stroke: var(--s6); stroke-width: 2; }
 .pairline { stroke: var(--s6); stroke-width: 1.5; opacity: 0.45; }
 .pairline-db { stroke: var(--muted); stroke-width: 1.5; opacity: 0.5; }
+.dot-o7 { fill: var(--surface-1); stroke: var(--s7); stroke-width: 2; }
+.dot-o8 { fill: var(--surface-1); stroke: var(--s8); stroke-width: 2; }
+.pairline-s7 { stroke: var(--s7); stroke-width: 1.5; opacity: 0.45; }
+.pairline-s8 { stroke: var(--s8); stroke-width: 1.5; opacity: 0.45; }
 .chip-o { background: transparent; border: 2px solid var(--s6);
           box-sizing: border-box; }
 .chain { margin: 4px 0 16px; }
@@ -1570,7 +1574,9 @@ so it costs zero extra bytes. Three mechanisms tested: sequential (two
 launches), streams (two CUDA streams — excluded below, see the stage
 README's Finding 2: concurrent cooperative launches wedge
 nondeterministically on this GPU), and multisource (both seeds in one
-shared queue, one launch).</p>
+shared queue, one launch). Each mechanism also has a verbatim
+8-direction twin — compared against its 4-direction baseline at the end
+of this section.</p>
 
 <div class="tiles"><div class="tile"><div class="tile-v">40 ms</div><div class="tile-l">biggest scene · asymmetric 4000²+800² (16,640,000 px) · 8.7× vs @njit</div></div><div class="tile"><div class="tile-v">2.05× (min 1.59×)</div><div class="tile-l">multisource's best payoff vs sequential · two squares 2800²</div></div><div class="tile"><div class="tile-v">-3.3% to +29.6%</div><div class="tile-l">packing tax vs the published single-blob kernel — straddles zero: unmeasurable, not zero-and-hidden (see Finding 3)</div></div></div>
 
@@ -1674,17 +1680,85 @@ fills BOTH blobs faster than sequential filled the big one alone
 <p class="note"><img src="../../../multi_blob/dual_blob/wavefront/asym384_b8_t32_multisource.gif" alt="Multisource wavefront on an asymmetric blob pair: the small (green) blob finishes early and stays light while the large (blue) blob keeps darkening — one shared clock, not two." style="max-width:340px; border-radius:8px; display:block; margin:10px 0;">One shared clock: the small (green) blob finishes early and stays light while the large (blue) blob keeps darkening — max(tA, tB), not tA + tB. Sequential-replay contrast GIF and the full write-up live in the stage <code>README.md</code>.</p>
 
 <div class="card">
+<h2>4 vs 8 directions — the same two blobs</h2>
+<p class="note">The §1.4 experiment repeated on the labeled two-blob
+kernels: every mechanism has a verbatim 8-direction twin (diagonals
+included, label inheritance untouched), measured in the same interleaved
+round-robin as everything above. Solid dot = 4-conn, hollow = the 8-conn
+twin, one dumbbell per mechanism per scene. Diagonals cut BFS depth to
+the Chebyshev distance (4,001 →
+2,001 levels on
+asymmetric 4000²+800²) and mostly buy time — up to
+1.65× for multisource, at
+two disks r=1400 — though at two squares 2800²
+the multisource twin reads as a wash
+(1.00×) even as its sequential twin
+improves. The headline survives the extra directions: at 8-conn,
+multisource still beats its own 8-conn sequential baseline
+1.30–2.31× (the "8-conn mu/seq" table
+column). One dumbbell points backwards — two disks r=1400, sequential (0.75×): the same scene whose 4-conn numbers already showed this session's worst drift (median vs min mu/seq: 1.05× vs 1.64×), so treat that single reversal with the house median-vs-min caution.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s7)"></i>sequential 4-conn</span><span><i class="chip chip-o" style="border-color:var(--s7)"></i>sequential 8-conn</span><span><i class="chip" style="background:var(--s8)"></i>multisource 4-conn</span><span><i class="chip chip-o" style="border-color:var(--s8)"></i>multisource 8-conn</span></div>
+<svg viewBox="0 0 860 250" role="img" aria-label="4-conn vs 8-conn kernel time per scene, sequential and multisource">
+<line x1="214.0" y1="4" x2="214.0" y2="216" class="grid"/>
+<text x="214.0" y="234" class="tick" text-anchor="middle">1</text>
+<line x1="500.1" y1="4" x2="500.1" y2="216" class="grid"/>
+<text x="500.1" y="234" class="tick" text-anchor="middle">10</text>
+<text x="768" y="234" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="27.0" x2="768" y2="27.0" class="rowline"/>
+<text x="204" y="31.0" class="rowlab" text-anchor="end">two squares 300² (small)</text>
+<line x1="436.0" y1="18.0" x2="380.4" y2="18.0" class="pairline-s7"/>
+<circle cx="436.0" cy="18.0" r="5" class="dot s7" data-tip="two squares 300² (small) — sequential 4-conn: 6.0 ms"/>
+<circle cx="380.4" cy="18.0" r="5" class="dot-o7" data-tip="two squares 300² (small) — sequential 8-conn: 3.8 ms"/>
+<text x="776.0" y="22.0" class="rowval" font-weight="650">1.56×</text>
+<line x1="352.5" y1="36.0" x2="300.9" y2="36.0" class="pairline-s8"/>
+<circle cx="352.5" cy="36.0" r="5" class="dot s8" data-tip="two squares 300² (small) — multisource 4-conn: 3.0 ms, 301 levels"/>
+<circle cx="300.9" cy="36.0" r="5" class="dot-o8" data-tip="two squares 300² (small) — multisource 8-conn: 2.0 ms, 151 levels"/>
+<text x="776.0" y="40.0" class="rowval" font-weight="650">1.52×</text>
+<line x1="214" y1="81.0" x2="768" y2="81.0" class="rowline"/>
+<text x="204" y="85.0" class="rowlab" text-anchor="end">two squares 2800²</text>
+<line x1="735.4" y1="72.0" x2="682.2" y2="72.0" class="pairline-s7"/>
+<circle cx="735.4" cy="72.0" r="5" class="dot s7" data-tip="two squares 2800² — sequential 4-conn: 66 ms"/>
+<circle cx="682.2" cy="72.0" r="5" class="dot-o7" data-tip="two squares 2800² — sequential 8-conn: 43 ms"/>
+<text x="776.0" y="76.0" class="rowval" font-weight="650">1.53×</text>
+<line x1="645.9" y1="90.0" x2="646.1" y2="90.0" class="pairline-s8"/>
+<circle cx="645.9" cy="90.0" r="5" class="dot s8" data-tip="two squares 2800² — multisource 4-conn: 32 ms, 2,801 levels"/>
+<circle cx="646.1" cy="90.0" r="5" class="dot-o8" data-tip="two squares 2800² — multisource 8-conn: 32 ms, 1,401 levels"/>
+<text x="776.0" y="94.0" class="rowval">≈1.00×</text>
+<line x1="214" y1="135.0" x2="768" y2="135.0" class="rowline"/>
+<text x="204" y="139.0" class="rowlab" text-anchor="end">two disks r=1400</text>
+<line x1="667.7" y1="126.0" x2="702.8" y2="126.0" class="pairline-s7"/>
+<circle cx="667.7" cy="126.0" r="5" class="dot s7" data-tip="two disks r=1400 — sequential 4-conn: 39 ms"/>
+<circle cx="702.8" cy="126.0" r="5" class="dot-o7" data-tip="two disks r=1400 — sequential 8-conn: 51 ms"/>
+<text x="776.0" y="130.0" class="rowval">0.75× slower</text>
+<line x1="661.1" y1="144.0" x2="598.9" y2="144.0" class="pairline-s8"/>
+<circle cx="661.1" cy="144.0" r="5" class="dot s8" data-tip="two disks r=1400 — multisource 4-conn: 37 ms, 1,980 levels"/>
+<circle cx="598.9" cy="144.0" r="5" class="dot-o8" data-tip="two disks r=1400 — multisource 8-conn: 22 ms, 1,401 levels"/>
+<text x="776.0" y="148.0" class="rowval" font-weight="650">1.65×</text>
+<line x1="214" y1="189.0" x2="768" y2="189.0" class="rowline"/>
+<text x="204" y="193.0" class="rowlab" text-anchor="end">asymmetric 4000²+800²</text>
+<line x1="703.3" y1="180.0" x2="674.1" y2="180.0" class="pairline-s7"/>
+<circle cx="703.3" cy="180.0" r="5" class="dot s7" data-tip="asymmetric 4000²+800² — sequential 4-conn: 51 ms"/>
+<circle cx="674.1" cy="180.0" r="5" class="dot-o7" data-tip="asymmetric 4000²+800² — sequential 8-conn: 41 ms"/>
+<text x="776.0" y="184.0" class="rowval" font-weight="650">1.26×</text>
+<line x1="672.3" y1="198.0" x2="641.9" y2="198.0" class="pairline-s8"/>
+<circle cx="672.3" cy="198.0" r="5" class="dot s8" data-tip="asymmetric 4000²+800² — multisource 4-conn: 40 ms, 4,001 levels"/>
+<circle cx="641.9" cy="198.0" r="5" class="dot-o8" data-tip="asymmetric 4000²+800² — multisource 8-conn: 31 ms, 2,001 levels"/>
+<text x="776.0" y="202.0" class="rowval" font-weight="650">1.28×</text>
+</svg>
+</div>
+
+<div class="card">
 <h2>All numbers — dual-blob stage</h2>
 <p class="note">The lin-vs-xy entry-format bet (does killing the
 per-pixel integer divide matter?) reads as a wash in the xy/lin column —
 confirmed by an interleaved controlled A/B in the stage README after an
 uncontrolled first pass wrongly read it as a 28% loss (see that README's
-Finding 3 on timing methodology). The 8-connectivity bonus and the
-packing-tax verdict (which straddles zero — unmeasurable, not "no tax")
-are columns here rather than their own charts, matching how this
-project already treats small/inconclusive findings elsewhere.</p>
+Finding 3 on timing methodology). The packing-tax verdict (which
+straddles zero — unmeasurable, not "no tax") is a column here rather
+than its own chart, matching how this project already treats
+small/inconclusive findings elsewhere.</p>
 <details open><summary>Per-scene results table</summary>
-<div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>@njit ms</th><th>seq ms</th><th>seq/2 ms</th><th>multi ms</th><th>multi min</th><th>vs seq</th><th>vs seq (min)</th><th>xy ms</th><th>xy/lin</th><th>pack tax %</th><th>8-conn multi ms</th><th>8 vs 4-conn</th><th>GB/s</th><th>% peak</th></tr><tr><td>two squares 300² (small)</td><td>180,000</td><td>1.6</td><td>6.0</td><td>5.6</td><td>3.0</td><td>3.0</td><td>1.96×</td><td>1.97×</td><td>3.1</td><td>0.99×</td><td>-3.3</td><td>2.0</td><td>1.52×</td><td>2.6</td><td>1.4</td></tr><tr><td>two squares 2800²</td><td>15,680,000</td><td>325</td><td>66</td><td>46</td><td>32</td><td>30</td><td>2.05×</td><td>1.59×</td><td>37</td><td>0.87×</td><td>+29.6</td><td>32</td><td>1.00×</td><td>23.4</td><td>12.7</td></tr><tr><td>two disks r=1400</td><td>12,314,954</td><td>271</td><td>39</td><td>44</td><td>37</td><td>22</td><td>1.05×</td><td>1.64×</td><td>36</td><td>1.02×</td><td>-1.2</td><td>22</td><td>1.65×</td><td>13.1</td><td>7.1</td></tr><tr><td>asymmetric 4000²+800²</td><td>16,640,000</td><td>347</td><td>51</td><td>45</td><td>40</td><td>38</td><td>1.28×</td><td>1.20×</td><td>41</td><td>0.97×</td><td>+16.8</td><td>31</td><td>1.28×</td><td>18.7</td><td>10.1</td></tr></table></div></details>
+<div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>@njit ms</th><th>seq ms</th><th>seq/2 ms</th><th>multi ms</th><th>multi min</th><th>vs seq</th><th>vs seq (min)</th><th>xy ms</th><th>xy/lin</th><th>pack tax %</th><th>8-conn seq ms</th><th>8-conn multi ms</th><th>8 vs 4-conn</th><th>8-conn mu/seq</th><th>GB/s</th><th>% peak</th></tr><tr><td>two squares 300² (small)</td><td>180,000</td><td>1.6</td><td>6.0</td><td>5.6</td><td>3.0</td><td>3.0</td><td>1.96×</td><td>1.97×</td><td>3.1</td><td>0.99×</td><td>-3.3</td><td>3.8</td><td>2.0</td><td>1.52×</td><td>1.90×</td><td>2.6</td><td>1.4</td></tr><tr><td>two squares 2800²</td><td>15,680,000</td><td>325</td><td>66</td><td>46</td><td>32</td><td>30</td><td>2.05×</td><td>1.59×</td><td>37</td><td>0.87×</td><td>+29.6</td><td>43</td><td>32</td><td>1.00×</td><td>1.34×</td><td>23.4</td><td>12.7</td></tr><tr><td>two disks r=1400</td><td>12,314,954</td><td>271</td><td>39</td><td>44</td><td>37</td><td>22</td><td>1.05×</td><td>1.64×</td><td>36</td><td>1.02×</td><td>-1.2</td><td>51</td><td>22</td><td>1.65×</td><td>2.31×</td><td>13.1</td><td>7.1</td></tr><tr><td>asymmetric 4000²+800²</td><td>16,640,000</td><td>347</td><td>51</td><td>45</td><td>40</td><td>38</td><td>1.28×</td><td>1.20×</td><td>41</td><td>0.97×</td><td>+16.8</td><td>41</td><td>31</td><td>1.28×</td><td>1.30×</td><td>18.7</td><td>10.1</td></tr></table></div></details>
 </div>
 
 <div id="tooltip"></div>
