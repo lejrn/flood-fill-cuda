@@ -114,18 +114,48 @@ def _median(values):
     return statistics.median(values)
 
 
-def _run(img, seeds, repeats=GPU_REPEATS, **kw):
-    """Median kernel_ms over repeats; returns (last_result, med_kernel_ms,
-    med_a_ms, med_b_ms, med_overlap)."""
-    ks, aks, bks, ovs = [], [], [], []
-    r = None
-    for _ in range(repeats):
-        r = flood_fill(img, seeds, threads_per_block=TPB, **kw)
-        ks.append(r.kernel_ms)
-        aks.append(r.kernel_a_ms)
-        bks.append(r.kernel_b_ms)
-        ovs.append(r.overlap_ratio)
-    return r, _median(ks), _median(aks), _median(bks), _median(ovs)
+def _run_round_robin(img, seeds, configs, repeats=GPU_REPEATS):
+    """Time every config INTERLEAVED, one round at a time, alternating the
+    within-round order each round.
+
+    Not a stylistic choice — a correctness requirement for the A/B claims.
+    Kernel times on this laptop GPU drift enormously over a session (a
+    single config's own min-to-max spread was measured at 73% of its
+    median), so running 5xA then 5xB systematically penalizes whichever
+    ran later. That artifact alone produced a 'xy is 28% slower' reading
+    that reversed sign under interleaving, and understated the headline
+    sequential-vs-multisource win as 1.30x when it is really ~1.79x.
+
+    configs: {name: kwargs}. Returns {name: (last_result, stats_dict)}
+    where stats_dict has median/min/max/stdev of kernel_ms plus the
+    per-launch medians.
+    """
+    names = list(configs)
+    samples = {n: {"k": [], "a": [], "b": [], "ov": []} for n in names}
+    last = {}
+    for i in range(repeats):
+        order = names if i % 2 == 0 else list(reversed(names))
+        for n in order:
+            r = flood_fill(img, seeds, threads_per_block=TPB, **configs[n])
+            s = samples[n]
+            s["k"].append(r.kernel_ms)
+            s["a"].append(r.kernel_a_ms)
+            s["b"].append(r.kernel_b_ms)
+            s["ov"].append(r.overlap_ratio)
+            last[n] = r
+        gc.collect()
+    out = {}
+    for n in names:
+        k = samples[n]["k"]
+        out[n] = (last[n], {
+            "ms": _median(k),
+            "ms_min": min(k),
+            "ms_max": max(k),
+            "ms_stdev": statistics.stdev(k) if len(k) > 1 else 0.0,
+            "a_ms": _median(samples[n]["a"]),
+            "b_ms": _median(samples[n]["b"]),
+        })
+    return out
 
 
 def bench_scene(name, builder, note, peak_gb_s):
@@ -133,9 +163,24 @@ def bench_scene(name, builder, note, peak_gb_s):
     width, height = img.shape[0], img.shape[1]
     coop = max_blocks(threads_per_block=TPB)
 
-    # -- sequential, full capacity per launch (the baseline)
-    r, seq_ms, seq_a, seq_b, _ = _run(img, seeds, mode="sequential")
+    # Every GPU configuration is timed in ONE interleaved round-robin, so
+    # session-long clock drift hits them all equally (see
+    # _run_round_robin: it is what makes these ratios trustworthy).
+    runs = _run_round_robin(img, seeds, {
+        "seq": {"mode": "sequential"},
+        "seq_half": {"mode": "sequential", "blocks": coop // 2},
+        "multi": {"mode": "multisource"},
+        "multi_xy": {"mode": "multisource", "entry_format": "xy"},
+        "bare": {"mode": "multisource", "bare": True},
+        "bare_xy": {"mode": "multisource", "bare": True,
+                    "entry_format": "xy"},
+        "seq8": {"mode": "sequential", "connectivity": 8},
+        "multi8": {"mode": "multisource", "connectivity": 8},
+    })
+    r, seq = runs["seq"]
+    seq_ms, seq_a, seq_b = seq["ms"], seq["a_ms"], seq["b_ms"]
     ideal_max = max(seq_a, seq_b)
+    filled_ref = r.filled
     row = {
         "scene": name, "note": note, "width": width, "height": height,
         "filled": r.filled, "filled_a": r.filled_a, "filled_b": r.filled_b,
@@ -144,70 +189,52 @@ def bench_scene(name, builder, note, peak_gb_s):
         "seq_blocks": r.blocks,
         "seq_mpx_s": r.filled / seq_ms / 1000,
         "ideal_max_ms": ideal_max,
+        "seq_half_ms": runs["seq_half"][1]["ms"],
+        "seq_half_blocks": coop // 2,
     }
-    filled_ref = r.filled
-    del r
-    gc.collect()
 
-    # -- sequential at half capacity (the streams control)
-    _, seq_half_ms, _, _, _ = _run(img, seeds, mode="sequential",
-                                   blocks=coop // 2)
-    row["seq_half_ms"] = seq_half_ms
-    row["seq_half_blocks"] = coop // 2
-
-    # -- multisource, full capacity (the width bet)
-    r, mu_ms, _, _, _ = _run(img, seeds, mode="multisource")
+    rm, mu = runs["multi"]
+    mu_ms = mu["ms"]
     row.update({
         "multi_ms": mu_ms,
-        "multi_blocks": r.blocks,
-        "levels_multi": r.levels,
-        "peak_frontier": r.launches[0].peak_level,
-        "multi_mpx_s": r.filled / mu_ms / 1000,
+        "multi_ms_min": mu["ms_min"],
+        "multi_ms_max": mu["ms_max"],
+        "multi_ms_stdev": mu["ms_stdev"],
+        "seq_ms_min": seq["ms_min"],
+        "seq_ms_max": seq["ms_max"],
+        "multi_blocks": rm.blocks,
+        "levels_multi": rm.levels,
+        "peak_frontier": rm.launches[0].peak_level,
+        "multi_mpx_s": rm.filled / mu_ms / 1000,
         "speedup_multi_vs_seq": seq_ms / mu_ms,
+        # best-case-vs-best-case: the drift-robust form of the same ratio
+        "speedup_multi_vs_seq_min": seq["ms_min"] / mu["ms_min"],
         "multi_vs_ideal": mu_ms / ideal_max,  # ~1.0 = the max(tA,tB) dream
-        "multi_thread_util_pct": r.launches[0].thread_util_pct,
-        "multi_model_bytes": r.model_bytes,
-        "multi_model_gb_s": r.model_gb_s,
-        "multi_pct_of_peak": 100.0 * r.model_gb_s / peak_gb_s,
+        "multi_thread_util_pct": rm.launches[0].thread_util_pct,
+        "multi_model_bytes": rm.model_bytes,
+        "multi_model_gb_s": rm.model_gb_s,
+        "multi_pct_of_peak": 100.0 * rm.model_gb_s / peak_gb_s,
     })
-    multi_filled = r.filled
-    multi_blocks = r.blocks
-    traces = {"level_sizes_multi": r.launches[0].level_sizes.tolist()}
-    del r
-    gc.collect()
+    multi_filled = rm.filled
+    traces = {"level_sizes_multi": rm.launches[0].level_sizes.tolist()}
 
-    # -- the decode-tax experiment: identical launch, xy entries
-    _, xy_ms, _, _, _ = _run(img, seeds, mode="multisource",
-                             entry_format="xy", blocks=multi_blocks)
-    row["multi_xy_ms"] = xy_ms
-    row["xy_vs_lin"] = mu_ms / xy_ms          # >1 = xy (no div/mod) faster
+    # -- the decode-tax experiment (interleaved with everything above)
+    xy_ms = runs["multi_xy"][1]["ms"]
+    bare_ms = runs["bare"][1]["ms"]
+    bare_xy_ms = runs["bare_xy"][1]["ms"]
+    row.update({
+        "multi_xy_ms": xy_ms,
+        "xy_vs_lin": mu_ms / xy_ms,           # >1 = xy (no div/mod) faster
+        "multi_bare_ms": bare_ms,
+        "multi_overhead_pct": 100.0 * (mu_ms - bare_ms) / bare_ms,
+        "multi_bare_xy_ms": bare_xy_ms,
+        "xy_vs_lin_bare": bare_ms / bare_xy_ms,
+    })
 
-    # -- bare twins pinned to the same grid (observer overhead + the
-    #    purest decode-tax figure)
-    _, bare_ms, _, _, _ = _run(img, seeds, mode="multisource", bare=True,
-                               blocks=multi_blocks)
-    _, bare_xy_ms, _, _, _ = _run(img, seeds, mode="multisource", bare=True,
-                                  entry_format="xy", blocks=multi_blocks)
-    row["multi_bare_ms"] = bare_ms
-    row["multi_overhead_pct"] = 100.0 * (mu_ms - bare_ms) / bare_ms
-    row["multi_bare_xy_ms"] = bare_xy_ms
-    row["xy_vs_lin_bare"] = bare_ms / bare_xy_ms
-
-    # -- packing tax: the published single-blob kernel on blob A alone
-    (ax, ay) = seeds[0]
-    mb_times = []
-    for _ in range(GPU_REPEATS):
-        mb_r = mb.flood_fill(img, ax, ay, threads_per_block=TPB)
-        mb_times.append(mb_r.kernel_ms)
-    mb_a_ms = _median(mb_times)
-    row["mb_a_ms"] = mb_a_ms
-    row["packing_tax_pct"] = 100.0 * (seq_a - mb_a_ms) / mb_a_ms
-    del mb_r
-    gc.collect()
-
-    # -- 8-connectivity: sequential + multisource
-    _, seq8_ms, _, _, _ = _run(img, seeds, mode="sequential", connectivity=8)
-    r8, mu8_ms, _, _, _ = _run(img, seeds, mode="multisource", connectivity=8)
+    # -- 8-connectivity (also interleaved)
+    r8, mu8 = runs["multi8"]
+    mu8_ms = mu8["ms"]
+    seq8_ms = runs["seq8"][1]["ms"]
     row.update({
         "conn8_seq_ms": seq8_ms,
         "conn8_multi_ms": mu8_ms,
@@ -216,7 +243,22 @@ def bench_scene(name, builder, note, peak_gb_s):
         "conn8_speedup_multi_vs_seq": seq8_ms / mu8_ms,
     })
     conn8_filled = r8.filled
-    del r8
+    del r, rm, r8, runs
+    gc.collect()
+
+    # -- packing tax: the published single-blob kernel on blob A alone.
+    #    Not interleavable (different module/signature); reported with the
+    #    caveat that it is a cross-session-shaped comparison.
+    (ax, ay) = seeds[0]
+    mb_times = []
+    mb_r = None
+    for _ in range(GPU_REPEATS):
+        mb_r = mb.flood_fill(img, ax, ay, threads_per_block=TPB)
+        mb_times.append(mb_r.kernel_ms)
+    mb_a_ms = _median(mb_times)
+    row["mb_a_ms"] = mb_a_ms
+    row["packing_tax_pct"] = 100.0 * (seq_a - mb_a_ms) / mb_a_ms
+    del mb_r
     gc.collect()
 
     # -- CPU oracle: both blobs back-to-back (the honest two-blob CPU
@@ -237,9 +279,10 @@ def bench_scene(name, builder, note, peak_gb_s):
 
     check = "[OK]" if ok else "[MISMATCH!]"
     print(f"{name:16s} {row['filled']:>11,d} {njit_ms:9.2f} {seq_ms:8.2f} "
-          f"{seq_half_ms:8.2f} {mu_ms:8.2f} "
-          f"{row['speedup_multi_vs_seq']:6.2f}x {row['multi_vs_ideal']:6.2f} "
-          f"{row['xy_vs_lin']:6.2f}x {check}")
+          f"{row['seq_half_ms']:8.2f} {mu_ms:8.2f} "
+          f"{row['speedup_multi_vs_seq']:6.2f}x "
+          f"{row['speedup_multi_vs_seq_min']:6.2f}x "
+          f"{row['multi_vs_ideal']:6.2f} {row['xy_vs_lin']:6.2f}x {check}")
     return row
 
 
@@ -273,12 +316,18 @@ def main():
     print(f"Cooperative capacity @tpb={TPB}: lin={coop}, xy={coop_xy}")
 
     print(f"\n{'scene':16s} {'filled':>11s} {'njit ms':>9s} {'seq':>8s} "
-          f"{'seq/2':>8s} {'multi':>8s} {'mu/seq':>7s} {'/ideal':>6s} "
-          f"{'xy':>7s}")
+          f"{'seq/2':>8s} {'multi':>8s} {'mu/seq':>7s} {'(min)':>7s} "
+          f"{'/ideal':>6s} {'xy':>7s}")
     rows = [bench_scene(name, builder, note, peak_gb_s)
             for name, builder, note in SCENES]
 
-    print("\nNotes: all GPU times are kernel-only medians. '/ideal' = "
+    print("\nNotes: all GPU times are kernel-only medians over an "
+          "INTERLEAVED round-robin (every config timed once per round, "
+          "order alternating) — this GPU's per-run spread reached 73% of "
+          "the median, so sequential A-then-B timing produced sign-flipping "
+          "artifacts. 'mu/seq' is the median ratio, '(min)' the "
+          "best-vs-best ratio: agreement between them is the signal that a "
+          "difference is real. '/ideal' = "
           "multi_ms / max(seq tA, tB): 1.0 is the perfect multisource "
           "outcome (one shared clock instead of two). 'xy' = lin_ms/xy_ms: "
           ">1 means the div/mod-free entry format is faster. GB/s figures "
