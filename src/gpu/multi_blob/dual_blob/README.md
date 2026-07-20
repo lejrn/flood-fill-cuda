@@ -125,14 +125,79 @@ threshold; process history matters too.
 | packing tax (lin seq-A vs published multi_block) | < 2% | one extra shift+OR per enqueue, one shift+AND per dequeue |
 | label bandwidth cost | **zero** by construction | the label occupies bits the queue entry already moved; `bandwidth.py` is a re-export, unchanged |
 
+## Finding 3: this GPU's timings need interleaved A/B, or they lie
+
+The first benchmark run timed 5×A then 5×B per comparison and reported
+"the xy format is 28% slower." It is not. A single configuration's own
+min-to-max spread on these scenes reaches **73% of its median** (laptop
+GPU, WSL2, thermal/clock drift over a multi-minute session), so whichever
+variant runs later is systematically penalised. Under an interleaved
+round-robin the same comparison came back at 1.03× — a wash — and the
+headline sequential-vs-multisource win, understated as 1.30× by the
+sequential ordering, is really ~1.6–1.8×.
+
+`benchmark.py` therefore times **every configuration once per round, with
+the within-round order reversed each round**, and reports both the median
+ratio and the min-vs-min ratio. When those two agree, the difference is
+real; when they diverge, the honest answer is "below the noise floor."
+
 ## Results
 
-*(pending — filled in by `benchmark.py` in the next commit)*
+RTX 4060 Laptop (24 SMs), tpb=256, cooperative max 48 blocks (identical
+for both entry formats), measured D2D copy peak **185 GB/s**. Times are
+kernel-only medians of an interleaved round-robin.
+
+| scene | px | seq | multi | **mu/seq** | (min-based) | xy/lin | vs @njit | GB/s (%peak) |
+|---|---|---|---|---|---|---|---|---|
+| two_sq_300 (2×90k) | 180k | 5.97 | **3.05** | 1.96× | 1.97× | 0.99× | 0.5× | 2.6 (1.4%) |
+| two_sq_2800 (2×7.8M) | 15.7M | 66.46 | **32.35** | 2.05× | 1.59× | 0.87× | 10.1× | 23.4 (12.7%) |
+| two_disks_r1400 (2×6.2M) | 12.3M | 38.54 | **36.56** | 1.05× | 1.64× | 1.02× | 7.4× | 13.1 (7.1%) |
+| asym_4000_800 (16M+0.6M) | 16.6M | 51.33 | **39.99** | 1.28× | 1.20× | 0.97× | 8.7× | 18.7 (10.1%) |
+
+A dedicated controlled A/B (11 interleaved rounds, `two_sq_2800`) puts the
+headline number on firmer ground than any single row above:
+**seq 55.13 ms vs multi 30.82 ms = 1.79× (median), 1.58× (min-vs-min).**
+
+### Verdicts on the predictions
+
+| bet | predicted | measured | verdict |
+|---|---|---|---|
+| multisource beats sequential | 1.2–1.5× equal pairs | **1.05–2.05×** (median), 1.20–1.97× (min); controlled A/B 1.58–1.79× | ✅ **beaten** — the win is bigger than predicted |
+| asym pair bounded by max(tA,tB) | /ideal ≈ 1.0, speedup ≈ 1.05× | /ideal **0.91**, speedup 1.20–1.28× | ✅ and then some: multisource fills *both* blobs faster than sequential filled the big one alone — wider frontiers help the dominant blob too |
+| streams | no win | serialized (overlap 0.67–1.02) or wedged | ✅ confirmed, and worse than predicted |
+| xy vs lin decode tax | wash ±3% | 0.87–1.02× instrumented, 1.02–1.25× bare, 1.03× controlled | ✅ **wash** — the divide is not the bottleneck |
+| label costs zero bandwidth | 0 B | 0 B by construction | ✅ structural |
+| packing tax < 2% | < 2% | −3.3%, +29.6%, −1.2%, +16.8% | ❌ **unmeasurable** — cross-module, not interleavable; the spread straddles zero, so no tax is demonstrated *or* excluded |
+| instrumentation overhead | small positive | −24% to +4% (negative is impossible) | ❌ noise-dominated at these scene sizes |
+
+### Reading the rest
+
+- **8-connectivity still pays**: multisource conn8 vs conn4 = 1.52×,
+  1.00×, 1.65×, 1.28× — consistent with Chapter 3's width lesson, now
+  compounding with the two-blob width gain.
+- **The CPU wins the small scene** (0.5× — 180k px in 1.6 ms on `@njit`
+  vs 3.05 ms on the GPU). Two 300² blobs cannot fill 12,288 threads;
+  launch and barrier overhead dominate. Reported, not hidden.
+- **Bandwidth share stays low** (1.4–12.7% of the measured peak), so this
+  stage is no more DRAM-bound than Chapter 3 was — occupancy and barrier
+  count remain the levers.
+- **Why multisource wins**: halved barrier count (levels = max, not sum —
+  2,801 instead of 5,602 on the big pair) *and* doubled frontier width per
+  level, which lifts thread utilisation while frontiers are narrow.
 
 ## Wavefront renders
 
-*(pending — `wavefront.py`, next commit: multisource vs sequential-replay
-GIFs of the same asymmetric pair — two clocks, same pixels)*
+| file | what it shows |
+|---|---|
+| `wavefront/asym384_b8_t32_multisource.gif` | the money shot: both waves advance on one clock; the green blob completes early and stays **light** while blue keeps darkening — max(tA,tB) |
+| `wavefront/asym384_b8_t32_sequential.gif` | the same pixels replayed on the sequential clock (blob B's ticks shifted by blob A's level count): green comes out **dark** because it ran last — tA + tB |
+| `wavefront/twosq320_b8_t32_multisource.gif` | equal pair, both waves in lockstep |
+
+Hue encodes the **blob** (blue family / green family), not the owning
+block: with two separate blobs the owner-speckle would only repeat
+Chapter 3's finding and bury this stage's signal, which is *which blob is
+still flooding*. Shading is a single global clock across the whole run,
+which is exactly what makes the two GIFs comparable.
 
 ## Files
 
