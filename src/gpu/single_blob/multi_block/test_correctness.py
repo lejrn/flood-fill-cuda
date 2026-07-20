@@ -334,6 +334,203 @@ def test_rejects_bad_connectivity(conn):
         flood_fill(img, sx, sy, connectivity=conn)
 
 
+# ------------------------------------------------------ radius-2 twins (guarded)
+
+# The guarded radius-2 kernel shares conn8's FILL SET exactly (the guard
+# keeps every ring-2 jump inside true 8-connectivity) but not its
+# depth/levels: BFS on a supergraph advances Chebyshev distance 2 through
+# interior, so assert_matches_reference (which checks depth) is unusable.
+# The guard is static — "all 8 ring-1 in-bounds and originally red" — so
+# depth/levels/interior are still fully deterministic and grid-invariant.
+
+
+def assert_r2_fill_set(img, seed_x, seed_y, **gpu_kwargs):
+    ref_visited, _, _, ref_filled = cpu_flood_fill_8(img, seed_x, seed_y)
+    result = flood_fill(img, seed_x, seed_y, connectivity=8, radius=2,
+                        **gpu_kwargs)
+    np.testing.assert_array_equal(result.visited, ref_visited)
+    assert result.filled == ref_filled
+    filled_mask = result.visited == 1
+    assert (result.img[filled_mask] == BLUE).all()
+    np.testing.assert_array_equal(result.img[~filled_mask], img[~filled_mask])
+    return result
+
+
+@pytest.mark.parametrize("name", SCENES8.keys())
+def test_r2_fill_set_matches_reference(name):
+    """Random scenes are the best available 1-px-gap fuzzer for the guard."""
+    img, sx, sy = SCENES8[name]()
+    assert_r2_fill_set(img, sx, sy)
+
+
+def test_r2_never_leaks_across_gap():
+    """THE guard test: two components at Chebyshev distance 2 (one white
+    row between two red stripes). An unguarded 5x5 neighborhood would jump
+    the gap; the guard must not — every stripe-edge pixel has a non-blob
+    ring-1 neighbor, so no pixel whose ring-2 reaches the far stripe ever
+    fires its second ring."""
+    img = np.full((60, 60, 3), 255, dtype=np.uint8)
+    img[10:20, :] = scenes.RED   # stripe A (seeded)
+    img[21:31, :] = scenes.RED   # stripe B, one white row away
+    result = flood_fill(img, 15, 30, connectivity=8, radius=2)
+    assert result.visited[10:20, :].all()
+    assert result.visited[21:31, :].sum() == 0
+    np.testing.assert_array_equal(result.img[21:31, :], img[21:31, :])
+
+
+def test_r2_serpentine_guard_never_fires():
+    """1-px corridors: no pixel has an all-red ring-1, so interior == 0 and
+    the supergraph degenerates to plain conn8 — fill set AND depth
+    identical. This is the pure-guard-overhead scene of the benchmark."""
+    img, sx, sy = scenes.serpentine_scene(128, 128)
+    r2 = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    r8 = flood_fill(img, sx, sy, connectivity=8)
+    assert r2.interior == 0
+    np.testing.assert_array_equal(r2.visited, r8.visited)
+    np.testing.assert_array_equal(r2.depth, r8.depth)
+    assert r2.levels == r8.levels
+
+
+def test_r2_depth_dominance_and_fewer_levels():
+    """Supergraph BFS: no pixel is reached later than conn8 reaches it, and
+    a solid blob takes strictly fewer levels (~half)."""
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    r2 = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    r8 = flood_fill(img, sx, sy, connectivity=8)
+    reached = r8.visited == 1
+    assert (r2.depth[reached] <= r8.depth[reached]).all()
+    assert r2.levels < r8.levels
+
+
+def test_r2_interior_census_full_red():
+    """The guard is static, so on a full-red image interior == the count of
+    non-border pixels, exactly."""
+    img, sx, sy = scenes.full_red_scene(96, 96)
+    result = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    assert result.interior == 94 * 94
+    assert result.levels < 96  # conn8 would take 96
+
+
+def test_r2_exactly_once_processing():
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    _, _, _, ref_filled = cpu_flood_fill_8(img, sx, sy)
+    result = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    assert result.processed == result.filled == ref_filled
+    assert result.processed_per_block.sum() == result.processed
+    assert result.filled - 1 <= result.cas_attempts <= 24 * result.filled
+    assert 0 <= result.interior <= result.processed
+
+
+@pytest.mark.parametrize("blocks", [1, 3, None])
+@pytest.mark.parametrize("tpb", [64, 512])
+def test_r2_block_count_and_tpb_invariance(blocks, tpb):
+    """Depth/levels/interior are grid-invariant too (static guard), so full
+    determinism across shapes is asserted against a baseline run."""
+    img, sx, sy = scenes.random_scene(256, 256, 0.60, rng_seed=3)
+    a = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    b = flood_fill(img, sx, sy, connectivity=8, radius=2,
+                   threads_per_block=tpb, blocks=blocks)
+    np.testing.assert_array_equal(a.visited, b.visited)
+    np.testing.assert_array_equal(a.depth, b.depth)
+    assert a.levels == b.levels and a.filled == b.filled
+    assert a.interior == b.interior
+
+
+def test_r2_bare_twin_parity():
+    """The bare twin runs the identical supergraph BFS — visited/depth/
+    levels/filled equality against the instrumented run."""
+    img, sx, sy = scenes.random_scene(200, 200, 0.60, rng_seed=9)
+    inst = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    bare = flood_fill(img, sx, sy, connectivity=8, radius=2, bare=True)
+    np.testing.assert_array_equal(inst.visited, bare.visited)
+    np.testing.assert_array_equal(inst.depth, bare.depth)
+    assert inst.levels == bare.levels and inst.filled == bare.filled
+
+
+def test_r2_model_bytes_consistency():
+    """r2's model uses the exact probe count 8*processed + 16*interior."""
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    result = flood_fill(img, sx, sy, connectivity=8, radius=2)
+    expected = bandwidth.model_bytes(
+        result.processed, result.cas_attempts, result.filled,
+        instrumented=True, n_dirs=8,
+        probe_reads=8 * result.processed + 16 * result.interior)
+    assert result.model_bytes == expected
+    assert result.model_gb_s > 0
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"connectivity": 4, "radius": 2},
+    {"connectivity": 8, "radius": 3},
+    {"connectivity": 8, "radius": 0},
+])
+def test_rejects_bad_radius(kwargs):
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="radius"):
+        flood_fill(img, sx, sy, **kwargs)
+
+
+# ------------------------------------------------- warp-cooperative twins
+
+# Same BFS graph as conn8 — only the work distribution changes (4 entries
+# x 8 directions across a warp's 32 lanes), so results must be
+# bit-identical to conn8's and the full reference assertion applies
+# unchanged, depth and levels included.
+
+
+@pytest.mark.parametrize("name", SCENES8.keys())
+def test_wc_matches_cpu_reference(name):
+    img, sx, sy = SCENES8[name]()
+    assert_matches_reference(img, sx, sy, connectivity=8,
+                             probe_layout="warp")
+
+
+def test_wc_equals_conn8_gpu_result():
+    img, sx, sy = scenes.random_scene(200, 200, 0.60, rng_seed=13)
+    wc = flood_fill(img, sx, sy, connectivity=8, probe_layout="warp")
+    r8 = flood_fill(img, sx, sy, connectivity=8)
+    np.testing.assert_array_equal(wc.visited, r8.visited)
+    np.testing.assert_array_equal(wc.depth, r8.depth)
+    assert wc.levels == r8.levels and wc.filled == r8.filled
+
+
+@pytest.mark.parametrize("blocks", [1, 3, None])
+@pytest.mark.parametrize("tpb", [64, 512])
+def test_wc_block_count_and_tpb_invariance(blocks, tpb):
+    """Partial final chunks (rear not a multiple of 4) are exercised by any
+    random scene; odd grids by blocks=3."""
+    img, sx, sy = scenes.random_scene(256, 256, 0.60, rng_seed=3)
+    assert_matches_reference(img, sx, sy, connectivity=8,
+                             probe_layout="warp",
+                             threads_per_block=tpb, blocks=blocks)
+
+
+def test_wc_exactly_once_processing():
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    _, _, _, ref_filled = cpu_flood_fill_8(img, sx, sy)
+    result = flood_fill(img, sx, sy, connectivity=8, probe_layout="warp")
+    assert result.processed == result.filled == ref_filled
+    assert result.processed_per_block.sum() == result.processed
+    assert result.filled - 1 <= result.cas_attempts <= 8 * result.filled
+
+
+def test_wc_bare_twin_matches_reference():
+    img, sx, sy = scenes.random_scene(200, 200, 0.60, rng_seed=9)
+    assert_matches_reference(img, sx, sy, connectivity=8,
+                             probe_layout="warp", bare=True)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"connectivity": 4, "probe_layout": "warp"},
+    {"connectivity": 8, "radius": 2, "probe_layout": "warp"},
+    {"connectivity": 8, "probe_layout": "wide"},
+])
+def test_rejects_bad_probe_layout(kwargs):
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="probe_layout"):
+        flood_fill(img, sx, sy, **kwargs)
+
+
 # ------------------------------------------------------------------ validation
 
 @pytest.mark.parametrize("tpb", [100, 0, 1024, 2048])
