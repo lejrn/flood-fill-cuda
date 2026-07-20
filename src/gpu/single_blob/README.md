@@ -8,13 +8,13 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──► …
-                                     │                                      │                            │
-                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?
-                                     ▼                            one BFS? where do they run?"    what stops it — and is
-                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"
-                                                                  pinned                          global queue × 48 blocks;
-                                                                                                  plateau at 512 threads/SM
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs
+                                     │                                      │                            │                                    │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:
+                                     ▼                            one BFS? where do they run?"    what stops it — and is          who owns each pixel?"
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum
+                                                                                                  plateau at 512 threads/SM      (1.6–1.8×)
 ```
 
 ---
@@ -269,7 +269,81 @@ structure, sharpening what `ncu` must arbitrate.
 3. **Tile-based BFS** for the serpentine — N blocks made the worst case
    worse; only fewer barriers can fix it.
 4. **Multi-blob** (connected-component labeling) — unchanged from
-   Chapter 2's list.
+   Chapter 2's list. *→ became Chapter 4 (the labeling half; discovering
+   the components is still open).*
+
+---
+
+## Chapter 4 — two blobs, N blocks (`../multi_blob/dual_blob/`)
+
+### Inherited problems
+1. Every kernel so far fills **one** blob from **one** seed; a second blob
+   means a second launch, and the clock adds up.
+2. Nothing in the pipeline can say *which* blob a pixel belongs to — the
+   fill color is a hardcoded blue constant.
+3. Chapter 3's plateau is still unattributed, and its levers (barrier
+   count, frontier width, occupancy) are exactly what a second blob
+   perturbs.
+
+### Approaches — what each bets
+| approach | the bet |
+|---|---|
+| **label in the queue entry** | the blob id fits in spare bits of the int32 the queue already moves, so labeling is free; and it need never be *computed* — inherited at enqueue, it cannot mix across a ≥2 px gap |
+| `lin` vs `xy` entry format | `(x·h+y)<<1\|lbl` (pays an integer div/mod to decode) vs `lbl<<26\|x<<13\|y` (shifts only) — is the divide a real cost? |
+| `sequential` | two launches, own queue each. The honest baseline: tA + tB |
+| `streams` | two cooperative grids on two CUDA streams — bets the driver co-schedules them |
+| `multisource` | both seeds in **one** queue, one launch: levels become max(a,b) not a+b, and every level is twice as wide |
+
+### Results (RTX 4060 Laptop, tpb=256, 48 blocks, 185 GB/s measured peak)
+| finding | number |
+|---|---|
+| multisource vs sequential | **1.05–2.05×** (median), 1.20–1.97× (min-vs-min); controlled 11-round A/B on 15.7M px: **1.79× / 1.58×** |
+| asymmetric pair vs the max(tA,tB) "ideal" | **0.91** — both blobs finished faster than sequential finished the big one alone |
+| best absolute | 15.7M px in **32.35 ms**; 10.1× the `@njit` two-blob oracle |
+| `streams` | serialized (overlap 0.67–1.02) when it ran at all — **no win** |
+| `xy` vs `lin` entries | **1.03×** — a wash; the divide was never the bottleneck |
+| labeling bandwidth cost | **0 bytes** (structural) |
+| 8-conn twins, multisource | 1.00–1.65× over 4-conn — Chapter 3's width lesson compounding |
+| small scene (180k px) | **0.5×** — the CPU still wins; two 300² blobs cannot fill 12,288 threads |
+
+### New problems and lessons
+- **A launch-uniform value cannot be read from mutable global memory.**
+  Replacing the hardcoded `rear = 1` with a read of the host-written seed
+  count *deadlocks the GPU*: blocks do not start in lockstep, an early
+  block enqueues (mutating rear) before a late block's initial read, and
+  the two disagree about the level-0 window forever at `grid.sync`. The
+  count must arrive as a kernel parameter — which is retroactively *why*
+  every earlier kernel hardcoded it.
+- **Concurrent cooperative grids are a placement lottery, not a
+  scheduling guarantee.** Fresh-process probes: 48+48 and 80+80 blocks
+  ran, 88+88 wedged permanently, 96+96 co-scheduled once and hung in
+  another session; even an 8+8 pair hung once mid-suite, so process
+  history matters too. `streams` survives as a documented measurement,
+  its tests are opt-in, and the benchmark excludes it.
+- **Timing methodology is a correctness concern, not a nicety.** A
+  single config's min-to-max spread reaches **73% of its median** here,
+  so A-then-B timing invented a "28% slower" result that reversed sign
+  under interleaving — and understated the chapter's headline win as
+  1.30×. Every A/B now runs interleaved with per-round order reversal and
+  reports median *and* min-vs-min; disagreement between them means "below
+  the noise floor." Two of this chapter's own predictions (packing tax,
+  instrumentation overhead) are marked **unmeasurable** on that basis
+  rather than quietly reported.
+- **The wavefront tells the story better than the table.** The same
+  asymmetric pair rendered on the multisource clock (green finishes early,
+  stays light) and replayed on the sequential clock (green runs last,
+  comes out dark) is max(tA,tB) vs tA+tB in two pictures.
+
+### Open problems → Chapter 5 candidates
+1. **Finding the seeds.** This stage is *given* two seeds. Real multi-blob
+   work must discover components itself — connected-component labeling,
+   where label inheritance stops being a rider and becomes the algorithm.
+2. **N blobs.** The `xy` format already carries 6 label bits (64 blobs);
+   the open question is scheduling N waves in one queue when they are
+   *not* disjoint.
+3. **`ncu`**, still the arbiter — now also for "labels are traffic-free."
+4. **Is the cooperative-launch wedge WSL2-specific?** The same probe on
+   native Linux or under MPS would say.
 
 ---
 
