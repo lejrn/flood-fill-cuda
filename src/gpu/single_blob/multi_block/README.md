@@ -58,7 +58,9 @@ stage register pressure capped the *block* (tpb ≤ 512); here it caps the
 *whole grid*. The leaner bare twin fits 768/SM, and at tpb=32 its 576
 blocks are **Ada's hard architectural cap of 24 blocks per SM** — no
 kernel on this GPU can place more; only a register diet gets the
-instrumented kernel near it.
+instrumented kernel near it. The 8-conn twins measure **identical**
+capacity at every tpb — the doubled neighbor loop did not move the
+register wall.
 
 ## Bandwidth instrumentation (`bandwidth.py`)
 
@@ -184,6 +186,108 @@ block between barriers — more blocks only make the barrier costlier.
   between runs. The serpentine's +1.9% on a barrier-dominated scene is the
   cleanest signal that the counters cost roughly nothing.
 
+## The 8-direction experiment (`connectivity=8`)
+
+The thesis (the user's): 8 directions might **slow** the fill (each thread
+probes 8 neighbors — more work and traffic per pixel) or **speed** it
+(each level reaches more pixels — fewer, wider levels: fewer barriers,
+better warp engagement). Twin kernels (`multi_block_global8_kernel` +
+bare), verbatim copies of the 4-conn pair except the offset table and
+`range(8)`; cooperative capacity measured **identical** (the doubled loop
+did not move the register wall). Depth becomes Chebyshev distance —
+square waves instead of diamonds (see the wavefront pair).
+
+### Predictions (stated before measuring) and verdicts
+
+| mechanism | arithmetic | prediction | verdict |
+|---|---|---|---|
+| barriers | levels halve (7,999→4,000 corner square; 2,688→1,901 disk; serpentine ~unchanged) | barrier-heavy scenes wash-or-faster; serpentine slower | **half right** — levels halved exactly as computed, but the speed-up went far beyond "wash" |
+| traffic | model 61 → ~105 B/px (+72%) | plateau-bound big blobs **slower** by tens of % | **WRONG** — they got 1.34–1.37× *faster*. See the post-mortem below |
+| coverage | peak frontier ~doubles → best cell needs ~2× threads | best cell shifts one tpb step up | **confirmed** — square 128×32 → 48×128, disk 128×64 → 48×256 |
+| utilization | wider, fewer levels | thread_util up everywhere | **confirmed** — roughly doubled (e.g. 61.6% → 80.8% at 64M px) |
+
+### Results (median of 5, blocks=None → 48×256, same session)
+
+| scene | conn4 ms | conn8 ms | 8-conn speedup | levels 4→8 | util 4→8 % | conn8 GB/s (% peak) |
+|---|---:|---:|---:|---|---|---:|
+| sq_256 center | 1.2 | 0.9 | 1.42× | 129→65 | 1→2 | 1.2 (0.7%) |
+| sq_1024 center | 5.3 | 3.3 | 1.62× | 513→257 | 4→8 | 4.9 (2.6%) |
+| sq_2000 center | 8.2 | **4.7** | **1.75×** | 1,001→501 | 8→16 | 13.9 (7.4%) |
+| sq_4000 corner | 58.9 | 40.9 | 1.44× | 7,999→4,000 | 16→33 | 24.5 (13.0%) |
+| disk r=950 | 12.7 | 10.2 | 1.24× | 1,344→951 | 17→24 | 16.8 (8.9%) |
+| disk r=1900 | 26.7 | 23.3 | 1.14× | 2,688→1,901 | 34→49 | 30.7 (16.3%) |
+| serpentine_256 | 143.4 | 178.3 | **0.80×** | 32,896→32,641 | ~0 | ~0 |
+| sq_4600 full | 47.6 | 34.7 | 1.37× | 4,601→2,301 | 37→67 | 40.3 (21.3%) |
+| sq_5000 center | 54.5 | 40.7 | 1.34× | 5,001→2,501 | 41→69 | 41.4 (22.0%) |
+| sq_6000 center | 76.4 | 56.2 | 1.36× | 6,001→3,001 | 49→74 | 42.1 (22.3%) |
+| sq_8000 center | 137.8 | **100.3** | 1.37× | 8,001→4,001 | 62→81 | 42.3 (22.4%) |
+
+Fill sets verified identical per scene (all suite scenes are solid/
+corridor — no diagonal-only gaps); only the timeline differs.
+
+### The sweep at 8-conn (Mpx/s, same grid, same session)
+
+**sq_4000_corner, 8-conn** (4-conn best: 318.8 @ 128×32):
+
+| blocks | tpb 32 | tpb 64 | tpb 128 | tpb 256 | tpb 512 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 8.1 | 17.6 | 31.6 | 55.5 | 78.2 |
+| 2 | 16.3 | 30.9 | 59.2 | 100.9 | 132.5 |
+| 4 | 30.9 | 61.6 | 110.4 | 173.4 | 213.8 |
+| 8 | 60.0 | 115.4 | 197.3 | 273.8 | 313.3 |
+| 16 | 112.4 | 205.4 | 307.3 | 365.4 | 368.4 |
+| 24 | - | - | - | - | 365.6* |
+| 32 | 200.6 | 305.2 | 397.9 | 417.6 | - |
+| 48 | 259.0 | 364.6 | **430.7** | 379.0* | - |
+| 96 | 343.6 | 413.2 | 399.5* | - | - |
+| 128 | 388.8 | 429.6 | - | - | - |
+| 192 | 400.5 | 399.3* | - | - | - |
+| 384 | 341.3* | - | - | - | - |
+
+**disk_4001_r1900, 8-conn** (4-conn best: 477.1 @ 128×64):
+
+| blocks | tpb 32 | tpb 64 | tpb 128 | tpb 256 | tpb 512 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 6.5 | 13.5 | 27.4 | 50.7 | 80.3 |
+| 2 | 13.0 | 26.6 | 53.1 | 95.1 | 141.6 |
+| 4 | 27.2 | 53.2 | 103.5 | 172.1 | 233.9 |
+| 8 | 53.7 | 101.2 | 185.6 | 289.9 | 352.4 |
+| 16 | 103.9 | 183.5 | 304.5 | 408.6 | 418.3 |
+| 24 | - | - | - | - | 468.5* |
+| 32 | 187.5 | 297.9 | 414.0 | 460.5 | - |
+| 48 | 253.9 | 372.9 | 470.8 | **503.5*** | - |
+| 96 | 369.4 | 454.5 | 476.5* | - | - |
+| 128 | 413.7 | 452.2 | - | - | - |
+| 192 | 445.8 | 472.5 | - | - | - |
+| 384 | 421.0* | - | - | - | - |
+
+**503.5 Mpx/s (disk, 48×256) is the project's fastest fill to date.** Note
+the grid crossover inside the tables: at 1–16 blocks 8-conn *loses* to
+4-conn cell-for-cell (pure probe cost with nothing to feed) — the
+8-direction bet pays only once the grid is wide enough to eat the wider
+levels.
+
+### Post-mortem on the failed traffic prediction
+
+The model said +72% bytes per pixel; the big blobs sped up anyway, and the
+modeled rate reached **42 GB/s (22% of peak) — double what any 4-conn
+configuration ever sustained on the same hardware.** Two things the model
+cannot see:
+
+1. **Sector locality.** A pixel's 8 neighbors span the same three image
+   rows as its 4 neighbors; the extra probes overwhelmingly land in 32 B
+   sectors the kernel was touching anyway. Logical bytes doubled; DRAM
+   sectors barely moved.
+2. **Width buys latency hiding.** Halving the level count doubles the
+   width of each level, which doubles the memory requests in flight per
+   barrier interval (utilization 62% → 81% at 64M px). More outstanding
+   loads = better-hidden latency = higher achieved bandwidth.
+
+Consequence for the standing plateau question: **the 4-conn plateau was
+not a hard DRAM wall** — the same machine just sustained 2× the modeled
+traffic. The plateau's cause shifts toward level-width/latency/barrier
+structure. `ncu` remains the arbiter, but the evidence moved.
+
 ## Wavefront renders (`wavefront.py` → `wavefront/`)
 
 The kernel records `depth[x,y]` (when) and `owner[x,y]` (which block), so
@@ -195,6 +299,7 @@ because unfilled scene pixels ARE red), **lightness = fill level**
 | artifact | config | what it shows |
 |---|---|---|
 | `square256_b8_t32.gif/.png` | 8×32 | all 8 blocks share the wave; per-block coherence near the seed decays into speckle |
+| `square256_b8_t32_conn8.gif/.png` | 8×32, `connectivity=8` | the same scene as a **square** wave (Chebyshev ball) — the walls arrive in half the levels |
 | `fullred256_b8_t32.gif/.png` | 8×32, corner seed | blocks come online one by one as the frontier outgrows the threads in front of them |
 | `disk512_b8_t64.gif/.png` | 8×64 | the frontier ring sweeping a disk, 8-hue trail behind it |
 | `square256_b48_t256.png` | 48×256 — the benchmark's own config | a ~440 px frontier feeds exactly 2 of 48 blocks; 46 idle at every barrier |
@@ -213,14 +318,16 @@ one thing its losing kernel had that the winner doesn't.
 ## Run
 
 ```bash
-# Correctness (51 tests vs the 4-connectivity @njit CPU reference).
+# Correctness (81 tests: 4-conn vs the sbs @njit reference, 8-conn vs
+# persistent/'s, plus 4-vs-8 cross-checks).
 uv run pytest src/gpu/single_blob/multi_block/test_correctness.py -v
 
-# Benchmark: measured copy peak, scene suite vs @njit/v2/dual-global,
-# blocks x tpb sweep; writes JSON + two CSVs to benchmark_results/.
+# Benchmark: measured copy peak, scene suite vs @njit/v2/dual-global with
+# conn8 head-to-head columns, connectivity-tagged blocks x tpb sweep;
+# writes JSON + two CSVs to benchmark_results/. ~25-35 min.
 uv run python src/gpu/single_blob/multi_block/benchmark.py
 
-# Wavefront GIFs + gradient PNGs (block hues) into wavefront/.
+# Wavefront GIFs + gradient PNGs (block hues; incl. the conn8 square wave).
 uv run python src/gpu/single_blob/multi_block/wavefront.py
 ```
 
@@ -274,6 +381,11 @@ uv run python src/gpu/single_blob/multi_block/wavefront.py
   the typical frontier and every SM is fed, extra blocks add barrier
   arrivals and nothing else, so Mpx/s stops rising (and past ~128 blocks,
   falls).
+- **Manhattan vs Chebyshev distance** — 4-conn BFS depth is |Δx| + |Δy|
+  (waves are diamonds; a corner-seeded W×H image takes W+H−1 levels);
+  8-conn depth is max(|Δx|, |Δy|) (waves are squares; max(W, H) levels —
+  about half). Half the levels = half the `grid.sync` ritual, and each
+  level is roughly twice as wide.
 
 ## Open problems (Chapter 4 candidates)
 

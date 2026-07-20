@@ -236,10 +236,34 @@ the serpentine.
 - **The host-RAM ceiling is now binding.** The GPU dispatches 64M px in
   132 ms and could go far bigger; the laptop cannot hold the arrays.
 
+### The 8-direction experiment (an in-stage bet, v0.7.0)
+The question (the user's): does probing 8 neighbors instead of 4 slow the
+fill (more work per pixel) or speed it (fewer, wider levels)? Twin
+kernels, verbatim except the offset table; same measured cooperative
+capacity; depth becomes Chebyshev (square waves — see the wavefront
+pair). **Verdict: the width bet wins nearly everywhere.** Squares
+1.34–1.75× faster, disks 1.14–1.24×, levels exactly halved, utilization
+doubled, new records (disk 503.5 Mpx/s at 48×256; 64M px in 100.3 ms —
+20× the CPU); the serpentine pays the pure probe tax (0.80×, levels
+32,896→32,641), and at small grids 8-conn loses cell-for-cell — the bet
+pays only once the grid can eat the wider levels. Best sweep cells
+shifted one tpb step up exactly as the coverage rule predicted.
+
+**The failed prediction is the biggest lesson.** The byte model priced
+8-conn at +72% traffic and predicted the plateau-bound blobs would slow;
+instead they sped up while sustaining **2× the modeled bandwidth** (42
+GB/s, 22% of peak). The model counts logical bytes, but the extra probes
+land in 32 B sectors the kernel already touches, and doubled level width
+doubles the loads in flight (better-hidden latency). Consequence,
+correcting this chapter's earlier framing: **the 4-conn plateau was never
+a hard DRAM wall** — its cause shifts toward level-width/latency/barrier
+structure, sharpening what `ncu` must arbitrate.
+
 ### Open problems → Chapter 4 candidates
 1. **`ncu` profiling** — arbitrate the plateau (DRAM sector traffic, L2
-   hit rates, rear-atomic contention); the derived model's attribution gap
-   is now the project's central open question.
+   hit rates, rear-atomic contention); the 8-direction result proved the
+   4-conn plateau was not DRAM-bound, making the attribution question
+   sharper, not moot.
 2. **Register dieting** — the bare twin proves 768 threads/SM fit; a
    slimmer instrumented kernel tests whether residency moves the plateau.
 3. **Tile-based BFS** for the serpentine — N blocks made the worst case
