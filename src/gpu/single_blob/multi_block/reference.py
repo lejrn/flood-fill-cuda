@@ -22,3 +22,13 @@ def load_by_path(name, path):
 
 _reference = load_by_path("_sbs_reference", os.path.join(_SBS, "reference.py"))
 cpu_flood_fill = _reference.cpu_flood_fill
+
+# The 8-connectivity reference lives in persistent/ (same @njit(cache=True)
+# level-synchronous BFS, same (visited, depth, levels, filled) contract,
+# diagonal neighbors included). persistent/ is untracked in git — a
+# pre-existing runtime dependency (single_block_shared/scenes.py already
+# execs persistent/scenes.py); committing persistent/ is the real fix.
+_PERSISTENT = os.path.abspath(os.path.join(_HERE, os.pardir, "persistent"))
+_reference8 = load_by_path("_persistent_reference",
+                           os.path.join(_PERSISTENT, "reference.py"))
+cpu_flood_fill_8 = _reference8.cpu_flood_fill

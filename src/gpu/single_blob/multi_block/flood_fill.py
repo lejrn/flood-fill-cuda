@@ -2,7 +2,13 @@
 
 Public API:
     flood_fill(img, seed_x, seed_y, threads_per_block=256, blocks=None,
-               bare=False) -> MultiFloodFillResult
+               bare=False, connectivity=4) -> MultiFloodFillResult
+
+connectivity=4 explores right/down/left/up (Manhattan-distance waves,
+diamond fronts); connectivity=8 adds the diagonals (Chebyshev waves,
+square fronts — fewer, wider levels for the same blob). The two are
+different algorithms: fills agree only on scenes without diagonal-only
+gaps, and depth/levels always differ.
 
 blocks=None launches the maximum cooperative grid the GPU can host for the
 chosen threads_per_block (queried from the compiled kernel, never hardcoded
@@ -28,12 +34,22 @@ import numpy as np
 from bandwidth import model_bytes as _model_bytes, model_gb_s as _model_gb_s
 from kernels import (
     multi_block_global_kernel, multi_block_global_bare_kernel,
+    multi_block_global8_kernel, multi_block_global8_bare_kernel,
     NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
     ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS,
     BS_PROCESSED, BS_SMID,
 )
 from numba import cuda
+
+# (bare, connectivity) -> kernel. The conn8 kernels are verbatim twins; the
+# 4-conn pair is never touched by the connectivity experiment.
+_KERNELS = {
+    (False, 4): multi_block_global_kernel,
+    (True, 4): multi_block_global_bare_kernel,
+    (False, 8): multi_block_global8_kernel,
+    (True, 8): multi_block_global8_bare_kernel,
+}
 
 # Cap on the recorded per-level trace (1D int32 -> 8 MB max)
 LEVEL_TRACE_CAPACITY = 2 ** 21
@@ -53,6 +69,7 @@ class MultiFloodFillResult:
     threads_per_block: int
     blocks: int            # resolved launch size (None -> cooperative max)
     bare: bool
+    connectivity: int      # 4 (Manhattan waves) or 8 (Chebyshev waves)
     # Work / balance
     processed: int
     cas_attempts: int
@@ -109,25 +126,26 @@ def _tiny_args():
     return d_img, d_visited, d_depth, d_counters, d_queue, d_q
 
 
-def _warmup(bare):
+def _warmup(bare, connectivity=4):
     """JIT-compile (and NVRTC-link) each kernel once, off the clock. The
     instrumented warmup also exercises the tuple-indexed int64 atomic on
     block_stats so any numba regression fails here, not mid-benchmark."""
-    if bare in _warmed:
+    key = (bare, connectivity)
+    if key in _warmed:
         return
     d_img, d_visited, d_depth, d_counters, d_queue, d_q = _tiny_args()
+    kernel_fn = _KERNELS[key]
     if bare:
-        multi_block_global_bare_kernel[1, 32](
-            d_img, d_visited, d_depth, d_queue, d_q, d_counters)
+        kernel_fn[1, 32](d_img, d_visited, d_depth, d_queue, d_q, d_counters)
     else:
         d_owner = cuda.to_device(np.full((8, 8), -1, dtype=np.int16))
         d_stats = cuda.to_device(np.zeros((1, 2), dtype=np.int64))
         d_trace = cuda.device_array(4, dtype=np.int32)
-        multi_block_global_kernel[1, 32](
+        kernel_fn[1, 32](
             d_img, d_visited, d_depth, d_owner, d_queue, d_q, d_counters,
             d_stats, d_trace)
     cuda.synchronize()
-    _warmed.add(bare)
+    _warmed.add(key)
 
 
 def _coop_max_blocks(kernel_fn, tpb):
@@ -138,17 +156,17 @@ def _coop_max_blocks(kernel_fn, tpb):
     return _coop_cache[key]
 
 
-def max_blocks(threads_per_block=256, bare=False):
+def max_blocks(threads_per_block=256, bare=False, connectivity=4):
     """The largest cooperative grid this GPU can host at threads_per_block
-    (what blocks=None resolves to). Compiles the kernel on first call."""
-    _warmup(bare)
-    kernel_fn = (multi_block_global_bare_kernel if bare
-                 else multi_block_global_kernel)
-    return _coop_max_blocks(kernel_fn, threads_per_block)
+    (what blocks=None resolves to). Compiles the kernel on first call.
+    Queried per kernel — the conn8 twins' capacity is never assumed equal
+    to the 4-conn pair's (a register-count difference would change it)."""
+    _warmup(bare, connectivity)
+    return _coop_max_blocks(_KERNELS[(bare, connectivity)], threads_per_block)
 
 
 def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
-               bare=False):
+               bare=False, connectivity=4):
     """Flood-fill the red blob containing (seed_x, seed_y) with N blocks.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
@@ -177,13 +195,14 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
             raise ValueError(f"blocks must be an int or None, got {blocks!r}")
         if blocks < 1:
             raise ValueError(f"blocks must be >= 1, got {blocks}")
+    if connectivity not in (4, 8):
+        raise ValueError(f"connectivity must be 4 or 8, got {connectivity!r}")
 
-    _warmup(bare)
+    _warmup(bare, connectivity)
     device = cuda.get_current_device()
     sm_count = int(device.MULTIPROCESSOR_COUNT)
 
-    kernel_fn = (multi_block_global_bare_kernel if bare
-                 else multi_block_global_kernel)
+    kernel_fn = _KERNELS[(bare, connectivity)]
     coop_max = _coop_max_blocks(kernel_fn, threads_per_block)
     if blocks is None:
         launch_blocks = coop_max
@@ -277,7 +296,8 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     warps = grid_threads // 32
     ats = int(counters[ACTIVE_THREAD_SUM])
     aws = int(counters[ACTIVE_WARP_SUM])
-    mbytes = (_model_bytes(processed, cas_attempts, filled, True)
+    mbytes = (_model_bytes(processed, cas_attempts, filled, True,
+                           n_dirs=connectivity)
               if instrumented else 0)
 
     return MultiFloodFillResult(
@@ -292,6 +312,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
         threads_per_block=threads_per_block,
         blocks=launch_blocks,
         bare=bare,
+        connectivity=connectivity,
         processed=processed,
         cas_attempts=cas_attempts,
         processed_per_block=ppb,
@@ -318,7 +339,8 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
         sm_utilization_pct=100.0 * distinct_sms / sm_count,
         discovery_redundancy=(cas_attempts / max(filled - 1, 1)
                               if instrumented else 0.0),
-        neighbor_check_efficiency_pct=(100.0 * filled / (4 * processed)
+        neighbor_check_efficiency_pct=(100.0 * filled
+                                       / (connectivity * processed)
                                        if instrumented and processed else 0.0),
         model_bytes=mbytes,
         model_gb_s=_model_gb_s(mbytes, kernel_ms),

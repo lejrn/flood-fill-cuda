@@ -16,15 +16,17 @@ import pytest
 
 import bandwidth
 from flood_fill import flood_fill, max_blocks
-from reference import cpu_flood_fill
+from reference import cpu_flood_fill, cpu_flood_fill_8
 import scenes
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 
 
-def assert_matches_reference(img, seed_x, seed_y, **gpu_kwargs):
-    ref_visited, ref_depth, ref_levels, ref_filled = cpu_flood_fill(img, seed_x, seed_y)
-    result = flood_fill(img, seed_x, seed_y, **gpu_kwargs)
+def assert_matches_reference(img, seed_x, seed_y, connectivity=4, **gpu_kwargs):
+    ref = cpu_flood_fill_8 if connectivity == 8 else cpu_flood_fill
+    ref_visited, ref_depth, ref_levels, ref_filled = ref(img, seed_x, seed_y)
+    result = flood_fill(img, seed_x, seed_y, connectivity=connectivity,
+                        **gpu_kwargs)
 
     np.testing.assert_array_equal(result.visited, ref_visited)
     np.testing.assert_array_equal(result.depth, ref_depth)
@@ -233,6 +235,103 @@ def test_model_bytes_consistency():
     assert result.model_gb_s > 0
     assert result.model_gb_s == pytest.approx(
         bandwidth.model_gb_s(expected, result.kernel_ms))
+
+
+# ------------------------------------------------------- 8-connectivity twins
+
+# The 8-conn kernels are different algorithms with different results: depth
+# is Chebyshev distance, and random scenes percolate at ~0.407 instead of
+# the 4-conn threshold — hence their own density bracket (0.30 / 0.60).
+SCENES8 = dict(SCENES)
+SCENES8["random_subcritical"] = lambda: scenes.random_scene(200, 200, 0.30,
+                                                            rng_seed=7)
+SCENES8["random_supercritical"] = lambda: scenes.random_scene(200, 200, 0.60,
+                                                              rng_seed=7)
+
+
+@pytest.mark.parametrize("name", SCENES8.keys())
+def test_matches_cpu_reference_8(name):
+    img, sx, sy = SCENES8[name]()
+    assert_matches_reference(img, sx, sy, connectivity=8)
+
+
+@pytest.mark.parametrize("blocks", [2, None])
+def test_depth_is_chebyshev_distance(blocks):
+    """On a full-red image seeded at the corner, 8-connected BFS depth is
+    the Chebyshev distance max(x, y) — square waves, not diamonds — and a
+    64x64 image fills in 64 levels instead of the 4-conn 127."""
+    img, sx, sy = scenes.full_red_scene(64, 64)
+    result = flood_fill(img, sx, sy, blocks=blocks, connectivity=8)
+    xs, ys = np.meshgrid(np.arange(64), np.arange(64), indexing="ij")
+    np.testing.assert_array_equal(result.depth, np.maximum(xs, ys))
+    assert result.levels == 64
+
+
+@pytest.mark.parametrize("blocks", [1, 3, None])
+@pytest.mark.parametrize("tpb", [64, 512])
+def test_block_count_and_tpb_invariance_8(blocks, tpb):
+    img, sx, sy = scenes.random_scene(256, 256, 0.60, rng_seed=3)
+    assert_matches_reference(img, sx, sy, connectivity=8,
+                             threads_per_block=tpb, blocks=blocks)
+
+
+def test_exactly_once_processing_8():
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    _, _, _, ref_filled = cpu_flood_fill_8(img, sx, sy)
+    result = flood_fill(img, sx, sy, connectivity=8)
+    assert result.processed == result.filled == ref_filled
+    assert result.processed_per_block.sum() == result.processed
+    assert result.filled - 1 <= result.cas_attempts <= 8 * result.filled
+
+
+def test_owner_census_8():
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    result = flood_fill(img, sx, sy, blocks=4, connectivity=8)
+    reached = result.visited == 1
+    census = np.bincount(result.owner[reached].astype(np.int64),
+                         minlength=result.blocks)
+    np.testing.assert_array_equal(census, result.processed_per_block)
+
+
+def test_bare_twin_matches_reference_8():
+    img, sx, sy = scenes.random_scene(200, 200, 0.60, rng_seed=9)
+    assert_matches_reference(img, sx, sy, connectivity=8, bare=True)
+
+
+@pytest.mark.parametrize("name", ["square_64", "disk_101", "serpentine_128"])
+def test_4_vs_8_on_solid_scenes(name):
+    """On scenes without diagonal-only gaps the two connectivities fill the
+    IDENTICAL pixel set — only the timeline differs: 8-conn reaches every
+    pixel at least as early (Chebyshev <= Manhattan) in strictly fewer
+    levels (serpentine: <=, its 1-px corridors only save U-turn corners)."""
+    img, sx, sy = SCENES[name]()
+    r4 = flood_fill(img, sx, sy, connectivity=4)
+    r8 = flood_fill(img, sx, sy, connectivity=8)
+    np.testing.assert_array_equal(r4.visited, r8.visited)
+    assert r4.filled == r8.filled
+    if name == "serpentine_128":
+        assert r8.levels <= r4.levels
+    else:
+        assert r8.levels < r4.levels
+    reached = r4.visited == 1
+    assert (r8.depth[reached] <= r4.depth[reached]).all()
+
+
+def test_model_bytes_consistency_8():
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    result = flood_fill(img, sx, sy, connectivity=8)
+    expected = bandwidth.model_bytes(result.processed, result.cas_attempts,
+                                     result.filled, instrumented=True,
+                                     n_dirs=8)
+    assert result.model_bytes == expected
+    assert result.model_gb_s > 0
+
+
+@pytest.mark.parametrize("conn", [5, 0, "8"])
+def test_rejects_bad_connectivity(conn):
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="connectivity"):
+        flood_fill(img, sx, sy, connectivity=conn)
 
 
 # ------------------------------------------------------------------ validation
