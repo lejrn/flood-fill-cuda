@@ -73,26 +73,32 @@ def _frontier_color(hue):
                     dtype=np.uint8)
 
 
-# (scene builder, blocks, tpb, output stem, upscale, gif?, max frames)
+# (scene builder, blocks, tpb, output stem, upscale, gif?, max frames,
+#  connectivity)
 COMBOS = [
     # 256 grid threads vs a ~440 px peak frontier: all 8 blocks work; the
     # first rings keep per-block coherence, then ownership speckles
     (lambda: scenes.square_scene(256, 256, 220, 220), 8, 32,
-     "square256_b8_t32", 2, True, 96),
+     "square256_b8_t32", 2, True, 96, 4),
+    # the same scene and grid at 8-connectivity: the wave is a SQUARE
+    # (Chebyshev ball), not a diamond, and reaches the walls in roughly
+    # half the levels — the barrier-halving mechanism made visible
+    (lambda: scenes.square_scene(256, 256, 220, 220), 8, 32,
+     "square256_b8_t32_conn8", 2, True, 96, 8),
     # corner seed: the frontier grows 1 -> 256, so the blocks come online
     # one at a time as it outgrows the threads in front of them
     (lambda: scenes.full_red_scene(256, 256), 8, 32,
-     "fullred256_b8_t32", 2, True, 96),
+     "fullred256_b8_t32", 2, True, 96, 4),
     # 512 threads vs rings up to ~1,400 px: all 8 blocks on a disk
     (lambda: scenes.disk_scene(512, 512, 240), 8, 64,
-     "disk512_b8_t64", 1, True, 72),
+     "disk512_b8_t64", 1, True, 72, 4),
     # the benchmark's own config on a small scene: only blocks 0-1 ever
     # appear — 46 of 48 blocks idle at every barrier (honest flip side)
     (lambda: scenes.square_scene(256, 256, 220, 220), 48, 256,
-     "square256_b48_t256", 2, False, 0),
+     "square256_b48_t256", 2, False, 0, 4),
     # 1-pixel frontier: block 0 owns literally every pixel (starvation)
     (lambda: scenes.serpentine_scene(128, 128), 8, 32,
-     "serpentine128_b8_t32", 3, False, 0),
+     "serpentine128_b8_t32", 3, False, 0, 4),
 ]
 
 
@@ -115,9 +121,11 @@ def to_image(arr_xy3, upscale):
     return Image.fromarray(img)
 
 
-def render(builder, blocks, tpb, stem, upscale, make_gif, max_frames):
+def render(builder, blocks, tpb, stem, upscale, make_gif, max_frames,
+           connectivity=4):
     img, sx, sy = builder()
-    r = flood_fill(img, sx, sy, threads_per_block=tpb, blocks=blocks)
+    r = flood_fill(img, sx, sy, threads_per_block=tpb, blocks=blocks,
+                   connectivity=connectivity)
     depth, owner, levels = r.depth, r.owner, r.levels
     luts = {b: _ramp_lut(_block_hue(b)) for b in range(blocks)}
     grad = gradient_colors(depth, owner, levels, luts)
