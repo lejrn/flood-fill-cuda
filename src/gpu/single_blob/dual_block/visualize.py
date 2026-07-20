@@ -58,8 +58,13 @@ SBS_ROWS = SBS["scenes"]
 SBS_SWEEP = SBS["tpb_sweep"]
 MB_ROWS = [r for r in MB["scenes"] if "skipped" not in r]
 MB_SWEEP = [r for r in MB["block_tpb_sweep"] if "skipped" not in r]
+# The sweep grid was extended to run at both connectivities on two scenes;
+# every consumer must pick one explicitly or it draws a tangled mix.
+MB_SWEEP4 = [r for r in MB_SWEEP if r.get("connectivity", 4) == 4]
+MB_SWEEP8 = [r for r in MB_SWEEP if r.get("connectivity", 4) == 8]
 MB_PEAK = MB["measured_peak_gb_s"]
 MB_TPBS = MB["config"]["tpb_sweep"]
+HAS_CONN8 = any(r.get("conn8_kernel_ms") is not None for r in MB_ROWS)
 
 KERNELS = ["split", "global", "dirsplit"]
 # Entity -> color slot, constant across every dual chart: s1 = single-block
@@ -177,6 +182,67 @@ def log_dot_plot(rows, series, aria, row_label):
             parts.append(f'<circle cx="{x_of(v):.1f}" cy="{cy + dy:.1f}" '
                          f'r="5" class="dot {cls}" data-tip="{tip}"/>')
     parts.append("</svg>")
+    return "\n".join(parts)
+
+
+# -------------------------------------------------------- timeline helpers
+def _mini_svg(inner, aria):
+    return (f'<svg viewBox="0 0 120 48" class="tl-mini-svg" role="img" '
+            f'aria-label="{aria}">{inner}</svg>')
+
+
+def _mini_levels(values, cls):
+    """Tiny decimated trace of a level-size pyramid."""
+    xs, ys = decimate(values, max_pts=60)
+    peak = max(ys) if ys else 1
+    n = len(xs)
+    pts = " ".join(f"{4 + i / max(n - 1, 1) * 112:.1f},"
+                   f"{44 - (ys[i] / peak) * 40:.1f}" for i in range(n))
+    return _mini_svg(f'<polyline points="{pts}" class="line {cls}l"/>',
+                     "Level-size trace, decimated")
+
+
+def _mini_scaling(pts, cls):
+    """Tiny scaling curve: value vs blocks (log2 x) — shows the plateau."""
+    blocks = [b for b, _ in pts]
+    bmax = max(blocks)
+    vmax = max(v for _, v in pts) or 1
+    poly = " ".join(f"{4 + math.log2(b) / math.log2(bmax) * 112:.1f},"
+                    f"{44 - (v / vmax) * 40:.1f}" for b, v in pts)
+    return _mini_svg(f'<polyline points="{poly}" class="line {cls}l"/>',
+                     "Scaling curve vs block count")
+
+
+def _mini_pair(v4, v8, cls4, cls8):
+    """Tiny two-bar comparison (bigger = faster: Mpx/s, not ms)."""
+    vmax = max(v4, v8) or 1
+    h4, h8 = (v4 / vmax) * 40, (v8 / vmax) * 40
+    return _mini_svg(
+        f'<rect x="24" y="{44 - h4:.1f}" width="24" height="{h4:.1f}" '
+        f'rx="2" class="seg {cls4}"/>'
+        f'<rect x="66" y="{44 - h8:.1f}" width="24" height="{h8:.1f}" '
+        f'rx="2" class="seg {cls8}"/>',
+        "4-connectivity vs 8-connectivity throughput")
+
+
+def render_timeline(nodes):
+    """nodes: (dot_cls, badge, title, overview, chips, mini_svg_or_None)."""
+    parts = ['<div class="timeline">']
+    for dot, badge, title, overview, chips, mini in nodes:
+        chips_html = "".join(
+            f'<span class="tl-chip"><b>{v}</b> {l}</span>' for v, l in chips)
+        mini_html = f'<div class="tl-mini">{mini}</div>' if mini else ""
+        parts.append(
+            f'<div class="tl-node">'
+            f'<span class="tl-dot" style="--tl: var(--{dot})"></span>'
+            f'<div class="tl-card">'
+            f'<div class="tl-main">'
+            f'<div class="tl-badge">{badge}</div>'
+            f'<div class="tl-title">{title}</div>'
+            f'<p class="tl-overview">{overview}</p>'
+            f'<div class="tl-chips">{chips_html}</div>'
+            f'</div>{mini_html}</div></div>')
+    parts.append('</div>')
     return "\n".join(parts)
 
 
@@ -530,11 +596,21 @@ MB_SWEEP_PANELS = [
 ]
 
 
-def mb_sweep_panels():
-    """Per-scene panels: metric vs blocks (log2 x), one line per tpb."""
+def mb_sweep_panels(connectivity=4):
+    """Per-scene panels: metric vs blocks (log2 x), one line per tpb.
+
+    Sources MB_SWEEP4 or MB_SWEEP8 explicitly — the sweep grid runs at
+    both connectivities on two scenes, so drawing from the unsplit list
+    tangles two different experiments into one line-set. A scene absent
+    at this connectivity (the serpentine has no 8-conn sweep) is skipped.
+    """
+    src = MB_SWEEP4 if connectivity == 4 else MB_SWEEP8
     html = []
-    for sname, metric, title in MB_SWEEP_PANELS:
-        rows = [r for r in MB_SWEEP if r["scene"] == sname]
+    for sname, metric, base_title in MB_SWEEP_PANELS:
+        rows = [r for r in src if r["scene"] == sname]
+        if not rows:
+            continue
+        title = base_title + (" — 8-conn" if connectivity == 8 else "")
         blocks_all = sorted({r["blocks"] for r in rows})
         bmax = blocks_all[-1]
         vmax = max(r[metric] for r in rows) * 1.14
@@ -596,11 +672,14 @@ def mb_sweep_panels():
 
 def mb_bandwidth_chart():
     """Model GB/s per scene against the measured copy peak — the gap IS the
-    finding (or the model's sector-blindness; ncu decides)."""
+    finding (or the model's sector-blindness; ncu decides). Paired bars
+    where the 8-conn twin was also measured: 4-conn solid, 8-conn a
+    lighter step of the same ramp — one entity, two variants."""
     hi = MB_PEAK * 1.04
     n = len(MB_ROWS)
-    bar_h = 14
-    h = n * ROW_H + 34
+    bar_h = 10
+    row_h = 44 if HAS_CONN8 else ROW_H
+    h = n * row_h + 34
     span = W - GUT_L - GUT_R
 
     def x_of(v):
@@ -612,33 +691,110 @@ def mb_bandwidth_chart():
     while tick <= hi:
         x = x_of(tick)
         parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
-                     f'y2="{n * ROW_H}" class="grid"/>')
-        parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                     f'y2="{n * row_h}" class="grid"/>')
+        parts.append(f'<text x="{x:.1f}" y="{n * row_h + 18}" '
                      f'class="tick" text-anchor="middle">{tick:g}</text>')
         tick += 50
     px = x_of(MB_PEAK)
     parts.append(f'<line x1="{px:.1f}" y1="4" x2="{px:.1f}" '
-                 f'y2="{n * ROW_H}" class="satline"/>')
+                 f'y2="{n * row_h}" class="satline"/>')
     parts.append(f'<text x="{px - 6:.1f}" y="14" class="anno" '
                  f'text-anchor="end">measured D2D copy peak '
                  f'{MB_PEAK:.0f} GB/s</text>')
     for i, r in enumerate(MB_ROWS):
-        y = i * ROW_H + (ROW_H - bar_h) / 2
-        cy = i * ROW_H + ROW_H / 2
+        cy = i * row_h + row_h / 2
+        has8 = r.get("conn8_model_gb_s") is not None
         parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
                      f'text-anchor="end">{label(r["scene"])}</text>')
-        v = r["multi_model_gb_s"]
-        bw = max(v / hi * span, 1.5)
-        tip = (f"{label(r['scene'])} — model {v:.1f} GB/s = "
+        v4 = r["multi_model_gb_s"]
+        y4 = (cy - bar_h - 1) if has8 else (cy - bar_h / 2)
+        bw4 = max(v4 / hi * span, 1.5)
+        tip4 = (f"{label(r['scene'])} — 4-conn model {v4:.1f} GB/s = "
                f"{r['multi_pct_of_peak']:.1f}% of the measured peak · "
                f"{r['multi_mpx_s_kernel']:.0f} Mpx/s · lower-bound model")
-        parts.append(f'<rect x="{GUT_L}" y="{y:.1f}" width="{bw:.1f}" '
-                     f'height="{bar_h}" rx="4" class="seg s6" '
-                     f'data-tip="{tip}"/>')
-        note = (f"{v:.1f} GB/s · {r['multi_pct_of_peak']:.1f}%"
-                if v >= 0.05 else "≈0 — barrier-bound")
-        parts.append(f'<text x="{GUT_L + bw + 6:.1f}" y="{cy + 4:.1f}" '
-                     f'class="rowval">{note}</text>')
+        parts.append(f'<rect x="{GUT_L}" y="{y4:.1f}" width="{bw4:.1f}" '
+                     f'height="{bar_h}" rx="3" class="seg s6" '
+                     f'data-tip="{tip4}"/>')
+        note4 = (f"{v4:.1f} GB/s · {r['multi_pct_of_peak']:.1f}%"
+                if v4 >= 0.05 else "≈0 — barrier-bound")
+        parts.append(f'<text x="{GUT_L + bw4 + 6:.1f}" y="{y4 + bar_h - 1:.1f}" '
+                     f'class="rowval">{note4}</text>')
+        if has8:
+            v8 = r["conn8_model_gb_s"]
+            y8 = cy + 1
+            bw8 = max(v8 / hi * span, 1.5)
+            tip8 = (f"{label(r['scene'])} — 8-conn model {v8:.1f} GB/s = "
+                   f"{r['conn8_pct_of_peak']:.1f}% of the measured peak · "
+                   f"{r['conn8_mpx_s']:.0f} Mpx/s · lower-bound model")
+            parts.append(f'<rect x="{GUT_L}" y="{y8:.1f}" width="{bw8:.1f}" '
+                         f'height="{bar_h}" rx="3" class="seg m2" '
+                         f'data-tip="{tip8}"/>')
+            note8 = (f"{v8:.1f} GB/s · {r['conn8_pct_of_peak']:.1f}%"
+                    if v8 >= 0.05 else "≈0 — barrier-bound")
+            parts.append(f'<text x="{GUT_L + bw8 + 6:.1f}" '
+                         f'y="{y8 + bar_h - 1:.1f}" class="rowval">'
+                         f'{note8}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def conn8_chart():
+    """Per-scene 4-conn vs 8-conn kernel time, log axis, dumbbell pairs.
+
+    One entity (the multi-block kernel) at two variants: solid dot = the
+    4-conn baseline, hollow dot = the 8-conn twin, connected so the
+    direction of the gap (and the serpentine's inversion) reads at a
+    glance; the ratio gutter gives the exact number."""
+    rows = [r for r in MB_ROWS if r.get("conn8_kernel_ms") is not None]
+    gut_r = 92
+    vals = [v for r in rows
+            for v in (r["multi_kernel_ms"], r["conn8_kernel_ms"])]
+    lo = 10 ** math.floor(math.log10(min(vals)))
+    hi = max(vals) * 1.3
+    n = len(rows)
+    h = n * ROW_H + 34
+    span = W - GUT_L - gut_r
+
+    def x_of(v):
+        return GUT_L + (math.log10(v) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" aria-label="4-conn vs '
+             f'8-conn kernel time per scene">']
+    tick = lo
+    while tick <= hi:
+        x = x_of(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * ROW_H}" class="grid"/>')
+        if x < W - gut_r - 70:
+            parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                         f'class="tick" text-anchor="middle">{tick:g}</text>')
+        tick *= 10
+    parts.append(f'<text x="{W - gut_r}" y="{n * ROW_H + 18}" class="tick" '
+                 f'text-anchor="end">ms (log)</text>')
+    for i, r in enumerate(rows):
+        cy = i * ROW_H + ROW_H / 2
+        v4, v8 = r["multi_kernel_ms"], r["conn8_kernel_ms"]
+        x4, x8 = x_of(v4), x_of(v8)
+        parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{W - gut_r}" '
+                     f'y2="{cy:.1f}" class="rowline"/>')
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{label(r["scene"])}</text>')
+        parts.append(f'<line x1="{x4:.1f}" y1="{cy:.1f}" x2="{x8:.1f}" '
+                     f'y2="{cy:.1f}" class="pairline"/>')
+        tip4 = (f"{label(r['scene'])} — 4-conn: {fmt_ms(v4)} ms, "
+               f"{fmt_int(r['levels'])} levels")
+        tip8 = (f"{label(r['scene'])} — 8-conn: {fmt_ms(v8)} ms, "
+               f"{fmt_int(r['conn8_levels'])} levels")
+        parts.append(f'<circle cx="{x4:.1f}" cy="{cy:.1f}" r="5" '
+                     f'class="dot s6" data-tip="{tip4}"/>')
+        parts.append(f'<circle cx="{x8:.1f}" cy="{cy:.1f}" r="5" '
+                     f'class="dot-o" data-tip="{tip8}"/>')
+        ratio = r["conn8_vs_conn4"]
+        rtxt = f"{ratio:.2f}×" if ratio >= 1 else f"{ratio:.2f}× slower"
+        weight = ' font-weight="650"' if ratio >= 1 else ""
+        parts.append(f'<text x="{W - gut_r + 8:.1f}" y="{cy + 4:.1f}" '
+                     f'class="rowval"{weight}>{rtxt}</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 
@@ -675,6 +831,36 @@ def mb_table():
                    f'<td colspan="15">skipped — {r["skipped"]}</td></tr>'
                    for r in skipped)
     return f"<table>{head}{''.join(body)}{foot}</table>"
+
+
+def conn8_table():
+    head = ("<tr><th>scene</th><th>filled px</th><th>4-conn ms</th>"
+            "<th>8-conn ms</th><th>bare ms</th><th>ovh %</th>"
+            "<th>vs 4-conn</th><th>levels 4→8</th><th>util % 4→8</th>"
+            "<th>peak frontier</th><th>Mpx/s</th><th>GB/s</th>"
+            "<th>% peak</th></tr>")
+    body = []
+    for r in MB_ROWS:
+        if r.get("conn8_kernel_ms") is None:
+            continue
+        body.append(
+            "<tr>"
+            f"<td>{label(r['scene'])}</td>"
+            f"<td>{fmt_int(r['filled'])}</td>"
+            f"<td>{fmt_ms(r['multi_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['conn8_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['conn8_bare_kernel_ms'])}</td>"
+            f"<td>{r['conn8_overhead_pct']:+.1f}</td>"
+            f"<td>{r['conn8_vs_conn4']:.2f}×</td>"
+            f"<td>{fmt_int(r['levels'])}→{fmt_int(r['conn8_levels'])}</td>"
+            f"<td>{r['multi_thread_util_pct']:.0f}→"
+            f"{r['conn8_thread_util_pct']:.0f}</td>"
+            f"<td>{fmt_int(r['conn8_peak_frontier'])}</td>"
+            f"<td>{r['conn8_mpx_s']:.1f}</td>"
+            f"<td>{r['conn8_model_gb_s']:.1f}</td>"
+            f"<td>{r['conn8_pct_of_peak']:.1f}</td>"
+            "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
 
 
 def sbs_chart():
@@ -769,27 +955,144 @@ tiles_html = "".join(
 # ------------------------------------------------- multi-block stat tiles
 _mb_best_v2 = max(MB_ROWS, key=lambda r: r["multi_speedup_vs_v2"])
 _mb_best_njit = max(MB_ROWS, key=lambda r: r["multi_speedup_vs_njit"])
-_mb_best_cell = max(MB_SWEEP, key=lambda r: r["mpx_s"])
+_mb_best_cell = max(MB_SWEEP4, key=lambda r: r["mpx_s"])  # 4-conn only
+_mb_best_cell8 = max(MB_SWEEP8, key=lambda r: r["mpx_s"]) if MB_SWEEP8 else None
 _mb_peak_pct = max(r["multi_pct_of_peak"] for r in MB_ROWS)
-MB_TILES = [
-    (f"{_mb_best_v2['multi_speedup_vs_v2']:.1f}× vs 1 block",
-     f"the N blocks' best payoff · {label(_mb_best_v2['scene'])} "
-     f"({fmt_int(_mb_best_v2['filled'])} px)"),
-    (f"{_mb_best_njit['multi_speedup_vs_njit']:.1f}× vs @njit",
-     f"{label(_mb_best_njit['scene'])} in "
-     f"{fmt_ms(_mb_best_njit['multi_kernel_ms'])} ms vs "
-     f"{fmt_ms(_mb_best_njit['njit_ms'])} ms on the CPU"),
-    (f"{_mb_best_cell['mpx_s']:.0f} Mpx/s plateau",
-     f"scaling stops at ~8–16 blocks · best cell "
-     f"{_mb_best_cell['blocks']}×{_mb_best_cell['tpb']} "
-     f"({label(_mb_best_cell['scene'])})"),
-    (f"{MB_PEAK:.0f} GB/s measured peak",
-     f"modeled traffic plateaus at ≈{_mb_peak_pct:.0f}% of it — a lower "
-     f"bound; ncu is the arbiter"),
+_mb_conn8_rows = [r for r in MB_ROWS if r.get("conn8_kernel_ms") is not None]
+_best_conn8 = (max(_mb_conn8_rows, key=lambda r: r["conn8_vs_conn4"])
+              if _mb_conn8_rows else None)
+_peak_pct8 = (max(r["conn8_pct_of_peak"] for r in _mb_conn8_rows)
+             if _mb_conn8_rows else None)
+_sq8000 = next((r for r in MB_ROWS if r["scene"] == "sq_8000_center"), None)
+_serp8 = next((r for r in _mb_conn8_rows if r["scene"] == "serpentine_256"),
+              None)
+
+# --------------------------------------------------------- project tiles
+_fastest = max(MB_SWEEP, key=lambda r: r["mpx_s"])  # across both conn's
+_biggest = max(MB_ROWS, key=lambda r: r["filled"])
+if _biggest.get("conn8_kernel_ms") is not None:
+    _big_ms, _big_conn = _biggest["conn8_kernel_ms"], "8-conn"
+else:
+    _big_ms, _big_conn = _biggest["multi_kernel_ms"], "4-conn"
+_big_speedup = _biggest["njit_ms"] / _big_ms
+_cap_threads = max(int(t) * n for t, n in MB["coop_max_by_tpb"].items())
+_cap_blocks = max(MB["coop_max_by_tpb"].values())
+_mb_serp = next(r for r in MB_ROWS if r["scene"] == "serpentine_256")
+
+PROJECT_TILES = [
+    (f"{_fastest['mpx_s']:.0f} Mpx/s",
+     f"fastest fill · {label(_fastest['scene'])} · {_fastest['blocks']}×"
+     f"{_fastest['tpb']} · {_fastest.get('connectivity', 4)}-conn",
+     "blocks × tpb sweep"),
+    (f"{fmt_ms(_big_ms)} ms",
+     f"biggest scene · {label(_biggest['scene'])} "
+     f"({fmt_int(_biggest['filled'])} px, {_big_conn}) · "
+     f"{_big_speedup:.1f}× vs @njit",
+     "N-block scene suite"),
+    (f"{_cap_threads:,} threads",
+     f"cooperative capacity wall · {_cap_blocks} blocks max · ~104 "
+     f"regs/thread caps every grid shape at 512 threads/SM",
+     "N-block capacity table"),
+    (f"{MB_PEAK:.0f} GB/s",
+     f"measured D2D copy peak · model share ≈{_mb_peak_pct:.0f}% (4-conn)"
+     + (f", ≈{_peak_pct8:.0f}% (8-conn)" if _peak_pct8 else "")
+     + " — a lower bound",
+     "bandwidth instrumentation"),
+    (f"{fmt_ms(_mb_serp['njit_ms'])} vs {fmt_ms(_mb_serp['v2_kernel_ms'])} ms",
+     "standing worst case · serpentine 256² · CPU vs the best GPU design "
+     "(single-block v2) — every parallel kernel loses here",
+     "N-block scene suite"),
 ]
-mb_tiles_html = "".join(
+project_tiles_html = "".join(
     f'<div class="tile"><div class="tile-v">{v}</div>'
-    f'<div class="tile-l">{l}</div></div>' for v, l in MB_TILES)
+    f'<div class="tile-l">{l}</div><div class="tile-src">{s}</div></div>'
+    for v, l, s in PROJECT_TILES)
+
+# ------------------------------------------------------------- timeline
+_sbs_sq2000 = next(r for r in SBS_ROWS if r["scene"] == "sq_2000_center")
+_sbs_v1_win = next(r for r in SBS_ROWS if r["scene"] == "sq_4000_corner")
+_sbs_v2_36m = next(r for r in SBS_ROWS if r["scene"] == "sq_6000_center")
+_dual_36m = next(r for r in ROWS if r["scene"] == "sq_6000_center")
+_v2_768_same_sm = _pl[("sq_6000_center", "v2 1x768 (1 SM)")]["kernel_ms"]
+_same_sm_gain_pct = 100.0 * (_v2_768_same_sm / _same - 1)
+_disk_tpb64_pts = sorted(
+    (r["blocks"], r["mpx_s"]) for r in MB_SWEEP4
+    if r["scene"] == "disk_4001_r1900" and r["tpb"] == 64)
+
+TIMELINE = [
+    ("s2", "CPU baselines", "Pure Python and an @njit oracle",
+     "The classic level-synchronous BFS, compiled but sequential — the "
+     "bar every GPU kernel must beat, and the oracle every one must match "
+     "pixel-for-pixel (visited mask, depth map, exactly).",
+     [(f"{fmt_ms(_sq8000['njit_ms']) if _sq8000 else '—'} ms",
+       "@njit CPU @64M px")],
+     None),
+    ("s1", "single_block_shared", "v1 — the shared-memory ring",
+     "One CUDA block, one 8,192-slot ring queue in shared memory: the "
+     "fastest possible frontier access. Correct and fast — until the "
+     "frontier doesn't fit, when an overflow tripwire refuses the run "
+     "rather than silently drop pixels.",
+     [(f"{_sbs_v1_win['speedup_kernel_vs_njit']:.2f}×", "vs @njit @16M px"),
+      ("8,192 slots", "tripwire past W>2048 center-seeded")],
+     None),
+    ("s1", "single_block_shared", "v2 — the spill tier",
+     "A second, global-memory tier absorbs whatever the ring can't hold. "
+     "Safety became structural instead of tripwired — every pixel is "
+     "CAS-claimed once, so total spill is bounded — and the GPU's lead "
+     "over the CPU now grows with blob size instead of capping out.",
+     [(f"{_sbs_v2_36m['speedup_spill_vs_njit']:.2f}×", "vs @njit @36M px")],
+     _mini_levels(_sbs_sq2000.get("level_sizes", []), "s1")),
+    ("s4", "dual_block", "1 block → 2 blocks: three partitionings",
+     "Split (per-block shared rings + cross-seam inboxes), global (one "
+     "shared queue), and dirsplit (partition by discovery direction) all "
+     "run the identical BFS. The plainest design — one shared global "
+     "queue — wins.",
+     [(f"{fmt_ms(_dual_36m['global_kernel_ms'])} ms", "@36M px"),
+      (f"{_dual_36m['global_speedup_vs_v2']:.2f}×", "vs single-block v2")],
+     None),
+    ("s4", "dual_block", "Placement and pinning",
+     "Does it matter WHERE two blocks run? A hand-rolled barrier plus "
+     "%smid self-identification forces two blocks onto the same SM, or "
+     "spreads them — the GPU offers no direct placement control, so this "
+     "is a targeted probe, not a knob.",
+     [(f"{_same_sm_gain_pct:+.0f}%", "same-SM vs 1 full SM"),
+      (f"{_same / _spread:.2f}×", "spread vs same-SM"),
+      (f"{_sync_us:.1f} µs", "per grid.sync")],
+     None),
+    ("s6", "multi_block", "2 blocks → N blocks",
+     "The dual stage's winner — the global-memory queue — generalized to "
+     "any cooperative grid size. Scaling isn't free: registers cap the "
+     "ENTIRE grid at a fixed thread count no matter how it's grouped into "
+     "blocks, and past ~8–16 blocks the payoff plateaus, then declines.",
+     [(f"{_mb_best_v2['multi_speedup_vs_v2']:.2f}×", "vs 1 block"),
+      (f"{_mb_best_cell['blocks']}×{_mb_best_cell['tpb']}", "best cell"),
+      (f"{_cap_blocks} blocks", "hard ceiling")],
+     _mini_scaling(_disk_tpb64_pts, "m3") if _disk_tpb64_pts else None),
+    ("s6", "multi_block", "Bandwidth instrumentation",
+     "The project's first bandwidth metric: a MEASURED device-to-device "
+     "copy peak as the honest ceiling, plus a derived bytes-moved model "
+     "per run — always labeled a lower bound, never a measurement. The "
+     "4-conn plateau read as DRAM-bound... until the next experiment.",
+     [(f"{MB_PEAK:.0f} GB/s", "measured copy peak"),
+      (f"≈{_mb_peak_pct:.0f}%", "of peak at the 4-conn plateau"),
+      ("~61 B/px", "the 4-conn model")],
+     None),
+    ("s6", "multi_block", "8 directions vs 4",
+     "Does probing 8 neighbors instead of 4 slow the fill (more work per "
+     "pixel) or speed it (fewer, wider levels)? Verbatim twin kernels "
+     "settle it: the width bet wins almost everywhere, setting new "
+     "records — and falsifying the previous node's DRAM-wall reading.",
+     [(f"{_best_conn8['conn8_vs_conn4']:.2f}×" if _best_conn8 else "—",
+       "best speedup"),
+      (f"{_mb_best_cell8['mpx_s']:.0f} Mpx/s" if _mb_best_cell8 else "—",
+       "new record"),
+      (f"{_serp8['conn8_vs_conn4']:.2f}×" if _serp8 else "—",
+       "serpentine (slower)")],
+     (_mini_pair(_sq8000["multi_mpx_s_kernel"], _sq8000["conn8_mpx_s"],
+                "s6", "m2")
+      if _sq8000 and _sq8000.get("conn8_mpx_s") else None)),
+]
+timeline_html = render_timeline(TIMELINE)
 
 balance_html, balance_js = balance_panels()
 
@@ -885,6 +1188,37 @@ th, td { text-align: right; padding: 5px 9px; border-bottom: 1px solid var(--gri
          font-variant-numeric: tabular-nums; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--ink-2); font-weight: 600; }
+.tile-src { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.timeline { position: relative; padding-left: 30px; margin: 6px 0 26px; }
+.timeline::before {
+  content: ""; position: absolute; left: 9px; top: 8px; bottom: 8px;
+  width: 2px; background: var(--grid); border-radius: 1px;
+}
+.tl-node { position: relative; margin-bottom: 14px; }
+.tl-dot {
+  position: absolute; left: -27px; top: 16px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--tl, var(--s1));
+  border: 2px solid var(--page); box-shadow: 0 0 0 1px var(--border);
+}
+.tl-card {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 16px;
+  display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+}
+.tl-main { flex: 1 1 340px; min-width: 0; }
+.tl-badge { font-size: 11px; color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.02em; }
+.tl-title { font-size: 13.5px; font-weight: 650; margin: 2px 0 4px; }
+.tl-overview { font-size: 12px; color: var(--ink-2); margin: 0 0 8px; }
+.tl-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tl-chip { border: 1px solid var(--border); border-radius: 6px;
+           padding: 3px 9px; font-size: 12px; color: var(--ink-2); }
+.tl-chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.tl-mini { flex: 0 0 130px; }
+.dot-o { fill: var(--surface-1); stroke: var(--s6); stroke-width: 2; }
+.pairline { stroke: var(--s6); stroke-width: 1.5; opacity: 0.45; }
+.chip-o { background: transparent; border: 2px solid var(--s6);
+          box-sizing: border-box; }
 """
 
 JS = """
@@ -963,20 +1297,83 @@ LEG_MB_SPD = legend([("vs single-block v2", "s1"), ("vs dual global", "s4"),
                      ("vs @njit CPU", "s2")])
 LEG_MB_TPB = legend([(f"tpb {t}", f"m{i + 1}")
                      for i, t in enumerate(MB_TPBS)])
+LEG_CONN8 = ('<div class="legend">'
+             '<span><i class="chip" style="background:var(--s6)"></i>'
+             '4-conn</span>'
+             '<span><i class="chip chip-o"></i>8-conn</span>'
+             '</div>')
+LEG_MB_BW = LEG_CONN8 if HAS_CONN8 else ""
+
+# Conditional zone-3 blocks: only render where the experiment applies.
+_sweep8_pointer = (" The same sweep at 8 directions is charted next."
+                  if MB_SWEEP8 else "")
+_sweep8_card = ""
+if MB_SWEEP8:
+    _sweep8_card = f"""
+<div class="card">
+<h2>The same sweep, 8 directions</h2>
+<p class="note">Identical grid, identical scenes, connectivity=8. Same
+capacity ceilings (registers don't care how many neighbors a thread
+probes) but a higher plateau, and the record cell moves to
+{_mb_best_cell8['blocks']}×{_mb_best_cell8['tpb']} —
+{_mb_best_cell8['mpx_s']:.0f} Mpx/s, the project's fastest fill.</p>
+{LEG_MB_TPB}
+{mb_sweep_panels(8)}
+</div>
+"""
+
+_bw_conn8_note = ""
+if _peak_pct8:
+    _bw_conn8_note = (
+        f" The 8-direction twins (lighter bars) reach ≈{_peak_pct8:.0f}% of "
+        f"peak at LOWER wall-clock time — proof the 4-conn plateau was "
+        f"never a hard DRAM wall; the ceiling's real cause shifts toward "
+        f"occupancy/latency structure, sharpening what ncu must arbitrate.")
+
+_conn8_card = ""
+_conn8_table_block = ""
+if HAS_CONN8:
+    _conn8_card = f"""
+<div class="card">
+<h2>8 directions — the same scenes, twin kernels</h2>
+<p class="note">One entity, two variants: solid dot = the 4-conn
+baseline, hollow dot = the verbatim 8-conn twin, connected so the
+direction of the gap reads at a glance. The width bet wins nearly
+everywhere ({_best_conn8['conn8_vs_conn4']:.2f}× best, at
+{label(_best_conn8['scene'])}) — levels halve, utilization roughly
+doubles — except the serpentine, whose dumbbell points the other way
+({_serp8['conn8_vs_conn4']:.2f}×): pure probe cost with no wider levels
+to pay for it.</p>
+{LEG_CONN8}
+{conn8_chart()}
+</div>
+"""
+    _conn8_table_block = f"""
+<details><summary>8-connectivity per-scene results table</summary>
+<div class="tablewrap">{conn8_table()}</div></details>
+"""
 
 html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flood fill — 1 → 2 → N blocks, benchmarked</title>
+<title>Flood fill — 1 → 2 → N blocks → 8 directions, benchmarked</title>
 <style>{CSS}</style></head>
 <body><div class="viz-root">
-<h1>BFS flood fill — 1 block → 2 blocks → N blocks, benchmarked</h1>
-<div class="sub">{DUAL['device']} · {DUAL['sm_count']} SMs · newest stage
-first: the N-block global-queue kernel (blocks=None → cooperative max),
-then the dual-block partitionings, then the single-block stage ·
-4-connectivity · tpb=256 unless noted · placement observed via %smid</div>
+<h1>BFS flood fill — 1 block → 2 blocks → N blocks → 8 directions,
+benchmarked</h1>
+<div class="sub">{DUAL['device']} · {DUAL['sm_count']} SMs · headline
+tiles, then every experiment on a timeline (oldest → newest), then every
+chart — newest stage first. 4-connectivity throughout except where the
+8-direction twins are charted explicitly · placement observed via %smid</div>
 
-<div class="tiles">{mb_tiles_html}</div>
+<div class="tiles">{project_tiles_html}</div>
+
+<div class="sub" style="margin-top:4px; font-weight:600; color:var(--ink)">
+How we got here — {len(TIMELINE)} experiments, oldest first</div>
+{timeline_html}
+
+<div class="sub" style="margin-top:4px; font-weight:600; color:var(--ink)">
+All charts, newest stage first</div>
 
 <div class="card">
 <h2>N blocks — runtime per scene</h2>
@@ -986,7 +1383,8 @@ cooperative maximum, {MB_ROWS[0]['multi_blocks']} blocks at tpb=256
 (violet). The gap widens with blob size to
 {_mb_best_v2['multi_speedup_vs_v2']:.1f}× vs one block; on the serpentine
 the ordering inverts — more blocks means a costlier barrier and nothing to
-feed. Hover any dot; exact numbers in the table below.</p>
+feed. 4-conn kernels — the 8-direction twins are charted below. Hover any
+dot; exact numbers in the table below.</p>
 {LEG_MB}
 {mb_runtime_chart()}
 </div>
@@ -998,13 +1396,13 @@ against. Right of the parity line the N blocks win; the payoff vs the CPU
 reaches {_mb_best_njit['multi_speedup_vs_njit']:.1f}× at 64M px. Left of
 it: the tiny scene (barrier tax beats 16K pixels) and the serpentine
 (0.0007× vs the CPU — 65,792 grid-wide barriers at ~2 µs each ARE the
-runtime).</p>
+runtime). 4-conn kernels — the 8-direction twins are charted below.</p>
 {LEG_MB_SPD}
 {mb_speedup_chart()}
 </div>
 
 <div class="card">
-<h2>The centerpiece — blocks × threads-per-block sweep</h2>
+<h2>The centerpiece — blocks × threads-per-block sweep (4-conn)</h2>
 <p class="note">Throughput vs block count (log₂ axis), one line per
 threads-per-block; line ends mark each tpb's cooperative-capacity limit
 (registers: ~104/thread cap every configuration at 12,288 total threads =
@@ -1017,28 +1415,28 @@ smallest tpb whose grid still covers the peak frontier in one stride
 pass, with the block count maxed so the same frontier spreads across
 more SMs. The serpentine panel is in kernel ms — no configuration helps
 a shape that starves every block between barriers; it only gets worse as
-the barrier population grows.</p>
+the barrier population grows.{_sweep8_pointer}</p>
 {LEG_MB_TPB}
-{mb_sweep_panels()}
+{mb_sweep_panels(4)}
 </div>
-
+{_sweep8_card}
 <div class="card">
 <h2>Bandwidth — the modeled traffic vs the measured ceiling</h2>
-<p class="note">Violet bars: algorithmic bytes moved (from each run's
-exactly-once counters, ≈61 B/pixel) ÷ kernel time. The dashed line is the
-MEASURED device-to-device copy peak — the honest ceiling, not a spec
-sheet. The plateau tops out at ≈{_mb_peak_pct:.0f}% of it <i>by a
-lower-bound model</i>: 32 B DRAM sectors can inflate the real traffic of
-scattered 3–4 B accesses several-fold, which would put the true figure
-near the ceiling — consistent with bandwidth saturation, but only ncu can
-close that attribution gap.</p>
+<p class="note">Bars: algorithmic bytes moved (from each run's
+exactly-once counters) ÷ kernel time. The dashed line is the MEASURED
+device-to-device copy peak — the honest ceiling, not a spec sheet. The
+4-conn plateau tops out at ≈{_mb_peak_pct:.0f}% of it <i>by a lower-bound
+model</i> (≈61 B/pixel): 32 B DRAM sectors can inflate the real traffic
+of scattered 3–4 B accesses.{_bw_conn8_note}</p>
+{LEG_MB_BW}
 {mb_bandwidth_chart()}
 </div>
-
+{_conn8_card}
 <div class="card">
 <h2>All numbers — N-block stage</h2>
-<details open><summary>Per-scene results table</summary>
+<details open><summary>Per-scene results table (4-conn)</summary>
 <div class="tablewrap">{mb_table()}</div></details>
+{_conn8_table_block}
 </div>
 
 <div class="sub" style="margin-top:26px">Below: the dual-block stage
