@@ -12,7 +12,8 @@ Organized by DOMAIN, not by benchmark session:
                                sweep/bandwidth)
      1.4 4 vs 8 connectivity  (multi_block: the 8-direction twin kernels)
   2. Dual blob                (dual_blob: sequential vs streams vs
-                               multisource, lin vs xy entry format)
+                               multisource, lin vs xy entry format,
+                               4 vs 8 connectivity on both mechanisms)
 
 Every subsection reports its OWN speedup multiplier from its own
 benchmark session; 1.3 also shows those multipliers chained together
@@ -979,12 +980,87 @@ def db_speedup_chart():
     return "\n".join(parts)
 
 
+def db_conn8_chart():
+    """Per-scene 4-conn vs 8-conn kernel time for BOTH mechanisms, log
+    axis. Two dumbbells per row — sequential (s7) above, multisource (s8)
+    below — each with solid dot = the 4-conn baseline, hollow dot = the
+    verbatim 8-conn twin (one entity at two variants, the same convention
+    as the §1.4 dumbbell; the entity color stays with the mechanism).
+    Gutter: each dumbbell's own 4→8 ratio, >1 = the 8-conn twin faster."""
+    rows = DB_ROWS
+    gut_r = 92
+    row_h = ROW_H + 18          # two dumbbells per row need the headroom
+    vals = [v for r in rows for v in (r["seq_ms"], r["conn8_seq_ms"],
+                                      r["multi_ms"], r["conn8_multi_ms"])]
+    lo = 10 ** math.floor(math.log10(min(vals)))
+    hi = max(vals) * 1.3
+    n = len(rows)
+    h = n * row_h + 34
+    span = W - GUT_L - gut_r
+
+    def x_of(v):
+        return GUT_L + (math.log10(v) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" aria-label="4-conn vs '
+             f'8-conn kernel time per scene, sequential and multisource">']
+    tick = lo
+    while tick <= hi:
+        x = x_of(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * row_h}" class="grid"/>')
+        if x < W - gut_r - 70:
+            parts.append(f'<text x="{x:.1f}" y="{n * row_h + 18}" '
+                         f'class="tick" text-anchor="middle">{tick:g}</text>')
+        tick *= 10
+    parts.append(f'<text x="{W - gut_r}" y="{n * row_h + 18}" class="tick" '
+                 f'text-anchor="end">ms (log)</text>')
+    for i, r in enumerate(rows):
+        cy = i * row_h + row_h / 2
+        parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{W - gut_r}" '
+                     f'y2="{cy:.1f}" class="rowline"/>')
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{db_label(r["scene"])}</text>')
+        pairs = ((-9, "s7", "pairline-s7", "dot-o7", "sequential",
+                  r["seq_ms"], r["conn8_seq_ms"], None, None),
+                 (9, "s8", "pairline-s8", "dot-o8", "multisource",
+                  r["multi_ms"], r["conn8_multi_ms"],
+                  r["levels_multi"], r["conn8_levels_multi"]))
+        for dy_off, cls, pl_cls, o_cls, mech, v4, v8, lv4, lv8 in pairs:
+            yy = cy + dy_off
+            x4, x8 = x_of(v4), x_of(v8)
+            parts.append(f'<line x1="{x4:.1f}" y1="{yy:.1f}" x2="{x8:.1f}" '
+                         f'y2="{yy:.1f}" class="{pl_cls}"/>')
+            lvl4 = f", {fmt_int(lv4)} levels" if lv4 else ""
+            lvl8 = f", {fmt_int(lv8)} levels" if lv8 else ""
+            tip4 = (f"{db_label(r['scene'])} — {mech} 4-conn: "
+                    f"{fmt_ms(v4)} ms{lvl4}")
+            tip8 = (f"{db_label(r['scene'])} — {mech} 8-conn: "
+                    f"{fmt_ms(v8)} ms{lvl8}")
+            parts.append(f'<circle cx="{x4:.1f}" cy="{yy:.1f}" r="5" '
+                         f'class="dot {cls}" data-tip="{tip4}"/>')
+            parts.append(f'<circle cx="{x8:.1f}" cy="{yy:.1f}" r="5" '
+                         f'class="{o_cls}" data-tip="{tip8}"/>')
+            ratio = v4 / v8
+            if abs(ratio - 1) < 0.005:
+                rtxt, weight = "≈1.00×", ""
+            elif ratio >= 1:
+                rtxt, weight = f"{ratio:.2f}×", ' font-weight="650"'
+            else:
+                rtxt, weight = f"{ratio:.2f}× slower", ""
+            parts.append(f'<text x="{W - gut_r + 8:.1f}" y="{yy + 4:.1f}" '
+                         f'class="rowval"{weight}>{rtxt}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
 def db_table():
     head = ("<tr><th>scene</th><th>filled px</th><th>@njit ms</th>"
             "<th>seq ms</th><th>seq/2 ms</th><th>multi ms</th>"
             "<th>multi min</th><th>vs seq</th><th>vs seq (min)</th>"
             "<th>xy ms</th><th>xy/lin</th><th>pack tax %</th>"
-            "<th>8-conn multi ms</th><th>8 vs 4-conn</th>"
+            "<th>8-conn seq ms</th><th>8-conn multi ms</th>"
+            "<th>8 vs 4-conn</th><th>8-conn mu/seq</th>"
             "<th>GB/s</th><th>% peak</th></tr>")
     body = []
     for r in DB_ROWS:
@@ -1002,8 +1078,10 @@ def db_table():
             f"<td>{fmt_ms(r['multi_xy_ms'])}</td>"
             f"<td>{r['xy_vs_lin']:.2f}×</td>"
             f"<td>{r['packing_tax_pct']:+.1f}</td>"
+            f"<td>{fmt_ms(r['conn8_seq_ms'])}</td>"
             f"<td>{fmt_ms(r['conn8_multi_ms'])}</td>"
             f"<td>{r['conn8_multi_vs_conn4']:.2f}×</td>"
+            f"<td>{r['conn8_speedup_multi_vs_seq']:.2f}×</td>"
             f"<td>{r['multi_model_gb_s']:.1f}</td>"
             f"<td>{r['multi_pct_of_peak']:.1f}</td>"
             "</tr>")
@@ -1013,6 +1091,23 @@ def db_table():
 if HAS_DUALBLOB:
     _db_biggest = max(DB_ROWS, key=lambda r: r["filled"])
     _db_best_spd = max(DB_ROWS, key=lambda r: r["speedup_multi_vs_seq"])
+    _db8_best = max(DB_ROWS, key=lambda r: r["conn8_multi_vs_conn4"])
+    _db8_wash = min(DB_ROWS, key=lambda r: r["conn8_multi_vs_conn4"])
+    _db8_spd_lo = min(r["conn8_speedup_multi_vs_seq"] for r in DB_ROWS)
+    _db8_spd_hi = max(r["conn8_speedup_multi_vs_seq"] for r in DB_ROWS)
+    _db8_lvl = max(DB_ROWS, key=lambda r: r["levels_multi"])
+    _db8_seq_back = min(DB_ROWS, key=lambda r: r["seq_ms"] / r["conn8_seq_ms"])
+    _db8_back_ratio = _db8_seq_back["seq_ms"] / _db8_seq_back["conn8_seq_ms"]
+    _db8_back_note = ""
+    if _db8_back_ratio < 0.9:
+        _db8_back_note = (
+            f" One dumbbell points backwards — "
+            f"{db_label(_db8_seq_back['scene'])}, sequential "
+            f"({_db8_back_ratio:.2f}×): the same scene whose 4-conn numbers "
+            f"already showed this session's worst drift (median vs min "
+            f"mu/seq: {_db8_seq_back['speedup_multi_vs_seq']:.2f}× vs "
+            f"{_db8_seq_back['speedup_multi_vs_seq_min']:.2f}×), so treat "
+            f"that single reversal with the house median-vs-min caution.")
     _db_tax_lo = min(r["packing_tax_pct"] for r in DB_ROWS)
     _db_tax_hi = max(r["packing_tax_pct"] for r in DB_ROWS)
     DB_TILES = [
@@ -1301,6 +1396,10 @@ th { color: var(--ink-2); font-weight: 600; }
 .dot-o { fill: var(--surface-1); stroke: var(--s6); stroke-width: 2; }
 .pairline { stroke: var(--s6); stroke-width: 1.5; opacity: 0.45; }
 .pairline-db { stroke: var(--muted); stroke-width: 1.5; opacity: 0.5; }
+.dot-o7 { fill: var(--surface-1); stroke: var(--s7); stroke-width: 2; }
+.dot-o8 { fill: var(--surface-1); stroke: var(--s8); stroke-width: 2; }
+.pairline-s7 { stroke: var(--s7); stroke-width: 1.5; opacity: 0.45; }
+.pairline-s8 { stroke: var(--s8); stroke-width: 1.5; opacity: 0.45; }
 .chip-o { background: transparent; border: 2px solid var(--s6);
           box-sizing: border-box; }
 .chain { margin: 4px 0 16px; }
@@ -1436,6 +1535,16 @@ LEG_MB_BW = LEG_CONN8 if HAS_CONN8 else ""
 LEG_MB_BW_4 = legend([("4-conn model GB/s", "s6")])
 LEG_DB = legend([("@njit CPU (2 blobs)", "s2"), ("sequential", "s7"),
                  ("multisource", "s8")])
+LEG_DB_CONN8 = ('<div class="legend">'
+                '<span><i class="chip" style="background:var(--s7)"></i>'
+                'sequential 4-conn</span>'
+                '<span><i class="chip chip-o" '
+                'style="border-color:var(--s7)"></i>sequential 8-conn</span>'
+                '<span><i class="chip" style="background:var(--s8)"></i>'
+                'multisource 4-conn</span>'
+                '<span><i class="chip chip-o" '
+                'style="border-color:var(--s8)"></i>multisource 8-conn</span>'
+                '</div>')
 
 # Conditional zone-3 blocks: only render where the experiment applies.
 _sweep8_pointer = (" The same sweep at 8 directions is charted next."
@@ -1508,7 +1617,9 @@ so it costs zero extra bytes. Three mechanisms tested: sequential (two
 launches), streams (two CUDA streams — excluded below, see the stage
 README's Finding 2: concurrent cooperative launches wedge
 nondeterministically on this GPU), and multisource (both seeds in one
-shared queue, one launch).</p>
+shared queue, one launch). Each mechanism also has a verbatim
+8-direction twin — compared against its 4-direction baseline at the end
+of this section.</p>
 
 <div class="tiles">{db_tiles_html}</div>
 
@@ -1544,15 +1655,37 @@ fills BOTH blobs faster than sequential filled the big one alone
 {_db_wavefront_note}
 
 <div class="card">
+<h2>4 vs 8 directions — the same two blobs</h2>
+<p class="note">The §1.4 experiment repeated on the labeled two-blob
+kernels: every mechanism has a verbatim 8-direction twin (diagonals
+included, label inheritance untouched), measured in the same interleaved
+round-robin as everything above. Solid dot = 4-conn, hollow = the 8-conn
+twin, one dumbbell per mechanism per scene. Diagonals cut BFS depth to
+the Chebyshev distance ({fmt_int(_db8_lvl['levels_multi'])} →
+{fmt_int(_db8_lvl['conn8_levels_multi'])} levels on
+{db_label(_db8_lvl['scene'])}) and mostly buy time — up to
+{_db8_best['conn8_multi_vs_conn4']:.2f}× for multisource, at
+{db_label(_db8_best['scene'])} — though at {db_label(_db8_wash['scene'])}
+the multisource twin reads as a wash
+({_db8_wash['conn8_multi_vs_conn4']:.2f}×) even as its sequential twin
+improves. The headline survives the extra directions: at 8-conn,
+multisource still beats its own 8-conn sequential baseline
+{_db8_spd_lo:.2f}–{_db8_spd_hi:.2f}× (the "8-conn mu/seq" table
+column).{_db8_back_note}</p>
+{LEG_DB_CONN8}
+{db_conn8_chart()}
+</div>
+
+<div class="card">
 <h2>All numbers — dual-blob stage</h2>
 <p class="note">The lin-vs-xy entry-format bet (does killing the
 per-pixel integer divide matter?) reads as a wash in the xy/lin column —
 confirmed by an interleaved controlled A/B in the stage README after an
 uncontrolled first pass wrongly read it as a 28% loss (see that README's
-Finding 3 on timing methodology). The 8-connectivity bonus and the
-packing-tax verdict (which straddles zero — unmeasurable, not "no tax")
-are columns here rather than their own charts, matching how this
-project already treats small/inconclusive findings elsewhere.</p>
+Finding 3 on timing methodology). The packing-tax verdict (which
+straddles zero — unmeasurable, not "no tax") is a column here rather
+than its own chart, matching how this project already treats
+small/inconclusive findings elsewhere.</p>
 <details open><summary>Per-scene results table</summary>
 <div class="tablewrap">{db_table()}</div></details>
 </div>
