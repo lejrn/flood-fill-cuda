@@ -185,6 +185,49 @@ headline number on firmer ground than any single row above:
   2,801 instead of 5,602 on the big pair) *and* doubled frontier width per
   level, which lifts thread utilisation while frontiers are narrow.
 
+## The radius-2 experiment (ported from multi_block)
+
+multi_block's guarded ring-2 twins, with labels riding along: ring-1
+probed first, unconditionally; only pixels whose entire ring-1 is
+in-bounds blob material also probe the 16 ring-2 cells, and a ring-2
+claim inherits the dequeuer's label — correct because the guard keeps
+every jump inside the dequeuer's own 8-connected component (asserted by
+a hand-built 1-px-gap label-isolation test, tighter than the scene
+builders' ≥2 px contract). lin family only; `benchmark_radius2.py` times
+{seq8, multi8, seq8r2, multi8r2} in one interleaved round-robin per
+scene at one pinned grid.
+
+### Predictions (written before the benchmark ran, with multi_block's verdict as prior)
+
+| bet | arithmetic | prediction | verdict |
+|---|---|---|---|
+| multi8r2 vs multi8 | these scenes are 12–16M px solid pairs; multi_block measured 0.72–0.76× at 11–16M px and worse at 36M+ | **loses**, 0.70–0.90× (the 300² pair closest to a wash) | **CONFIRMED** — 0.77–0.93× median, mins agree; the 2800² pair read 0.38× median / 0.59× min (the session's noisiest row, but a loss in both forms) |
+| seq8r2 vs seq8 | identical per-blob work, two launches | the same loss band | **direction confirmed, magnitude unresolved** — medians 0.68–1.07×, mins 0.48–0.90×; median and min disagree on 3 of 4 scenes. Two-launch timing is the drift-noisiest measurement here; read it as loss-to-wash |
+| multisource win at r2 | both mechanisms pay the same ring-2 tax | mu/seq survives roughly unchanged (~1.3–1.9× at 8-conn) — the two experiments are orthogonal | **mostly CONFIRMED** — 2.10× / 1.89× / 1.32× (conn8: 1.93 / 1.68 / 1.83). Exception: the 2800² pair's median says 0.74× while its min says 1.19× — a sign flip between the two forms, the textbook Finding-3 drift signature; that cell is inconclusive |
+| interior | solid pairs, blobs never touch the border | ≈100% of filled, minus the two 1-px perimeters | **CONFIRMED** — 98.7–99.9% |
+
+### Results (median of 5, all configs pinned to 48×256, one session)
+
+| scene | seq8 ms | multi8 ms | seq8r2 ms | multi8r2 ms | r2 multi (min) | mu/seq 8→r2 | levels 8→r2 | int % |
+|---|---:|---:|---:|---:|---|---|---|---:|
+| two squares 300² | 3.9 | 2.0 | 4.6 | 2.2 | 0.93× (0.90) | 1.93→2.10 | 151→76 | 98.7 |
+| two squares 2800² | 52.5 | 27.5 | 54.0 | 73.0 | 0.38× (0.59)* | 1.91→0.74* | 1,401→701 | 99.9 |
+| two disks r=1400 | 49.3 | 29.4 | 72.6 | 38.3 | 0.77× (0.71) | 1.68→1.89 | 1,401→701 | 99.8 |
+| asym 4000²+800² | 68.0 | 37.2 | 63.5 | 48.2 | 0.77× (0.64) | 1.83→1.32 | 2,001→1,001 | 99.9 |
+
+\* the 2800² row is the drift casualty of the session (its mu/seq median
+and min disagree in *sign*); its loss verdict holds in both forms, its
+magnitude does not. Fill sets cross-checked against the 8-conn merged
+oracle on every scene, every config.
+
+The stage-level verdict matches multi_block's: **the guarded ring-2 bet
+is correct, deterministic, label-safe — and slower.** Levels halve
+exactly (the wavefront would show a double-speed wave) but the ~3× probe
+bill lands on kernels whose lanes were already fed; two blobs in one
+queue only widens levels further, which is more of what r2 doesn't need.
+The orthogonality claim held where the data is clean: multisource keeps
+its ~1.3–2× win over sequential whether or not both pay the ring-2 tax.
+
 ## Wavefront renders
 
 | file | what it shows |
@@ -203,13 +246,14 @@ which is exactly what makes the two GIFs comparable.
 
 | file | role |
 |---|---|
-| `kernels.py` | 8 verbatim-twin kernels: {lin, xy} × {instrumented, bare} × {4-conn, 8-conn} |
+| `kernels.py` | 10 verbatim-twin kernels: {lin, xy} × {instrumented, bare} × {4-conn, 8-conn}, + the guarded radius-2 pair (lin, 8-conn only) |
 | `flood_fill.py` | `flood_fill(img, seeds, mode=..., entry_format=...)` → `DualBlobResult` (+ per-launch `LaunchStats`) |
 | `scenes.py` | two-blob builders: `two_squares_scene`, `two_disks_scene`, `asym_squares_scene`, `two_pixels_scene` (all `(img, seeds)`, gap ≥ 2 enforced) |
 | `reference.py` | single-seed oracles re-exported + `cpu_flood_fill_two` merged oracle (asserts the blobs are truly disjoint) |
 | `bandwidth.py` | re-export of multi_block's model — identical because labeling moves zero extra bytes |
-| `test_correctness.py` | ~60 tests: every mode × format × connectivity vs the merged oracle, exact colors, mode equivalence, accounting, validation |
+| `test_correctness.py` | 75 tests: every mode × format × connectivity vs the merged oracle, exact colors, mode equivalence, accounting, radius-2 guard/label-isolation, validation |
 | `benchmark.py` | the modes + decode-tax head-to-head |
+| `benchmark_radius2.py` | radius-2 vs conn8, both mechanisms, interleaved |
 | `wavefront.py` | blob-hued timeline GIFs/PNGs |
 
 ## Run
@@ -217,6 +261,7 @@ which is exactly what makes the two GIFs comparable.
 ```
 uv run pytest src/gpu/multi_blob/dual_blob/test_correctness.py -v
 uv run python src/gpu/multi_blob/dual_blob/benchmark.py
+uv run python src/gpu/multi_blob/dual_blob/benchmark_radius2.py
 uv run python src/gpu/multi_blob/dual_blob/wavefront.py
 
 # streams-mode tests are opt-in — they can hang the GPU (see Finding 2)
