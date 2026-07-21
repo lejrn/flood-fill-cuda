@@ -157,13 +157,14 @@ th { color: var(--ink-2); font-weight: 600; }
 2 blobs, benchmarked</h1>
 <div class="sub">NVIDIA GeForce RTX 4060 Laptop GPU  · 24 SMs · organized by
 domain: single blob (§1.1 one block → §1.2 two blocks → §1.3 N blocks →
-§1.4 4-vs-8 connectivity), then dual blob (§2). Every subsection reports
+§1.4 4-vs-8 connectivity → §1.5 per-barrier work experiments), then dual
+blob (§2). Every subsection reports
 its own speedup from its own benchmark session; §1.3 chains them into one
 multiplier from single block to N blocks. 4-connectivity throughout
 except where 8-direction twins are charted explicitly · placement
 observed via %smid</div>
 
-<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest fill · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div></div>
+<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div></div>
 
 <h2 class="domain-h" style="margin-top:8px">1. Single blob</h2>
 
@@ -1566,6 +1567,159 @@ variants). The 8-direction twins (lighter bars) reach ≈22% of peak at LOWER wa
 
 </div>
 
+<h3 class="subsection-h">1.5 More work per barrier — radius-2 and
+warp-coop</h3>
+
+<div class="card">
+<h2>Two bets on the same question</h2>
+<p class="note">Can a BFS level do more before paying its two grid.sync
+barriers? <b>Radius-2</b> probes MORE: a guarded second ring (jumps only
+where all 8 ring-1 neighbors are blob, keeping the fill exactly
+8-connected) — levels halve, ~3× the probes. <b>Warp-coop</b> probes
+SMARTER: 4 queue entries × 8 directions spread across a warp's 32 lanes
+— identical work, one probe round per chunk instead of 8, results
+bit-identical to the baseline. One interleaved round-robin, one pinned
+grid, and the verdicts point in opposite directions: radius-2 LOSES
+every scene (0.50–0.90×, worst at the biggest — by
+64M px the lanes were already 81% fed, so tripled probe traffic is pure
+bill), warp-coop WINS every scene
+(1.12–1.53×). The serpentine tells both stories at once: radius-2's guard never fires there (interior = 0, 0.90× — ironically its best scene: pure guard overhead beats paying for jumps), while warp-coop hits 1.45× and takes the scene below its own 4-conn baseline (124 vs 145 ms) for the first time in the project. Predictions-vs-verdicts
+table and post-mortem in the multi_block README.</p>
+<div class="chain">
+<div class="chain-title">square 8000² · center (64,000,000 px), one session — the fastest whole-scene rate measured: 723 Mpx/s</div>
+<div class="chain-row">
+<div class="chain-step"><div class="chain-lbl">CPU (@njit, 8-conn)</div><div class="chain-val">4,312 ms</div></div>
+<div class="chain-op">×43.29</div>
+<div class="chain-step"><div class="chain-lbl">8-conn N blocks</div><div class="chain-val">100 ms</div></div>
+<div class="chain-op">×1.13</div>
+<div class="chain-step"><div class="chain-lbl">warp-coop</div><div class="chain-val">88 ms</div></div>
+<div class="chain-op">=</div><div class="chain-total" style="background:var(--s6)">48.72×</div>
+</div>
+<div class="chain-note">The CPU baseline here is the 8-connectivity oracle (a different, slower baseline than §1.3's 4-conn @njit), and every step is measured within the neighbors benchmark's own session — this chain is not multiplied into §1.3's.</div>
+</div>
+</div>
+
+<div class="card">
+<h2>Radius-2 vs the 8-conn baseline</h2>
+<p class="note">Solid dot = 8-conn baseline, hollow = the guarded ring-2
+twin. The mechanism worked perfectly — levels halve to the pixel,
+interior ≈100%, fill sets identical — and the economics still lose:
+the width lever that powered §1.4's win was already exhausted, so the
+extra probes and ~3× CAS attempts buy nothing. Its modeled bandwidth is
+a project record that loses wall-clock: work-efficiency loss, not
+machine inefficiency. Hover a hollow dot for the best-vs-best ratio
+(agreement with the median = the drift signal).</p>
+<div class="legend"><span><i class="chip" style="background:var(--s6)"></i>8-conn baseline</span><span><i class="chip chip-o"></i>radius-2 twin</span></div>
+<svg viewBox="0 0 860 250" role="img" aria-label="8-conn baseline vs radius-2 kernel time per scene">
+<line x1="214.0" y1="4" x2="214.0" y2="216" class="grid"/>
+<text x="214.0" y="234" class="tick" text-anchor="middle">1</text>
+<line x1="436.8" y1="4" x2="436.8" y2="216" class="grid"/>
+<text x="436.8" y="234" class="tick" text-anchor="middle">10</text>
+<line x1="659.5" y1="4" x2="659.5" y2="216" class="grid"/>
+<text x="659.5" y="234" class="tick" text-anchor="middle">100</text>
+<text x="752" y="234" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="752" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">square 2000² · center</text>
+<line x1="387.0" y1="18.0" x2="399.6" y2="18.0" class="pairline"/>
+<circle cx="387.0" cy="18.0" r="5" class="dot s6" data-tip="square 2000² · center — 8-conn baseline: 6.0 ms, 501 levels"/>
+<circle cx="399.6" cy="18.0" r="5" class="dot-o" data-tip="square 2000² · center — radius-2: 6.8 ms, 251 levels, 100% interior (best-vs-best ratio 0.90×)"/>
+<text x="760.0" y="22.0" class="rowval">0.88× slower</text>
+<line x1="214" y1="54.0" x2="752" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">square 4000² · corner</text>
+<line x1="569.0" y1="54.0" x2="595.9" y2="54.0" class="pairline"/>
+<circle cx="569.0" cy="54.0" r="5" class="dot s6" data-tip="square 4000² · corner — 8-conn baseline: 39 ms, 4,000 levels"/>
+<circle cx="595.9" cy="54.0" r="5" class="dot-o" data-tip="square 4000² · corner — radius-2: 52 ms, 2,001 levels, 100% interior (best-vs-best ratio 0.73×)"/>
+<text x="760.0" y="58.0" class="rowval">0.76× slower</text>
+<line x1="214" y1="90.0" x2="752" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">disk r=1900</text>
+<line x1="549.8" y1="90.0" x2="582.3" y2="90.0" class="pairline"/>
+<circle cx="549.8" cy="90.0" r="5" class="dot s6" data-tip="disk r=1900 — 8-conn baseline: 32 ms, 1,901 levels"/>
+<circle cx="582.3" cy="90.0" r="5" class="dot-o" data-tip="disk r=1900 — radius-2: 45 ms, 951 levels, 100% interior (best-vs-best ratio 0.68×)"/>
+<text x="760.0" y="94.0" class="rowval">0.71× slower</text>
+<line x1="214" y1="126.0" x2="752" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">serpentine 256²</text>
+<line x1="715.9" y1="126.0" x2="726.5" y2="126.0" class="pairline"/>
+<circle cx="715.9" cy="126.0" r="5" class="dot s6" data-tip="serpentine 256² — 8-conn baseline: 179 ms, 32,641 levels"/>
+<circle cx="726.5" cy="126.0" r="5" class="dot-o" data-tip="serpentine 256² — radius-2: 200 ms, 32,641 levels, 0% interior (best-vs-best ratio 0.89×)"/>
+<text x="760.0" y="130.0" class="rowval">0.90× slower</text>
+<line x1="214" y1="162.0" x2="752" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">square 6000² · center</text>
+<line x1="603.1" y1="162.0" x2="665.1" y2="162.0" class="pairline"/>
+<circle cx="603.1" cy="162.0" r="5" class="dot s6" data-tip="square 6000² · center — 8-conn baseline: 56 ms, 3,001 levels"/>
+<circle cx="665.1" cy="162.0" r="5" class="dot-o" data-tip="square 6000² · center — radius-2: 106 ms, 1,501 levels, 100% interior (best-vs-best ratio 0.53×)"/>
+<text x="760.0" y="166.0" class="rowval">0.53× slower</text>
+<line x1="214" y1="198.0" x2="752" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">square 8000² · center</text>
+<line x1="659.1" y1="198.0" x2="726.6" y2="198.0" class="pairline"/>
+<circle cx="659.1" cy="198.0" r="5" class="dot s6" data-tip="square 8000² · center — 8-conn baseline: 100 ms, 4,001 levels"/>
+<circle cx="726.6" cy="198.0" r="5" class="dot-o" data-tip="square 8000² · center — radius-2: 200 ms, 2,001 levels, 100% interior (best-vs-best ratio 0.49×)"/>
+<text x="760.0" y="202.0" class="rowval">0.50× slower</text>
+</svg>
+</div>
+
+<div class="card">
+<h2>Warp-coop vs the 8-conn baseline</h2>
+<p class="note">Same BFS graph, same probes, same atomics — only the
+work DISTRIBUTION changes, and every scene speeds up: there were idle
+lanes to harvest everywhere (even the 64M px square idled 19% of lanes
+at 8-conn; warp-coop closes it to 2%). The one drift caveat: the disk's
+median and min ratios disagree (hover the hollow dot) — read that row
+cautiously.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s6)"></i>8-conn baseline</span><span><i class="chip chip-o"></i>warp-coop twin</span></div>
+<svg viewBox="0 0 860 250" role="img" aria-label="8-conn baseline vs warp-coop kernel time per scene">
+<line x1="214.0" y1="4" x2="214.0" y2="216" class="grid"/>
+<text x="214.0" y="234" class="tick" text-anchor="middle">1</text>
+<line x1="441.3" y1="4" x2="441.3" y2="216" class="grid"/>
+<text x="441.3" y="234" class="tick" text-anchor="middle">10</text>
+<line x1="668.6" y1="4" x2="668.6" y2="216" class="grid"/>
+<text x="668.6" y="234" class="tick" text-anchor="middle">100</text>
+<text x="752" y="234" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="752" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">square 2000² · center</text>
+<line x1="390.6" y1="18.0" x2="348.6" y2="18.0" class="pairline"/>
+<circle cx="390.6" cy="18.0" r="5" class="dot s6" data-tip="square 2000² · center — 8-conn baseline: 6.0 ms, 501 levels"/>
+<circle cx="348.6" cy="18.0" r="5" class="dot-o" data-tip="square 2000² · center — warp-coop: 3.9 ms (best-vs-best ratio 1.55×)"/>
+<text x="760.0" y="22.0" class="rowval" font-weight="650">1.53×</text>
+<line x1="214" y1="54.0" x2="752" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">square 4000² · corner</text>
+<line x1="576.3" y1="54.0" x2="556.2" y2="54.0" class="pairline"/>
+<circle cx="576.3" cy="54.0" r="5" class="dot s6" data-tip="square 4000² · corner — 8-conn baseline: 39 ms, 4,000 levels"/>
+<circle cx="556.2" cy="54.0" r="5" class="dot-o" data-tip="square 4000² · corner — warp-coop: 32 ms (best-vs-best ratio 1.21×)"/>
+<text x="760.0" y="58.0" class="rowval" font-weight="650">1.23×</text>
+<line x1="214" y1="90.0" x2="752" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">disk r=1900</text>
+<line x1="556.7" y1="90.0" x2="534.9" y2="90.0" class="pairline"/>
+<circle cx="556.7" cy="90.0" r="5" class="dot s6" data-tip="disk r=1900 — 8-conn baseline: 32 ms, 1,901 levels"/>
+<circle cx="534.9" cy="90.0" r="5" class="dot-o" data-tip="disk r=1900 — warp-coop: 26 ms (best-vs-best ratio 1.05×)"/>
+<text x="760.0" y="94.0" class="rowval" font-weight="650">1.25×</text>
+<line x1="214" y1="126.0" x2="752" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">serpentine 256²</text>
+<line x1="726.1" y1="126.0" x2="689.7" y2="126.0" class="pairline"/>
+<circle cx="726.1" cy="126.0" r="5" class="dot s6" data-tip="serpentine 256² — 8-conn baseline: 179 ms, 32,641 levels"/>
+<circle cx="689.7" cy="126.0" r="5" class="dot-o" data-tip="serpentine 256² — warp-coop: 124 ms (best-vs-best ratio 1.43×)"/>
+<text x="760.0" y="130.0" class="rowval" font-weight="650">1.45×</text>
+<line x1="214" y1="162.0" x2="752" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">square 6000² · center</text>
+<line x1="611.0" y1="162.0" x2="600.0" y2="162.0" class="pairline"/>
+<circle cx="611.0" cy="162.0" r="5" class="dot s6" data-tip="square 6000² · center — 8-conn baseline: 56 ms, 3,001 levels"/>
+<circle cx="600.0" cy="162.0" r="5" class="dot-o" data-tip="square 6000² · center — warp-coop: 50 ms (best-vs-best ratio 1.10×)"/>
+<text x="760.0" y="166.0" class="rowval" font-weight="650">1.12×</text>
+<line x1="214" y1="198.0" x2="752" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">square 8000² · center</text>
+<line x1="668.2" y1="198.0" x2="656.5" y2="198.0" class="pairline"/>
+<circle cx="668.2" cy="198.0" r="5" class="dot s6" data-tip="square 8000² · center — 8-conn baseline: 100 ms, 4,001 levels"/>
+<circle cx="656.5" cy="198.0" r="5" class="dot-o" data-tip="square 8000² · center — warp-coop: 88 ms (best-vs-best ratio 1.16×)"/>
+<text x="760.0" y="202.0" class="rowval" font-weight="650">1.13×</text>
+</svg>
+</div>
+
+<div class="card">
+<h2>All numbers — per-barrier experiments</h2>
+<details open><summary>Per-scene results table</summary>
+<div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>conn4 ms</th><th>conn8 ms</th><th>r2 ms</th><th>wc ms</th><th>r2 vs 8</th><th>(min)</th><th>wc vs 8</th><th>(min)</th><th>levels 8→r2</th><th>interior %</th><th>util 8/r2/wc %</th></tr><tr><td>square 2000² · center</td><td>1,000,000</td><td>10</td><td>6.0</td><td>6.8</td><td>3.9</td><td>0.88×</td><td>0.90×</td><td>1.53×</td><td>1.55×</td><td>501→251</td><td>99.6</td><td>16/32/81</td></tr><tr><td>square 4000² · corner</td><td>16,000,000</td><td>59</td><td>39</td><td>52</td><td>32</td><td>0.76×</td><td>0.73×</td><td>1.23×</td><td>1.21×</td><td>4,000→2,001</td><td>99.9</td><td>33/62/90</td></tr><tr><td>disk r=1900</td><td>11,340,981</td><td>35</td><td>32</td><td>45</td><td>26</td><td>0.71×</td><td>0.68×</td><td>1.25×</td><td>1.05×</td><td>1,901→951</td><td>99.9</td><td>49/77/95</td></tr><tr><td>serpentine 256²</td><td>32,896</td><td>145</td><td>179</td><td>200</td><td>124</td><td>0.90×</td><td>0.89×</td><td>1.45×</td><td>1.43×</td><td>32,641→32,641</td><td>0.0</td><td>0/0/0</td></tr><tr><td>square 6000² · center</td><td>36,000,000</td><td>79</td><td>56</td><td>106</td><td>50</td><td>0.53×</td><td>0.53×</td><td>1.12×</td><td>1.10×</td><td>3,001→1,501</td><td>99.9</td><td>74/87/97</td></tr><tr><td>square 8000² · center</td><td>64,000,000</td><td>136</td><td>100</td><td>200</td><td>88</td><td>0.50×</td><td>0.49×</td><td>1.13×</td><td>1.16×</td><td>4,001→2,001</td><td>100.0</td><td>81/90/98</td></tr></table></div></details>
+</div>
+
+
 <h2 class="domain-h">2. Dual blob</h2>
 <p class="sub">Two disconnected red blobs, labeled and recolored
 in-kernel (blob 0 blue, blob 1 green) by the SAME N-block cooperative
@@ -1746,6 +1900,70 @@ column). One dumbbell points backwards — two disks r=1400, sequential (0.75×)
 <text x="776.0" y="202.0" class="rowval" font-weight="650">1.28×</text>
 </svg>
 </div>
+
+
+<div class="card">
+<h2>Radius-2 on two blobs — the same bet, labeled</h2>
+<p class="note">The §1.5 verdict ports cleanly: the guarded ring-2 twin
+(hollow) loses to its 8-conn baseline (solid) for both mechanisms, while
+the multisource-vs-sequential win survives the ring-2 tax where the data
+is clean (mu/seq column in the table). Ring-2 claims inherit the
+dequeuer's label — provably safe (the guard keeps every jump inside the
+dequeuer's own component; tested across a 1-px gap, tighter than the
+scene contract). The 2800² pair is the session's drift casualty: its
+median and min mu/seq forms disagree in sign — see the stage README.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s7)"></i>sequential 8-conn</span><span><i class="chip chip-o" style="border-color:var(--s7)"></i>sequential radius-2</span><span><i class="chip" style="background:var(--s8)"></i>multisource 8-conn</span><span><i class="chip chip-o" style="border-color:var(--s8)"></i>multisource radius-2</span></div>
+<svg viewBox="0 0 860 250" role="img" aria-label="8-conn vs radius-2 kernel time per scene, sequential and multisource">
+<line x1="214.0" y1="4" x2="214.0" y2="216" class="grid"/>
+<text x="214.0" y="234" class="tick" text-anchor="middle">1</text>
+<line x1="486.1" y1="4" x2="486.1" y2="216" class="grid"/>
+<text x="486.1" y="234" class="tick" text-anchor="middle">10</text>
+<text x="752" y="234" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="27.0" x2="752" y2="27.0" class="rowline"/>
+<text x="204" y="31.0" class="rowlab" text-anchor="end">two squares 300² (small)</text>
+<line x1="374.7" y1="18.0" x2="393.3" y2="18.0" class="pairline-s7"/>
+<circle cx="374.7" cy="18.0" r="5" class="dot s7" data-tip="two squares 300² (small) — sequential 8-conn: 3.9 ms"/>
+<circle cx="393.3" cy="18.0" r="5" class="dot-o7" data-tip="two squares 300² (small) — sequential radius-2: 4.6 ms (best-vs-best ratio 0.90×)"/>
+<text x="760.0" y="22.0" class="rowval">0.85× slower</text>
+<line x1="296.8" y1="36.0" x2="305.6" y2="36.0" class="pairline-s8"/>
+<circle cx="296.8" cy="36.0" r="5" class="dot s8" data-tip="two squares 300² (small) — multisource 8-conn: 2.0 ms"/>
+<circle cx="305.6" cy="36.0" r="5" class="dot-o8" data-tip="two squares 300² (small) — multisource radius-2: 2.2 ms (best-vs-best ratio 0.90×)"/>
+<text x="760.0" y="40.0" class="rowval">0.93× slower</text>
+<line x1="214" y1="81.0" x2="752" y2="81.0" class="rowline"/>
+<text x="204" y="85.0" class="rowlab" text-anchor="end">two squares 2800²</text>
+<line x1="681.9" y1="72.0" x2="685.2" y2="72.0" class="pairline-s7"/>
+<circle cx="681.9" cy="72.0" r="5" class="dot s7" data-tip="two squares 2800² — sequential 8-conn: 52 ms"/>
+<circle cx="685.2" cy="72.0" r="5" class="dot-o7" data-tip="two squares 2800² — sequential radius-2: 54 ms (best-vs-best ratio 0.67×)"/>
+<text x="760.0" y="76.0" class="rowval">0.97× slower</text>
+<line x1="605.4" y1="90.0" x2="721.0" y2="90.0" class="pairline-s8"/>
+<circle cx="605.4" cy="90.0" r="5" class="dot s8" data-tip="two squares 2800² — multisource 8-conn: 27 ms"/>
+<circle cx="721.0" cy="90.0" r="5" class="dot-o8" data-tip="two squares 2800² — multisource radius-2: 73 ms (best-vs-best ratio 0.59×)"/>
+<text x="760.0" y="94.0" class="rowval">0.38× slower</text>
+<line x1="214" y1="135.0" x2="752" y2="135.0" class="rowline"/>
+<text x="204" y="139.0" class="rowlab" text-anchor="end">two disks r=1400</text>
+<line x1="674.6" y1="126.0" x2="720.3" y2="126.0" class="pairline-s7"/>
+<circle cx="674.6" cy="126.0" r="5" class="dot s7" data-tip="two disks r=1400 — sequential 8-conn: 49 ms"/>
+<circle cx="720.3" cy="126.0" r="5" class="dot-o7" data-tip="two disks r=1400 — sequential radius-2: 73 ms (best-vs-best ratio 0.47×)"/>
+<text x="760.0" y="130.0" class="rowval">0.68× slower</text>
+<line x1="613.5" y1="144.0" x2="644.8" y2="144.0" class="pairline-s8"/>
+<circle cx="613.5" cy="144.0" r="5" class="dot s8" data-tip="two disks r=1400 — multisource 8-conn: 29 ms"/>
+<circle cx="644.8" cy="144.0" r="5" class="dot-o8" data-tip="two disks r=1400 — multisource radius-2: 38 ms (best-vs-best ratio 0.71×)"/>
+<text x="760.0" y="148.0" class="rowval">0.77× slower</text>
+<line x1="214" y1="189.0" x2="752" y2="189.0" class="rowline"/>
+<text x="204" y="193.0" class="rowlab" text-anchor="end">asymmetric 4000²+800²</text>
+<line x1="712.5" y1="180.0" x2="704.5" y2="180.0" class="pairline-s7"/>
+<circle cx="712.5" cy="180.0" r="5" class="dot s7" data-tip="asymmetric 4000²+800² — sequential 8-conn: 68 ms"/>
+<circle cx="704.5" cy="180.0" r="5" class="dot-o7" data-tip="asymmetric 4000²+800² — sequential radius-2: 64 ms (best-vs-best ratio 0.66×)"/>
+<text x="760.0" y="184.0" class="rowval" font-weight="650">1.07×</text>
+<line x1="641.3" y1="198.0" x2="672.0" y2="198.0" class="pairline-s8"/>
+<circle cx="641.3" cy="198.0" r="5" class="dot s8" data-tip="asymmetric 4000²+800² — multisource 8-conn: 37 ms"/>
+<circle cx="672.0" cy="198.0" r="5" class="dot-o8" data-tip="asymmetric 4000²+800² — multisource radius-2: 48 ms (best-vs-best ratio 0.64×)"/>
+<text x="760.0" y="202.0" class="rowval">0.77× slower</text>
+</svg>
+<details><summary>Radius-2 per-scene table</summary>
+<div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>seq8 ms</th><th>multi8 ms</th><th>seq8-r2 ms</th><th>multi8-r2 ms</th><th>r2 multi vs 8</th><th>(min)</th><th>mu/seq 8→r2</th><th>levels 8→r2</th><th>interior %</th></tr><tr><td>two squares 300² (small)</td><td>180,000</td><td>3.9</td><td>2.0</td><td>4.6</td><td>2.2</td><td>0.93×</td><td>0.90×</td><td>1.93→2.10×</td><td>151→76</td><td>98.7</td></tr><tr><td>two squares 2800²</td><td>15,680,000</td><td>52</td><td>27</td><td>54</td><td>73</td><td>0.38×</td><td>0.59×</td><td>1.91→0.74×</td><td>1,401→701</td><td>99.9</td></tr><tr><td>two disks r=1400</td><td>12,314,954</td><td>49</td><td>29</td><td>73</td><td>38</td><td>0.77×</td><td>0.71×</td><td>1.68→1.89×</td><td>1,401→701</td><td>99.8</td></tr><tr><td>asymmetric 4000²+800²</td><td>16,640,000</td><td>68</td><td>37</td><td>64</td><td>48</td><td>0.77×</td><td>0.64×</td><td>1.83→1.32×</td><td>2,001→1,001</td><td>99.9</td></tr></table></div></details>
+</div>
+
 
 <div class="card">
 <h2>All numbers — dual-blob stage</h2>

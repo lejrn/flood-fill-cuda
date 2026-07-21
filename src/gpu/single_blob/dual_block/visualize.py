@@ -11,9 +11,12 @@ Organized by DOMAIN, not by benchmark session:
      1.3 Dual blocks vs N blocks (multi_block: 4-conn runtime/speedup/
                                sweep/bandwidth)
      1.4 4 vs 8 connectivity  (multi_block: the 8-direction twin kernels)
+     1.5 More work per barrier (multi_block: radius-2 + warp-coop twins,
+                               the neighbors_* benchmark)
   2. Dual blob                (dual_blob: sequential vs streams vs
                                multisource, lin vs xy entry format,
-                               4 vs 8 connectivity on both mechanisms)
+                               4 vs 8 connectivity on both mechanisms,
+                               radius-2 on both mechanisms)
 
 Every subsection reports its OWN speedup multiplier from its own
 benchmark session; 1.3 also shows those multipliers chained together
@@ -54,11 +57,16 @@ def _newest(pattern, folder):
     return candidates[-1]
 
 
-def _newest_optional(pattern, folder):
+def _newest_optional(pattern, folder, exclude=None):
     """Like _newest, but returns None instead of exiting — dual_blob is a
     newer stage than the others and a dashboard run predating it should
-    still render (graceful degradation, same contract as HAS_CONN8)."""
+    still render (graceful degradation, same contract as HAS_CONN8).
+    exclude drops basenames containing the substring (dual_blob_*.json
+    would otherwise swallow dual_blob_radius2_*.json)."""
     candidates = sorted(glob.glob(os.path.join(folder, pattern)))
+    if exclude:
+        candidates = [c for c in candidates
+                      if exclude not in os.path.basename(c)]
     return candidates[-1] if candidates else None
 
 
@@ -66,7 +74,12 @@ DUAL_PATH = sys.argv[1] if len(sys.argv) > 1 else _newest("dual_block_*.json",
                                                           RESULTS_DIR)
 SBS_PATH = _newest("single_block_shared_*.json", SBS_RESULTS_DIR)
 MB_PATH = _newest("multi_block_*.json", MB_RESULTS_DIR)
-DB_PATH = _newest_optional("dual_blob_*.json", DB_RESULTS_DIR)
+DB_PATH = _newest_optional("dual_blob_*.json", DB_RESULTS_DIR,
+                           exclude="radius2")
+# The per-barrier work experiments (radius-2 + warp-coop) write their own
+# JSONs; both are optional (graceful degradation, same contract as DB).
+NB_PATH = _newest_optional("neighbors_*.json", MB_RESULTS_DIR)
+DBR2_PATH = _newest_optional("dual_blob_radius2_*.json", DB_RESULTS_DIR)
 OUT_PATH = os.path.join(RESULTS_DIR, "dual_block_benchmark.html")
 
 with open(DUAL_PATH) as f:
@@ -79,6 +92,14 @@ DB = None
 if DB_PATH:
     with open(DB_PATH) as f:
         DB = json.load(f)
+NB = None
+if NB_PATH:
+    with open(NB_PATH) as f:
+        NB = json.load(f)
+DBR2 = None
+if DBR2_PATH:
+    with open(DBR2_PATH) as f:
+        DBR2 = json.load(f)
 
 ROWS = DUAL["scenes"]
 SWEEP = DUAL["tpb_sweep"]
@@ -98,6 +119,11 @@ HAS_CONN8 = any(r.get("conn8_kernel_ms") is not None for r in MB_ROWS)
 DB_ROWS = DB["scenes"] if DB else []
 DB_PEAK = DB["measured_peak_gb_s"] if DB else 0.0
 HAS_DUALBLOB = bool(DB_ROWS)
+
+NB_ROWS = ([r for r in NB["scenes"] if "skipped" not in r] if NB else [])
+HAS_NEIGHBORS = bool(NB_ROWS)
+DBR2_ROWS = DBR2["scenes"] if DBR2 else []
+HAS_DB_R2 = HAS_DUALBLOB and bool(DBR2_ROWS)
 
 KERNELS = ["split", "global", "dirsplit"]
 # Entity -> color slot, constant across every dual chart: s1 = single-block
@@ -840,6 +866,101 @@ def conn8_table():
     return f"<table>{head}{''.join(body)}</table>"
 
 
+def nb_variant_chart(var_key, ratio_key, ratio_min_key, var_label,
+                     var_tip=None):
+    """Per-scene conn8 baseline vs ONE per-barrier variant (radius-2 or
+    warp-coop), log axis, dumbbell pairs — conn8_chart's geometry over
+    the neighbors JSON. Same entity at two variants: solid dot = the
+    conn8 baseline, hollow = the variant; the gutter gives the exact
+    median ratio (>1 = the variant faster), with the best-vs-best form
+    in the hover tooltip (agreement between the two = the drift signal)."""
+    rows = NB_ROWS
+    gut_r = 108
+    vals = [v for r in rows for v in (r["conn8_kernel_ms"], r[var_key])]
+    lo = 10 ** math.floor(math.log10(min(vals)))
+    hi = max(vals) * 1.3
+    n = len(rows)
+    h = n * ROW_H + 34
+    span = W - GUT_L - gut_r
+
+    def x_of(v):
+        return GUT_L + (math.log10(v) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" aria-label="8-conn '
+             f'baseline vs {var_label} kernel time per scene">']
+    tick = lo
+    while tick <= hi:
+        x = x_of(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * ROW_H}" class="grid"/>')
+        if x < W - gut_r - 70:
+            parts.append(f'<text x="{x:.1f}" y="{n * ROW_H + 18}" '
+                         f'class="tick" text-anchor="middle">{tick:g}</text>')
+        tick *= 10
+    parts.append(f'<text x="{W - gut_r}" y="{n * ROW_H + 18}" class="tick" '
+                 f'text-anchor="end">ms (log)</text>')
+    for i, r in enumerate(rows):
+        cy = i * ROW_H + ROW_H / 2
+        v8, vv = r["conn8_kernel_ms"], r[var_key]
+        x8, xv = x_of(v8), x_of(vv)
+        parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{W - gut_r}" '
+                     f'y2="{cy:.1f}" class="rowline"/>')
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{label(r["scene"])}</text>')
+        parts.append(f'<line x1="{x8:.1f}" y1="{cy:.1f}" x2="{xv:.1f}" '
+                     f'y2="{cy:.1f}" class="pairline"/>')
+        tip8 = (f"{label(r['scene'])} — 8-conn baseline: {fmt_ms(v8)} ms, "
+                f"{fmt_int(r['conn8_levels'])} levels")
+        extra = var_tip(r) if var_tip else ""
+        tipv = (f"{label(r['scene'])} — {var_label}: {fmt_ms(vv)} ms{extra} "
+                f"(best-vs-best ratio {r[ratio_min_key]:.2f}×)")
+        parts.append(f'<circle cx="{x8:.1f}" cy="{cy:.1f}" r="5" '
+                     f'class="dot s6" data-tip="{tip8}"/>')
+        parts.append(f'<circle cx="{xv:.1f}" cy="{cy:.1f}" r="5" '
+                     f'class="dot-o" data-tip="{tipv}"/>')
+        ratio = r[ratio_key]
+        if abs(ratio - 1) < 0.005:
+            rtxt, weight = "≈1.00×", ""
+        elif ratio >= 1:
+            rtxt, weight = f"{ratio:.2f}×", ' font-weight="650"'
+        else:
+            rtxt, weight = f"{ratio:.2f}× slower", ""
+        parts.append(f'<text x="{W - gut_r + 8:.1f}" y="{cy + 4:.1f}" '
+                     f'class="rowval"{weight}>{rtxt}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def nb_table():
+    head = ("<tr><th>scene</th><th>filled px</th><th>conn4 ms</th>"
+            "<th>conn8 ms</th><th>r2 ms</th><th>wc ms</th>"
+            "<th>r2 vs 8</th><th>(min)</th><th>wc vs 8</th><th>(min)</th>"
+            "<th>levels 8→r2</th><th>interior %</th>"
+            "<th>util 8/r2/wc %</th></tr>")
+    body = []
+    for r in NB_ROWS:
+        body.append(
+            "<tr>"
+            f"<td>{label(r['scene'])}</td>"
+            f"<td>{fmt_int(r['filled'])}</td>"
+            f"<td>{fmt_ms(r['conn4_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['conn8_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['r2_kernel_ms'])}</td>"
+            f"<td>{fmt_ms(r['wc_kernel_ms'])}</td>"
+            f"<td>{r['r2_vs_conn8']:.2f}×</td>"
+            f"<td>{r['r2_vs_conn8_min']:.2f}×</td>"
+            f"<td>{r['wc_vs_conn8']:.2f}×</td>"
+            f"<td>{r['wc_vs_conn8_min']:.2f}×</td>"
+            f"<td>{fmt_int(r['conn8_levels'])}→{fmt_int(r['r2_levels'])}</td>"
+            f"<td>{r['r2_interior_pct']:.1f}</td>"
+            f"<td>{r['conn8_thread_util_pct']:.0f}/"
+            f"{r['r2_thread_util_pct']:.0f}/"
+            f"{r['wc_thread_util_pct']:.0f}</td>"
+            "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
+
+
 def sbs_chart():
     series = [(lambda r: r["njit_ms"], "@njit CPU", "s2"),
               (lambda r: r.get("pure_ms"), "pure Python", "s3"),
@@ -1054,6 +1175,106 @@ def db_conn8_chart():
     return "\n".join(parts)
 
 
+def db_r2_chart():
+    """Per-scene conn8 vs radius-2 kernel time for BOTH mechanisms, log
+    axis — db_conn8_chart's two-dumbbells-per-row geometry over the
+    dual_blob_radius2 JSON. Solid dot = the 8-conn baseline, hollow = its
+    guarded ring-2 twin (one entity at two variants, per mechanism);
+    entity color stays with the mechanism (sequential s7, multisource
+    s8). Gutter: each dumbbell's own ratio, >1 = the ring-2 twin faster."""
+    rows = DBR2_ROWS
+    gut_r = 108
+    row_h = ROW_H + 18
+    vals = [v for r in rows
+            for v in (r["seq8_ms"], r["seq8r2_ms"],
+                      r["multi8_ms"], r["multi8r2_ms"])]
+    lo = 10 ** math.floor(math.log10(min(vals)))
+    hi = max(vals) * 1.3
+    n = len(rows)
+    h = n * row_h + 34
+    span = W - GUT_L - gut_r
+
+    def x_of(v):
+        return GUT_L + (math.log10(v) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" aria-label="8-conn vs '
+             f'radius-2 kernel time per scene, sequential and multisource">']
+    tick = lo
+    while tick <= hi:
+        x = x_of(tick)
+        parts.append(f'<line x1="{x:.1f}" y1="4" x2="{x:.1f}" '
+                     f'y2="{n * row_h}" class="grid"/>')
+        if x < W - gut_r - 70:
+            parts.append(f'<text x="{x:.1f}" y="{n * row_h + 18}" '
+                         f'class="tick" text-anchor="middle">{tick:g}</text>')
+        tick *= 10
+    parts.append(f'<text x="{W - gut_r}" y="{n * row_h + 18}" class="tick" '
+                 f'text-anchor="end">ms (log)</text>')
+    for i, r in enumerate(rows):
+        cy = i * row_h + row_h / 2
+        parts.append(f'<line x1="{GUT_L}" y1="{cy:.1f}" x2="{W - gut_r}" '
+                     f'y2="{cy:.1f}" class="rowline"/>')
+        parts.append(f'<text x="{GUT_L - 10}" y="{cy + 4:.1f}" class="rowlab" '
+                     f'text-anchor="end">{db_label(r["scene"])}</text>')
+        pairs = ((-9, "s7", "pairline-s7", "dot-o7", "sequential",
+                  r["seq8_ms"], r["seq8r2_ms"],
+                  r["r2_seq_vs_conn8"], r["r2_seq_vs_conn8_min"]),
+                 (9, "s8", "pairline-s8", "dot-o8", "multisource",
+                  r["multi8_ms"], r["multi8r2_ms"],
+                  r["r2_multi_vs_conn8"], r["r2_multi_vs_conn8_min"]))
+        for dy_off, cls, pl_cls, o_cls, mech, v8, vr, ratio, rmin in pairs:
+            yy = cy + dy_off
+            x8, xr = x_of(v8), x_of(vr)
+            parts.append(f'<line x1="{x8:.1f}" y1="{yy:.1f}" x2="{xr:.1f}" '
+                         f'y2="{yy:.1f}" class="{pl_cls}"/>')
+            tip8 = (f"{db_label(r['scene'])} — {mech} 8-conn: "
+                    f"{fmt_ms(v8)} ms")
+            tipr = (f"{db_label(r['scene'])} — {mech} radius-2: "
+                    f"{fmt_ms(vr)} ms (best-vs-best ratio {rmin:.2f}×)")
+            parts.append(f'<circle cx="{x8:.1f}" cy="{yy:.1f}" r="5" '
+                         f'class="dot {cls}" data-tip="{tip8}"/>')
+            parts.append(f'<circle cx="{xr:.1f}" cy="{yy:.1f}" r="5" '
+                         f'class="{o_cls}" data-tip="{tipr}"/>')
+            if abs(ratio - 1) < 0.005:
+                rtxt, weight = "≈1.00×", ""
+            elif ratio >= 1:
+                rtxt, weight = f"{ratio:.2f}×", ' font-weight="650"'
+            else:
+                rtxt, weight = f"{ratio:.2f}× slower", ""
+            parts.append(f'<text x="{W - gut_r + 8:.1f}" y="{yy + 4:.1f}" '
+                         f'class="rowval"{weight}>{rtxt}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def db_r2_table():
+    head = ("<tr><th>scene</th><th>filled px</th><th>seq8 ms</th>"
+            "<th>multi8 ms</th><th>seq8-r2 ms</th><th>multi8-r2 ms</th>"
+            "<th>r2 multi vs 8</th><th>(min)</th>"
+            "<th>mu/seq 8→r2</th><th>levels 8→r2</th>"
+            "<th>interior %</th></tr>")
+    body = []
+    for r in DBR2_ROWS:
+        body.append(
+            "<tr>"
+            f"<td>{db_label(r['scene'])}</td>"
+            f"<td>{fmt_int(r['filled'])}</td>"
+            f"<td>{fmt_ms(r['seq8_ms'])}</td>"
+            f"<td>{fmt_ms(r['multi8_ms'])}</td>"
+            f"<td>{fmt_ms(r['seq8r2_ms'])}</td>"
+            f"<td>{fmt_ms(r['multi8r2_ms'])}</td>"
+            f"<td>{r['r2_multi_vs_conn8']:.2f}×</td>"
+            f"<td>{r['r2_multi_vs_conn8_min']:.2f}×</td>"
+            f"<td>{r['conn8_speedup_multi_vs_seq']:.2f}→"
+            f"{r['r2_speedup_multi_vs_seq']:.2f}×</td>"
+            f"<td>{fmt_int(r['conn8_levels_multi'])}→"
+            f"{fmt_int(r['r2_levels_multi'])}</td>"
+            f"<td>{r['r2_interior_pct']:.1f}</td>"
+            "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
+
+
 def db_table():
     head = ("<tr><th>scene</th><th>filled px</th><th>@njit ms</th>"
             "<th>seq ms</th><th>seq/2 ms</th><th>multi ms</th>"
@@ -1184,10 +1405,27 @@ _cap_threads = max(int(t) * n for t, n in MB["coop_max_by_tpb"].items())
 _cap_blocks = max(MB["coop_max_by_tpb"].values())
 _mb_serp = next(r for r in MB_ROWS if r["scene"] == "serpentine_256")
 
+# -- §1.5 per-barrier work experiments (neighbors JSON, optional)
+if HAS_NEIGHBORS:
+    _nb_big = max(NB_ROWS, key=lambda r: r["filled"])
+    _nb_serp = next((r for r in NB_ROWS
+                     if r["scene"] == "serpentine_256"), None)
+    _nb_r2_lo = min(r["r2_vs_conn8"] for r in NB_ROWS)
+    _nb_r2_hi = max(r["r2_vs_conn8"] for r in NB_ROWS)
+    _nb_wc_lo = min(r["wc_vs_conn8"] for r in NB_ROWS)
+    _nb_wc_hi = max(r["wc_vs_conn8"] for r in NB_ROWS)
+    _nb_wc_mpx = _nb_big["filled"] / _nb_big["wc_kernel_ms"] / 1000
+    # Its own single-session chain; the CPU baseline is the 8-CONN oracle
+    # (slower than §1.3's 4-conn @njit) — never multiplied into §1.3.
+    CHAIN_15 = [("CPU (@njit, 8-conn)", _nb_big["njit_ms"]),
+                ("8-conn N blocks", _nb_big["conn8_kernel_ms"]),
+                ("warp-coop", _nb_big["wc_kernel_ms"])]
+
 PROJECT_TILES = [
     (f"{_fastest['mpx_s']:.0f} Mpx/s",
-     f"fastest fill · {label(_fastest['scene'])} · {_fastest['blocks']}×"
-     f"{_fastest['tpb']} · {_fastest.get('connectivity', 4)}-conn",
+     f"fastest sweep cell · {label(_fastest['scene'])} · "
+     f"{_fastest['blocks']}×{_fastest['tpb']} · "
+     f"{_fastest.get('connectivity', 4)}-conn",
      "blocks × tpb sweep"),
     (f"{_big_speedup:.1f}× chained",
      f"1 block → N blocks{' (+8-conn)' if _big_conn == '8-conn' else ''} · "
@@ -1208,6 +1446,13 @@ PROJECT_TILES = [
      "(single-block v2) — every parallel kernel loses here",
      "N-block scene suite"),
 ]
+if HAS_NEIGHBORS:
+    PROJECT_TILES.append(
+        (f"{_nb_wc_mpx:.0f} Mpx/s",
+         f"fastest whole-scene fill · warp-coop 8-conn · "
+         f"{label(_nb_big['scene'])} ({fmt_int(_nb_big['filled'])} px) in "
+         f"{fmt_ms(_nb_big['wc_kernel_ms'])} ms — see §1.5",
+         "per-barrier experiments"))
 if HAS_DUALBLOB:
     PROJECT_TILES.append(
         (f"{_db_best_spd['speedup_multi_vs_seq']:.2f}×",
@@ -1533,6 +1778,26 @@ LEG_CONN8 = ('<div class="legend">'
              '</div>')
 LEG_MB_BW = LEG_CONN8 if HAS_CONN8 else ""
 LEG_MB_BW_4 = legend([("4-conn model GB/s", "s6")])
+LEG_NB_R2 = ('<div class="legend">'
+             '<span><i class="chip" style="background:var(--s6)"></i>'
+             '8-conn baseline</span>'
+             '<span><i class="chip chip-o"></i>radius-2 twin</span>'
+             '</div>')
+LEG_NB_WC = ('<div class="legend">'
+             '<span><i class="chip" style="background:var(--s6)"></i>'
+             '8-conn baseline</span>'
+             '<span><i class="chip chip-o"></i>warp-coop twin</span>'
+             '</div>')
+LEG_DB_R2 = ('<div class="legend">'
+             '<span><i class="chip" style="background:var(--s7)"></i>'
+             'sequential 8-conn</span>'
+             '<span><i class="chip chip-o" '
+             'style="border-color:var(--s7)"></i>sequential radius-2</span>'
+             '<span><i class="chip" style="background:var(--s8)"></i>'
+             'multisource 8-conn</span>'
+             '<span><i class="chip chip-o" '
+             'style="border-color:var(--s8)"></i>multisource radius-2</span>'
+             '</div>')
 LEG_DB = legend([("@njit CPU (2 blobs)", "s2"), ("sequential", "s7"),
                  ("multisource", "s8")])
 LEG_DB_CONN8 = ('<div class="legend">'
@@ -1593,6 +1858,110 @@ to pay for it.</p>
     _conn8_table_block = f"""
 <details><summary>8-connectivity per-scene results table</summary>
 <div class="tablewrap">{conn8_table()}</div></details>
+"""
+
+_nb_section = ""
+if HAS_NEIGHBORS:
+    _nb_serp_note = ""
+    if _nb_serp:
+        _nb_serp_note = (
+            f" The serpentine tells both stories at once: radius-2's guard "
+            f"never fires there (interior = 0, "
+            f"{_nb_serp['r2_vs_conn8']:.2f}× — ironically its best scene: "
+            f"pure guard overhead beats paying for jumps), while warp-coop "
+            f"hits {_nb_serp['wc_vs_conn8']:.2f}× and takes the scene "
+            f"below its own 4-conn baseline "
+            f"({fmt_ms(_nb_serp['wc_kernel_ms'])} vs "
+            f"{fmt_ms(_nb_serp['conn4_kernel_ms'])} ms) for the first "
+            f"time in the project.")
+    _nb_section = f"""
+<h3 class="subsection-h">1.5 More work per barrier — radius-2 and
+warp-coop</h3>
+
+<div class="card">
+<h2>Two bets on the same question</h2>
+<p class="note">Can a BFS level do more before paying its two grid.sync
+barriers? <b>Radius-2</b> probes MORE: a guarded second ring (jumps only
+where all 8 ring-1 neighbors are blob, keeping the fill exactly
+8-connected) — levels halve, ~3× the probes. <b>Warp-coop</b> probes
+SMARTER: 4 queue entries × 8 directions spread across a warp's 32 lanes
+— identical work, one probe round per chunk instead of 8, results
+bit-identical to the baseline. One interleaved round-robin, one pinned
+grid, and the verdicts point in opposite directions: radius-2 LOSES
+every scene ({_nb_r2_lo:.2f}–{_nb_r2_hi:.2f}×, worst at the biggest — by
+64M px the lanes were already 81% fed, so tripled probe traffic is pure
+bill), warp-coop WINS every scene
+({_nb_wc_lo:.2f}–{_nb_wc_hi:.2f}×).{_nb_serp_note} Predictions-vs-verdicts
+table and post-mortem in the multi_block README.</p>
+{chain_strip(CHAIN_15,
+             title=f"{label(_nb_big['scene'])} "
+                   f"({fmt_int(_nb_big['filled'])} px), one session — "
+                   f"the fastest whole-scene rate measured: "
+                   f"{_nb_wc_mpx:.0f} Mpx/s",
+             footnote="The CPU baseline here is the 8-connectivity oracle "
+                      "(a different, slower baseline than §1.3's 4-conn "
+                      "@njit), and every step is measured within the "
+                      "neighbors benchmark's own session — this chain is "
+                      "not multiplied into §1.3's.",
+             total_cls="s6")}
+</div>
+
+<div class="card">
+<h2>Radius-2 vs the 8-conn baseline</h2>
+<p class="note">Solid dot = 8-conn baseline, hollow = the guarded ring-2
+twin. The mechanism worked perfectly — levels halve to the pixel,
+interior ≈100%, fill sets identical — and the economics still lose:
+the width lever that powered §1.4's win was already exhausted, so the
+extra probes and ~3× CAS attempts buy nothing. Its modeled bandwidth is
+a project record that loses wall-clock: work-efficiency loss, not
+machine inefficiency. Hover a hollow dot for the best-vs-best ratio
+(agreement with the median = the drift signal).</p>
+{LEG_NB_R2}
+{nb_variant_chart("r2_kernel_ms", "r2_vs_conn8", "r2_vs_conn8_min",
+                  "radius-2",
+                  var_tip=lambda r: (f", {fmt_int(r['r2_levels'])} levels, "
+                                     f"{r['r2_interior_pct']:.0f}% interior"))}
+</div>
+
+<div class="card">
+<h2>Warp-coop vs the 8-conn baseline</h2>
+<p class="note">Same BFS graph, same probes, same atomics — only the
+work DISTRIBUTION changes, and every scene speeds up: there were idle
+lanes to harvest everywhere (even the 64M px square idled 19% of lanes
+at 8-conn; warp-coop closes it to 2%). The one drift caveat: the disk's
+median and min ratios disagree (hover the hollow dot) — read that row
+cautiously.</p>
+{LEG_NB_WC}
+{nb_variant_chart("wc_kernel_ms", "wc_vs_conn8", "wc_vs_conn8_min",
+                  "warp-coop")}
+</div>
+
+<div class="card">
+<h2>All numbers — per-barrier experiments</h2>
+<details open><summary>Per-scene results table</summary>
+<div class="tablewrap">{nb_table()}</div></details>
+</div>
+"""
+
+_db_r2_card = ""
+if HAS_DB_R2:
+    _dbr2_big = max(DBR2_ROWS, key=lambda r: r["filled"])
+    _db_r2_card = f"""
+<div class="card">
+<h2>Radius-2 on two blobs — the same bet, labeled</h2>
+<p class="note">The §1.5 verdict ports cleanly: the guarded ring-2 twin
+(hollow) loses to its 8-conn baseline (solid) for both mechanisms, while
+the multisource-vs-sequential win survives the ring-2 tax where the data
+is clean (mu/seq column in the table). Ring-2 claims inherit the
+dequeuer's label — provably safe (the guard keeps every jump inside the
+dequeuer's own component; tested across a 1-px gap, tighter than the
+scene contract). The 2800² pair is the session's drift casualty: its
+median and min mu/seq forms disagree in sign — see the stage README.</p>
+{LEG_DB_R2}
+{db_r2_chart()}
+<details><summary>Radius-2 per-scene table</summary>
+<div class="tablewrap">{db_r2_table()}</div></details>
+</div>
 """
 
 _db_section = ""
@@ -1676,6 +2045,8 @@ column).{_db8_back_note}</p>
 {db_conn8_chart()}
 </div>
 
+{_db_r2_card}
+
 <div class="card">
 <h2>All numbers — dual-blob stage</h2>
 <p class="note">The lin-vs-xy entry-format bet (does killing the
@@ -1701,7 +2072,8 @@ html = f"""<!doctype html>
 2 blobs, benchmarked</h1>
 <div class="sub">{DUAL['device']} · {DUAL['sm_count']} SMs · organized by
 domain: single blob (§1.1 one block → §1.2 two blocks → §1.3 N blocks →
-§1.4 4-vs-8 connectivity), then dual blob (§2). Every subsection reports
+§1.4 4-vs-8 connectivity → §1.5 per-barrier work experiments), then dual
+blob (§2). Every subsection reports
 its own speedup from its own benchmark session; §1.3 chains them into one
 multiplier from single block to N blocks. 4-connectivity throughout
 except where 8-direction twins are charted explicitly · placement
@@ -1913,6 +2285,7 @@ variants).{_bw_conn8_note}</p>
 <h2>All numbers — 8-connectivity</h2>
 {_conn8_table_block}
 </div>
+{_nb_section}
 {_db_section}
 <div id="tooltip"></div>
 </div>
@@ -1923,6 +2296,10 @@ variants).{_bw_conn8_note}</p>
 with open(OUT_PATH, "w") as f:
     f.write(html)
 _db_part = f" + {os.path.basename(DB_PATH)}" if DB_PATH else " (no dual_blob JSON — §2 omitted)"
+_nb_part = (f" + {os.path.basename(NB_PATH)}" if NB_PATH
+            else " (no neighbors JSON — §1.5 omitted)")
+_dbr2_part = (f" + {os.path.basename(DBR2_PATH)}" if DBR2_PATH
+              else " (no dual_blob_radius2 JSON — §2 r2 card omitted)")
 print(f"rendered {os.path.basename(MB_PATH)} + {os.path.basename(DUAL_PATH)}"
-      f" + {os.path.basename(SBS_PATH)}{_db_part} -> {OUT_PATH} "
-      f"({len(html):,} bytes)")
+      f" + {os.path.basename(SBS_PATH)}{_nb_part}{_db_part}{_dbr2_part}"
+      f" -> {OUT_PATH} ({len(html):,} bytes)")
