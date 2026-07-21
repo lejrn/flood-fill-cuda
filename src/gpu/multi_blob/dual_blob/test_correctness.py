@@ -289,6 +289,104 @@ def test_xy_format_8():
                              entry_format="xy")
 
 
+# ------------------------------------------------- radius-2 twins (guarded)
+
+# The guarded radius-2 twins (lin family only) share conn8's fill set AND
+# label map — the guard keeps every ring-2 jump inside the dequeuer's own
+# 8-connected component — but not its depth/levels (each level advances
+# Chebyshev distance 2 through interior), so the full reference assert is
+# unusable; these assert visited/label/filled/recolor.
+
+
+def assert_r2_fill_and_labels(img, seeds, mode, **gpu_kwargs):
+    (ref_v, _, ref_l, _, ref_filled,
+     (_, fa), (_, fb)) = cpu_flood_fill_two(img, seeds, 8)
+    r = flood_fill(img, seeds, mode=mode, connectivity=8, radius=2,
+                   **_kw(mode, gpu_kwargs))
+    np.testing.assert_array_equal(r.visited, ref_v)
+    np.testing.assert_array_equal(r.label, ref_l)
+    assert r.filled == ref_filled
+    assert r.filled_a == fa and r.filled_b == fb
+    assert (r.img[ref_l == 0] == BLUE).all()
+    assert (r.img[ref_l == 1] == GREEN).all()
+    untouched = ref_v == 0
+    np.testing.assert_array_equal(r.img[untouched], img[untouched])
+    return r
+
+
+@pytest.mark.parametrize("mode", TEST_MODES)
+@pytest.mark.parametrize("name", ["two_squares", "asym_squares", "min_gap"])
+def test_r2_fill_and_labels(name, mode):
+    img, seeds = SCENES[name]()
+    assert_r2_fill_and_labels(img, seeds, mode)
+
+
+def test_r2_labels_isolated_across_1px_gap():
+    """Two blobs at Chebyshev distance 2 — one white row apart, TIGHTER
+    than the scene builders' >=2 px contract (they refuse gap=1, so this
+    scene is built by hand). An unguarded ring-2 would jump the gap and
+    smear one blob's label onto the other; the guard must not — every
+    stripe-edge pixel has a non-blob ring-1 neighbor."""
+    img = np.full((64, 64, 3), 255, dtype=np.uint8)
+    img[10:20, :] = scenes.RED   # blob A
+    img[21:31, :] = scenes.RED   # blob B, one white row away
+    seeds = [(15, 30), (25, 30)]
+    r = flood_fill(img, seeds, mode="multisource", connectivity=8, radius=2)
+    assert (r.label[10:20, :] == 0).all()
+    assert (r.label[21:31, :] == 1).all()
+    r8 = flood_fill(img, seeds, mode="multisource", connectivity=8)
+    np.testing.assert_array_equal(r.visited, r8.visited)
+    np.testing.assert_array_equal(r.label, r8.label)
+
+
+def test_r2_fewer_levels_and_interior():
+    """Supergraph BFS: fewer levels, no pixel reached later than conn8;
+    the static guard makes interior an exact census — two 30x30 solid
+    squares have 28x28 interior cores each."""
+    img, seeds = SCENES["two_squares"]()
+    r2 = flood_fill(img, seeds, mode="multisource", connectivity=8, radius=2)
+    r8 = flood_fill(img, seeds, mode="multisource", connectivity=8)
+    assert r2.levels < r8.levels
+    reached = r8.visited == 1
+    assert (r2.depth[reached] <= r8.depth[reached]).all()
+    assert r2.interior == 2 * 28 * 28
+    assert r2.filled - 2 <= r2.cas_attempts <= 24 * r2.filled
+    assert r2.processed == r2.filled
+
+
+def test_r2_bare_twin_parity():
+    img, seeds = SCENES["two_squares"]()
+    inst = flood_fill(img, seeds, mode="multisource", connectivity=8,
+                      radius=2)
+    bare = flood_fill(img, seeds, mode="multisource", connectivity=8,
+                      radius=2, bare=True)
+    np.testing.assert_array_equal(inst.visited, bare.visited)
+    np.testing.assert_array_equal(inst.depth, bare.depth)
+    np.testing.assert_array_equal(inst.label, bare.label)
+    assert inst.levels == bare.levels and inst.filled == bare.filled
+
+
+def test_r2_model_bytes_consistency():
+    """r2's model uses the exact probe count 8*processed + 16*interior."""
+    img, seeds = SCENES["two_squares"]()
+    r = flood_fill(img, seeds, mode="multisource", connectivity=8, radius=2)
+    expected = bandwidth.model_bytes(
+        r.processed, r.cas_attempts, r.filled, instrumented=True, n_dirs=8,
+        probe_reads=8 * r.processed + 16 * r.interior)
+    assert r.model_bytes == expected
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"connectivity": 4, "radius": 2},
+    {"connectivity": 8, "radius": 2, "entry_format": "xy"},
+    {"connectivity": 8, "radius": 3},
+])
+def test_rejects_bad_radius(kwargs):
+    img, seeds = SCENES["two_squares"]()
+    with pytest.raises(ValueError, match="radius"):
+        flood_fill(img, seeds, **kwargs)
+
+
 # ------------------------------------------------------------ bandwidth model
 
 def test_model_bytes_consistency():

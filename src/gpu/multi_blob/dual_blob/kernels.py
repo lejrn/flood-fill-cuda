@@ -78,6 +78,16 @@ DY_HOST = np.array([0, 1, 0, -1], dtype=np.int32)
 DX8_HOST = np.array([1, 1, 0, -1, -1, -1, 0, 1], dtype=np.int32)
 DY8_HOST = np.array([0, 1, 1, 1, 0, -1, -1, -1], dtype=np.int32)
 
+# Ring-2 offsets: the 16 cells at Chebyshev distance exactly 2, clockwise
+# from E — probed by the radius-2 twins only when all 8 ring-1 neighbors
+# are in-bounds blob material (see multi_block's radius-2 twins: the guard
+# keeps every jump inside true 8-connectivity, so labels stay correct too —
+# a ring-2 claim is 8-connected to the dequeuer's own component).
+DX_R2_HOST = np.array([2, 2, 2, 1, 0, -1, -2, -2,
+                       -2, -2, -2, -1, 0, 1, 2, 2], dtype=np.int32)
+DY_R2_HOST = np.array([0, 1, 2, 2, 2, 2, 2, 1,
+                       0, -1, -2, -2, -2, -2, -2, -1], dtype=np.int32)
+
 # Per-blob fill colors, indexed by label: 0 -> blue, 1 -> green.
 # Neither may be RED (255,0,0) — painted pixels must stop matching _is_red.
 PALETTE_HOST = np.array([[0, 0, 255],
@@ -99,7 +109,8 @@ ACTIVE_THREAD_SUM = 5   # sum over levels of min(level_size, grid threads)
 ACTIVE_WARP_SUM = 6     # sum over levels of ceil(min(level_size, grid)/32)
 PROCESSED = 7           # pixels dequeued/recolored (== FILLED iff exactly-once)
 CAS_ATTEMPTS = 8        # visited-CAS ops tried
-NUM_COUNTERS = 9
+INTERIOR = 9            # radius-2 twins: pixels whose ring-1 was all blob
+NUM_COUNTERS = 10
 
 # Columns of the (blocks, 2) int64 block_stats array
 BS_PROCESSED = 0        # pixels this block dequeued -> N-way load balance
@@ -417,6 +428,201 @@ def dual_blob_lin8_bare_kernel(img, visited, depth, queue, q_state,
                         _warp_enqueue_global(queue, q_state, Q_REAR,
                                              ((nx * height + ny) << 1) | lbl,
                                              counters)
+        grid.sync()
+        new_rear = q_state[Q_REAR]
+        grid.sync()
+        level += 1
+        front = rear
+        rear = new_rear
+
+    if tid == 0:
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
+
+
+# ------------------------------------- radius-2 twins (guarded, lin only)
+# The multi_block radius-2 experiment ported to labeled entries: ring-1
+# probed first, unconditionally; only pixels whose entire ring-1 is
+# in-bounds blob material (red, or visited==1 for claimed pixels whose
+# paint may be racing) also probe the 16 ring-2 cells. The guard keeps
+# every jump inside the dequeuer's own 8-connected component, so the
+# inherited label is exactly as correct as at ring-1 — fill set AND label
+# map provably identical to the lin8 twins'; only depth/levels change
+# meaning (levels roughly halve on solid blobs). lin family only: the xy
+# bet measured a wash, so the experiment stays on the baseline encoding.
+
+
+@cuda.jit(link=[SMID_CU])
+def dual_blob_lin8r2_kernel(img, visited, depth, owner, queue, q_state,
+                            counters, block_stats, level_sizes, n_seeds):
+    """Guarded radius-2 variant of dual_blob_lin8_kernel; same host
+    contract, same instrumentation, plus counters[INTERIOR]."""
+    grid = cuda.cg.this_grid()
+    bx = cuda.blockIdx.x
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    dx2 = cuda.const.array_like(DX_R2_HOST)
+    dy2 = cuda.const.array_like(DY_R2_HOST)
+    palette = cuda.const.array_like(PALETTE_HOST)
+
+    front = 0
+    rear = n_seeds
+    level = 0
+    peak_level = 1
+    peak_occ = 1
+    active_thread_sum = 0
+    active_warp_sum = 0
+    my_processed = 0
+    my_cas_attempts = 0
+    my_interior = 0
+
+    while front < rear:
+        level_size = rear - front
+        if level_size > peak_level:
+            peak_level = level_size
+        active = min(level_size, stride)
+        active_thread_sum += active
+        active_warp_sum += (active + 31) // 32
+        if tid == 0 and level < level_sizes.shape[0]:
+            level_sizes[level] = level_size
+
+        for i in range(front + tid, rear, stride):
+            entry = queue[i]
+            lbl = entry & 1
+            pixel = entry >> 1
+            x = pixel // height
+            y = pixel % height
+
+            img[x, y, 0] = palette[lbl, 0]
+            img[x, y, 1] = palette[lbl, 1]
+            img[x, y, 2] = palette[lbl, 2]
+            depth[x, y] = level
+            owner[x, y] = bx  # per-pixel block-owner map
+            my_processed += 1
+
+            interior = True
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height:
+                    if _is_red(img, nx, ny):
+                        my_cas_attempts += 1
+                        if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                            _warp_enqueue_global(
+                                queue, q_state, Q_REAR,
+                                ((nx * height + ny) << 1) | lbl,
+                                counters)
+                    elif visited[nx, ny] == 0:
+                        interior = False  # never red: not blob material
+                else:
+                    interior = False      # edge pixels never jump
+
+            if interior:
+                my_interior += 1
+                for d in range(16):
+                    nx = x + dx2[d]
+                    ny = y + dy2[d]
+                    # bounds still required: ring-1 in-bounds does not
+                    # imply ring-2 in-bounds (x==1 -> ring-2 at -1)
+                    if (0 <= nx < width and 0 <= ny < height
+                            and _is_red(img, nx, ny)):
+                        my_cas_attempts += 1
+                        if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                            _warp_enqueue_global(
+                                queue, q_state, Q_REAR,
+                                ((nx * height + ny) << 1) | lbl,
+                                counters)
+
+        grid.sync()  # enqueues + final rear for this level visible grid-wide
+        new_rear = q_state[Q_REAR]
+        grid.sync()  # everyone has read new_rear; next level's atomics may begin
+
+        level += 1
+        occ = new_rear - front
+        if occ > peak_occ:
+            peak_occ = occ
+        front = rear
+        rear = new_rear
+
+    cuda.atomic.add(counters, PROCESSED, my_processed)
+    cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
+    cuda.atomic.add(counters, INTERIOR, my_interior)
+    cuda.atomic.add(block_stats, (bx, BS_PROCESSED), my_processed)
+    if cuda.threadIdx.x == 0:
+        block_stats[bx, BS_SMID] = get_smid()
+    if tid == 0:
+        # all grid-uniform register values
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
+        counters[PEAK_LEVEL] = peak_level
+        counters[PEAK_OCC] = peak_occ
+        counters[ACTIVE_THREAD_SUM] = active_thread_sum
+        counters[ACTIVE_WARP_SUM] = active_warp_sum
+
+
+@cuda.jit
+def dual_blob_lin8r2_bare_kernel(img, visited, depth, queue, q_state,
+                                 counters, n_seeds):
+    grid = cuda.cg.this_grid()
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    dx2 = cuda.const.array_like(DX_R2_HOST)
+    dy2 = cuda.const.array_like(DY_R2_HOST)
+    palette = cuda.const.array_like(PALETTE_HOST)
+
+    front = 0
+    rear = n_seeds
+    level = 0
+
+    while front < rear:
+        for i in range(front + tid, rear, stride):
+            entry = queue[i]
+            lbl = entry & 1
+            pixel = entry >> 1
+            x = pixel // height
+            y = pixel % height
+            img[x, y, 0] = palette[lbl, 0]
+            img[x, y, 1] = palette[lbl, 1]
+            img[x, y, 2] = palette[lbl, 2]
+            depth[x, y] = level
+            interior = True
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height:
+                    if _is_red(img, nx, ny):
+                        if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                            _warp_enqueue_global(
+                                queue, q_state, Q_REAR,
+                                ((nx * height + ny) << 1) | lbl,
+                                counters)
+                    elif visited[nx, ny] == 0:
+                        interior = False
+                else:
+                    interior = False
+            if interior:
+                for d in range(16):
+                    nx = x + dx2[d]
+                    ny = y + dy2[d]
+                    if (0 <= nx < width and 0 <= ny < height
+                            and _is_red(img, nx, ny)):
+                        if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                            _warp_enqueue_global(
+                                queue, q_state, Q_REAR,
+                                ((nx * height + ny) << 1) | lbl,
+                                counters)
         grid.sync()
         new_rear = q_state[Q_REAR]
         grid.sync()

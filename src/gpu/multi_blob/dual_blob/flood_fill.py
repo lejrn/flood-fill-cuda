@@ -2,10 +2,18 @@
 
 Public API:
     flood_fill(img, seeds, mode="multisource", threads_per_block=256,
-               blocks=None, bare=False, connectivity=4, entry_format="lin")
+               blocks=None, bare=False, connectivity=4, entry_format="lin",
+               radius=1)
         -> DualBlobResult
     max_blocks(threads_per_block=256, bare=False, connectivity=4,
-               entry_format="lin")
+               entry_format="lin", radius=1)
+
+radius=2 (requires connectivity=8 and entry_format="lin") selects the
+guarded radius-2 twins ported from multi_block: ring-1 probed first with
+the unchanged protocol; only pixels whose entire ring-1 is in-bounds blob
+material also probe the 16 ring-2 cells, inheriting the dequeuer's label.
+Fill set and label map identical to plain conn8; levels roughly halve on
+solid blobs. Instrumented results report `interior` (guard passes).
 
 seeds is a list of exactly two (x, y) red pixels lying in two DIFFERENT
 connected components (the caller's contract — reference.py's merged oracle
@@ -53,13 +61,14 @@ from bandwidth import model_bytes as _model_bytes, model_gb_s as _model_gb_s
 from kernels import (
     dual_blob_lin_kernel, dual_blob_lin_bare_kernel,
     dual_blob_lin8_kernel, dual_blob_lin8_bare_kernel,
+    dual_blob_lin8r2_kernel, dual_blob_lin8r2_bare_kernel,
     dual_blob_xy_kernel, dual_blob_xy_bare_kernel,
     dual_blob_xy8_kernel, dual_blob_xy8_bare_kernel,
     PALETTE_HOST,
     XY_FIELD_BITS, XY_LBL_SHIFT, XY_MAX_DIM,
     NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
-    ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS,
+    ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS, INTERIOR,
     BS_PROCESSED, BS_SMID,
 )
 from numba import cuda
@@ -67,16 +76,18 @@ from numba import cuda
 MODES = ("sequential", "streams", "multisource")
 ENTRY_FORMATS = ("lin", "xy")
 
-# (entry_format, bare, connectivity) -> kernel
+# (entry_format, bare, connectivity, radius) -> kernel
 _KERNELS = {
-    ("lin", False, 4): dual_blob_lin_kernel,
-    ("lin", True, 4): dual_blob_lin_bare_kernel,
-    ("lin", False, 8): dual_blob_lin8_kernel,
-    ("lin", True, 8): dual_blob_lin8_bare_kernel,
-    ("xy", False, 4): dual_blob_xy_kernel,
-    ("xy", True, 4): dual_blob_xy_bare_kernel,
-    ("xy", False, 8): dual_blob_xy8_kernel,
-    ("xy", True, 8): dual_blob_xy8_bare_kernel,
+    ("lin", False, 4, 1): dual_blob_lin_kernel,
+    ("lin", True, 4, 1): dual_blob_lin_bare_kernel,
+    ("lin", False, 8, 1): dual_blob_lin8_kernel,
+    ("lin", True, 8, 1): dual_blob_lin8_bare_kernel,
+    ("lin", False, 8, 2): dual_blob_lin8r2_kernel,
+    ("lin", True, 8, 2): dual_blob_lin8r2_bare_kernel,
+    ("xy", False, 4, 1): dual_blob_xy_kernel,
+    ("xy", True, 4, 1): dual_blob_xy_bare_kernel,
+    ("xy", False, 8, 1): dual_blob_xy8_kernel,
+    ("xy", True, 8, 1): dual_blob_xy8_bare_kernel,
 }
 
 # Cap on the recorded per-level trace (1D int32 -> 8 MB max), per launch
@@ -101,6 +112,7 @@ class LaunchStats:
     peak_occupancy: int    # max queue entries alive across adjacent levels
     processed: int
     cas_attempts: int
+    interior: int          # radius-2 only: guard passes (else 0)
     kernel_ms: float       # device time (CUDA events under streams)
     thread_util_pct: float
     processed_per_block: np.ndarray = field(repr=False)
@@ -126,6 +138,7 @@ class DualBlobResult:
     blocks: int            # per-launch grid size actually used
     bare: bool
     connectivity: int
+    radius: int            # 1, or 2 for the guarded radius-2 twins
     entry_format: str
     # Combined outcome
     filled: int
@@ -136,6 +149,7 @@ class DualBlobResult:
     levels_b: int
     processed: int
     cas_attempts: int
+    interior: int          # radius-2 only: guard passes summed over launches
     # Timing (ms). kernel_ms: sequential = tA + tB; streams = wall clock
     # around both launches; multisource = the single launch.
     kernel_ms: float
@@ -184,13 +198,13 @@ def _tiny_args(entry_format):
     return d_img, d_visited, d_depth, d_counters, d_queue, d_q
 
 
-def _warmup(entry_format, bare, connectivity=4):
+def _warmup(entry_format, bare, connectivity=4, radius=1):
     """JIT-compile (and NVRTC-link) each kernel once, off the clock. The
     first warmup also probes whether this Numba/driver accepts a
     cooperative launch on a non-default stream (mode="streams" needs it);
     the outcome is recorded, never assumed."""
     global _streams_ok, _streams_err
-    key = (entry_format, bare, connectivity)
+    key = (entry_format, bare, connectivity, radius)
     if key not in _warmed:
         d_img, d_visited, d_depth, d_counters, d_queue, d_q = \
             _tiny_args(entry_format)
@@ -215,7 +229,7 @@ def _warmup(entry_format, bare, connectivity=4):
             d_stats = cuda.to_device(np.zeros((1, 2), dtype=np.int64))
             d_trace = cuda.device_array(4, dtype=np.int32)
             s = cuda.stream()
-            _KERNELS[(entry_format, False, connectivity)][1, 32, s](
+            _KERNELS[(entry_format, False, connectivity, radius)][1, 32, s](
                 d_img, d_visited, d_depth, d_owner, d_queue, d_q,
                 d_counters, d_stats, d_trace, 2)
             s.synchronize()
@@ -234,18 +248,20 @@ def _coop_max_blocks(kernel_fn, tpb):
 
 
 def max_blocks(threads_per_block=256, bare=False, connectivity=4,
-               entry_format="lin"):
+               entry_format="lin", radius=1):
     """The largest cooperative grid this GPU can host at threads_per_block
     for ONE launch (what blocks=None resolves to outside streams mode;
     streams mode defaults each of its two launches to half of this).
     Queried per kernel — never assumed equal across formats/twins."""
-    _warmup(entry_format, bare, connectivity)
-    return _coop_max_blocks(_KERNELS[(entry_format, bare, connectivity)],
-                            threads_per_block)
+    _warmup(entry_format, bare, connectivity, radius)
+    return _coop_max_blocks(
+        _KERNELS[(entry_format, bare, connectivity, radius)],
+        threads_per_block)
 
 
 def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
-               blocks=None, bare=False, connectivity=4, entry_format="lin"):
+               blocks=None, bare=False, connectivity=4, entry_format="lin",
+               radius=1):
     """Flood-fill two disconnected red blobs, blob 0 blue / blob 1 green.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
@@ -298,14 +314,20 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
             raise ValueError(f"blocks must be >= 1, got {blocks}")
     if connectivity not in (4, 8):
         raise ValueError(f"connectivity must be 4 or 8, got {connectivity!r}")
+    if radius not in (1, 2):
+        raise ValueError(f"radius must be 1 or 2, got {radius!r}")
+    if radius == 2 and (connectivity != 8 or entry_format != "lin"):
+        raise ValueError(
+            "radius=2 requires connectivity=8 and entry_format='lin' (the "
+            "guarded ring-2 twins exist only for the lin conn8 kernels)")
 
-    _warmup(entry_format, bare, connectivity)
+    _warmup(entry_format, bare, connectivity, radius)
     if mode == "streams" and not _streams_ok:
         raise NotImplementedError(
             "mode='streams' unavailable: this Numba/driver rejected a "
             f"cooperative launch on a non-default stream ({_streams_err})")
 
-    kernel_fn = _KERNELS[(entry_format, bare, connectivity)]
+    kernel_fn = _KERNELS[(entry_format, bare, connectivity, radius)]
     coop_max = _coop_max_blocks(kernel_fn, threads_per_block)
     if blocks is None:
         # Streams default: a THIRD of capacity per launch, not half. Probed
@@ -474,6 +496,7 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
             peak_occupancy=int(c[PEAK_OCC]),
             processed=int(c[PROCESSED]),
             cas_attempts=int(c[CAS_ATTEMPTS]),
+            interior=int(c[INTERIOR]),
             kernel_ms=(per_launch_ms[i] if per_launch_ms else kernel_ms),
             thread_util_pct=util,
             processed_per_block=ppb,
@@ -497,10 +520,14 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
     filled = sum(l.filled for l in launches)
     processed = sum(l.processed for l in launches)
     cas_attempts = sum(l.cas_attempts for l in launches)
+    interior = sum(l.interior for l in launches)
     kernel_a_ms = per_launch_ms[0] if per_launch_ms else 0.0
     kernel_b_ms = per_launch_ms[1] if per_launch_ms else 0.0
+    # Exact probe count: radius-2 pixels probe 8 always + 16 when interior.
+    probe_reads = (8 * processed + 16 * interior if radius == 2
+                   else processed * connectivity)
     mbytes = (_model_bytes(processed, cas_attempts, filled, True,
-                           n_dirs=connectivity)
+                           n_dirs=connectivity, probe_reads=probe_reads)
               if instrumented else 0)
 
     return DualBlobResult(
@@ -515,6 +542,7 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
         blocks=launch_blocks,
         bare=bare,
         connectivity=connectivity,
+        radius=radius,
         entry_format=entry_format,
         filled=filled,
         filled_a=filled_a,
@@ -524,6 +552,7 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
         levels_b=levels_b,
         processed=processed,
         cas_attempts=cas_attempts,
+        interior=interior,
         kernel_ms=kernel_ms,
         kernel_a_ms=kernel_a_ms,
         kernel_b_ms=kernel_b_ms,
