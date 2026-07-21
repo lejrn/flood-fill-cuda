@@ -74,7 +74,7 @@ def _frontier_color(hue):
 
 
 # (scene builder, blocks, tpb, output stem, upscale, gif?, max frames,
-#  connectivity)
+#  connectivity[, radius])
 COMBOS = [
     # 256 grid threads vs a ~440 px peak frontier: all 8 blocks work; the
     # first rings keep per-block coherence, then ownership speckles
@@ -85,6 +85,12 @@ COMBOS = [
     # half the levels — the barrier-halving mechanism made visible
     (lambda: scenes.square_scene(256, 256, 220, 220), 8, 32,
      "square256_b8_t32_conn8", 2, True, 96, 8),
+    # the guarded radius-2 twin on the same scene and grid: the square
+    # wave now advances TWO Chebyshev rings per level through interior —
+    # half of conn8's levels again (the double-speed wave the benchmark
+    # priced and rejected: correct, deterministic, and slower at scale)
+    (lambda: scenes.square_scene(256, 256, 220, 220), 8, 32,
+     "square256_b8_t32_r2", 2, True, 96, 8, 2),
     # corner seed: the frontier grows 1 -> 256, so the blocks come online
     # one at a time as it outgrows the threads in front of them
     (lambda: scenes.full_red_scene(256, 256), 8, 32,
@@ -122,10 +128,10 @@ def to_image(arr_xy3, upscale):
 
 
 def render(builder, blocks, tpb, stem, upscale, make_gif, max_frames,
-           connectivity=4):
+           connectivity=4, radius=1):
     img, sx, sy = builder()
     r = flood_fill(img, sx, sy, threads_per_block=tpb, blocks=blocks,
-                   connectivity=connectivity)
+                   connectivity=connectivity, radius=radius)
     depth, owner, levels = r.depth, r.owner, r.levels
     luts = {b: _ramp_lut(_block_hue(b)) for b in range(blocks)}
     grad = gradient_colors(depth, owner, levels, luts)

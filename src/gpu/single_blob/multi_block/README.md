@@ -315,18 +315,64 @@ pins all configs to a common grid so ratios never compare unequal grids).
 
 | bet | arithmetic | prediction | verdict |
 |---|---|---|---|
-| r2 barriers | levels halve again (sq_8000 4,001→~2,001; disk 1,901→~951) → saves ~2,000 levels × 2 syncs × ~1.4 µs ≈ 6 ms of sq_8000's 100 ms | mild win alone (~6%) — the real lever is width, as in the conn8 experiment | *(pending)* |
-| r2 width | peak frontier doubles again, but utilization is already 81% at 64M px | less headroom than conn8 had: solid scenes 1.05–1.25×, best where util was lowest (mid-size squares) | *(pending)* |
-| r2 traffic | probes 8→24 per interior pixel: model ~105 → ~153 B/px (+46%), CAS attempts ~triple | after the conn8 sector-locality post-mortem: real cost far below modeled (ring-2 spans 5 rows vs ring-1's 3) — traffic does not decide it | *(pending)* |
-| r2 serpentine | interior == 0 (proven in tests) — pure guard cost: ~8 extra visited loads per pixel | 0.85–1.0×, the losing scene | *(pending)* |
-| wc narrow | serpentine spends ~5.5 µs/level at conn8; ~2.8 µs is syncs, most of the rest is 8 serial probe rounds → collapse to 1 | serpentine 1.3–1.6× vs conn8 — the headline bet | *(pending)* |
-| wc wide | same loads in flight, reshuffled; 8× more loop trips + redundant decode | wash to slightly slower on big solid scenes (0.9–1.05×) | *(pending)* |
+| r2 barriers | levels halve again (sq_8000 4,001→~2,001; disk 1,901→~951) → saves ~2,000 levels × 2 syncs × ~1.4 µs ≈ 6 ms of sq_8000's 100 ms | mild win alone (~6%) — the real lever is width, as in the conn8 experiment | **arithmetic exact, win never materialized** — levels halved to the pixel (4,001→2,001, interior ≈100%), and r2 still lost every scene |
+| r2 width | peak frontier doubles again, but utilization is already 81% at 64M px | less headroom than conn8 had: solid scenes 1.05–1.25×, best where util was lowest (mid-size squares) | **WRONG** — 0.50–0.88×, and *worst* where utilization was highest. Util did rise (81→90% at 64M) — and it didn't matter |
+| r2 traffic | probes 8→24 per interior pixel: model ~105 → ~153 B/px (+46%), CAS attempts ~triple | after the conn8 sector-locality post-mortem: real cost far below modeled (ring-2 spans 5 rows vs ring-1's 3) — traffic does not decide it | **WRONG, in reverse** — CAS attempts measured 2.5–2.9×, and traffic is exactly what decided it. See the post-mortem |
+| r2 serpentine | interior == 0 (proven in tests) — pure guard cost: ~8 extra visited loads per pixel | 0.85–1.0×, the losing scene | **CONFIRMED** — 0.90× (min-ratio 0.89), and ironically its *best* scene |
+| wc narrow | serpentine spends ~5.5 µs/level at conn8; ~2.8 µs is syncs, most of the rest is 8 serial probe rounds → collapse to 1 | serpentine 1.3–1.6× vs conn8 — the headline bet | **CONFIRMED** — 1.45× (min 1.43). 123.8 ms: the serpentine drops below conn4 (145.0 ms) for the first time in the project |
+| wc wide | same loads in flight, reshuffled; 8× more loop trips + redundant decode | wash to slightly slower on big solid scenes (0.9–1.05×) | **WRONG, pleasantly** — 1.12–1.53× everywhere. conn8's "wide" scenes still idled 19% of lanes; 8-lanes-per-entry closed that to 2% |
 
 Both experiments are benchmarked head-to-head against conn4/conn8 in ONE
 interleaved round-robin per scene (`benchmark_neighbors.py`) — the
 dual_blob stage's Finding-3 lesson: sequential A-then-B timing on this
 drifting GPU produces sign-flipping artifacts; only interleaving makes
 the ratios trustworthy.
+
+### Results (median of 5, all configs pinned to 48×256, one session)
+
+| scene | conn4 ms | conn8 ms | r2 ms | wc ms | r2/8 (min) | wc/8 (min) | levels 8→r2 | util 8/r2/wc % |
+|---|---:|---:|---:|---:|---|---|---|---|
+| sq_2000 center | 10.1 | 6.0 | 6.8 | **3.9** | 0.88× (0.90) | **1.53× (1.55)** | 501→251 | 16/32/81 |
+| sq_4000 corner | 58.9 | 39.3 | 51.8 | **32.0** | 0.76× (0.73) | 1.23× (1.21) | 4,000→2,001 | 33/62/90 |
+| disk r=1900 | 35.5 | 32.2 | 45.0 | **25.8** | 0.72× (0.68) | 1.25× (1.05)* | 1,901→951 | 49/77/95 |
+| serpentine_256 | 145.0 | 179.1 | 199.8 | **123.8** | 0.90× (0.89) | **1.45× (1.43)** | 32,641 (=) | ~0 |
+| sq_6000 center | 78.9 | 55.8 | 106.0 | **49.9** | 0.53× (0.53) | 1.12× (1.10) | 3,001→1,501 | 74/87/97 |
+| sq_8000 center | 136.1 | 99.6 | 200.1 | **88.5** | **0.50× (0.50)** | 1.13× (1.16) | 4,001→2,001 | 81/90/98 |
+
+\* the one median/min disagreement (1.25 vs 1.05) — the disk drifted; every
+other ratio's two forms agree, so the signs are real. Fill sets
+cross-checked against the 8-conn oracle on every scene, every config.
+**wc wins every scene** — sq_8000 in 88.5 ms is 64M px at 723 Mpx/s, the
+fastest whole-scene rate this project has measured, and the serpentine
+finally beats its own 4-conn baseline. **r2 loses every scene**, scaling
+*worse* with size: 0.88× at 1M px down to 0.50× at 64M.
+
+### Post-mortem: why r2 lost and wc won
+
+**Radius-2 fell into the hole conn8 climbed out of — at the top.** conn8
+won by halving levels *where utilization had headroom* (62→81% at 64M):
+doubling level width put idle lanes to work, and the extra probes hid
+behind latency that was going spare. r2 repeated the trick starting from
+81–90% utilization — there were no idle lanes left to feed. What remained
+was the bill: 16 extra probes per interior pixel and 2.5–2.9× the CAS
+attempts, none of it hideable. The modeled rate hit 51.7 GB/s (29% of
+peak — a project record; the machine genuinely moved more bytes per
+second than ever) and *still lost half its wall-clock*: work-efficiency
+loss, not machine inefficiency. The width lever is exhausted; pulling it
+harder just buys traffic.
+
+**Warp-coop won for the mirror reason: it adds zero work and wastes zero
+lanes.** Same BFS graph, same probes, same atomics — redistributed so
+that a level of L entries occupies 8L lanes instead of L. Every scene
+still had lane-idleness to harvest (even sq_8000 idled 19% of lanes at
+conn8), so every scene won. The serpentine's 1.45× also splits the
+standing "barrier cost" story: of conn8's ~5.5 µs/level, ~1.9 µs was the
+8 serial probe rounds wc collapsed into one — the two grid.syncs were
+never the whole bill.
+
+One more free observation: the bare twins compile leaner (72-block
+capacity vs 48 instrumented at tpb=256) — instrumentation, not the BFS,
+sets this stage's register wall.
 
 ## Wavefront renders (`wavefront.py` → `wavefront/`)
 
@@ -367,6 +413,11 @@ uv run pytest src/gpu/single_blob/multi_block/test_correctness.py -v
 # conn8 head-to-head columns, connectivity-tagged blocks x tpb sweep;
 # writes JSON + two CSVs to benchmark_results/. ~25-35 min.
 uv run python src/gpu/single_blob/multi_block/benchmark.py
+
+# Per-barrier work experiments: conn4/conn8/radius-2/warp-coop (+ bare
+# twins) in one INTERLEAVED round-robin per scene, all configs pinned to
+# a common grid; writes neighbors_*.json + CSV. ~15-25 min.
+uv run python src/gpu/single_blob/multi_block/benchmark_neighbors.py
 
 # Wavefront GIFs + gradient PNGs (block hues; incl. the conn8 square wave).
 uv run python src/gpu/single_blob/multi_block/wavefront.py
