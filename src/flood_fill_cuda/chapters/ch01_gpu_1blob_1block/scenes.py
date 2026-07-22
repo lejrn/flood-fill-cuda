@@ -1,37 +1,22 @@
 """
 Test scenes for the single-block shared-memory kernel.
 
-Re-exports the generators from persistent/scenes.py (loaded by file path via
-importlib — adding persistent/ to sys.path would shadow this package's own
-kernels/flood_fill/scenes modules, which share basenames), plus two scenes
-specific to the shared-ring capacity story:
+Re-exports the generators from shared/scenes.py, plus two scenes specific
+to the shared-ring capacity story:
 
-- corner_seeded_square_scene: seed at (0, 0). persistent's
+- corner_seeded_square_scene: seed at (0, 0). shared's
   square_scene(corner=True) places the *blob* at the corner but still seeds
   at the blob center, which halves nothing — corner seeding is what caps the
   peak frontier at ~2W instead of ~4W.
 - overflow_scene: guaranteed to overflow the 8192-entry shared ring.
 """
 
-import importlib.util
-import os
-
 import numpy as np
 
-_PERSISTENT_SCENES = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "persistent", "scenes.py")
-_spec = importlib.util.spec_from_file_location("_persistent_scenes", _PERSISTENT_SCENES)
-_persistent = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_persistent)
-
-RED = _persistent.RED
-WHITE = _persistent.WHITE
-square_scene = _persistent.square_scene
-disk_scene = _persistent.disk_scene
-serpentine_scene = _persistent.serpentine_scene
-random_scene = _persistent.random_scene
-single_pixel_scene = _persistent.single_pixel_scene
-full_red_scene = _persistent.full_red_scene
+from ...shared.scenes import (
+    RED, WHITE, square_scene, disk_scene, serpentine_scene,
+    random_scene, single_pixel_scene, full_red_scene,
+)
 
 
 def corner_seeded_square_scene(width, height, blob_w, blob_h):

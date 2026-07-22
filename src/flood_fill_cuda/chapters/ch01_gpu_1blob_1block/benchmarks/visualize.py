@@ -9,11 +9,13 @@ lanes woken), the threads-per-block sweep, and the full results table —
 with hover tooltips and light/dark theming, no external dependencies.
 
 Usage:
-    uv run python src/gpu/single_blob/single_block_shared/visualize.py [results.json]
+    uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.visualize [results.json]
 
-With no argument, the newest single_block_shared_*.json in benchmark_results/
-is used. Output: benchmark_results/single_block_benchmark.html (overwritten
-on each run — the timestamped JSON/CSV remain the durable record).
+With no argument, the newest single_block_shared_*.json in
+results/ch01_gpu_1blob_1block/benchmark_results/ is used. Output:
+results/ch01_gpu_1blob_1block/benchmark_results/single_block_benchmark.html
+(overwritten on each run — the timestamped JSON/CSV remain the durable
+record).
 """
 import glob
 import json
@@ -21,8 +23,9 @@ import math
 import os
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
+from ....shared import results_paths
+
+RESULTS_DIR = results_paths.results_dir("ch01_gpu_1blob_1block", "benchmark_results")
 
 if len(sys.argv) > 1:
     JSON_PATH = sys.argv[1]

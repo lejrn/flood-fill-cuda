@@ -3,9 +3,10 @@ Benchmark: single-block shared-ring GPU flood fill vs two CPU baselines.
 
 Implementations compared (all 4-connectivity, exact-red match, same work):
   1. pure-Python deque BFS (self-contained below — the classic sequential
-     algorithm; src/cpu/sequential.py is not imported because it runs a
-     file-loading job at import time and uses a threshold red test)
-  2. @njit compiled level-synchronous BFS (reference.py — the honest CPU bar)
+     algorithm; chapters/ch00_cpu_baseline/sequential.py is not imported
+     because it runs a file-loading job at import time and uses a
+     threshold red test)
+  2. @njit compiled level-synchronous BFS (cpu_oracle.py — the honest CPU bar)
   3. GPU v1 "ring" kernel (pure shared ring; trips on oversized frontiers)
   4. GPU v2 "spill" kernel (two-tier: shared ring + global spill tier with
      warp-aggregated enqueue; completes any scene that fits in memory)
@@ -21,11 +22,12 @@ this stage is the technique and truthful numbers, not beating @njit; expect
 the GPU to lose on serpentine (frontier starves the block) and to be judged
 per-scene elsewhere. Speedups below 1.0x are printed as-is.
 
-Run:  uv run python src/gpu/single_blob/single_block_shared/benchmark.py
+Run:  uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.benchmark
       add --slow to include the pure-Python baseline up to the 16M-px scenes
 
-Writes JSON (with per-level frontier traces) and CSV to benchmark_results/
-next to this script.
+Writes JSON (with per-level frontier traces) and CSV to
+results/ch01_gpu_1blob_1block/benchmark_results/ (centralized, not next to
+this script).
 """
 
 import os
@@ -42,13 +44,13 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from flood_fill import flood_fill
-from reference import cpu_flood_fill
-import scenes
+from ..flood_fill import flood_fill
+from ..cpu_oracle import cpu_flood_fill
+from .. import scenes
+from ....shared import results_paths
 from numba import cuda
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
+RESULTS_DIR = results_paths.results_dir("ch01_gpu_1blob_1block", "benchmark_results")
 
 GPU_REPEATS = 5
 NJIT_REPEATS = 5

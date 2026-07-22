@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from kernels import (
+from .kernels import (
     single_block_bfs_kernel, single_block_bfs_spill_kernel,
     RING_CAPACITY, NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
