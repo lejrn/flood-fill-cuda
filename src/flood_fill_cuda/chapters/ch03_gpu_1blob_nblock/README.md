@@ -323,7 +323,8 @@ pins all configs to a common grid so ratios never compare unequal grids).
 | wc wide | same loads in flight, reshuffled; 8× more loop trips + redundant decode | wash to slightly slower on big solid scenes (0.9–1.05×) | **WRONG, pleasantly** — 1.12–1.53× everywhere. conn8's "wide" scenes still idled 19% of lanes; 8-lanes-per-entry closed that to 2% |
 
 Both experiments are benchmarked head-to-head against conn4/conn8 in ONE
-interleaved round-robin per scene (`benchmark_neighbors.py`) — the
+interleaved round-robin per scene
+(`benchmarks/benchmark_connectivity_and_barrier_work.py`) — the
 dual_blob stage's Finding-3 lesson: sequential A-then-B timing on this
 drifting GPU produces sign-flipping artifacts; only interleaving makes
 the ratios trustworthy.
@@ -404,23 +405,24 @@ one thing its losing kernel had that the winner doesn't.
 ## Run
 
 ```bash
-# Correctness (133 tests: 4-conn vs the sbs @njit reference, 8-conn vs
-# persistent/'s, 4-vs-8 cross-checks, radius-2 guard/leak/interior tests,
-# warp-coop bit-identity tests).
-uv run pytest src/gpu/single_blob/multi_block/test_correctness.py -v
+# Correctness (133 tests: 4-conn vs ch01's @njit reference, 8-conn vs
+# shared/cpu_oracle.py's, 4-vs-8 cross-checks, radius-2 guard/leak/interior
+# tests, warp-coop bit-identity tests).
+uv run pytest src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/test_correctness.py -v
 
 # Benchmark: measured copy peak, scene suite vs @njit/v2/dual-global with
 # conn8 head-to-head columns, connectivity-tagged blocks x tpb sweep;
-# writes JSON + two CSVs to benchmark_results/. ~25-35 min.
-uv run python src/gpu/single_blob/multi_block/benchmark.py
+# writes JSON + two CSVs to results/ch03_gpu_1blob_nblock/benchmark_results/.
+# ~25-35 min.
+uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.benchmark
 
 # Per-barrier work experiments: conn4/conn8/radius-2/warp-coop (+ bare
 # twins) in one INTERLEAVED round-robin per scene, all configs pinned to
 # a common grid; writes neighbors_*.json + CSV. ~15-25 min.
-uv run python src/gpu/single_blob/multi_block/benchmark_neighbors.py
+uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.benchmark_connectivity_and_barrier_work
 
 # Wavefront GIFs + gradient PNGs (block hues; incl. the conn8 square wave).
-uv run python src/gpu/single_blob/multi_block/wavefront.py
+uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.wavefront
 ```
 
 ## Glossary (the stage's load-bearing terms)

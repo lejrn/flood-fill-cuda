@@ -23,8 +23,10 @@ The @njit 8-conn oracle provides njit_ms context and the filled
 cross-check (valid for every config: the radius-2 guard provably
 preserves the conn8 fill set, and wc is bit-identical by construction).
 
-Run:  uv run python src/gpu/single_blob/multi_block/benchmark_neighbors.py
-Writes JSON + CSV to benchmark_results/ next to this script.
+Run:  uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.benchmark_connectivity_and_barrier_work
+Writes JSON + CSV (still the neighbors_* prefix — the dashboard already
+globs for that name) to results/ch03_gpu_1blob_nblock/benchmark_results/
+(centralized, not next to this script).
 Budget ~15-25 min (7 kernel JITs + 35 fills per scene, 6 scenes).
 """
 
@@ -41,14 +43,14 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-import bandwidth
-from flood_fill import flood_fill, max_blocks
-from reference import cpu_flood_fill_8
-import scenes
+from . import bandwidth
+from ..flood_fill import flood_fill, max_blocks
+from ..cpu_oracle import cpu_flood_fill_8
+from .. import scenes
+from ....shared import results_paths
 from numba import cuda
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
+RESULTS_DIR = results_paths.results_dir("ch03_gpu_1blob_nblock", "benchmark_results")
 
 GPU_REPEATS = 5
 NJIT_REPEATS = 3
