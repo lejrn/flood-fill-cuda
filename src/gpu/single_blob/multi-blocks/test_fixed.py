@@ -4,11 +4,14 @@ Tests for kernels_fixed.py — gradient-colored multi-block flood fill.
 Skips gracefully when no CUDA device is available.
 """
 
+import os
 import numpy as np
 import pytest
 
 import subprocess
 import sys
+
+os.environ.setdefault('NUMBA_CUDA_USE_NVIDIA_BINDING', '1')
 
 def _cuda_functional():
     """Return True only if a CUDA device array can actually be created."""
@@ -21,11 +24,13 @@ def _cuda_functional():
     # is_available() can return True even when the driver segfaults on first use
     # (common in WSL2 without a physical GPU). Probe with a subprocess so that a
     # crash there does not kill the test process.
+    env = {**os.environ, 'NUMBA_CUDA_USE_NVIDIA_BINDING': '1'}
     probe = subprocess.run(
         [sys.executable, "-c",
          "from numba import cuda; import numpy as np; cuda.to_device(np.zeros(1, dtype=np.int32))"],
         timeout=15,
         capture_output=True,
+        env=env,
     )
     return probe.returncode == 0
 

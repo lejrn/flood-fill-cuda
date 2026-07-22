@@ -5,6 +5,9 @@ Tests different combinations of blocks_per_grid, threads_per_block, and chunk_si
 
 import os
 import sys
+
+os.environ.setdefault('NUMBA_CUDA_USE_NVIDIA_BINDING', '1')
+
 import numpy as np
 import time
 import csv

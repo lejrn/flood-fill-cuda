@@ -30,7 +30,7 @@ perf_logger = PerformanceLogger()
 def flood_fill_iteration(img, visited, width, height, new_color,
                         global_queue_x, global_queue_y, global_queue_front, global_queue_rear,
                         debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count,
-                        chunk_size, iteration_num):
+                        chunk_size, iteration_num, iter_front, iter_rear):
     """
     Single iteration of flood fill using multi-block work distribution.
     
@@ -69,9 +69,11 @@ def flood_fill_iteration(img, visited, width, height, new_color,
     DX_const = cuda.const.array_like(DX_host)
     DY_const = cuda.const.array_like(DY_host)
     
-    # Read current queue state (all blocks see the same values)
-    iteration_front = global_queue_front[0]
-    iteration_rear = global_queue_rear[0]
+    # Use host-snapshotted front/rear so all blocks see identical values.
+    # Reading global_queue_rear directly here would cause a race: late-starting
+    # blocks would see a rear already inflated by early blocks adding neighbors.
+    iteration_front = iter_front
+    iteration_rear = iter_rear
     current_queue_size = iteration_rear - iteration_front
     
     # Early exit if no work
@@ -375,26 +377,30 @@ def run_multi_iteration_flood_fill(img, visited, start_x, start_y, width, height
     cuda.synchronize()
     
     iteration = 0
-    check_interval = 50  # Check every 50 iterations (much less frequent)
-    
+
     while iteration < max_iterations:
-        # Only check termination occasionally to minimize transfers
-        if iteration % check_interval == 0:
-            current_front = global_queue_front.copy_to_host()[0]
-            current_rear = global_queue_rear.copy_to_host()[0]
-            
-            if current_front >= current_rear:
-                break  # No more work
-        
-        # Launch kernel for this iteration
+        # Snapshot front/rear on the host before each launch so all blocks
+        # receive identical values — prevents the race where late-starting
+        # blocks read a rear already inflated by early blocks adding neighbors.
+        current_front = int(global_queue_front.copy_to_host()[0])
+        current_rear = int(global_queue_rear.copy_to_host()[0])
+
+        if iteration < 50 or iteration % 500 == 0:
+            pcount = int(debug_pixel_count.copy_to_host()[0])
+            print(f"    [dbg iter {iteration:4d}] front={current_front:8d}, rear={current_rear:8d}, delta={current_rear-current_front:6d}, pcount={pcount:8d}")
+
+        if current_front >= current_rear:
+            break  # No more work
+
         flood_fill_iteration[blocks_per_grid, threads_per_block](
             img, visited, width, height, new_color,
             global_queue_x, global_queue_y, global_queue_front, global_queue_rear,
             debug_block_usage, debug_thread_usage, debug_warp_usage, debug_pixel_count,
-            chunk_size, iteration
+            chunk_size, iteration,
+            current_front, current_rear
         )
         cuda.synchronize()
-        
+
         iteration += 1
     
     # Final verification
@@ -408,6 +414,6 @@ def run_multi_iteration_flood_fill(img, visited, start_x, start_y, width, height
     print(f"   • Iterations: {iteration}")
     print(f"   • Pixels processed: {pixels_processed:,}")
     print(f"   • Final queue state: front={final_front}, rear={final_rear}, size={final_queue_size}")
-    print(f"   • Host transfers: only every {check_interval} iterations + final check")
+    print(f"   • Host transfers: 2×int32 per iteration (front/rear snapshot)")
     
     return iteration
