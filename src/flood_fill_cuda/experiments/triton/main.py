@@ -8,9 +8,9 @@ result against OpenCV's CPU floodFill, and saves before/after PNGs.
 
 Usage (from the repo root):
 
-    uv run python src/gpu/single_blob/triton/main.py
-    uv run python src/gpu/single_blob/triton/main.py --size 8192 --shape spiral
-    uv run python src/gpu/single_blob/triton/main.py --mode both --repeats 5
+    uv run python src/flood_fill_cuda/experiments/triton/main.py
+    uv run python src/flood_fill_cuda/experiments/triton/main.py --size 8192 --shape spiral
+    uv run python src/flood_fill_cuda/experiments/triton/main.py --mode both --repeats 5
 """
 
 import argparse
