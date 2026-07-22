@@ -5,8 +5,8 @@ operational reference every derived bandwidth figure is expressed against.
 
 Section 1, scene suite (median of GPU_REPEATS, blocks=None -> cooperative
 max, tpb=256): @njit CPU reference, single-block v2 spill (cross-imported
-from ../single_block_shared), dual-block global (cross-imported from
-../dual_block — the 2-block ancestor, re-measured fresh), and the
+from ch01_gpu_1blob_1block), dual-block global (cross-imported from
+ch02_gpu_1blob_2block — the 2-block ancestor, re-measured fresh), and the
 multi-block kernel instrumented AND bare. Every instrumented row carries
 model_gb_s (derived bytes-moved / kernel time) and % of the measured peak.
 The final scene is a guarded 8000^2 / 64M px stretch run: 10000^2 (the L2
@@ -26,9 +26,10 @@ solid/corridor), and the sweep runs the full blocks x tpb grid at 8-conn
 on the two big blobs, rows tagged by connectivity. Session budget
 ~25-35 min.
 
-Run:  uv run python src/gpu/single_blob/multi_block/benchmark.py
+Run:  uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.benchmark
 Writes JSON (with per-level traces and per-block stats) plus two CSVs to
-benchmark_results/ next to this script.
+results/ch03_gpu_1blob_nblock/benchmark_results/ (centralized, not next to
+this script).
 """
 
 import os
@@ -45,14 +46,16 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-import bandwidth
-from flood_fill import flood_fill, max_blocks
-from reference import cpu_flood_fill, load_by_path, _SBS
-import scenes
+from . import bandwidth
+from ..flood_fill import flood_fill, max_blocks
+from ..cpu_oracle import cpu_flood_fill
+from ...ch01_gpu_1blob_1block.flood_fill import flood_fill as sbs_flood_fill
+from ...ch02_gpu_1blob_2block.flood_fill import flood_fill as dual_flood_fill
+from .. import scenes
+from ....shared import results_paths
 from numba import cuda
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
+RESULTS_DIR = results_paths.results_dir("ch03_gpu_1blob_nblock", "benchmark_results")
 
 GPU_REPEATS = 5
 NJIT_REPEATS = 5
@@ -64,29 +67,6 @@ TPB_SWEEP = [32, 64, 128, 256, 512]
 BLOCKS_SWEEP = [1, 2, 4, 8, 16, 32, 48, 96, 128, 192, "max"]
 SWEEP_SCENES = ["sq_4000_corner", "disk_4001_r1900", "serpentine_256"]
 SWEEP_SCENES_CONN8 = ["sq_4000_corner", "disk_4001_r1900"]
-
-
-def _load_sibling(pkg_dirname, prefix):
-    """Load a sibling package's flood_fill.py despite the module-name
-    collision: its `from kernels import ...` consults sys.modules first,
-    which is already bound to THIS package's kernels — so temporarily remap
-    the name while executing it."""
-    pkg = os.path.abspath(os.path.join(_HERE, os.pardir, pkg_dirname))
-    sib_kernels = load_by_path(f"_{prefix}_kernels", os.path.join(pkg, "kernels.py"))
-    saved = sys.modules.get("kernels")
-    sys.modules["kernels"] = sib_kernels
-    try:
-        return load_by_path(f"_{prefix}_flood_fill",
-                            os.path.join(pkg, "flood_fill.py"))
-    finally:
-        if saved is not None:
-            sys.modules["kernels"] = saved
-        else:
-            sys.modules.pop("kernels", None)
-
-
-sbs = _load_sibling("single_block_shared", "sbs")
-dual = _load_sibling("dual_block", "dual")
 
 SCENES = [
     ("sq_256_center", lambda: scenes.square_scene(256, 256, 128, 128),
@@ -145,7 +125,7 @@ def bench_scene(name, builder, note, peak_gb_s):
     v2_kernel_times = []
     v2 = None
     for _ in range(GPU_REPEATS):
-        v2 = sbs.flood_fill(img, sx, sy, variant="spill")
+        v2 = sbs_flood_fill(img, sx, sy, variant="spill")
         v2_kernel_times.append(v2.kernel_ms)
     v2_kernel_ms = statistics.median(v2_kernel_times)
     v2_filled = v2.filled
@@ -156,7 +136,7 @@ def bench_scene(name, builder, note, peak_gb_s):
     dualg_kernel_times = []
     dg = None
     for _ in range(GPU_REPEATS):
-        dg = dual.flood_fill(img, sx, sy, kernel="global")
+        dg = dual_flood_fill(img, sx, sy, kernel="global")
         dualg_kernel_times.append(dg.kernel_ms)
     dualg_kernel_ms = statistics.median(dualg_kernel_times)
     dualg_filled = dg.filled
@@ -345,8 +325,8 @@ def main():
     flood_fill(warm_img, wx, wy, bare=True)
     flood_fill(warm_img, wx, wy, connectivity=8)
     flood_fill(warm_img, wx, wy, connectivity=8, bare=True)
-    sbs.flood_fill(warm_img, wx, wy, variant="spill")
-    dual.flood_fill(warm_img, wx, wy, kernel="global")
+    sbs_flood_fill(warm_img, wx, wy, variant="spill")
+    dual_flood_fill(warm_img, wx, wy, kernel="global")
     cpu_flood_fill(warm_img, wx, wy)
 
     coop_by_tpb = {tpb: max_blocks(threads_per_block=tpb) for tpb in TPB_SWEEP}
