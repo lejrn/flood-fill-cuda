@@ -33,8 +33,9 @@ the fresh-process, watchdog-guarded probe whose table lives in README.md.
 The @njit oracle fills both blobs back-to-back on the CPU (the honest CPU
 baseline for a two-blob job) and cross-checks every filled count.
 
-Run:  uv run python src/gpu/multi_blob/dual_blob/benchmark.py
-Writes JSON + CSV to benchmark_results/ next to this script.
+Run:  uv run python -m flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.benchmarks.benchmark
+Writes JSON + CSV to results/ch04_gpu_2blob_nblock/benchmark_results/
+(centralized, not next to this script).
 Budget ~15-25 min (dominated by 6 kernel compiles and the 16M px scenes).
 """
 
@@ -52,47 +53,19 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-import bandwidth
-from flood_fill import flood_fill, max_blocks
-from reference import cpu_flood_fill, cpu_flood_fill_two, load_by_path
-import scenes
+from . import bandwidth
+from ..flood_fill import flood_fill, max_blocks
+from ..cpu_oracle import cpu_flood_fill, cpu_flood_fill_two
+from ...ch03_gpu_1blob_nblock.flood_fill import flood_fill as mb_flood_fill
+from .. import scenes
+from ....shared import results_paths
 from numba import cuda
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
-_MULTI_BLOCK = os.path.abspath(os.path.join(
-    _HERE, os.pardir, os.pardir, "single_blob", "multi_block"))
+RESULTS_DIR = results_paths.results_dir("ch04_gpu_2blob_nblock", "benchmark_results")
 
 GPU_REPEATS = 5
 NJIT_REPEATS = 3
 TPB = 256
-
-
-def _load_multi_block():
-    """Load the single-blob multi_block stage's flood_fill.py despite the
-    module-name collision (same technique as multi_block itself uses for
-    its siblings): temporarily remap 'kernels' and 'bandwidth' in
-    sys.modules while executing it."""
-    mb_kernels = load_by_path("_mb_kernels",
-                              os.path.join(_MULTI_BLOCK, "kernels.py"))
-    mb_bandwidth = load_by_path("_mb_bandwidth2",
-                                os.path.join(_MULTI_BLOCK, "bandwidth.py"))
-    saved = {}
-    for name, mod in (("kernels", mb_kernels), ("bandwidth", mb_bandwidth)):
-        saved[name] = sys.modules.get(name)
-        sys.modules[name] = mod
-    try:
-        return load_by_path("_mb_flood_fill",
-                            os.path.join(_MULTI_BLOCK, "flood_fill.py"))
-    finally:
-        for name, mod in saved.items():
-            if mod is not None:
-                sys.modules[name] = mod
-            else:
-                sys.modules.pop(name, None)
-
-
-mb = _load_multi_block()
 
 SCENES = [
     ("two_sq_300", lambda: scenes.two_squares_scene(700, 400, 300, 300,
@@ -253,7 +226,7 @@ def bench_scene(name, builder, note, peak_gb_s):
     mb_times = []
     mb_r = None
     for _ in range(GPU_REPEATS):
-        mb_r = mb.flood_fill(img, ax, ay, threads_per_block=TPB)
+        mb_r = mb_flood_fill(img, ax, ay, threads_per_block=TPB)
         mb_times.append(mb_r.kernel_ms)
     mb_a_ms = _median(mb_times)
     row["mb_a_ms"] = mb_a_ms
@@ -308,7 +281,7 @@ def main():
     for kw in ({}, {"bare": True}, {"entry_format": "xy"},
                {"entry_format": "xy", "bare": True}, {"connectivity": 8}):
         flood_fill(warm_img, warm_seeds, **{"mode": "multisource", **kw})
-    mb.flood_fill(warm_img, *warm_seeds[0])
+    mb_flood_fill(warm_img, *warm_seeds[0])
     cpu_flood_fill_two(warm_img, warm_seeds)
 
     coop = max_blocks(threads_per_block=TPB)
