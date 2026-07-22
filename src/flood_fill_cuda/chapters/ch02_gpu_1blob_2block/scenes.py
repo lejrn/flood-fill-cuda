@@ -1,34 +1,19 @@
-"""Scene generators: single_block_shared's set plus three seam-aware scenes.
+"""Scene generators: ch01_gpu_1blob_1block's set plus three seam-aware scenes.
 
-The base scenes are loaded by file path (see reference.py for why). The new
-scenes exist because the split kernel divides the image at the vertical seam
-x = width//2, and the interesting behaviors — inbox traffic, ownership
-imbalance, ping-ponging wavefronts — need scenes built around that seam.
-Note the base serpentine's red lines run at constant x, PARALLEL to the
-seam: its wave crosses the seam exactly once, which is why the transposed
-seam_serpentine below exists.
+The new scenes exist because the split kernel divides the image at the
+vertical seam x = width//2, and the interesting behaviors — inbox traffic,
+ownership imbalance, ping-ponging wavefronts — need scenes built around
+that seam. Note the base serpentine's red lines run at constant x,
+PARALLEL to the seam: its wave crosses the seam exactly once, which is
+why the transposed seam_serpentine below exists.
 """
-import os
-
 import numpy as np
 
-from reference import load_by_path
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_SBS = os.path.abspath(os.path.join(_HERE, os.pardir, "single_block_shared"))
-
-_scenes = load_by_path("_sbs_scenes", os.path.join(_SBS, "scenes.py"))
-
-RED = _scenes.RED
-WHITE = _scenes.WHITE
-square_scene = _scenes.square_scene
-disk_scene = _scenes.disk_scene
-serpentine_scene = _scenes.serpentine_scene
-random_scene = _scenes.random_scene
-single_pixel_scene = _scenes.single_pixel_scene
-full_red_scene = _scenes.full_red_scene
-corner_seeded_square_scene = _scenes.corner_seeded_square_scene
-overflow_scene = _scenes.overflow_scene
+from ..ch01_gpu_1blob_1block.scenes import (
+    RED, WHITE, square_scene, disk_scene, serpentine_scene, random_scene,
+    single_pixel_scene, full_red_scene, corner_seeded_square_scene,
+    overflow_scene,
+)
 
 
 def seam_serpentine_scene(width, height):

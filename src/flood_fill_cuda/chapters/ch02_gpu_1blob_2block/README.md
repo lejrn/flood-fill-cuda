@@ -28,7 +28,8 @@ pixel:
   entries because only one column's pixels can ever cross each way, each
   CAS-claimed once. Its weakness: a blob living in one half leaves the
   other block with literally zero work.
-- **`global`** is persistent/'s design at 4-connectivity: balanced by
+- **`global`** is the graveyarded `persistent/` prototype's design at
+  4-connectivity: balanced by
   construction *when frontiers exceed one block's thread count* — the
   grid-stride assigns item `front+tid` to global thread `tid`, so a
   frontier smaller than tpb lands entirely in block 0.
@@ -220,27 +221,26 @@ everywhere — the owner hues are what make the approaches distinct:
 | `split_disk512`, `split_seamserp256` | static gradients: radial timeline; per-line seam ping-pong |
 
 ```bash
-uv run python src/gpu/single_blob/dual_block/wavefront.py
+uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.wavefront
 ```
 
 ## Run
 
 ```bash
-# Correctness (98 tests vs the 4-connectivity @njit CPU reference).
-# Run per-directory: this file shares basenames with the sibling packages.
-uv run pytest src/gpu/single_blob/dual_block/test_correctness.py -v
+# Correctness (102 tests vs the 4-connectivity @njit CPU reference).
+uv run pytest src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/test_correctness.py -v
 
 # Benchmark: three partitionings vs single-block v2 vs @njit, plus the
 # tpb sweep, the placement experiment, and instrumentation overhead.
-uv run python src/gpu/single_blob/dual_block/benchmark.py
+uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.benchmark
 
-# Render the combined dashboard (dual-block + appended single-block stage)
-# from the newest JSONs of both packages — open the HTML in a browser.
-uv run python src/gpu/single_blob/dual_block/visualize.py
+# Render the combined cross-chapter dashboard from the newest JSONs of
+# every chapter — open the HTML in a browser.
+uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.visualize
 ```
 
 ```python
-from flood_fill import flood_fill
+from flood_fill_cuda.chapters.ch02_gpu_1blob_2block.flood_fill import flood_fill
 flood_fill(img, x, y, kernel="split")                      # or "global"/"dirsplit"
 flood_fill(img, x, y, kernel="split", bare=True)           # uninstrumented twin
 flood_fill(img, x, y, kernel="pinned",
