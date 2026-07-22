@@ -5,18 +5,17 @@ which catches level-mixing races a visited-only check would miss — level
 and filled counts), recolor reached pixels solid blue, and leave everything
 else untouched.
 
-Run per-directory (this file shares its basename with the sibling packages
-and none has an __init__.py):
+Run:
 
-    uv run pytest src/gpu/single_blob/dual_block/test_correctness.py -v
+    uv run pytest src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/test_correctness.py -v
 """
 
 import numpy as np
 import pytest
 
-from flood_fill import flood_fill
-from reference import cpu_flood_fill
-import scenes
+from .flood_fill import flood_fill
+from .cpu_oracle import cpu_flood_fill
+from . import scenes
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 

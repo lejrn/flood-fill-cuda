@@ -2,8 +2,8 @@
 
 Per scene (median of GPU_REPEATS):
   - @njit CPU reference (the honest sequential bar)
-  - single-block v2 spill kernel (cross-imported from ../single_block_shared
-    — the "what does the 2nd block buy?" baseline)
+  - single-block v2 spill kernel (cross-imported from
+    ch01_gpu_1blob_1block — the "what does the 2nd block buy?" baseline)
   - the three dual kernels, instrumented AND bare (identical BFS without
     counters/traces), so the instrumentation overhead is measured
 Then two focused sections:
@@ -14,9 +14,10 @@ Then two focused sections:
     vs the same pair spread by the scheduler across two SMs — with the
     observed %smid values recorded as proof of placement
 
-Run:  uv run python src/gpu/single_blob/dual_block/benchmark.py
+Run:  uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.benchmark
 Writes JSON (with per-level global and per-block traces) and CSV to
-benchmark_results/ next to this script.
+results/ch02_gpu_1blob_2block/benchmark_results/ (centralized, not next to
+this script).
 """
 
 import os
@@ -32,13 +33,14 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from flood_fill import flood_fill
-from reference import cpu_flood_fill, load_by_path, _SBS
-import scenes
+from ..flood_fill import flood_fill
+from ..cpu_oracle import cpu_flood_fill
+from ...ch01_gpu_1blob_1block.flood_fill import flood_fill as sbs_flood_fill
+from .. import scenes
+from ....shared import results_paths
 from numba import cuda
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
+RESULTS_DIR = results_paths.results_dir("ch02_gpu_1blob_2block", "benchmark_results")
 
 GPU_REPEATS = 5
 NJIT_REPEATS = 5
@@ -46,25 +48,6 @@ KERNELS = ["split", "global", "dirsplit"]
 TPB_SWEEP = [64, 128, 256, 512]
 PLACEMENT_SCENES = ["sq_2000_center", "sq_6000_center"]
 
-
-def load_single_block_shared():
-    """Load ../single_block_shared/flood_fill.py despite the module-name
-    collision: its `from kernels import ...` consults sys.modules first,
-    which is already bound to THIS package's kernels — so temporarily remap
-    the name while executing it."""
-    sbs_kernels = load_by_path("_sbs_kernels", os.path.join(_SBS, "kernels.py"))
-    saved = sys.modules.get("kernels")
-    sys.modules["kernels"] = sbs_kernels
-    try:
-        return load_by_path("_sbs_flood_fill", os.path.join(_SBS, "flood_fill.py"))
-    finally:
-        if saved is not None:
-            sys.modules["kernels"] = saved
-        else:
-            sys.modules.pop("kernels", None)
-
-
-sbs = load_single_block_shared()
 
 SCENES = [
     ("sq_256_center", lambda: scenes.square_scene(256, 256, 128, 128),
@@ -120,7 +103,7 @@ def bench_scene(name, builder, note):
     v2_kernel_times, v2_total_times = [], []
     v2 = None
     for _ in range(GPU_REPEATS):
-        v2 = sbs.flood_fill(img, sx, sy, variant="spill")
+        v2 = sbs_flood_fill(img, sx, sy, variant="spill")
         v2_kernel_times.append(v2.kernel_ms)
         v2_total_times.append(v2.total_ms)
     v2_kernel_ms = statistics.median(v2_kernel_times)
@@ -221,7 +204,7 @@ def placement_experiment():
             times = []
             r = None
             for _ in range(GPU_REPEATS):
-                r = sbs.flood_fill(img, sx, sy, threads_per_block=tpb,
+                r = sbs_flood_fill(img, sx, sy, threads_per_block=tpb,
                                    variant="spill")
                 times.append(r.kernel_ms)
             ms = statistics.median(times)
@@ -264,7 +247,7 @@ def main():
         flood_fill(warm_img, wx, wy, kernel=kernel, bare=True)
     flood_fill(warm_img, wx, wy, kernel="pinned", threads_per_block=768,
                placement="spread")
-    sbs.flood_fill(warm_img, wx, wy, variant="spill")
+    sbs_flood_fill(warm_img, wx, wy, variant="spill")
     cpu_flood_fill(warm_img, wx, wy)
 
     print(f"\n{'scene':20s} {'filled':>11s} {'njit ms':>9s} {'v2 ms':>8s} "

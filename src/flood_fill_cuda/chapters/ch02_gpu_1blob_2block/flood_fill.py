@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from kernels import (
+from .kernels import (
     dual_block_global_kernel, dual_block_split_kernel,
     dual_block_dirsplit_kernel, dual_block_pinned_kernel,
     dual_block_global_bare_kernel, dual_block_split_bare_kernel,

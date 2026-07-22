@@ -16,8 +16,9 @@ same everywhere; the OWNER hues are what make the approaches distinct:
 split shows two solid territories meeting at the seam, dirsplit shows two
 direction-arcs chasing the wavefront, global shows an interleaved speckle.
 
-Run:  uv run python src/gpu/single_blob/dual_block/wavefront.py
-Writes GIFs + PNGs to wavefront/ next to this script.
+Run:  uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.wavefront
+Writes GIFs + PNGs to results/ch02_gpu_1blob_2block/wavefront/ (centralized,
+not next to this script).
 """
 
 import os
@@ -25,11 +26,11 @@ import os
 import numpy as np
 from PIL import Image
 
-from flood_fill import flood_fill
-import scenes
+from ..flood_fill import flood_fill
+from .. import scenes
+from ....shared import results_paths
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(_HERE, "wavefront")
+OUT_DIR = results_paths.results_dir("ch02_gpu_1blob_2block", "wavefront")
 
 MAX_FRAMES = 96
 FRAME_MS = 60

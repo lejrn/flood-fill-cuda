@@ -27,10 +27,10 @@ fresh in the same session) rather than cross-multiplying separate
 sessions' numbers.
 
 Usage:
-    uv run python src/gpu/single_blob/dual_block/visualize.py [dual.json]
+    uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.visualize [dual.json]
 
-Output: benchmark_results/dual_block_benchmark.html (overwritten per run —
-the timestamped JSON/CSV remain the durable record).
+Output: results/ch02_gpu_1blob_2block/benchmark_results/dual_block_benchmark.html
+(overwritten per run — the timestamped JSON/CSV remain the durable record).
 """
 import glob
 import json
@@ -38,16 +38,12 @@ import math
 import os
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
-SBS_RESULTS_DIR = os.path.join(_HERE, os.pardir, "single_block_shared",
-                               "benchmark_results")
-MB_RESULTS_DIR = os.path.join(_HERE, os.pardir, "multi_block",
-                              "benchmark_results")
-# dual_blob lives one level further out — a sibling top-level domain to
-# single_blob/, not another single_blob/ stage.
-DB_RESULTS_DIR = os.path.join(_HERE, os.pardir, os.pardir, "multi_blob",
-                              "dual_blob", "benchmark_results")
+from ....shared import results_paths
+
+RESULTS_DIR = results_paths.results_dir("ch02_gpu_1blob_2block", "benchmark_results")
+SBS_RESULTS_DIR = results_paths.results_dir("ch01_gpu_1blob_1block", "benchmark_results")
+MB_RESULTS_DIR = results_paths.results_dir("ch03_gpu_1blob_nblock", "benchmark_results")
+DB_RESULTS_DIR = results_paths.results_dir("ch04_gpu_2blob_nblock", "benchmark_results")
 
 
 def _newest(pattern, folder):
@@ -1967,7 +1963,7 @@ median and min mu/seq forms disagree in sign — see the stage README.</p>
 _db_section = ""
 if HAS_DUALBLOB:
     _db_wavefront_note = (
-        '<p class="note"><img src="../../../multi_blob/dual_blob/wavefront/'
+        '<p class="note"><img src="../../ch04_gpu_2blob_nblock/wavefront/'
         'asym384_b8_t32_multisource.gif" alt="Multisource wavefront on an '
         'asymmetric blob pair: the small (green) blob finishes early and '
         'stays light while the large (blue) blob keeps darkening — one '
