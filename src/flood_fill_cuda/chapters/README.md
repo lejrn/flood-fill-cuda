@@ -27,10 +27,10 @@ time; a GPU should do them together.
 
 **The baselines:** pure-Python BFS (the classic algorithm, honest but
 ~100–1000× slow) and an `@njit`-compiled level-synchronous BFS
-(`single_block_shared/reference.py`) — the bar every kernel must beat *and*
-the oracle every kernel must match pixel-for-pixel.
+(`ch01_gpu_1blob_1block/cpu_oracle.py`) — the bar every kernel must beat
+*and* the oracle every kernel must match pixel-for-pixel.
 
-**The prototype's lesson:** the historical `single_block.py` had a
+**The prototype's lesson:** the historical `ch00_cpu_baseline/single_block.py` had a
 non-wrapping queue that silently dropped pixels, marked non-red pixels
 visited (CAS before the color check), and hardcoded 64 threads. Its real
 legacy was a checklist of what correctness requires: a queue that can't
@@ -39,7 +39,7 @@ compare *depth maps*, not just pixel counts.
 
 ---
 
-## Chapter 1 — one blob, one block (`single_block_shared/`)
+## Chapter 1 — one blob, one block (`ch01_gpu_1blob_1block/`)
 
 ### Inherited problems
 1. Serial CPU fills; the GPU sits idle.
@@ -95,7 +95,7 @@ never exceed the tier — nothing left to trip. Enqueues became
 
 ---
 
-## Chapter 2 — one blob, two blocks (`dual_block/`)
+## Chapter 2 — one blob, two blocks (`ch02_gpu_1blob_2block/`)
 
 ### Inherited problems
 Add one block. But blocks cannot `syncthreads` across each other, cannot
@@ -156,11 +156,12 @@ it down?" into a measured 0–3% (global/dirsplit) and 1.4–8.7% (split).
 
 ### Open problems → Chapter 3 candidates
 1. **N blocks:** the payoff curve (1→2 blocks ≈ 2×) begs for 4, 8, 24
-   blocks — the `../multi-blocks/` and `persistent/` designs revisited
-   with this project's rigor (exact tests, bare twins, smid observation,
-   per-block traces). Expected new problems: barrier cost grows with grid
-   size; the global queue's single rear counter becomes a contention point
-   (warp-aggregation may not be enough). *→ became Chapter 3.*
+   blocks — the graveyarded `multi-blocks/` and `persistent/` designs
+   revisited with this project's rigor (exact tests, bare twins, smid
+   observation, per-block traces). Expected new problems: barrier cost
+   grows with grid size; the global queue's single rear counter becomes a
+   contention point (warp-aggregation may not be enough). *→ became
+   Chapter 3.*
 2. **The serpentine remains unbeaten** by everything GPU: candidate
    answer is tile-based BFS (iterate inside a shared-memory tile between
    global syncs) — trade barrier count for redundant tile work.
@@ -173,7 +174,7 @@ it down?" into a measured 0–3% (global/dirsplit) and 1.4–8.7% (split).
 
 ---
 
-## Chapter 3 — one blob, N blocks (`multi_block/`)
+## Chapter 3 — one blob, N blocks (`ch03_gpu_1blob_nblock/`)
 
 ### Inherited problems
 1. Two blocks are 2 of 24 SMs ≈ 8% of the GPU; the 1→2 payoff curve
@@ -274,7 +275,7 @@ structure, sharpening what `ncu` must arbitrate.
 
 ---
 
-## Chapter 4 — two blobs, N blocks (`../multi_blob/dual_blob/`)
+## Chapter 4 — two blobs, N blocks (`ch04_gpu_2blob_nblock/`)
 
 ### Inherited problems
 1. Every kernel so far fills **one** blob from **one** seed; a second blob
@@ -352,17 +353,21 @@ structure, sharpening what `ncu` must arbitrate.
 Each stage ships the same observability kit, and it keeps paying off:
 pixel-exact tests against the CPU reference (visited + **depth maps** —
 level-mixing races can't hide); benchmarks with JSON/CSV records and
-honest losses; interactive dashboards (`single_block_shared/visualize.py`,
-`dual_block/visualize.py` — the latter renders both stages);
-**wavefront renders** (`dual_block/wavefront.py`,
-`multi_block/wavefront.py`) that replay the recorded `depth`/`owner` maps
-as GIFs — the same BFS, but each partitioning's territories visibly
-different (the N-block render's ownership *speckle* is itself evidence:
-spatial scatter is the bandwidth chapter's sector-inflation story made
-visible); **bare twin kernels** so the
+honest losses, written to a centralized `results/<chapter_id>/` tree via
+`shared/results_paths.py`; interactive dashboards
+(`ch01_gpu_1blob_1block/benchmarks/visualize.py`,
+`ch02_gpu_1blob_2block/benchmarks/visualize.py` — the latter renders every
+stage); **wavefront renders**
+(`ch02_gpu_1blob_2block/benchmarks/wavefront.py`,
+`ch03_gpu_1blob_nblock/benchmarks/wavefront.py`) that replay the recorded
+`depth`/`owner` maps as GIFs — the same BFS, but each partitioning's
+territories visibly different (the N-block render's ownership *speckle*
+is itself evidence: spatial scatter is the bandwidth chapter's
+sector-inflation story made visible); **bare twin kernels** so the
 instrumentation itself stays priced; and, since Chapter 3, **bandwidth
-instruments** (`multi_block/bandwidth.py`) — a measured D2D copy peak as
-the only reference figures are compared against, and a per-run derived
+instruments** (`shared/bandwidth.py`, promoted from
+`ch03_gpu_1blob_nblock/` since ch04 reuses it) — a measured D2D copy peak
+as the only reference figures are compared against, and a per-run derived
 bytes-moved model that is always labeled the lower bound it is.
 
 ## Extending this file
