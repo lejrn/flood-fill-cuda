@@ -698,7 +698,7 @@ wheels = [
 [[package]]
 name = "flood-fill-cuda"
 version = "0.9.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "cuda-python" },
     { name = "cupy-cuda12x" },
