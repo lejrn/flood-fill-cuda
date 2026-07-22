@@ -137,22 +137,22 @@ the multi-block (`../multi-blocks/`) and persistent cooperative
 
 ```bash
 # Correctness (29 tests vs the 4-connectivity @njit CPU reference).
-# Run per-directory: this file shares basenames with persistent/'s modules.
-uv run pytest src/gpu/single_blob/single_block_shared/test_correctness.py -v
+uv run pytest src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/test_correctness.py -v
 
 # Benchmark: pure-Python vs @njit vs GPU + tpb sweep; writes JSON/CSV
-# (with per-level frontier traces) to benchmark_results/ next to the script.
-uv run python src/gpu/single_blob/single_block_shared/benchmark.py
-uv run python src/gpu/single_blob/single_block_shared/benchmark.py --slow  # + pure Python on 16M px
+# (with per-level frontier traces) to results/ch01_gpu_1blob_1block/benchmark_results/.
+uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.benchmark
+uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.benchmark --slow  # + pure Python on 16M px
 
 # Render the newest benchmark JSON as an interactive HTML dashboard
-# (benchmark_results/single_block_benchmark.html — open in a browser).
-uv run python src/gpu/single_blob/single_block_shared/visualize.py
+# (results/ch01_gpu_1blob_1block/benchmark_results/single_block_benchmark.html — open in a browser).
+uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.visualize
 ```
 
-Note: this package is 4-connected (matching `src/cpu/sequential.py` and its
-own `reference.py`); `persistent/` and `multi-blocks/` are 8-connected, so
-fill results are not comparable across connectivity.
+Note: this package is 4-connected (matching
+`chapters/ch00_cpu_baseline/sequential.py` and its own `cpu_oracle.py`);
+`shared/cpu_oracle.py` and the graveyarded `multi-blocks/` are 8-connected,
+so fill results are not comparable across connectivity.
 
 ## Roadmap
 

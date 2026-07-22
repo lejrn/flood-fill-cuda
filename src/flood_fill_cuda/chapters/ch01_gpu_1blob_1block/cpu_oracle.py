@@ -6,8 +6,9 @@ kernel's semantics exactly: same neighbor order (right, down, left, up), same
 level structure, same "enqueue once via visited" rule — so visited masks,
 depth maps, level counts, and fill counts must all match bit-for-bit.
 
-Note this intentionally differs from persistent/reference.py, which uses
-8-connectivity; the single_block_shared kernel is 4-connected.
+Note this intentionally differs from shared/cpu_oracle.py's
+cpu_flood_fill_8, which uses 8-connectivity; this chapter's kernel is
+4-connected.
 """
 
 import numpy as np

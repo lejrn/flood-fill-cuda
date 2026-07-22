@@ -7,19 +7,17 @@ The GPU result must match the 4-connectivity CPU reference exactly:
   a visited-only comparison would miss)
 - level count and filled count
 
-Run per-directory (this file shares its basename with persistent/'s test
-module and neither package has __init__.py, so collecting both in one pytest
-invocation fails with an import-file mismatch):
+Run:
 
-    uv run pytest src/gpu/single_blob/single_block_shared/test_correctness.py -v
+    uv run pytest src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/test_correctness.py -v
 """
 
 import numpy as np
 import pytest
 
-from flood_fill import flood_fill
-from reference import cpu_flood_fill
-import scenes
+from .flood_fill import flood_fill
+from .cpu_oracle import cpu_flood_fill
+from . import scenes
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 
