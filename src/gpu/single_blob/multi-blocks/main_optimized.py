@@ -5,6 +5,20 @@ Uses the fixed kernels with minimal host-device transfers.
 
 import os
 import sys
+
+# Must be set before numba is imported — CUDA 12.9 + Numba 0.61.x ctypes bindings segfault
+os.environ.setdefault('NUMBA_CUDA_USE_NVIDIA_BINDING', '1')
+
+import warnings
+# cuda-python emits a FutureWarning about its own deprecated cuda.cuda module;
+# NumbaPerformanceWarning fires for small grids on the init kernel (grid=1).
+warnings.filterwarnings('ignore', message='The cuda.cuda module is deprecated', category=FutureWarning)
+try:
+    from numba.core.errors import NumbaPerformanceWarning
+    warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
+except ImportError:
+    pass
+
 import numpy as np
 import time
 from PIL import Image
@@ -82,31 +96,24 @@ def run_optimized_large_scene():
     # Create large scene
     img_host, width, height, start_x, start_y = create_large_scene()
     
-    # GPU configuration for large scene
-    blocks_per_grid = 48
+    # GPU configuration for large scene — 96 blocks × 24 SMs = 4 blocks per SM on RTX 4060
+    blocks_per_grid = 96
     threads_per_block = 128
     print(f"🔧 GPU Configuration: {blocks_per_grid} blocks, {threads_per_block} threads/block")
     
     # Setup GPU arrays
     print("🔄 Setting up GPU arrays...")
     img = cuda.to_device(img_host)
-    visited = cuda.device_array((width, height), dtype=np.int32)
-    visited[:] = 0
-    
+    visited = cuda.to_device(np.zeros((width, height), dtype=np.int32))
+
     # Global queue arrays
     global_queue_x, global_queue_y, global_queue_front, global_queue_rear = create_global_queue_arrays()
-    
+
     # Debug arrays
-    debug_block_usage = cuda.device_array(blocks_per_grid, dtype=np.int32)
-    debug_thread_usage = cuda.device_array(blocks_per_grid * threads_per_block, dtype=np.int32)
-    debug_warp_usage = cuda.device_array(blocks_per_grid * 2, dtype=np.int32)
-    debug_pixel_count = cuda.device_array(1, dtype=np.int32)
-    
-    # Initialize debug arrays
-    debug_block_usage[:] = 0
-    debug_thread_usage[:] = 0
-    debug_warp_usage[:] = 0
-    debug_pixel_count[:] = 0
+    debug_block_usage = cuda.to_device(np.zeros(blocks_per_grid, dtype=np.int32))
+    debug_thread_usage = cuda.to_device(np.zeros(blocks_per_grid * threads_per_block, dtype=np.int32))
+    debug_warp_usage = cuda.to_device(np.zeros(blocks_per_grid * 2, dtype=np.int32))
+    debug_pixel_count = cuda.to_device(np.zeros(1, dtype=np.int32))
     
     # Reset queue
     reset_global_queue(global_queue_front, global_queue_rear)

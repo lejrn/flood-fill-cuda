@@ -5,6 +5,9 @@ Test the newly discovered optimal configuration (24×128, chunk=32) on large sce
 
 import os
 import sys
+
+os.environ.setdefault('NUMBA_CUDA_USE_NVIDIA_BINDING', '1')
+
 import numpy as np
 import time
 import json
