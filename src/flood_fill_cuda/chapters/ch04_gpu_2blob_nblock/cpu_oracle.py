@@ -1,8 +1,7 @@
 """CPU references for the dual-blob stage.
 
-The single-seed oracles are re-exported from the single_blob tree (loaded
-by file path via importlib: the sibling GPU packages have no __init__.py
-and share module basenames, so a plain import would shadow).
+The single-seed oracles are re-exported: 4-connectivity from ch01, 8-conn
+from shared/.
 
 The two-seed oracle needs NO new BFS: the blobs are disconnected, so a
 pixel's distance to the nearest seed equals its distance to its own blob's
@@ -14,34 +13,11 @@ reached the pixel. The disjointness assertion doubles as the scenes'
 disconnection guard (it fails loudly if a "two blob" scene is secretly one
 blob).
 """
-import importlib.util
-import os
 
 import numpy as np
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_SINGLE_BLOB = os.path.abspath(
-    os.path.join(_HERE, os.pardir, os.pardir, "single_blob"))
-_SBS = os.path.join(_SINGLE_BLOB, "single_block_shared")
-_PERSISTENT = os.path.join(_SINGLE_BLOB, "persistent")
-
-
-def load_by_path(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_reference = load_by_path("_sbs_reference", os.path.join(_SBS, "reference.py"))
-cpu_flood_fill = _reference.cpu_flood_fill
-
-# The 8-connectivity reference lives in persistent/ (same @njit(cache=True)
-# level-synchronous BFS, same (visited, depth, levels, filled) contract,
-# diagonal neighbors included).
-_reference8 = load_by_path("_persistent_reference",
-                           os.path.join(_PERSISTENT, "reference.py"))
-cpu_flood_fill_8 = _reference8.cpu_flood_fill
+from ..ch01_gpu_1blob_1block.cpu_oracle import cpu_flood_fill
+from ...shared.cpu_oracle import cpu_flood_fill_8
 
 
 def cpu_flood_fill_two(img, seeds, connectivity=4):

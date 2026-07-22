@@ -11,10 +11,9 @@ cooperative grids near the device's co-residency capacity can wedge (see
 flood_fill.py), and probing that cliff is benchmark.py's job, not a
 correctness concern.
 
-Run per-directory (this file shares its basename with sibling packages
-and none has an __init__.py):
+Run:
 
-    uv run pytest src/gpu/multi_blob/dual_blob/test_correctness.py -v
+    uv run pytest src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/test_correctness.py -v
 """
 
 import os
@@ -22,10 +21,10 @@ import os
 import numpy as np
 import pytest
 
-import bandwidth
-from flood_fill import flood_fill, max_blocks, MODES
-from reference import cpu_flood_fill_two
-import scenes
+from ...shared import bandwidth
+from .flood_fill import flood_fill, max_blocks, MODES
+from .cpu_oracle import cpu_flood_fill_two
+from . import scenes
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 GREEN = np.array([0, 255, 0], dtype=np.uint8)

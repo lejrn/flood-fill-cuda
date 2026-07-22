@@ -57,8 +57,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from bandwidth import model_bytes as _model_bytes, model_gb_s as _model_gb_s
-from kernels import (
+from ...shared.bandwidth import model_bytes as _model_bytes, model_gb_s as _model_gb_s
+from .kernels import (
     dual_blob_lin_kernel, dual_blob_lin_bare_kernel,
     dual_blob_lin8_kernel, dual_blob_lin8_bare_kernel,
     dual_blob_lin8r2_kernel, dual_blob_lin8r2_bare_kernel,

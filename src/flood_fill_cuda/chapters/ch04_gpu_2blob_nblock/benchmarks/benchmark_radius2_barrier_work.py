@@ -17,8 +17,10 @@ Scalars only are harvested from each result; the filled cross-check runs
 against the 8-conn merged oracle (valid for r2: the guard provably
 preserves the conn8 fill set).
 
-Run:  uv run python src/gpu/multi_blob/dual_blob/benchmark_radius2.py
-Writes JSON + CSV to benchmark_results/ next to this script.
+Run:  uv run python -m flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.benchmarks.benchmark_radius2_barrier_work
+Writes JSON + CSV (still the dual_blob_radius2_* prefix) to
+results/ch04_gpu_2blob_nblock/benchmark_results/ (centralized, not next to
+this script).
 Budget ~5-10 min.
 """
 
@@ -32,13 +34,13 @@ import json
 import statistics
 from datetime import datetime, timezone
 
-from flood_fill import flood_fill, max_blocks
-from reference import cpu_flood_fill_two
-import scenes
+from ..flood_fill import flood_fill, max_blocks
+from ..cpu_oracle import cpu_flood_fill_two
+from .. import scenes
+from ....shared import results_paths
 from numba import cuda
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(_HERE, "benchmark_results")
+RESULTS_DIR = results_paths.results_dir("ch04_gpu_2blob_nblock", "benchmark_results")
 
 GPU_REPEATS = 5
 TPB = 256

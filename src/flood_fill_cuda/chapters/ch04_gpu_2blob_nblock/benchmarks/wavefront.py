@@ -25,8 +25,9 @@ timelines comparable:
 Both hues sit far outside the +-30 degree band around red: unfilled scene
 pixels ARE red, and nothing may impersonate them.
 
-Run:  uv run python src/gpu/multi_blob/dual_blob/wavefront.py
-Writes GIFs + PNGs to wavefront/ next to this script.
+Run:  uv run python -m flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.benchmarks.wavefront
+Writes GIFs + PNGs to results/ch04_gpu_2blob_nblock/wavefront/ (centralized,
+not next to this script).
 """
 
 import colorsys
@@ -35,11 +36,11 @@ import os
 import numpy as np
 from PIL import Image
 
-from flood_fill import flood_fill
-import scenes
+from ..flood_fill import flood_fill
+from .. import scenes
+from ....shared import results_paths
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(_HERE, "wavefront")
+OUT_DIR = results_paths.results_dir("ch04_gpu_2blob_nblock", "wavefront")
 
 MAX_FRAMES = 96
 FRAME_MS = 60

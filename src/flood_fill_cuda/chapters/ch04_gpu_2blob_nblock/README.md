@@ -1,4 +1,4 @@
-# Two blobs, N blocks (`dual_blob/`)
+# Two blobs, N blocks (`ch04_gpu_2blob_nblock/`)
 
 The image levels up: a white background and **two similar, separate red
 blobs**. Both must be flooded and recolored — blob 0 **blue**, blob 1
@@ -15,7 +15,7 @@ proven cooperative global-queue kernel and asks three questions:
    concurrent cooperative grids)
 
 Everything load-bearing is inherited unchanged from
-[`../../single_blob/multi_block/`](../../single_blob/multi_block/):
+[`../ch03_gpu_1blob_nblock/`](../ch03_gpu_1blob_nblock/):
 the claim protocol (bounds → is_red → `atomic.cas(visited)` →
 warp-aggregated enqueue), two `grid.sync()` per level, every counter's
 meaning, and the structural no-overflow argument.
@@ -193,9 +193,9 @@ in-bounds blob material also probe the 16 ring-2 cells, and a ring-2
 claim inherits the dequeuer's label — correct because the guard keeps
 every jump inside the dequeuer's own 8-connected component (asserted by
 a hand-built 1-px-gap label-isolation test, tighter than the scene
-builders' ≥2 px contract). lin family only; `benchmark_radius2.py` times
-{seq8, multi8, seq8r2, multi8r2} in one interleaved round-robin per
-scene at one pinned grid.
+builders' ≥2 px contract). lin family only;
+`benchmarks/benchmark_radius2_barrier_work.py` times {seq8, multi8, seq8r2,
+multi8r2} in one interleaved round-robin per scene at one pinned grid.
 
 ### Predictions (written before the benchmark ran, with multi_block's verdict as prior)
 
@@ -249,23 +249,23 @@ which is exactly what makes the two GIFs comparable.
 | `kernels.py` | 10 verbatim-twin kernels: {lin, xy} × {instrumented, bare} × {4-conn, 8-conn}, + the guarded radius-2 pair (lin, 8-conn only) |
 | `flood_fill.py` | `flood_fill(img, seeds, mode=..., entry_format=...)` → `DualBlobResult` (+ per-launch `LaunchStats`) |
 | `scenes.py` | two-blob builders: `two_squares_scene`, `two_disks_scene`, `asym_squares_scene`, `two_pixels_scene` (all `(img, seeds)`, gap ≥ 2 enforced) |
-| `reference.py` | single-seed oracles re-exported + `cpu_flood_fill_two` merged oracle (asserts the blobs are truly disjoint) |
-| `bandwidth.py` | re-export of multi_block's model — identical because labeling moves zero extra bytes |
+| `cpu_oracle.py` | single-seed oracles re-exported + `cpu_flood_fill_two` merged oracle (asserts the blobs are truly disjoint) |
+| `benchmarks/bandwidth.py` | re-export of shared/bandwidth.py's model — identical because labeling moves zero extra bytes |
 | `test_correctness.py` | 75 tests: every mode × format × connectivity vs the merged oracle, exact colors, mode equivalence, accounting, radius-2 guard/label-isolation, validation |
-| `benchmark.py` | the modes + decode-tax head-to-head |
-| `benchmark_radius2.py` | radius-2 vs conn8, both mechanisms, interleaved |
-| `wavefront.py` | blob-hued timeline GIFs/PNGs |
+| `benchmarks/benchmark.py` | the modes + decode-tax head-to-head |
+| `benchmarks/benchmark_radius2_barrier_work.py` | radius-2 vs conn8, both mechanisms, interleaved |
+| `benchmarks/wavefront.py` | blob-hued timeline GIFs/PNGs |
 
 ## Run
 
 ```
-uv run pytest src/gpu/multi_blob/dual_blob/test_correctness.py -v
-uv run python src/gpu/multi_blob/dual_blob/benchmark.py
-uv run python src/gpu/multi_blob/dual_blob/benchmark_radius2.py
-uv run python src/gpu/multi_blob/dual_blob/wavefront.py
+uv run pytest src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/test_correctness.py -v
+uv run python -m flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.benchmarks.benchmark
+uv run python -m flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.benchmarks.benchmark_radius2_barrier_work
+uv run python -m flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.benchmarks.wavefront
 
 # streams-mode tests are opt-in — they can hang the GPU (see Finding 2)
-DUAL_BLOB_STREAMS=1 uv run pytest src/gpu/multi_blob/dual_blob/test_correctness.py -k streams
+DUAL_BLOB_STREAMS=1 uv run pytest src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/test_correctness.py -k streams
 ```
 
 ## Open problems → next stages
