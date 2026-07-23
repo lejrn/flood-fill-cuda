@@ -19,14 +19,10 @@
   const MAX_LIVE_SHAPES = 24;
   const STATS_LIFETIME_MS = 5000;   // results readout: shown, then just gone, no fade
 
-  // Wave animation: frontier pixels are brightest, cooling to a dark,
-  // saturated resting shade as the wave passes them. BRIGHT_L/DARK_L are
-  // HSL lightness; DECAY_FRACTION is how much of the total level range
-  // the cooldown takes (5% -- a fast, tight trailing glow).
-  const BRIGHT_L = 0.80;
-  const DARK_L = 0.26;
-  const WAVE_SAT = 0.72;
-  const DECAY_FRACTION = 0.05;
+  // A single, muted ember-red for the frontier's thin leading edge --
+  // kept apart from the interior's dark ash gradient (see levelColor)
+  // so it always reads clearly without being neon-bright.
+  const FRONTIER_COLOR = [196, 62, 46];
 
   let painting = false;
   let lastX = 0, lastY = 0;
@@ -297,15 +293,13 @@
     return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
   }
 
-  // Wave color as a function of normalized BFS depth (0 at the seed, 1 at
-  // the outermost level, hue purple -> blue -> green) and how far behind
-  // the frontier this pixel currently is, in levels: bright right at the
-  // frontier, cooling linearly to a dark stable shade over decayLevels.
-  function waveColor(levelNorm, distanceBehindFrontier, decayLevels) {
-    const hue = 270 - 130 * levelNorm;
-    const t = Math.min(1, Math.max(0, distanceBehindFrontier / decayLevels));
-    const light = BRIGHT_L + (DARK_L - BRIGHT_L) * t;
-    return hslToRgb(hue, WAVE_SAT, light);
+  // Interior resting color as a function of normalized BFS depth (0 at
+  // the seed, 1 at the outermost level): a dark, muted ash gradient --
+  // deliberately low-saturation and low-lightness (no neon, no hue
+  // sweep through blue/purple) so the thin frontier line is the only
+  // thing that reads as bright against it.
+  function levelColor(t) {
+    return hslToRgb(22, 0.30, 0.10 + 0.14 * t);
   }
 
   // durationMs is the engine's own reported compute time: the replay
@@ -319,8 +313,8 @@
       out.data.set(origImageData.data);
 
       const duration = Math.max(durationMs, 1);
-      const decayLevels = Math.max(1, Math.round(levels * DECAY_FRACTION));
       let start = null;
+      let prevLevel = -1;
 
       function paintLevel(idx, color) {
         const p = idx * 4;
@@ -332,36 +326,30 @@
         out.data[p + 3] = origImageData.data[p + 3];
       }
 
-      function paintWindow(currentLevel) {
-        const hi = Math.floor(currentLevel);
-        const lo = Math.max(0, Math.floor(currentLevel - decayLevels));
-        for (let lvl = lo; lvl <= hi; lvl++) {
-          const levelNorm = levels > 1 ? lvl / (levels - 1) : 0;
-          const color = waveColor(levelNorm, currentLevel - lvl, decayLevels);
-          for (const idx of buckets[lvl]) paintLevel(idx, color);
-        }
-      }
-
       function frame(ts) {
         if (start === null) start = ts;
         const elapsed = ts - start;
-        const currentLevel = Math.min(levels - 1, (elapsed / duration) * levels);
-        paintWindow(currentLevel);
-        sctx.putImageData(out, 0, 0);
+        let t = Math.floor((elapsed / duration) * levels);
+        if (t > levels - 1) t = levels - 1;
 
-        if (elapsed < duration) {
-          requestAnimationFrame(frame);
-        } else {
-          // Final settle pass: every level fully cooled, so the finished
-          // shape never freezes mid-brighten at its outermost ring.
-          for (let lvl = 0; lvl < levels; lvl++) {
-            const levelNorm = levels > 1 ? lvl / (levels - 1) : 0;
-            const color = waveColor(levelNorm, decayLevels, decayLevels);
-            for (const idx of buckets[lvl]) paintLevel(idx, color);
-          }
-          sctx.putImageData(out, 0, 0);
-          resolve();
+        // Each level settles to its final dark shade the instant it's
+        // reached -- no repainting, no brightness pulsing, just a calm
+        // one-way reveal.
+        for (let lvl = prevLevel + 1; lvl <= t; lvl++) {
+          const color = levelColor(levels > 1 ? lvl / (levels - 1) : 0);
+          for (const idx of buckets[lvl]) paintLevel(idx, color);
         }
+        // The frontier: a single-level-wide reddish line gliding just
+        // ahead of the settled interior.
+        const frontierLvl = t + 1;
+        if (frontierLvl < levels) {
+          for (const idx of buckets[frontierLvl]) paintLevel(idx, FRONTIER_COLOR);
+        }
+        sctx.putImageData(out, 0, 0);
+        prevLevel = t;
+
+        if (elapsed < duration) requestAnimationFrame(frame);
+        else resolve();
       }
       requestAnimationFrame(frame);
     });
