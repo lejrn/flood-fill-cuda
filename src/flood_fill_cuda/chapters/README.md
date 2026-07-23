@@ -354,10 +354,11 @@ Each stage ships the same observability kit, and it keeps paying off:
 pixel-exact tests against the CPU reference (visited + **depth maps** —
 level-mixing races can't hide); benchmarks with JSON/CSV records and
 honest losses, written to a centralized `results/<chapter_id>/` tree via
-`shared/results_paths.py`; interactive dashboards
-(`ch01_gpu_1blob_1block/benchmarks/visualize.py`,
-`ch02_gpu_1blob_2block/benchmarks/visualize.py` — the latter renders every
-stage); **wavefront renders**
+`shared/results_paths.py`; interactive dashboards — each chapter's own
+`benchmarks/visualize.py` renders its own section from its own JSON, and
+`dashboard/` (`uv run python -m flood_fill_cuda.dashboard`) assembles
+every chapter's section into one whole-project page at
+`results/dashboard/project_dashboard.html`; **wavefront renders**
 (`ch02_gpu_1blob_2block/benchmarks/wavefront.py`,
 `ch03_gpu_1blob_nblock/benchmarks/wavefront.py`) that replay the recorded
 `depth`/`owner` maps as GIFs — the same BFS, but each partitioning's
