@@ -1,59 +1,34 @@
 """
-Generate the combined benchmark dashboard: single blob (1 block -> 2
-blocks -> N blocks -> 8 directions) and dual blob (2 blobs, N blocks).
+Chapter 2 dashboard renderer: dual-block (2 blocks) split/global/dirsplit
+kernels -- runtime, speedup vs the single-block v2 baseline, thread
+placement, per-block balance over time, a throughput sweep paired with
+the single-block stage, instrumentation overhead, and the CPU -> 2 blocks
+chained speedup (section 1.2).
 
-Organized by DOMAIN, not by benchmark session:
-
-  1. Single blob
-     1.1 Single block        (single_block_shared: v1 ring, v2 spill)
-     1.2 Dual blocks          (dual_block: split, global, dirsplit,
-                               placement/pinning, balance, tpb sweep)
-     1.3 Dual blocks vs N blocks (multi_block: 4-conn runtime/speedup/
-                               sweep/bandwidth)
-     1.4 4 vs 8 connectivity  (multi_block: the 8-direction twin kernels)
-     1.5 More work per barrier (multi_block: radius-2 + warp-coop twins,
-                               the neighbors_* benchmark)
-  2. Dual blob                (dual_blob: sequential vs streams vs
-                               multisource, lin vs xy entry format,
-                               4 vs 8 connectivity on both mechanisms,
-                               radius-2 on both mechanisms)
-
-Every subsection reports its OWN speedup multiplier from its own
-benchmark session; 1.3 also shows those multipliers chained together
-into one total (single block -> N blocks) via `chain_strip()` — see that
-function's docstring for why the chain is computed from ONE file
-(multi_block's own JSON, which re-measures every predecessor kernel
-fresh in the same session) rather than cross-multiplying separate
-sessions' numbers.
-
-Usage:
-    uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.visualize [dual.json]
-
-Output: results/ch02_gpu_1blob_2block/benchmark_results/dual_block_benchmark.html
-(overwritten per run — the timestamped JSON/CSV remain the durable record).
+Extracted from the dashboard monolith. Self-contained: loads its own
+dual_block_*.json (an explicit path can be passed via sys.argv[1],
+forwarded by the dashboard assembler when given), and exposes
+ready-to-embed section HTML (SECTION_1_2), the balance-panel hover JS
+(JS), and the device/SM identifiers (DEVICE, SM_COUNT) the assembled
+dashboard's subtitle needs.
 """
 import json
-import os
 import sys
 
 from ....shared import results_paths
 from ....shared import viz
 from ...ch01_gpu_1blob_1block.benchmarks import visualize as sbs_viz
-from ...ch03_gpu_1blob_nblock.benchmarks import visualize as mb_viz
-from ...ch04_gpu_2blob_nblock.benchmarks import visualize as db_viz
 
 RESULTS_DIR = results_paths.results_dir("ch02_gpu_1blob_2block", "benchmark_results")
 
-
-_newest = results_paths.newest
-
-
-DUAL_PATH = sys.argv[1] if len(sys.argv) > 1 else _newest("dual_block_*.json",
-                                                          RESULTS_DIR)
-OUT_PATH = os.path.join(RESULTS_DIR, "dual_block_benchmark.html")
+DUAL_PATH = sys.argv[1] if len(sys.argv) > 1 else results_paths.newest(
+    "dual_block_*.json", RESULTS_DIR)
 
 with open(DUAL_PATH) as f:
     DUAL = json.load(f)
+
+DEVICE = DUAL["device"]
+SM_COUNT = DUAL["sm_count"]
 
 ROWS = DUAL["scenes"]
 SWEEP = DUAL["tpb_sweep"]
@@ -65,8 +40,6 @@ KERNELS = ["split", "global", "dirsplit"]
 # Entity -> color slot, constant across every dual chart: s1 = single-block
 # v2, s2 = @njit CPU, s3 = split, s4 = global, s5 = dirsplit.
 KCLS = {"split": "s3", "global": "s4", "dirsplit": "s5"}
-
-SCENE_LABELS = viz.SCENE_LABELS
 
 
 label = viz.label
@@ -400,11 +373,6 @@ def dual_table():
 
 
 
-
-
-
-
-
 # -------------------------------------------------------------- stat tiles
 _big = max(ROWS, key=lambda r: r["filled"])
 _best_v2 = max(max(r[f"{k}_speedup_vs_v2"] for k in KERNELS) for r in ROWS)
@@ -432,13 +400,12 @@ tiles_html = "".join(
     f'<div class="tile"><div class="tile-v">{v}</div>'
     f'<div class="tile-l">{l}</div></div>' for v, l in TILES)
 
+# This chapter's own tiles are subsection-local (embedded above via
+# tiles_html), not part of the assembled dashboard's top project-tiles
+# strip -- it contributes no project tile.
+TILES = []
 
 
-PROJECT_TILES = list(sbs_viz.TILES) + list(mb_viz.TILES) + list(db_viz.TILES)
-project_tiles_html = "".join(
-    f'<div class="tile"><div class="tile-v">{v}</div>'
-    f'<div class="tile-l">{l}</div><div class="tile-src">{s}</div></div>'
-    for v, l, s in PROJECT_TILES)
 
 # --------------------------------------------------- chained speedups
 # Each subsection reports its OWN stage's speedup from ITS OWN benchmark
@@ -451,18 +418,20 @@ project_tiles_html = "".join(
 # drift; only the newest file's own numbers ever get multiplied here.)
 _dual_36m = next(r for r in ROWS if r["scene"] == "sq_6000_center")
 
+
 CHAIN_NOTE = viz.CHAIN_NOTE
+
 
 CHAIN_12 = [("CPU (@njit)", _dual_36m["njit_ms"]),
            ("single-block v2", _dual_36m["v2_kernel_ms"]),
            ("dual global", _dual_36m["global_kernel_ms"])]
 
 
+
 balance_html, balance_js = balance_panels()
 
-CSS = viz.CSS
 
-JS = viz.TOOLTIP_JS + """const BPANELS = __BPANELS__;
+JS = """const BPANELS = __BPANELS__;
 document.querySelectorAll('.bhover-capture').forEach(el => {
   const name = el.dataset.panel, p = BPANELS[name];
   const svg = document.getElementById('b_' + name);
@@ -507,6 +476,7 @@ legend = viz.legend
 chain_strip = viz.chain_strip
 
 
+
 LEG5 = legend([("@njit CPU", "s2"), ("single-block v2", "s1"),
                ("split", "s3"), ("global", "s4"), ("dirsplit", "s5")])
 LEG3 = legend([("split", "s3"), ("global", "s4"), ("dirsplit", "s5")])
@@ -514,30 +484,7 @@ LEG_BAL = legend([("block 0", "s1"), ("block 1", "s4")])
 
 
 
-html = f"""<!doctype html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flood fill — 1 → 2 → N blocks → 8 directions → 2 blobs, benchmarked</title>
-<style>{CSS}</style></head>
-<body><div class="viz-root">
-<h1>BFS flood fill — 1 block → 2 blocks → N blocks → 8 directions →
-2 blobs, benchmarked</h1>
-<div class="sub">{DUAL['device']} · {DUAL['sm_count']} SMs · organized by
-domain: single blob (§1.1 one block → §1.2 two blocks → §1.3 N blocks →
-§1.4 4-vs-8 connectivity → §1.5 per-barrier work experiments), then dual
-blob (§2). Every subsection reports
-its own speedup from its own benchmark session; §1.3 chains them into one
-multiplier from single block to N blocks. 4-connectivity throughout
-except where 8-direction twins are charted explicitly · placement
-observed via %smid</div>
-
-<div class="tiles">{project_tiles_html}</div>
-
-<h2 class="domain-h" style="margin-top:8px">1. Single blob</h2>
-
-{sbs_viz.SECTION_1_1}
-
-<h3 class="subsection-h">1.2 Dual blocks — split, global, dirsplit</h3>
+SECTION_1_2 = f"""<h3 class="subsection-h">1.2 Dual blocks — split, global, dirsplit</h3>
 <div class="tiles">{tiles_html}</div>
 
 <div class="card">
@@ -616,27 +563,4 @@ scenes where the fixed cost has nothing to amortize against.</p>
 <p class="note">Same idea as §1.1's chip, one link longer — dual_block's
 own session, its biggest scene (36M px).</p>
 {chain_strip(CHAIN_12, footnote=CHAIN_NOTE, total_cls="s4")}
-</div>
-
-{mb_viz.SECTION_1_3}
-
-{mb_viz.SECTION_1_4}
-{mb_viz.SECTION_1_5}
-{db_viz.SECTION_2}
-<div id="tooltip"></div>
-</div>
-<script>{JS}</script>
-</body></html>
-"""
-
-with open(OUT_PATH, "w") as f:
-    f.write(html)
-_db_part = (f" + {os.path.basename(db_viz.DB_PATH)}" if db_viz.DB_PATH
-            else " (no dual_blob JSON — §2 omitted)")
-_nb_part = (f" + {os.path.basename(mb_viz.NB_PATH)}" if mb_viz.NB_PATH
-            else " (no neighbors JSON — §1.5 omitted)")
-_dbr2_part = (f" + {os.path.basename(db_viz.DBR2_PATH)}" if db_viz.DBR2_PATH
-              else " (no dual_blob_radius2 JSON — §2 r2 card omitted)")
-print(f"rendered {os.path.basename(mb_viz.MB_PATH)} + {os.path.basename(DUAL_PATH)}"
-      f" + {os.path.basename(sbs_viz.JSON_PATH)}{_nb_part}{_db_part}{_dbr2_part}"
-      f" -> {OUT_PATH} ({len(html):,} bytes)")
+</div>"""

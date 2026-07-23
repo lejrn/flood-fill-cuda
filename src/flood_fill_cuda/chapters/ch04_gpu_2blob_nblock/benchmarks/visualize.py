@@ -22,10 +22,10 @@ from ....shared.viz import (
 
 RESULTS_DIR = results_paths.results_dir("ch04_gpu_2blob_nblock", "benchmark_results")
 _WAVEFRONT_DIR = results_paths.results_dir("ch04_gpu_2blob_nblock", "wavefront")
-# Relative to the CONSUMING page's own output dir. This pass renders into
-# ch02's benchmark_results/ (the dashboard is not split out yet); computed,
-# not hardcoded, so it stays correct once that changes.
-_CONSUMER_OUT_DIR = results_paths.results_dir("ch02_gpu_1blob_2block", "benchmark_results")
+# Relative to the CONSUMING page's own output dir (the assembled
+# dashboard's results/dashboard/) -- computed, not hardcoded, so it stays
+# correct if that directory ever moves again.
+_CONSUMER_OUT_DIR = results_paths.results_dir("dashboard")
 _WAVEFRONT_RELPATH = os.path.relpath(_WAVEFRONT_DIR, _CONSUMER_OUT_DIR)
 
 DB_PATH = results_paths.newest_optional("dual_blob_*.json", RESULTS_DIR,
