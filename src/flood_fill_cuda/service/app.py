@@ -11,6 +11,10 @@ browser side (new Uint16Array(buf, 16) needs no parsing):
     offset 16  width*height uint16 LE, row-major (i = y*width + x):
                0 = not part of the blob, else min(depth+1, 65535)
 
+?mode=cpu|gpu (default gpu) picks the engine — see engine.py's module
+docstring for why the two are a fair side-by-side comparison. X-Mode on
+the response echoes back which one actually ran.
+
 GZipMiddleware is worthwhile here specifically because the encoding makes
 the background all-zeros: a real stroke's payload compresses hard.
 """
@@ -51,6 +55,10 @@ BACKLOG_CAP = 8                     # queued-for-GPU cap; fills run 5-50ms
 # with its own single-worker executor, which recreates the exact hazard
 # this guards against.
 _gpu_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gpu")
+# CPU-mode fills never touch CUDA, so they carry none of the above hazard
+# and get their own pool -- a slow CPU fill (that's the point of the mode)
+# never blocks GPU-mode requests waiting behind it.
+_cpu_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cpu-fill")
 _inflight = 0
 
 
@@ -76,9 +84,34 @@ async def healthz():
     return {"status": "ok", "warm": True, "device": name}
 
 
+def _parse_optional_float(request, name):
+    raw = request.query_params.get(name)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a number, got {raw!r}")
+
+
 @app.post("/api/fill")
 async def fill(request: Request):
     global _inflight
+
+    mode = request.query_params.get("mode", "gpu").lower()
+    if mode not in engine.MODES:
+        return JSONResponse(
+            {"detail": f"mode must be one of {engine.MODES}, got {mode!r}"},
+            status_code=400)
+
+    try:
+        # Crop-local coordinates of where the user released the pointer;
+        # the seed the fill spreads from. Falls back to the mask's center
+        # of mass (engine.run_fill's default) if omitted.
+        seed_x = _parse_optional_float(request, "seed_x")
+        seed_y = _parse_optional_float(request, "seed_y")
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
 
     body = await request.body()
     if not body:
@@ -104,8 +137,9 @@ async def fill(request: Request):
     _inflight += 1
     try:
         loop = asyncio.get_running_loop()
-        outcome = await loop.run_in_executor(_gpu_executor, engine.run_fill,
-                                             mask)
+        executor = _gpu_executor if mode == "gpu" else _cpu_executor
+        outcome = await loop.run_in_executor(
+            executor, engine.run_fill, mask, mode, seed_x, seed_y)
     except engine.MaskTooLargeError as e:
         return JSONResponse({"detail": str(e)}, status_code=413)
     except ValueError as e:
@@ -125,6 +159,7 @@ async def fill(request: Request):
             "X-Filled": str(outcome.filled),
             "X-Kernel-Ms": f"{outcome.kernel_ms:.3f}",
             "X-Total-Ms": f"{outcome.total_ms:.3f}",
+            "X-Mode": outcome.mode,
         },
     )
 

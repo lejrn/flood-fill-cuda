@@ -27,6 +27,7 @@
   let bbox = null;
   let liveShapes = [];
   let currentShape = "circle";
+  let currentMode = "gpu";
 
   // ---- canvas sizing -------------------------------------------------
   // Backing-store resolution is CSS px * devicePixelRatio (capped at 1.5
@@ -165,12 +166,21 @@
     }
   }
 
-  const toolbarButtons = document.querySelectorAll("#toolbar .brush-btn");
-  toolbarButtons.forEach((btn) => {
+  const shapeButtons = document.querySelectorAll("#toolbar .brush-btn");
+  shapeButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
-      toolbarButtons.forEach((b) => b.classList.remove("active"));
+      shapeButtons.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       currentShape = btn.dataset.shape;
+    });
+  });
+
+  const modeButtons = document.querySelectorAll("#toolbar .mode-btn");
+  modeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      modeButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentMode = btn.dataset.mode;
     });
   });
 
@@ -204,6 +214,10 @@
     try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
     if (!bbox) return;
 
+    // Where the pointer was released — becomes the fill's seed, in
+    // crop-local coordinates (below) once the bbox origin is known.
+    const [releaseX, releaseY] = toCanvasXY(e);
+
     const bx = Math.max(0, Math.floor(bbox.minX));
     const by = Math.max(0, Math.floor(bbox.minY));
     const bw = Math.min(canvas.width, Math.ceil(bbox.maxX)) - bx;
@@ -225,14 +239,18 @@
     const screenW = bw * scaleX;
     const screenH = bh * scaleY;
 
+    const seedX = releaseX - bx;
+    const seedY = releaseY - by;
+
     clearMain();   // user can paint the next blob immediately
-    spawnShape(shapeCanvas, screenX, screenY, screenW, screenH);
+    spawnShape(shapeCanvas, screenX, screenY, screenW, screenH, currentMode, seedX, seedY);
   }
 
   // ---- server round trip -------------------------------------------
-  async function requestFill(shapeCanvas) {
+  async function requestFill(shapeCanvas, mode, seedX, seedY) {
     const blob = await new Promise((res) => shapeCanvas.toBlob(res, "image/png"));
-    const resp = await fetch("/api/fill", { method: "POST", body: blob });
+    const params = new URLSearchParams({ mode, seed_x: seedX, seed_y: seedY });
+    const resp = await fetch(`/api/fill?${params}`, { method: "POST", body: blob });
     if (!resp.ok) {
       const detail = await resp.json().catch(() => ({}));
       throw new Error(`fill failed (${resp.status}): ${detail.detail || resp.statusText}`);
@@ -246,6 +264,7 @@
     const stats = {
       filled: parseInt(resp.headers.get("x-filled"), 10) || 0,
       kernelMs: parseFloat(resp.headers.get("x-kernel-ms")) || 0,
+      mode: resp.headers.get("x-mode") || mode,
     };
     return { width, height, levels, depth, stats };
   }
@@ -279,13 +298,17 @@
     return hslToRgb(270 - 130 * t, 0.68, 0.56);
   }
 
-  function animateFill(sctx, origImageData, depth, levels) {
+  // durationMs is the engine's own reported compute time: the replay
+  // plays at the fill's actual real-world speed rather than a stylized
+  // pace, so a 32ms GPU fill visibly snaps in ~32ms and a slower CPU fill
+  // on the same blob visibly crawls for as long as it really took.
+  function animateFill(sctx, origImageData, depth, levels, durationMs) {
     return new Promise((resolve) => {
       const buckets = bucketByLevel(depth, levels);
       const out = sctx.createImageData(origImageData.width, origImageData.height);
       out.data.set(origImageData.data);
 
-      const duration = Math.min(2000, Math.max(600, levels * 12));
+      const duration = Math.max(durationMs, 1);
       let start = null;
       let prevLevel = -1;
 
@@ -336,8 +359,8 @@
     const label = document.createElement("div");
     label.className = "shape-stats";
     label.textContent =
-      `${stats.filled.toLocaleString()} px · ${levels} levels · ` +
-      `kernel ${stats.kernelMs.toFixed(2)} ms`;
+      `${stats.mode.toUpperCase()} · ${stats.filled.toLocaleString()} px · ` +
+      `${levels} levels · ${stats.kernelMs.toFixed(2)} ms`;
     wrap.appendChild(label);
   }
 
@@ -358,7 +381,7 @@
     inner.classList.add("swaying");
   }
 
-  async function spawnShape(shapeCanvas, screenX, screenY, screenW, screenH) {
+  async function spawnShape(shapeCanvas, screenX, screenY, screenW, screenH, mode, seedX, seedY) {
     const wrap = document.createElement("div");
     wrap.className = "shape-wrap";
     wrap.style.left = screenX + "px";
@@ -379,12 +402,12 @@
     const origImageData = sctx.getImageData(0, 0, shapeCanvas.width, shapeCanvas.height);
 
     try {
-      const { levels, depth, stats } = await requestFill(shapeCanvas);
+      const { levels, depth, stats } = await requestFill(shapeCanvas, mode, seedX, seedY);
       // Shown the instant the fill computation's result is known, right
       // above the blob, so the timing is legible exactly when it matters.
       showStatsLabel(wrap, stats, levels);
       if (levels > 0) {
-        await animateFill(sctx, origImageData, depth, levels);
+        await animateFill(sctx, origImageData, depth, levels, stats.kernelMs);
       }
     } catch (err) {
       // Network hiccup or server error: let the shape fall as painted

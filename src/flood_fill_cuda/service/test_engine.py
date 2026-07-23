@@ -1,9 +1,10 @@
 """Correctness tests for the service engine's mask -> depth-timeline wrapper.
 
-Three things only this layer can get wrong that ch03's own suite doesn't
-cover: seed placement (center of mass, not caller-supplied), the
-(height,width) <-> (width,height) transpose, and the depth+1 wire encoding.
-Run:
+Things only this layer can get wrong that ch03's own suite doesn't cover:
+seed placement (an explicit release point, snapped onto the mask, or the
+center-of-mass fallback), the (height,width) <-> (width,height) transpose,
+the depth+1 wire encoding, and — since the CPU/GPU mode split lives here —
+that both engines agree on the identical BFS. Run:
 
     uv run pytest src/flood_fill_cuda/service/test_engine.py -v
 """
@@ -131,6 +132,58 @@ def test_monotonic_adjacency():
         if x + 1 < d.shape[1]:
             neighbors.append(d[y, x + 1])
         assert (v - 1) in neighbors
+
+
+def test_explicit_seed_used_directly_when_on_mask():
+    """An explicit release point already on the mask (not the centroid) is
+    used as-is: depth 0 lands exactly there, not at the mask's center."""
+    mask = _bar_mask(20, 200, 8, 12)
+    out = engine.run_fill(mask, seed_x=5, seed_y=10)
+    assert (out.seed_x, out.seed_y) == (5, 10)
+    assert out.depth_u16[10, 5] == 1   # depth 0 -> encoded 1
+
+
+def test_explicit_seed_snaps_onto_mask():
+    """A release point just outside the mask still resolves to a real mask
+    pixel, not the literal off-mask coordinate."""
+    mask = _disc_mask(101, 101, 50, 50, 40)
+    out = engine.run_fill(mask, seed_x=50, seed_y=95)   # 6px above the rim
+    assert mask[out.seed_y, out.seed_x]
+    assert (out.seed_x, out.seed_y) != (50, 95)
+
+
+def test_missing_seed_falls_back_to_centroid():
+    mask = _disc_mask(101, 101, 50, 50, 40)
+    out = engine.run_fill(mask)
+    assert (out.seed_x, out.seed_y) == (50, 50)
+
+
+def test_cpu_and_gpu_modes_agree():
+    """ch01's CPU oracle and ch03's GPU kernel are tested elsewhere to be
+    bit-identical on the same BFS (ch03/test_correctness.py); this checks
+    that guarantee survives the engine's mode dispatch, seed resolution,
+    and wire encoding intact."""
+    mask = _disc_mask(151, 151, 70, 70, 55)
+    gpu_out = engine.run_fill(mask, mode="gpu", seed_x=40, seed_y=70)
+    cpu_out = engine.run_fill(mask, mode="cpu", seed_x=40, seed_y=70)
+    np.testing.assert_array_equal(gpu_out.depth_u16, cpu_out.depth_u16)
+    assert gpu_out.levels == cpu_out.levels
+    assert gpu_out.filled == cpu_out.filled
+    assert (gpu_out.seed_x, gpu_out.seed_y) == (cpu_out.seed_x, cpu_out.seed_y)
+    assert gpu_out.mode == "gpu" and cpu_out.mode == "cpu"
+
+
+def test_cpu_mode_reports_real_compute_time():
+    mask = _disc_mask(101, 101, 50, 50, 40)
+    out = engine.run_fill(mask, mode="cpu")
+    assert out.kernel_ms > 0
+    assert out.total_ms == out.kernel_ms
+
+
+def test_invalid_mode_raises():
+    mask = _disc_mask(64, 64, 32, 32, 20)
+    with pytest.raises(ValueError, match="mode"):
+        engine.run_fill(mask, mode="tpu")
 
 
 def test_empty_mask_raises():

@@ -72,6 +72,32 @@ html, body {
 
 .brush-btn.active { background: #4c6ef5; color: #fff; }
 
+.toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.mode-btn {
+  min-width: 44px;
+  height: 40px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #cfcfe0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.mode-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+.mode-btn.active { background: #f0762c; color: #fff; }
+
 .shape-stats {
   position: absolute;
   left: 50%;
@@ -140,6 +166,9 @@ html, body {
   #toolbar { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); }
   .brush-btn { color: #46465a; }
   .brush-btn:hover { background: rgba(0, 0, 0, 0.06); }
+  .toolbar-divider { background: rgba(0, 0, 0, 0.12); }
+  .mode-btn { color: #46465a; }
+  .mode-btn:hover { background: rgba(0, 0, 0, 0.06); }
   .shape-stats {
     color: #20202a;
     background: rgba(255, 255, 255, 0.85);

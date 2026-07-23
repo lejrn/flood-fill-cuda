@@ -11,11 +11,14 @@
   <canvas id="paint"></canvas>
 </div>
 
-<div id="toolbar" role="group" aria-label="Brush shape">
+<div id="toolbar" role="group" aria-label="Paint controls">
   <button class="brush-btn active" data-shape="circle" title="Circle" aria-label="Circle brush">●</button>
   <button class="brush-btn" data-shape="star" title="Star" aria-label="Star brush">★</button>
   <button class="brush-btn" data-shape="square" title="Square" aria-label="Square brush">■</button>
   <button class="brush-btn" data-shape="scratchy" title="Scratchy" aria-label="Scratchy brush">✎</button>
+  <span class="toolbar-divider"></span>
+  <button class="mode-btn" data-mode="cpu" title="Fill on the CPU" aria-label="CPU mode">CPU</button>
+  <button class="mode-btn active" data-mode="gpu" title="Fill on the GPU" aria-label="GPU mode">GPU</button>
 </div>
 
 <div id="hint">Paint a thick blob, then let go — the GPU floods it, then it falls.</div>
