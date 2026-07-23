@@ -6,7 +6,7 @@ the pointer was let go, computed on either ch03's single-seed cooperative
 GPU kernel or ch01's sequential CPU oracle (the frontend's CPU/GPU toggle).
 Every fill actually runs twice: once on the blob exactly as painted (what's
 drawn on screen — the visual size never changes), and once on the same
-shape amplified to ~50x the pixel count (see `engine.py`'s module
+shape amplified to ~250x the pixel count (see `engine.py`'s module
 docstring), purely so the reported timing and pixel counts — and the
 animation's real-time pacing — are honest at the scale where the GPU's
 advantage actually shows up; a Full HD brush stroke alone never gets close.
