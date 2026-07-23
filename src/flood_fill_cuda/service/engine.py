@@ -58,7 +58,7 @@ CONNECTIVITY = 4              # diamond wavefronts — the more legible animatio
 DEPTH_CLAMP = 65535           # uint16 ceiling; only a >65k-level stroke clips
 MODES = ("cpu", "gpu")
 
-AMPLIFY_FACTOR = 50           # target pixel-count multiplier for the timing run
+AMPLIFY_FACTOR = 250          # target pixel-count multiplier for the timing run
 # Separate, higher ceiling than MAX_PIXELS (which guards the *input* upload)
 # -- this bounds the synthetic amplified mask, landing in the same
 # multi-megapixel range ch03/ch04's own benchmarks already validated.
