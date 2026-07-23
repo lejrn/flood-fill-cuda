@@ -36,6 +36,7 @@ from ...shared.bandwidth import model_gb_s as _model_gb_s
 from .kernels import (
     ccl_fill_kernel, ccl_fill_bare_kernel,
     seed_merge_kernel, seed_merge_bare_kernel,
+    seed_scan_kernel, ccl_kernel,
     PALETTE_HOST, N_PALETTE,
     NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
@@ -53,6 +54,12 @@ _KERNELS = {
     ("seed_merge", True): seed_merge_bare_kernel,
     ("ccl_fill", False): ccl_fill_kernel,
     ("ccl_fill", True): ccl_fill_bare_kernel,
+}
+
+# variant -> discovery-only phase kernel (benchmark attribution)
+_PHASE_KERNELS = {
+    "seed_merge": seed_scan_kernel,
+    "ccl_fill": ccl_kernel,
 }
 
 # Cap on the recorded per-level trace (1D int32 -> 8 MB max)
@@ -368,3 +375,51 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
         level_sizes=trace,
         level_trace_truncated=(instrumented and levels > trace_capacity),
     )
+
+
+def discovery_only(img_host, variant="seed_merge", threads_per_block=256,
+                   blocks=None):
+    """Benchmark probe: run ONLY the discovery phases on fresh buffers —
+    seed_merge's candidate scan (P0-P1) or ccl_fill's full CCL (P0-P2).
+    The phase kernels call the fused kernels' device functions, so
+    fill ~= fused_total - this is a fair attribution (same caveat as any
+    subtraction of separately-launched kernels). Returns
+    (kernel_ms, candidates)."""
+    if img_host.ndim != 3 or img_host.shape[2] != 3 or img_host.dtype != np.uint8:
+        raise ValueError("img must be a (width, height, 3) uint8 array")
+    if variant not in VARIANTS:
+        raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
+    width, height = img_host.shape[0], img_host.shape[1]
+    n = width * height
+    kernel_fn = _PHASE_KERNELS[variant]
+
+    def _bufs(img):
+        w, h = img.shape[0], img.shape[1]
+        return (cuda.to_device(img),
+                cuda.to_device(np.zeros((w, h), dtype=np.int32)),
+                cuda.to_device(np.full((w, h), -1, dtype=np.int32)),
+                cuda.device_array(w * h, dtype=np.int32),
+                cuda.device_array(w * h, dtype=np.int32),
+                cuda.to_device(np.array([0], dtype=np.int32)),
+                cuda.to_device(np.zeros(NUM_COUNTERS, dtype=np.int64)))
+
+    key = ("phase", variant)
+    if key not in _warmed:
+        kernel_fn[1, 32](*_bufs(_tiny_scene()))
+        cuda.synchronize()
+        _warmed.add(key)
+
+    coop_max = _coop_max_blocks(kernel_fn, threads_per_block)
+    launch_blocks = coop_max if blocks is None else int(blocks)
+    if launch_blocks > coop_max:
+        raise RuntimeError(
+            f"blocks={launch_blocks} exceeds cooperative capacity {coop_max}")
+
+    args = _bufs(img_host)
+    cuda.synchronize()
+    t0 = time.perf_counter()
+    kernel_fn[launch_blocks, threads_per_block](*args)
+    cuda.synchronize()
+    kernel_ms = (time.perf_counter() - t0) * 1000
+    candidates = int(args[6].copy_to_host()[CANDIDATES])
+    return kernel_ms, candidates
