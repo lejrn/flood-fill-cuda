@@ -1,15 +1,19 @@
 # Paint-and-fill web service
 
-A webpage where anyone can paint a thick blob with the mouse (or a finger);
-on release, ch03's single-seed cooperative GPU kernel floods it — seeded at
-the blob's center of mass — and the browser replays the frontier spreading
-outward from the depth timeline the kernel returns, then the finished shape
-falls off-screen like a feather.
+A webpage where anyone can paint a thick blob with the mouse (or a finger)
+using one of a few brush shapes; on release, the fill spreads from wherever
+the pointer was let go, computed on either ch03's single-seed cooperative
+GPU kernel or ch01's sequential CPU oracle (the frontend's CPU/GPU toggle),
+and the browser replays the frontier spreading outward from the depth
+timeline the engine returns — at the engine's own real elapsed compute
+time, not a stylized pace, so the GPU/CPU speed difference is something you
+*see*, not just a number. The finished shape then falls off-screen like a
+feather.
 
-No websockets, no frame streaming: the kernel runs the *entire* BFS in one
-cooperative launch and returns a per-pixel `depth` array (the level each
-pixel was filled at). The server ships that array once; the browser
-animates it locally by thresholding `depth <= t`, the same trick
+No websockets, no frame streaming: the engine runs the *entire* BFS in one
+call and returns a per-pixel `depth` array (the level each pixel was filled
+at). The server ships that array once; the browser animates it locally by
+thresholding `depth <= t`, the same trick
 [`ch04/benchmarks/wavefront.py`](../chapters/ch04_gpu_2blob_nblock/benchmarks/wavefront.py)
 uses to render its GIFs.
 
@@ -34,7 +38,8 @@ concurrent launches structurally impossible *within* one process; extra
 worker processes each get their own executor and recreate the hazard.
 Likewise, don't run a chapter's benchmark suite at the same time as the
 service — that's a second, independent source of concurrent cooperative
-launches on the same GPU.
+launches on the same GPU. CPU-mode fills (`?mode=cpu`) never touch CUDA, so
+they run on their own small executor and aren't subject to any of this.
 
 ## Test
 
@@ -55,12 +60,17 @@ curl -X POST --data-binary @stroke.png localhost:8000/api/fill -D- -o depth.bin
 
 ## API
 
-`POST /api/fill` — body is a PNG (the painted stroke's bounding-box crop,
-RGBA; alpha ≥ 128 is "painted"). Response is `application/octet-stream`:
-a 16-byte header (`magic, width, height, levels`, all `uint32` LE) followed
-by `width*height` `uint16` LE values, row-major: `0` = not part of the
-blob, else `min(depth+1, 65535)`. See `app.py`'s module docstring for the
-exact byte layout and the reasoning for this framing over JSON.
+`POST /api/fill?mode=cpu|gpu&seed_x=<num>&seed_y=<num>` — body is a PNG
+(the painted stroke's bounding-box crop, RGBA; alpha ≥ 128 is "painted").
+`mode` defaults to `gpu`; `seed_x`/`seed_y` (crop-local, typically where the
+pointer was released) default to the mask's center of mass if omitted —
+either way the seed is snapped to the nearest actual painted pixel. Response
+is `application/octet-stream`: a 16-byte header (`magic, width, height,
+levels`, all `uint32` LE) followed by `width*height` `uint16` LE values,
+row-major: `0` = not part of the blob, else `min(depth+1, 65535)`. See
+`app.py`'s module docstring for the exact byte layout and the reasoning for
+this framing over JSON. `X-Mode` on the response echoes back which engine
+actually ran.
 
 `GET /healthz` → `{"status", "warm", "device"}`.
 

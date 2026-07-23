@@ -67,6 +67,40 @@ def test_fill_round_trip(client):
     assert (depth > 0).sum() == int(r.headers["x-filled"])
     assert float(r.headers["x-kernel-ms"]) >= 0
     assert float(r.headers["x-total-ms"]) >= 0
+    assert r.headers["x-mode"] == "gpu"   # default mode
+
+
+def test_fill_cpu_mode(client):
+    png = _stroke_png()
+    r = client.post("/api/fill?mode=cpu", content=png)
+    assert r.status_code == 200
+    assert r.headers["x-mode"] == "cpu"
+    magic, width, height, levels = struct.unpack(HEADER_FMT,
+                                                  r.content[:HEADER_SIZE])
+    assert magic == MAGIC
+    assert levels > 0
+
+
+def test_fill_explicit_seed(client):
+    """seed_x/seed_y (the browser's release point, crop-local) pins the
+    fill's start; a corner seed should reach a far corner at high depth."""
+    png = _stroke_png(size=80, radius=38)   # near-full-canvas disc
+    r = client.post("/api/fill?seed_x=40&seed_y=40", content=png)
+    assert r.status_code == 200
+    depth = np.frombuffer(r.content[HEADER_SIZE:], dtype='<u2').reshape(80, 80)
+    assert depth[40, 40] == 1   # seed itself is depth 0 -> encoded 1
+
+
+def test_fill_invalid_mode(client):
+    png = _stroke_png()
+    r = client.post("/api/fill?mode=tpu", content=png)
+    assert r.status_code == 400
+
+
+def test_fill_non_numeric_seed(client):
+    png = _stroke_png()
+    r = client.post("/api/fill?seed_x=not-a-number", content=png)
+    assert r.status_code == 400
 
 
 def test_fill_empty_body(client):
