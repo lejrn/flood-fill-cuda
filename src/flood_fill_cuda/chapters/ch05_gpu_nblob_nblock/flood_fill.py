@@ -1,9 +1,9 @@
 """Host driver for the seed-discovery flood fill.
 
 Public API:
-    flood_fill(img, variant="ccl_fill", threads_per_block=256,
+    flood_fill(img, variant="seed_merge", threads_per_block=256,
                blocks=None, bare=False) -> SeedDiscoveryResult
-    max_blocks(variant="ccl_fill", threads_per_block=256, bare=False)
+    max_blocks(variant="seed_merge", threads_per_block=256, bare=False)
 
 THE headline API change of this chapter: there is no seeds parameter.
 The caller hands over an image; the GPU finds every blob, picks each
@@ -35,6 +35,7 @@ import numpy as np
 from ...shared.bandwidth import model_gb_s as _model_gb_s
 from .kernels import (
     ccl_fill_kernel, ccl_fill_bare_kernel,
+    seed_merge_kernel, seed_merge_bare_kernel,
     PALETTE_HOST, N_PALETTE,
     NUM_COUNTERS,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
@@ -44,10 +45,12 @@ from .kernels import (
 )
 from numba import cuda
 
-VARIANTS = ("ccl_fill",)
+VARIANTS = ("seed_merge", "ccl_fill")
 
 # (variant, bare) -> kernel
 _KERNELS = {
+    ("seed_merge", False): seed_merge_kernel,
+    ("seed_merge", True): seed_merge_bare_kernel,
     ("ccl_fill", False): ccl_fill_kernel,
     ("ccl_fill", True): ccl_fill_bare_kernel,
 }
@@ -62,8 +65,8 @@ MODEL_NOTE = (
     " device-side here, seeds included)] + discovery traffic [n*4 parent"
     " iota + n*3 discovery is_red sweep + filled*4*3 lex-predecessor"
     " probes + union_attempts*8 parent RMW + n*3 flatten re-sweep"
-    " (ccl_fill) or candidates*4 pre-visit writes + n*4 visited re-sweep"
-    " (seed_merge)] + label traffic [filled*4 label write + filled*4"
+    " (ccl_fill) or candidates*8 pre-visit/label writes + n*4 flatten"
+    " label sweep (seed_merge)] + label traffic [filled*4 label write + filled*4"
     " label read + filled*4 flatten find-start reads] — the bytes ch04's"
     " in-entry labels claimed for free, now priced. Derived lower-bound"
     " model (find-chain reads beyond the first are not modeled; L2"
@@ -89,7 +92,7 @@ def model_bytes_ch05(variant, n_pixels, filled, processed, cas_attempts,
     if variant == "ccl_fill":
         discovery += n_pixels * 3        # P2 flatten re-sweeps is_red
     else:
-        discovery += candidates * 4 + n_pixels * 4  # pre-visits; P3 visited sweep
+        discovery += candidates * 8 + n_pixels * 4  # pre-visits; P3 label sweep
     labels = filled * 4 * 3              # label write + read + find-start read
     return fill + discovery + labels
 
@@ -156,7 +159,8 @@ def _tiny_scene():
     return tiny
 
 
-def _device_buffers(img_host, instrumented, launch_blocks, trace_capacity):
+def _device_buffers(img_host, variant, instrumented, launch_blocks,
+                    trace_capacity):
     width, height = img_host.shape[0], img_host.shape[1]
     n = width * height
     bufs = {
@@ -176,6 +180,9 @@ def _device_buffers(img_host, instrumented, launch_blocks, trace_capacity):
             np.full((width, height), -1, dtype=np.int16))
         bufs["stats"] = cuda.to_device(stats_host)
         bufs["trace"] = cuda.device_array(trace_capacity, dtype=np.int32)
+        if variant == "seed_merge":
+            bufs["prov"] = cuda.to_device(
+                np.full((width, height), -1, dtype=np.int32))
     return bufs
 
 
@@ -184,6 +191,11 @@ def _kernel_args(variant, bare, bufs):
         return (bufs["img"], bufs["visited"], bufs["depth"], bufs["parent"],
                 bufs["label"], bufs["queue"], bufs["q_state"],
                 bufs["counters"])
+    if variant == "seed_merge":
+        return (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
+                bufs["parent"], bufs["label"], bufs["prov"], bufs["queue"],
+                bufs["q_state"], bufs["counters"], bufs["stats"],
+                bufs["trace"])
     return (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
             bufs["parent"], bufs["label"], bufs["queue"], bufs["q_state"],
             bufs["counters"], bufs["stats"], bufs["trace"])
@@ -194,7 +206,7 @@ def _warmup(variant, bare):
     key = (variant, bare)
     if key in _warmed:
         return
-    bufs = _device_buffers(_tiny_scene(), not bare, 1, 4)
+    bufs = _device_buffers(_tiny_scene(), variant, not bare, 1, 4)
     _KERNELS[key][1, 32](*_kernel_args(variant, bare, bufs))
     cuda.synchronize()
     _warmed.add(key)
@@ -208,7 +220,7 @@ def _coop_max_blocks(kernel_fn, tpb):
     return _coop_cache[key]
 
 
-def max_blocks(variant="ccl_fill", threads_per_block=256, bare=False):
+def max_blocks(variant="seed_merge", threads_per_block=256, bare=False):
     """The largest cooperative grid this GPU can host at threads_per_block.
     Queried per kernel — never assumed equal across variants/twins (the
     union-find loops change register pressure)."""
@@ -216,7 +228,7 @@ def max_blocks(variant="ccl_fill", threads_per_block=256, bare=False):
     return _coop_max_blocks(_KERNELS[(variant, bare)], threads_per_block)
 
 
-def flood_fill(img_host, variant="ccl_fill", threads_per_block=256,
+def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
                blocks=None, bare=False):
     """Discover, label and flood-fill every red blob — no seeds taken.
 
@@ -263,7 +275,7 @@ def flood_fill(img_host, variant="ccl_fill", threads_per_block=256,
     trace_capacity = min(n, LEVEL_TRACE_CAPACITY)
 
     t_total0 = time.perf_counter()
-    bufs = _device_buffers(img_host, instrumented, launch_blocks,
+    bufs = _device_buffers(img_host, variant, instrumented, launch_blocks,
                            trace_capacity)
     cuda.synchronize()
     t_kernel0 = time.perf_counter()
@@ -288,10 +300,14 @@ def flood_fill(img_host, variant="ccl_fill", threads_per_block=256,
         owner_out = bufs["owner"].copy_to_host()
         stats = bufs["stats"].copy_to_host()
         trace = bufs["trace"][:min(levels, trace_capacity)].copy_to_host()
+        prov_out = (bufs["prov"].copy_to_host()
+                    if variant == "seed_merge"
+                    else np.zeros((0, 0), dtype=np.int32))
     else:
         owner_out = np.zeros((0, 0), dtype=np.int16)
         stats = None
         trace = np.zeros(0, dtype=np.int32)
+        prov_out = np.zeros((0, 0), dtype=np.int32)
     t_end = time.perf_counter()
 
     # What the GPU discovered, made inspectable: exactly one canonical
@@ -321,7 +337,7 @@ def flood_fill(img_host, variant="ccl_fill", threads_per_block=256,
         visited=visited_out,
         depth=depth_out,
         label=label_out,
-        prov_label=np.zeros((0, 0), dtype=np.int32),
+        prov_label=prov_out,
         owner=owner_out,
         variant=variant,
         threads_per_block=threads_per_block,

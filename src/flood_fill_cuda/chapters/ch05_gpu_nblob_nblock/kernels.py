@@ -411,3 +411,261 @@ def ccl_fill_bare_kernel(img, visited, depth, parent, label_map, queue,
     if tid == 0:
         counters[FILLED] = q_state[Q_REAR]
         counters[LEVELS] = level
+
+
+# --------------------------------------------------------------- seed_merge
+# Connectivity in flight: every locally-detectable candidate (red pixel
+# with no red lex-predecessor — at least one per blob, its lex-min pixel)
+# starts a wave at level 0; where two waves of one blob collide, the CAS
+# loser unions the two provisional labels. Paint is DEFERRED to the final
+# flatten, and the deferral is load-bearing: a claimed pixel stays red,
+# so the later wave still probes it, loses the CAS, and looks up the
+# winner's label in label_map. That lookup is safe by a two-sided retry:
+# the winner wrote its label BEFORE enqueueing, so by the time the winner
+# is dequeued (>= 1 level barrier later) the label is visible grid-wide.
+# A CAS loser in the SAME level as the claim may still read the -1 the
+# map was initialized to — the guard skips it, and the union is retried
+# from the other side one level later (adjacent depths differ by <= 1,
+# and the other side's probe finds this pixel still red). The last
+# possible union happens in the final level's processing pass, which the
+# loop's closing barrier pair orders before the flatten reads.
+# Phases: P0 iota parent  P1 candidate scan  P2 racing fill + unions
+# P3 flatten + relabel + repaint.
+
+
+@cuda.jit(link=[SMID_CU])
+def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
+                      prov_label, queue, q_state, counters, block_stats,
+                      level_sizes):
+    """Host contract: as ccl_fill_kernel, plus prov_label filled with -1
+    (the pre-merge label snapshot the flatten preserves for replay)."""
+    grid = cuda.cg.this_grid()
+    bx = cuda.blockIdx.x
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+    palette = cuda.const.array_like(PALETTE_HOST)
+
+    my_union_attempts = 0
+    my_union_done = 0
+
+    # P0: every pixel its own root
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+
+    # P1: candidate scan — grid-stride gives one thread per pixel, so the
+    # pre-visit and label stores need no atomics
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            found = False
+            for d in range(4):
+                nx = x + pdx[d]
+                ny = y + pdy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    found = True
+            if not found:
+                visited[x, y] = 1
+                label_map[x, y] = i
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    # The fence sandwich (see module doc): every thread reads the same
+    # candidate count
+    grid.sync()
+    rear = q_state[Q_REAR]
+    grid.sync()
+    n_candidates = rear
+
+    # P2: racing multisource fill — labels inherit at claim, collide at
+    # CAS loss, merge via union-find. No paint (see block comment above).
+    front = 0
+    level = 0
+    peak_level = 0
+    peak_occ = 0
+    active_thread_sum = 0
+    active_warp_sum = 0
+    my_processed = 0
+    my_cas_attempts = 0
+
+    while front < rear:
+        level_size = rear - front
+        if level_size > peak_level:
+            peak_level = level_size
+        active = min(level_size, stride)
+        active_thread_sum += active
+        active_warp_sum += (active + 31) // 32
+        if tid == 0 and level < level_sizes.shape[0]:
+            level_sizes[level] = level_size
+
+        for i in range(front + tid, rear, stride):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+
+            lbl = label_map[x, y]
+            depth[x, y] = level
+            owner[x, y] = bx  # per-pixel block-owner map
+            my_processed += 1
+
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    my_cas_attempts += 1
+                    if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                        # win: stamp the inherited label BEFORE the entry
+                        # becomes dequeueable
+                        label_map[nx, ny] = lbl
+                        _warp_enqueue_global(queue, q_state, Q_REAR,
+                                             nx * height + ny, counters)
+                    else:
+                        # collision: someone owns it — same blob, maybe
+                        # another wave. -1 = not yet visible; skip, the
+                        # other side retries (block comment above).
+                        other = label_map[nx, ny]
+                        if other >= 0 and other != lbl:
+                            my_union_attempts += 1
+                            my_union_done += _union(parent, lbl, other)
+
+        grid.sync()  # enqueues + final rear for this level visible grid-wide
+        new_rear = q_state[Q_REAR]
+        grid.sync()  # everyone has read new_rear; next level's atomics may begin
+
+        level += 1
+        occ = new_rear - front
+        if occ > peak_occ:
+            peak_occ = occ
+        front = rear
+        rear = new_rear
+
+    # P3: flatten + relabel + repaint. The loop's closing barrier pair
+    # ordered every union before this point; label_map >= 0 is exactly
+    # the filled set (labels are stamped at claim time).
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        prov = label_map[x, y]
+        if prov >= 0:
+            prov_label[x, y] = prov
+            final = _find(parent, prov)
+            label_map[x, y] = final
+            c = final % N_PALETTE
+            img[x, y, 0] = palette[c, 0]
+            img[x, y, 1] = palette[c, 1]
+            img[x, y, 2] = palette[c, 2]
+
+    cuda.atomic.add(counters, PROCESSED, my_processed)
+    cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
+    cuda.atomic.add(counters, UNION_ATTEMPTS, my_union_attempts)
+    cuda.atomic.add(counters, UNION_DONE, my_union_done)
+    cuda.atomic.add(block_stats, (bx, BS_PROCESSED), my_processed)
+    if cuda.threadIdx.x == 0:
+        block_stats[bx, BS_SMID] = get_smid()
+    if tid == 0:
+        # all grid-uniform register values
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
+        counters[PEAK_LEVEL] = peak_level
+        counters[PEAK_OCC] = peak_occ
+        counters[ACTIVE_THREAD_SUM] = active_thread_sum
+        counters[ACTIVE_WARP_SUM] = active_warp_sum
+        counters[CANDIDATES] = n_candidates
+
+
+# ------------------------------------------------------- seed_merge bare twin
+
+
+@cuda.jit
+def seed_merge_bare_kernel(img, visited, depth, parent, label_map, queue,
+                           q_state, counters):
+    grid = cuda.cg.this_grid()
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+    palette = cuda.const.array_like(PALETTE_HOST)
+
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            found = False
+            for d in range(4):
+                nx = x + pdx[d]
+                ny = y + pdy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    found = True
+            if not found:
+                visited[x, y] = 1
+                label_map[x, y] = i
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    grid.sync()
+    rear = q_state[Q_REAR]
+    grid.sync()
+
+    front = 0
+    level = 0
+
+    while front < rear:
+        for i in range(front + tid, rear, stride):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+            lbl = label_map[x, y]
+            depth[x, y] = level
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                        label_map[nx, ny] = lbl
+                        _warp_enqueue_global(queue, q_state, Q_REAR,
+                                             nx * height + ny, counters)
+                    else:
+                        other = label_map[nx, ny]
+                        if other >= 0 and other != lbl:
+                            _union(parent, lbl, other)
+        grid.sync()
+        new_rear = q_state[Q_REAR]
+        grid.sync()
+        level += 1
+        front = rear
+        rear = new_rear
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        prov = label_map[x, y]
+        if prov >= 0:
+            final = _find(parent, prov)
+            label_map[x, y] = final
+            c = final % N_PALETTE
+            img[x, y, 0] = palette[c, 0]
+            img[x, y, 1] = palette[c, 1]
+            img[x, y, 2] = palette[c, 2]
+
+    if tid == 0:
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
