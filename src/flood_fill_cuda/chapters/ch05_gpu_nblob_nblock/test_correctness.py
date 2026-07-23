@@ -460,6 +460,54 @@ def test_model_bytes_consistency(variant):
     assert r.model_gb_s > 0
 
 
+# ------------------------------------------------------------ phase timing
+
+def test_phase_timing_reported():
+    """tid-0 %globaltimer stamps at the phase barriers: variant-specific
+    keys, non-negative wall times that nest inside the host-timed kernel
+    wall (generous bound — this is a structure test, not a race with the
+    clock)."""
+    img, _ = SCENES["u_shape"]()
+    expected = {"seed_merge": ("init", "scan", "fill", "flatten"),
+                "ccl_fill": ("init", "union_merge", "flatten_seed", "fill")}
+    for variant in VARIANTS:
+        r = flood_fill(img, variant=variant)
+        assert tuple(r.phase_ms) == expected[variant]
+        assert all(v >= 0 for v in r.phase_ms.values())
+        total = sum(r.phase_ms.values())
+        assert 0 < total <= r.kernel_ms * 1.5 + 0.5
+        # the fill dominates this scene in both variants
+        assert r.phase_ms["fill"] > 0
+
+
+def test_union_cycles_follow_the_collisions():
+    """seed_merge's in-flight union clock only ticks where waves collide:
+    zero on a scene with no cross-wave contact, positive on the U.
+    ccl_fill never accumulates cycles — its unions ARE the union_merge
+    phase, timed by wall clock instead."""
+    img_sq, _ = SCENES["two_squares"]()
+    r = flood_fill(img_sq, variant="seed_merge")
+    assert r.union_attempts == 0
+    assert r.union_cycles == 0 and r.union_thread_ms == 0.0
+
+    img_u, _ = SCENES["u_shape"]()
+    r = flood_fill(img_u, variant="seed_merge")
+    assert r.union_attempts > 0
+    assert r.union_cycles > 0 and r.union_thread_ms > 0.0
+
+    r = flood_fill(img_u, variant="ccl_fill")
+    assert r.union_cycles == 0
+    assert r.phase_ms["union_merge"] >= 0
+
+
+def test_bare_twin_reports_no_phase_timing():
+    img, _ = SCENES["u_shape"]()
+    for variant in VARIANTS:
+        r = flood_fill(img, variant=variant, bare=True)
+        assert r.phase_ms == {}
+        assert r.union_cycles == 0 and r.union_thread_ms == 0.0
+
+
 # --------------------------------------------------------------- bare twins
 
 @pytest.mark.parametrize("variant", VARIANTS)
