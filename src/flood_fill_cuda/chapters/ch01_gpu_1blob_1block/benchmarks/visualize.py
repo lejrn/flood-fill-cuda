@@ -30,7 +30,11 @@ from ....shared.viz import (
 
 RESULTS_DIR = results_paths.results_dir("ch01_gpu_1blob_1block", "benchmark_results")
 
-if len(sys.argv) > 1:
+# sys.argv is only this module's own override when it's the script being
+# run directly -- when imported as a dependency (by ch02's renderer or the
+# dashboard assembler), argv belongs to whatever positional override THEY
+# accept (e.g. ch02's own dual_block.json path), not to this chapter.
+if __name__ == "__main__" and len(sys.argv) > 1:
     JSON_PATH = sys.argv[1]
 else:
     candidates = sorted(glob.glob(
