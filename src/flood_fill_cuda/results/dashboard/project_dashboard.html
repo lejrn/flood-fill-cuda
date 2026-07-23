@@ -1,7 +1,8 @@
 <!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flood fill — 1 → 2 → N blocks → 8 directions → 2 blobs, benchmarked</title>
+<title>Flood fill — 1 → 2 → N blocks → 8 directions → 2 blobs → N blobs
+found by the GPU, benchmarked</title>
 <style>
 :root { color-scheme: light dark; }
 body {
@@ -154,17 +155,18 @@ th { color: var(--ink-2); font-weight: 600; }
 </style></head>
 <body><div class="viz-root">
 <h1>BFS flood fill — 1 block → 2 blocks → N blocks → 8 directions →
-2 blobs, benchmarked</h1>
+2 blobs → N blobs found by the GPU, benchmarked</h1>
 <div class="sub">NVIDIA GeForce RTX 4060 Laptop GPU  · 24 SMs · organized by
 domain: single blob (§1.1 one block → §1.2 two blocks → §1.3 N blocks →
-§1.4 4-vs-8 connectivity → §1.5 per-barrier work experiments), then dual
-blob (§2). Every subsection reports
+§1.4 4-vs-8 connectivity → §1.5 per-barrier work experiments), dual
+blob (§2), then seed discovery (§3: no host-provided seeds — the GPU
+finds, labels and fills every blob itself). Every subsection reports
 its own speedup from its own benchmark session; §1.3 chains them into one
 multiplier from single block to N blocks. 4-connectivity throughout
 except where 8-direction twins are charted explicitly · placement
 observed via %smid</div>
 
-<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div></div>
+<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">no seeds given: discovered, labeled and filled in one cooperative launch — see §3</div><div class="tile-src">seed-discovery stage</div></div></div>
 
 <h2 class="domain-h" style="margin-top:8px">1. Single blob</h2>
 
@@ -1977,6 +1979,152 @@ than its own chart, matching how this project already treats
 small/inconclusive findings elsewhere.</p>
 <details open><summary>Per-scene results table</summary>
 <div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>@njit ms</th><th>seq ms</th><th>seq/2 ms</th><th>multi ms</th><th>multi min</th><th>vs seq</th><th>vs seq (min)</th><th>xy ms</th><th>xy/lin</th><th>pack tax %</th><th>8-conn seq ms</th><th>8-conn multi ms</th><th>8 vs 4-conn</th><th>8-conn mu/seq</th><th>GB/s</th><th>% peak</th></tr><tr><td>two squares 300² (small)</td><td>180,000</td><td>1.6</td><td>6.0</td><td>5.6</td><td>3.0</td><td>3.0</td><td>1.96×</td><td>1.97×</td><td>3.1</td><td>0.99×</td><td>-3.3</td><td>3.8</td><td>2.0</td><td>1.52×</td><td>1.90×</td><td>2.6</td><td>1.4</td></tr><tr><td>two squares 2800²</td><td>15,680,000</td><td>325</td><td>66</td><td>46</td><td>32</td><td>30</td><td>2.05×</td><td>1.59×</td><td>37</td><td>0.87×</td><td>+29.6</td><td>43</td><td>32</td><td>1.00×</td><td>1.34×</td><td>23.4</td><td>12.7</td></tr><tr><td>two disks r=1400</td><td>12,314,954</td><td>271</td><td>39</td><td>44</td><td>37</td><td>22</td><td>1.05×</td><td>1.64×</td><td>36</td><td>1.02×</td><td>-1.2</td><td>51</td><td>22</td><td>1.65×</td><td>2.31×</td><td>13.1</td><td>7.1</td></tr><tr><td>asymmetric 4000²+800²</td><td>16,640,000</td><td>347</td><td>51</td><td>45</td><td>40</td><td>38</td><td>1.28×</td><td>1.20×</td><td>41</td><td>0.97×</td><td>+16.8</td><td>41</td><td>31</td><td>1.28×</td><td>1.30×</td><td>18.7</td><td>10.1</td></tr></table></div></details>
+</div>
+
+
+<h2 class="domain-h">3. Seed discovery</h2>
+<p class="sub">Nobody passes seeds anymore: the GPU is handed an image
+and must find every blob itself — one canonical seed and label per blob
+(its minimum linear index), any number of blobs, one cooperative launch,
+8-connectivity. Two strategies compared head-to-head: seed_merge floods
+from every locally-detectable candidate and merges colliding waves'
+labels in flight (atomicMin union-find); ccl_fill solves connectivity
+first with a data-independent union-find pass, then fills from exactly
+one seed per blob. Both retire ch04's in-entry label format (64-blob
+cap) for a per-pixel label map — priced, not free — and both drop the
+n_seeds parameter: the GPU-produced seed count is read behind a
+grid.sync fence sandwich, the refined form of ch04's deadlock lesson.</p>
+
+<div class="tiles"><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">discovered, labeled and filled in ONE launch · random noise 4000² · zero seeds given</div></div><div class="tile"><div class="tile-v">6/7</div><div class="tile-l">scenes where seed_merge (discovery riding inside the fill) beat the ccl_fill prepass</div></div><div class="tile"><div class="tile-v">2.10×–4.06×</div><div class="tile-l">discovery tax: kernel time vs ch04's given-seeds multisource (8-conn) on the two-blob scenes</div></div></div>
+
+<div class="card">
+<h2>Runtime per scene — discovery included</h2>
+<p class="note">Log scale. The @njit baseline runs the same job
+sequentially (CCL + canonical fill, discovery included). Hover any dot;
+exact numbers in the table below.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s2)"></i>@njit CPU (CCL + fill)</span><span><i class="chip" style="background:var(--s7)"></i>seed_merge</span><span><i class="chip" style="background:var(--s8)"></i>ccl_fill</span></div>
+<svg viewBox="0 0 860 286" role="img" aria-label="Seed-discovery runtime per scene, log scale">
+<line x1="214.0" y1="4" x2="214.0" y2="252" class="grid"/>
+<text x="214.0" y="270" class="tick" text-anchor="middle">0.1</text>
+<line x1="372.5" y1="4" x2="372.5" y2="252" class="grid"/>
+<text x="372.5" y="270" class="tick" text-anchor="middle">1</text>
+<line x1="531.0" y1="4" x2="531.0" y2="252" class="grid"/>
+<text x="531.0" y="270" class="tick" text-anchor="middle">10</text>
+<line x1="689.5" y1="4" x2="689.5" y2="252" class="grid"/>
+<text x="689.5" y="270" class="tick" text-anchor="middle">100</text>
+<text x="830" y="270" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="830" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">two squares 2800²</text>
+<circle cx="809.5" cy="11.5" r="5" class="dot s2" data-tip="two squares 2800² — @njit CPU (CCL + fill): 572 ms"/>
+<circle cx="642.7" cy="18.0" r="5" class="dot s7" data-tip="two squares 2800² — seed_merge: 51 ms"/>
+<circle cx="694.1" cy="24.5" r="5" class="dot s8" data-tip="two squares 2800² — ccl_fill: 107 ms"/>
+<line x1="214" y1="54.0" x2="830" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">two disks r=1400</text>
+<circle cx="770.8" cy="47.5" r="5" class="dot s2" data-tip="two disks r=1400 — @njit CPU (CCL + fill): 326 ms"/>
+<circle cx="673.1" cy="54.0" r="5" class="dot s7" data-tip="two disks r=1400 — seed_merge: 79 ms"/>
+<circle cx="652.2" cy="60.5" r="5" class="dot s8" data-tip="two disks r=1400 — ccl_fill: 58 ms"/>
+<line x1="214" y1="90.0" x2="830" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">asymmetric 4000²+800²</text>
+<circle cx="811.9" cy="83.5" r="5" class="dot s2" data-tip="asymmetric 4000²+800² — @njit CPU (CCL + fill): 593 ms"/>
+<circle cx="650.6" cy="90.0" r="5" class="dot s7" data-tip="asymmetric 4000²+800² — seed_merge: 57 ms"/>
+<circle cx="679.0" cy="96.5" r="5" class="dot s8" data-tip="asymmetric 4000²+800² — ccl_fill: 86 ms"/>
+<line x1="214" y1="126.0" x2="830" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">grid of 100 blobs</text>
+<circle cx="788.2" cy="119.5" r="5" class="dot s2" data-tip="grid of 100 blobs — @njit CPU (CCL + fill): 420 ms"/>
+<circle cx="612.5" cy="126.0" r="5" class="dot s7" data-tip="grid of 100 blobs — seed_merge: 33 ms"/>
+<circle cx="645.8" cy="132.5" r="5" class="dot s8" data-tip="grid of 100 blobs — ccl_fill: 53 ms"/>
+<line x1="214" y1="162.0" x2="830" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">random noise 4000²</text>
+<circle cx="804.6" cy="155.5" r="5" class="dot s2" data-tip="random noise 4000² — @njit CPU (CCL + fill): 533 ms"/>
+<circle cx="593.5" cy="162.0" r="5" class="dot s7" data-tip="random noise 4000² — seed_merge: 25 ms"/>
+<circle cx="610.5" cy="168.5" r="5" class="dot s8" data-tip="random noise 4000² — ccl_fill: 32 ms"/>
+<line x1="214" y1="198.0" x2="830" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">comb, 2000 teeth</text>
+<circle cx="774.9" cy="191.5" r="5" class="dot s2" data-tip="comb, 2000 teeth — @njit CPU (CCL + fill): 346 ms"/>
+<circle cx="645.7" cy="198.0" r="5" class="dot s7" data-tip="comb, 2000 teeth — seed_merge: 53 ms"/>
+<circle cx="668.4" cy="204.5" r="5" class="dot s8" data-tip="comb, 2000 teeth — ccl_fill: 74 ms"/>
+<line x1="214" y1="234.0" x2="830" y2="234.0" class="rowline"/>
+<text x="204" y="238.0" class="rowlab" text-anchor="end">serpentine 256²</text>
+<circle cx="356.5" cy="227.5" r="5" class="dot s2" data-tip="serpentine 256² — @njit CPU (CCL + fill): 0.79 ms"/>
+<circle cx="418.7" cy="234.0" r="5" class="dot s7" data-tip="serpentine 256² — seed_merge: 2.0 ms"/>
+<circle cx="727.2" cy="240.5" r="5" class="dot s8" data-tip="serpentine 256² — ccl_fill: 173 ms"/>
+</svg>
+</div>
+
+<div class="card">
+<h2>Where should connectivity be solved — in flight or up front?</h2>
+<p class="note">Two solid dots per scene: two distinct mechanisms, not
+variants of one entity. Gutter: ccl/merge — above 1.00× the colliding-
+waves bet wins, below it the CCL prepass does. The interesting spread is
+scene shape: many tiny blobs (candidates ≈ blobs) reward the prepass;
+few big blobs reward waves that discover while they fill.</p>
+<svg viewBox="0 0 860 286" role="img" aria-label="seed_merge vs ccl_fill kernel time per scene">
+<line x1="214.0" y1="4" x2="214.0" y2="252" class="grid"/>
+<text x="214.0" y="270" class="tick" text-anchor="middle">1</text>
+<line x1="449.5" y1="4" x2="449.5" y2="252" class="grid"/>
+<text x="449.5" y="270" class="tick" text-anchor="middle">10</text>
+<line x1="685.1" y1="4" x2="685.1" y2="252" class="grid"/>
+<text x="685.1" y="270" class="tick" text-anchor="middle">100</text>
+<text x="768" y="270" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="768" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">two squares 2800²</text>
+<line x1="615.6" y1="18.0" x2="691.9" y2="18.0" class="pairline-db"/>
+<circle cx="615.6" cy="18.0" r="5" class="dot s7" data-tip="two squares 2800² — seed_merge: 51 ms (2 candidates, 0 unions)"/>
+<circle cx="691.9" cy="18.0" r="5" class="dot s8" data-tip="two squares 2800² — ccl_fill: 107 ms (15,679,998 unions)"/>
+<text x="776.0" y="22.0" class="rowval" font-weight="650">2.11×</text>
+<line x1="214" y1="54.0" x2="768" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">two disks r=1400</text>
+<line x1="660.7" y1="54.0" x2="629.6" y2="54.0" class="pairline-db"/>
+<circle cx="660.7" cy="54.0" r="5" class="dot s7" data-tip="two disks r=1400 — seed_merge: 79 ms (500 candidates, 498 unions)"/>
+<circle cx="629.6" cy="54.0" r="5" class="dot s8" data-tip="two disks r=1400 — ccl_fill: 58 ms (12,314,952 unions)"/>
+<text x="776.0" y="58.0" class="rowval" font-weight="650">1.35× ccl</text>
+<line x1="214" y1="90.0" x2="768" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">asymmetric 4000²+800²</text>
+<line x1="627.3" y1="90.0" x2="669.5" y2="90.0" class="pairline-db"/>
+<circle cx="627.3" cy="90.0" r="5" class="dot s7" data-tip="asymmetric 4000²+800² — seed_merge: 57 ms (2 candidates, 0 unions)"/>
+<circle cx="669.5" cy="90.0" r="5" class="dot s8" data-tip="asymmetric 4000²+800² — ccl_fill: 86 ms (16,639,998 unions)"/>
+<text x="776.0" y="94.0" class="rowval" font-weight="650">1.51×</text>
+<line x1="214" y1="126.0" x2="768" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">grid of 100 blobs</text>
+<line x1="570.6" y1="126.0" x2="620.2" y2="126.0" class="pairline-db"/>
+<circle cx="570.6" cy="126.0" r="5" class="dot s7" data-tip="grid of 100 blobs — seed_merge: 33 ms (100 candidates, 0 unions)"/>
+<circle cx="620.2" cy="126.0" r="5" class="dot s8" data-tip="grid of 100 blobs — ccl_fill: 53 ms (12,959,900 unions)"/>
+<text x="776.0" y="130.0" class="rowval" font-weight="650">1.62×</text>
+<line x1="214" y1="162.0" x2="768" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">random noise 4000²</text>
+<line x1="542.4" y1="162.0" x2="567.7" y2="162.0" class="pairline-db"/>
+<circle cx="542.4" cy="162.0" r="5" class="dot s7" data-tip="random noise 4000² — seed_merge: 25 ms (1,154,024 candidates, 398,447 unions)"/>
+<circle cx="567.7" cy="162.0" r="5" class="dot s8" data-tip="random noise 4000² — ccl_fill: 32 ms (4,047,159 unions)"/>
+<text x="776.0" y="166.0" class="rowval" font-weight="650">1.28×</text>
+<line x1="214" y1="198.0" x2="768" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">comb, 2000 teeth</text>
+<line x1="620.0" y1="198.0" x2="653.7" y2="198.0" class="pairline-db"/>
+<circle cx="620.0" cy="198.0" r="5" class="dot s7" data-tip="comb, 2000 teeth — seed_merge: 53 ms (2,000 candidates, 1,999 unions)"/>
+<circle cx="653.7" cy="198.0" r="5" class="dot s8" data-tip="comb, 2000 teeth — ccl_fill: 74 ms (4,831,991 unions)"/>
+<text x="776.0" y="202.0" class="rowval" font-weight="650">1.39×</text>
+<line x1="214" y1="234.0" x2="768" y2="234.0" class="rowline"/>
+<text x="204" y="238.0" class="rowlab" text-anchor="end">serpentine 256²</text>
+<line x1="282.7" y1="234.0" x2="741.2" y2="234.0" class="pairline-db"/>
+<circle cx="282.7" cy="234.0" r="5" class="dot s7" data-tip="serpentine 256² — seed_merge: 2.0 ms (65 candidates, 64 unions)"/>
+<circle cx="741.2" cy="234.0" r="5" class="dot s8" data-tip="serpentine 256² — ccl_fill: 173 ms (32,895 unions)"/>
+<text x="776.0" y="238.0" class="rowval" font-weight="650">88.36×</text>
+</svg>
+</div>
+
+<p class="note"><img src="../ch05_gpu_nblob_nblock/wavefront/u192_merge_prov.gif" alt="Provisional-label replay on a U-shaped blob: two candidate waves in different colors race from the arm tips and collide at the bridge." style="max-width:300px; border-radius:8px; margin:10px 12px 10px 0; vertical-align:top;"><img src="../ch05_gpu_nblob_nblock/wavefront/u192_merge_final.gif" alt="Final-label replay of the same run: one color — the union erased the seam." style="max-width:300px; border-radius:8px; margin:10px 0; vertical-align:top;"><br>The merge made visible: the same seed_merge run replayed twice. Left, each pixel hued by its PROVISIONAL label — the two candidate waves race from the arm tips and slam together at the bridge, where the CAS loser fires the union. Right, the same depth clock hued by the CANONICAL label: one blob, no seam. More replays (24-tooth comb, 100-blob grid, the 1,858-blob random shatter) in <code>results/ch05_gpu_nblob_nblock/wavefront/</code>.</p>
+
+<div class="card">
+<h2>All numbers — seed-discovery stage</h2>
+<p class="note">'scan' and 'ccl-pass' are the standalone discovery
+phases (fused − phase ≈ fill, with the separate-launch subtraction
+caveat). The discovery-tax columns compare against ch04's multisource
+conn8 kernel WITH host-given seeds on the ch04-comparable scenes — the
+price of finding out vs being told. GB/s is the ch05 derived model
+(discovery + label-map terms included, see the benchmark JSON's
+bandwidth_model note) against the measured 193 GB/s copy
+peak.</p>
+<details open><summary>Per-scene results table</summary>
+<div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>blobs</th><th>candidates</th><th>@njit ms</th><th>merge ms</th><th>ccl ms</th><th>ccl/merge</th><th>(min)</th><th>scan ms</th><th>ccl-pass ms</th><th>tax merge</th><th>tax ccl</th><th>vs @njit</th><th>GB/s (merge)</th><th>% peak</th></tr><tr><td>two squares 2800²</td><td>15,680,000</td><td>2</td><td>2</td><td>572</td><td>51</td><td>107</td><td>2.11×</td><td>1.99×</td><td>1.5</td><td>53</td><td>2.15×</td><td>4.53×</td><td>11.3×</td><td>44.4</td><td>23.0</td></tr><tr><td>two disks r=1400</td><td>12,314,954</td><td>2</td><td>500</td><td>326</td><td>79</td><td>58</td><td>0.74×</td><td>0.70×</td><td>1.3</td><td>23</td><td>4.06×</td><td>2.99×</td><td>5.6×</td><td>23.5</td><td>12.2</td></tr><tr><td>asymmetric 4000²+800²</td><td>16,640,000</td><td>2</td><td>2</td><td>593</td><td>57</td><td>86</td><td>1.51×</td><td>1.49×</td><td>1.6</td><td>54</td><td>2.10×</td><td>3.17×</td><td>10.4×</td><td>42.0</td><td>21.8</td></tr><tr><td>grid of 100 blobs</td><td>12,960,000</td><td>100</td><td>100</td><td>420</td><td>33</td><td>53</td><td>1.62×</td><td>1.46×</td><td>1.3</td><td>28</td><td>—</td><td>—</td><td>12.8×</td><td>56.7</td><td>29.3</td></tr><tr><td>random noise 4000²</td><td>4,802,736</td><td>755,577</td><td>1,154,024</td><td>533</td><td>25</td><td>32</td><td>1.28×</td><td>1.25×</td><td>1.8</td><td>8.7</td><td>—</td><td>—</td><td>21.5×</td><td>24.8</td><td>12.8</td></tr><tr><td>comb, 2000 teeth</td><td>4,831,992</td><td>1</td><td>2,000</td><td>346</td><td>53</td><td>74</td><td>1.39×</td><td>2.07×</td><td>0.94</td><td>3.0</td><td>—</td><td>—</td><td>6.5×</td><td>12.6</td><td>6.5</td></tr><tr><td>serpentine 256²</td><td>32,896</td><td>1</td><td>65</td><td>0.79</td><td>2.0</td><td>173</td><td>88.36×</td><td>89.52×</td><td>0.16</td><td>0.37</td><td>—</td><td>—</td><td>0.4×</td><td>1.7</td><td>0.9</td></tr></table></div></details>
 </div>
 
 <div id="tooltip"></div>

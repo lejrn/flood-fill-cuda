@@ -1,7 +1,8 @@
 # flood-fill-cuda
 
 GPU-accelerated flood fill, built up in stages from a sequential CPU BFS
-to a cooperative-launch, N-block, two-blob CUDA kernel — using CUDA and
+to a cooperative-launch, N-block CUDA kernel that discovers, labels and
+fills every blob in the image itself — no seeds given — using CUDA and
 Numba, benchmarked and pixel-tested against a CPU oracle at every stage.
 
 **The real story lives in
@@ -16,7 +17,7 @@ a CPU reference.
 ```bash
 uv sync
 
-# Run everything (all four chapters' correctness suites)
+# Run everything (all chapters' correctness suites)
 uv run pytest
 
 # Run one chapter's benchmark and regenerate its own dashboard section
@@ -35,7 +36,7 @@ uv run python -m flood_fill_cuda.service
 ```
 src/flood_fill_cuda/
   shared/         scene generators, CPU oracles, bandwidth model, shared HTML/plot core — used across chapters
-  chapters/       the numbered narrative: ch00_cpu_baseline .. ch04_gpu_2blob_nblock
+  chapters/       the numbered narrative: ch00_cpu_baseline .. ch05_gpu_nblob_nblock
   dashboard/      assembles every chapter's renderer into one whole-project dashboard page
   service/        interactive web app — paint a blob, ch03's kernel floods it, browser animates + it falls
   experiments/    live side-tracks outside the numbered chain (triton/, scan_multi_blob/)
