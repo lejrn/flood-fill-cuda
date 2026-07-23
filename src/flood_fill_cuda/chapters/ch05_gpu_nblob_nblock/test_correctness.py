@@ -21,7 +21,15 @@ from .cpu_oracle import (
     cpu_candidates, cpu_label_components,
     cpu_fill_canonical, cpu_fill_from_candidates,
 )
+from .flood_fill import flood_fill, max_blocks, VARIANTS, model_bytes_ch05
+from .kernels import PALETTE_HOST, N_PALETTE
 from ...shared.cpu_oracle import cpu_flood_fill_8
+
+# Each variant's exact depth semantics (labels/visited agree across all)
+_ORACLES = {
+    "ccl_fill": cpu_fill_canonical,
+    "seed_merge": cpu_fill_from_candidates,
+}
 
 # Small enough to run the whole matrix quickly, big enough that every
 # scene has interior, and (for the GPU tests) that multiple blocks and
@@ -217,3 +225,228 @@ def test_oracle_blank_image():
         assert filled == 0 and levels == 0
         assert not visited.any()
         assert (depth == -1).all() and (label == -1).all()
+
+
+# ============================================================ GPU variants
+
+def assert_matches_oracle(img, variant, **gpu_kwargs):
+    """The full contract: visited/depth/label/levels/filled equal the
+    variant's oracle, every visited pixel wears its label's palette row,
+    the background is untouched, and the discovered seeds are exactly
+    one canonical (lex-min) pixel per blob."""
+    ref_v, ref_d, ref_l, ref_levels, ref_filled = _ORACLES[variant](img)
+    result = flood_fill(img, variant=variant, **gpu_kwargs)
+
+    np.testing.assert_array_equal(result.visited, ref_v)
+    np.testing.assert_array_equal(result.label, ref_l)
+    np.testing.assert_array_equal(result.depth, ref_d)
+    assert result.levels == ref_levels
+    assert result.filled == ref_filled
+
+    vis = ref_v.astype(bool)
+    np.testing.assert_array_equal(result.img[vis],
+                                  PALETTE_HOST[ref_l[vis] % N_PALETTE])
+    np.testing.assert_array_equal(result.img[~vis], img[~vis])
+
+    expected_labels = np.unique(ref_l[vis])
+    height = img.shape[1]
+    assert result.n_blobs == expected_labels.size
+    assert result.seeds == [(int(l) // height, int(l) % height)
+                            for l in expected_labels]
+    return result
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("name", SCENES.keys())
+def test_gpu_matches_oracle(name, variant):
+    img, n_blobs = SCENES[name]()
+    r = assert_matches_oracle(img, variant)
+    assert r.n_blobs == n_blobs
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("blocks", [1, 3, None])
+@pytest.mark.parametrize("tpb", [64, 256])
+def test_block_count_and_tpb_invariance(variant, blocks, tpb):
+    for name in ("two_squares", "u_shape"):
+        img, _ = SCENES[name]()
+        assert_matches_oracle(img, variant,
+                              threads_per_block=tpb, blocks=blocks)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_gpu_many_blobs_exceed_retired_label_format(variant):
+    """100 disjoint blobs and a random shatter of hundreds — both far
+    past ch04's 64-label entry format cap."""
+    img, n_blobs = scenes.blob_grid_scene(256, 256, 10, 10, 20, gap=4)
+    assert n_blobs == 100
+    r = assert_matches_oracle(img, variant)
+    assert r.n_blobs == 100
+    img, n_blobs = scenes.random_blobs_scene(128, 128, density=0.3,
+                                             rng_seed=7)
+    r = assert_matches_oracle(img, variant)
+    assert r.n_blobs == n_blobs > 50
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_gpu_blank_image(variant):
+    """A blank image is a valid question with answer zero — the kernel
+    must terminate with an empty queue (the fence-sandwich rear read is
+    exercised with rear == 0)."""
+    img, _ = scenes.blank_scene(64, 64)
+    r = flood_fill(img, variant=variant)
+    assert r.n_blobs == 0 and r.filled == 0 and r.levels == 0
+    assert r.seeds == []
+    assert not r.visited.any()
+    np.testing.assert_array_equal(r.img, img)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_gpu_serpentine(variant):
+    """The barrier-bound worst case still discovers and fills exactly."""
+    img, _ = scenes.serpentine_scene(48, 48)
+    assert_matches_oracle(img, variant)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_input_not_modified(variant):
+    img, _ = SCENES["two_squares"]()
+    before = img.copy()
+    flood_fill(img, variant=variant)
+    np.testing.assert_array_equal(img, before)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_deterministic_across_runs(variant):
+    """Label, depth and paint are pure functions of the image — the
+    races decide who claims and who merges, never the outcome."""
+    img, _ = SCENES["u_shape"]()
+    a = flood_fill(img, variant=variant)
+    b = flood_fill(img, variant=variant)
+    np.testing.assert_array_equal(a.img, b.img)
+    np.testing.assert_array_equal(a.depth, b.depth)
+    np.testing.assert_array_equal(a.label, b.label)
+    assert a.seeds == b.seeds
+
+
+# ------------------------------------------------------- union accounting
+
+def test_ccl_union_accounting():
+    """Every red pixel starts as a root; each effective link retires
+    exactly one — so union_done == filled - n_blobs, structurally."""
+    for name in ("two_squares", "u_shape", "comb", "blob_grid", "disk"):
+        img, _ = SCENES[name]()
+        r = flood_fill(img, variant="ccl_fill")
+        assert r.union_done == r.filled - r.n_blobs, name
+        assert r.union_attempts >= r.union_done
+        assert r.candidates == r.n_blobs, name  # queue held one seed/blob
+
+
+def test_ccl_seed_is_the_unique_depth0_pixel_per_blob():
+    img, _ = SCENES["blob_grid"]()
+    r = flood_fill(img, variant="ccl_fill")
+    for sx, sy in r.seeds:
+        blob = r.label == r.label[sx, sy]
+        assert r.depth[sx, sy] == 0
+        assert (r.depth[blob] == 0).sum() == 1
+        # and it is the blob's lex-min pixel
+        xs, ys = np.nonzero(blob)
+        k = np.lexsort((ys, xs))[0]
+        assert (xs[k], ys[k]) == (sx, sy)
+
+
+# ------------------------------------------------------------- accounting
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_accounting(variant):
+    img, _ = SCENES["blob_grid"]()
+    r = flood_fill(img, variant=variant)
+    red = int(_red_mask(img).sum())
+    assert r.filled == red
+    assert r.processed == r.filled
+    assert r.processed_per_block.sum() == r.processed
+    assert r.level_sizes.sum() == r.filled  # every entry dequeued once
+    assert r.filled <= r.cas_attempts <= 8 * r.filled
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_owner_census(variant):
+    img, _ = SCENES["two_disks"]()
+    r = flood_fill(img, variant=variant, blocks=4)
+    reached = r.visited == 1
+    owners = r.owner[reached]
+    assert owners.min() >= 0 and owners.max() < r.blocks
+    assert (r.owner[~reached] == -1).all()
+    census = np.bincount(owners.astype(np.int64), minlength=r.blocks)
+    np.testing.assert_array_equal(census, r.processed_per_block)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_model_bytes_consistency(variant):
+    """The label/discovery traffic is PRICED now — the result's figure
+    must be exactly the ch05 formula over the kernel's own counters."""
+    img, _ = SCENES["two_disks"]()
+    r = flood_fill(img, variant=variant)
+    n = img.shape[0] * img.shape[1]
+    expected = model_bytes_ch05(variant, n, r.filled, r.processed,
+                                r.cas_attempts, r.union_attempts,
+                                r.candidates, instrumented=True)
+    assert r.model_bytes == expected
+    assert r.model_gb_s > 0
+
+
+# --------------------------------------------------------------- bare twins
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_bare_twin_matches_oracle(variant):
+    img, _ = SCENES["two_squares"]()
+    assert_matches_oracle(img, variant, bare=True)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_bare_twin_reports_no_instrumentation(variant):
+    img, _ = SCENES["two_squares"]()
+    r = flood_fill(img, variant=variant, bare=True)
+    assert r.bare
+    assert r.processed == 0 and r.cas_attempts == 0
+    assert r.candidates == 0 and r.union_attempts == 0 and r.union_done == 0
+    assert r.owner.size == 0
+    assert r.model_bytes == 0 and r.model_gb_s == 0.0
+    assert r.filled > 0 and r.levels > 0
+    assert r.n_blobs == 2 and len(r.seeds) == 2  # label map still full
+
+
+# ------------------------------------------------------------------ validation
+
+def test_rejects_bad_variant():
+    img, _ = SCENES["two_squares"]()
+    with pytest.raises(ValueError, match="variant"):
+        flood_fill(img, variant="magic")
+
+
+def test_rejects_bad_image():
+    with pytest.raises(ValueError, match="uint8"):
+        flood_fill(np.zeros((8, 8), dtype=np.uint8))
+    with pytest.raises(ValueError, match="uint8"):
+        flood_fill(np.zeros((8, 8, 3), dtype=np.int32))
+
+
+@pytest.mark.parametrize("tpb", [100, 0, 1024])
+def test_rejects_bad_threads_per_block(tpb):
+    img, _ = SCENES["two_squares"]()
+    with pytest.raises(ValueError, match="threads_per_block"):
+        flood_fill(img, threads_per_block=tpb)
+
+
+@pytest.mark.parametrize("blocks", [0, -1, 1.5])
+def test_rejects_bad_block_count(blocks):
+    img, _ = SCENES["two_squares"]()
+    with pytest.raises(ValueError, match="blocks"):
+        flood_fill(img, blocks=blocks)
+
+
+def test_rejects_blocks_beyond_cooperative_capacity():
+    img, _ = SCENES["two_squares"]()
+    coop_max = max_blocks(threads_per_block=256)
+    with pytest.raises(RuntimeError, match="cooperative"):
+        flood_fill(img, blocks=coop_max + 1)
