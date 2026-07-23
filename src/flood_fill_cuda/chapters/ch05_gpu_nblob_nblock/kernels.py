@@ -109,7 +109,21 @@ CANDIDATES = 9          # queue entries after discovery (seed_merge:
                         # candidates; ccl_fill: n_blobs)
 UNION_ATTEMPTS = 10     # _union calls (collision branches / merge probes)
 UNION_DONE = 11         # successful links == initial_roots - n_blobs
-NUM_COUNTERS = 12
+UNION_CYCLES = 12       # seed_merge instrumented only: %clock64 cycles
+                        # summed across threads around in-flight _union
+                        # calls (ccl_fill's unions have their own PHASE
+                        # wall-time instead — see phase_ns below)
+NUM_COUNTERS = 13
+
+# Slots of the (N_PHASES,) int64 phase_ns array: %globaltimer nanosecond
+# stamps written by tid 0 at grid.sync boundaries (instrumented kernels
+# only). The stamps sit at barriers, so each delta is the WALL time of
+# one phase for the whole grid:
+#   seed_merge: [0] entry  [1] iota done  [2] scan done  [3] fill done
+#               [4] flatten+repaint done
+#   ccl_fill:   [0] entry  [1] iota done  [2] union merge done
+#               [3] flatten+seed-extract done  [4] fill done
+N_PHASES = 5
 
 # Columns of the (blocks, 2) int64 block_stats array
 BS_PROCESSED = 0        # pixels this block dequeued -> N-way load balance
@@ -118,8 +132,10 @@ BS_SMID = 1             # %smid this block observed itself running on
 # q_state slots
 Q_REAR = 0
 
-# %smid reader linked from smid.cu
+# %smid / timer readers linked from smid.cu
 get_smid = cuda.declare_device('get_smid', 'uint32()')
+get_globaltimer = cuda.declare_device('get_globaltimer', 'uint64()')
+get_clock64 = cuda.declare_device('get_clock64', 'uint64()')
 
 
 @cuda.jit(device=True, inline=True)
@@ -196,10 +212,12 @@ def _union(parent, a, b):
 
 @cuda.jit(link=[SMID_CU])
 def ccl_fill_kernel(img, visited, depth, owner, parent, label_map, queue,
-                    q_state, counters, block_stats, level_sizes):
+                    q_state, counters, block_stats, level_sizes, phase_ns):
     """Host contract: launch [blocks, tpb] cooperative; img untouched red/
     white scene; visited/counters/block_stats zeroed; depth/owner/label_map
-    filled with -1; parent uninitialized (P0 writes it); q_state=[0]."""
+    filled with -1; parent uninitialized (P0 writes it); q_state=[0];
+    phase_ns zeroed (N_PHASES int64 — tid 0 stamps %globaltimer at every
+    phase boundary; each boundary is a barrier, so deltas are wall time)."""
     grid = cuda.cg.this_grid()
     bx = cuda.blockIdx.x
     tid = cuda.grid(1)
@@ -218,10 +236,15 @@ def ccl_fill_kernel(img, visited, depth, owner, parent, label_map, queue,
     my_union_attempts = 0
     my_union_done = 0
 
+    if tid == 0:
+        phase_ns[0] = get_globaltimer()
+
     # P0: every pixel its own root
     for i in range(tid, n, stride):
         parent[i] = i
     grid.sync()
+    if tid == 0:
+        phase_ns[1] = get_globaltimer()
 
     # P1: merge along red lex-predecessor adjacencies (each of the blob's
     # 8-adjacencies handled exactly once, from its lex-greater endpoint)
@@ -236,6 +259,8 @@ def ccl_fill_kernel(img, visited, depth, owner, parent, label_map, queue,
                     my_union_attempts += 1
                     my_union_done += _union(parent, i, nx * height + ny)
     grid.sync()
+    if tid == 0:
+        phase_ns[2] = get_globaltimer()
 
     # P2: flatten every red pixel to its root; the root pixel itself is
     # the blob's canonical seed — pre-visit and enqueue it
@@ -253,6 +278,8 @@ def ccl_fill_kernel(img, visited, depth, owner, parent, label_map, queue,
     # moves rear again until after sync #2 — every thread reads the same
     # seed count (the refined ch04 lesson: barriered reads are fine)
     grid.sync()
+    if tid == 0:
+        phase_ns[3] = get_globaltimer()
     rear = q_state[Q_REAR]
     grid.sync()
     n_seeds = rear
@@ -310,6 +337,11 @@ def ccl_fill_kernel(img, visited, depth, owner, parent, label_map, queue,
             peak_occ = occ
         front = rear
         rear = new_rear
+
+    # loop exit is post-barrier (every thread passed the same final
+    # grid.sync), so this stamp closes the fill phase for the whole grid
+    if tid == 0:
+        phase_ns[4] = get_globaltimer()
 
     cuda.atomic.add(counters, PROCESSED, my_processed)
     cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
@@ -436,9 +468,13 @@ def ccl_fill_bare_kernel(img, visited, depth, parent, label_map, queue,
 @cuda.jit(link=[SMID_CU])
 def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
                       prov_label, queue, q_state, counters, block_stats,
-                      level_sizes):
+                      level_sizes, phase_ns):
     """Host contract: as ccl_fill_kernel, plus prov_label filled with -1
-    (the pre-merge label snapshot the flatten preserves for replay)."""
+    (the pre-merge label snapshot the flatten preserves for replay).
+    phase_ns: N_PHASES int64, zeroed — tid 0 stamps %globaltimer at the
+    phase barriers. The in-flight unions have no phase of their own, so
+    they are timed per-thread instead: %clock64 cycles around each
+    _union call, summed into counters[UNION_CYCLES]."""
     grid = cuda.cg.this_grid()
     bx = cuda.blockIdx.x
     tid = cuda.grid(1)
@@ -456,11 +492,17 @@ def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
 
     my_union_attempts = 0
     my_union_done = 0
+    my_union_cycles = 0
+
+    if tid == 0:
+        phase_ns[0] = get_globaltimer()
 
     # P0: every pixel its own root
     for i in range(tid, n, stride):
         parent[i] = i
     grid.sync()
+    if tid == 0:
+        phase_ns[1] = get_globaltimer()
 
     # P1: candidate scan — grid-stride gives one thread per pixel, so the
     # pre-visit and label stores need no atomics
@@ -482,6 +524,8 @@ def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
     # The fence sandwich (see module doc): every thread reads the same
     # candidate count
     grid.sync()
+    if tid == 0:
+        phase_ns[2] = get_globaltimer()
     rear = q_state[Q_REAR]
     grid.sync()
     n_candidates = rear
@@ -535,7 +579,9 @@ def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
                         other = label_map[nx, ny]
                         if other >= 0 and other != lbl:
                             my_union_attempts += 1
+                            t0 = get_clock64()
                             my_union_done += _union(parent, lbl, other)
+                            my_union_cycles += get_clock64() - t0
 
         grid.sync()  # enqueues + final rear for this level visible grid-wide
         new_rear = q_state[Q_REAR]
@@ -547,6 +593,10 @@ def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
             peak_occ = occ
         front = rear
         rear = new_rear
+
+    # loop exit is post-barrier: the fill phase ends here for every thread
+    if tid == 0:
+        phase_ns[3] = get_globaltimer()
 
     # P3: flatten + relabel + repaint. The loop's closing barrier pair
     # ordered every union before this point; label_map >= 0 is exactly
@@ -564,10 +614,17 @@ def seed_merge_kernel(img, visited, depth, owner, parent, label_map,
             img[x, y, 1] = palette[c, 1]
             img[x, y, 2] = palette[c, 2]
 
+    # instrumented-only closing barrier so the flatten stamp covers the
+    # whole grid's P3 (the bare twin ends without it)
+    grid.sync()
+    if tid == 0:
+        phase_ns[4] = get_globaltimer()
+
     cuda.atomic.add(counters, PROCESSED, my_processed)
     cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
     cuda.atomic.add(counters, UNION_ATTEMPTS, my_union_attempts)
     cuda.atomic.add(counters, UNION_DONE, my_union_done)
+    cuda.atomic.add(counters, UNION_CYCLES, my_union_cycles)
     cuda.atomic.add(block_stats, (bx, BS_PROCESSED), my_processed)
     if cuda.threadIdx.x == 0:
         block_stats[bx, BS_SMID] = get_smid()

@@ -38,10 +38,10 @@ from .kernels import (
     seed_merge_kernel, seed_merge_bare_kernel,
     seed_scan_kernel, ccl_kernel,
     PALETTE_HOST, N_PALETTE,
-    NUM_COUNTERS,
+    NUM_COUNTERS, N_PHASES,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
     ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS,
-    CANDIDATES, UNION_ATTEMPTS, UNION_DONE,
+    CANDIDATES, UNION_ATTEMPTS, UNION_DONE, UNION_CYCLES,
     BS_PROCESSED, BS_SMID,
 )
 from numba import cuda
@@ -128,6 +128,19 @@ class SeedDiscoveryResult:
                            # n_blobs; seed_merge: candidate count); 0 bare
     union_attempts: int
     union_done: int        # successful links == initial_roots - n_blobs
+    # Phase wall times from tid-0 %globaltimer stamps at the grid.sync
+    # boundaries (instrumented only; {} for bare). Keys by variant:
+    #   seed_merge: init, scan, fill, flatten
+    #   ccl_fill:   init, union_merge, flatten_seed, fill
+    phase_ms: dict
+    union_cycles: int      # seed_merge instrumented: %clock64 cycles
+                           # summed across threads around in-flight
+                           # _union calls (0 for ccl_fill — its unions
+                           # are the union_merge PHASE); 0 bare
+    union_thread_ms: float  # union_cycles / device clock rate: aggregate
+                            # THREAD-time spent in unions, not wall time
+                            # (threads run concurrently; base clock, so
+                            # boost skews it — an indicator, not a truth)
     # Fill outcome
     filled: int
     levels: int            # fill-phase level count (the shared clock)
@@ -187,6 +200,7 @@ def _device_buffers(img_host, variant, instrumented, launch_blocks,
             np.full((width, height), -1, dtype=np.int16))
         bufs["stats"] = cuda.to_device(stats_host)
         bufs["trace"] = cuda.device_array(trace_capacity, dtype=np.int32)
+        bufs["phase"] = cuda.to_device(np.zeros(N_PHASES, dtype=np.int64))
         if variant == "seed_merge":
             bufs["prov"] = cuda.to_device(
                 np.full((width, height), -1, dtype=np.int32))
@@ -202,10 +216,10 @@ def _kernel_args(variant, bare, bufs):
         return (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
                 bufs["parent"], bufs["label"], bufs["prov"], bufs["queue"],
                 bufs["q_state"], bufs["counters"], bufs["stats"],
-                bufs["trace"])
+                bufs["trace"], bufs["phase"])
     return (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
             bufs["parent"], bufs["label"], bufs["queue"], bufs["q_state"],
-            bufs["counters"], bufs["stats"], bufs["trace"])
+            bufs["counters"], bufs["stats"], bufs["trace"], bufs["phase"])
 
 
 def _warmup(variant, bare):
@@ -225,6 +239,25 @@ def _coop_max_blocks(kernel_fn, tpb):
         overload = next(iter(kernel_fn.overloads.values()))
         _coop_cache[key] = overload.max_cooperative_grid_blocks(tpb)
     return _coop_cache[key]
+
+
+_clock_rate_hz = None
+
+
+def _cycles_to_ms(cycles):
+    """%clock64 cycles -> aggregate thread-milliseconds via the device's
+    BASE clock rate. Boost clocks run higher, so this UNDERSTATES nothing
+    but may overstate time by the boost ratio — an indicator for 'how
+    much thread-time went into unions', never a wall-clock claim."""
+    global _clock_rate_hz
+    if cycles == 0:
+        return 0.0
+    if _clock_rate_hz is None:
+        try:
+            _clock_rate_hz = cuda.get_current_device().CLOCK_RATE * 1000
+        except Exception:
+            _clock_rate_hz = 0
+    return cycles / _clock_rate_hz * 1000 if _clock_rate_hz else 0.0
 
 
 def max_blocks(variant="seed_merge", threads_per_block=256, bare=False):
@@ -310,11 +343,18 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
         prov_out = (bufs["prov"].copy_to_host()
                     if variant == "seed_merge"
                     else np.zeros((0, 0), dtype=np.int32))
+        stamps = bufs["phase"].copy_to_host()
+        keys = (("init", "scan", "fill", "flatten")
+                if variant == "seed_merge"
+                else ("init", "union_merge", "flatten_seed", "fill"))
+        phase_ms = {k: max(int(stamps[i + 1] - stamps[i]), 0) / 1e6
+                    for i, k in enumerate(keys)}
     else:
         owner_out = np.zeros((0, 0), dtype=np.int16)
         stats = None
         trace = np.zeros(0, dtype=np.int32)
         prov_out = np.zeros((0, 0), dtype=np.int32)
+        phase_ms = {}
     t_end = time.perf_counter()
 
     # What the GPU discovered, made inspectable: exactly one canonical
@@ -355,6 +395,9 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
         candidates=int(counters[CANDIDATES]),
         union_attempts=int(counters[UNION_ATTEMPTS]),
         union_done=int(counters[UNION_DONE]),
+        phase_ms=phase_ms,
+        union_cycles=int(counters[UNION_CYCLES]),
+        union_thread_ms=_cycles_to_ms(int(counters[UNION_CYCLES])),
         filled=int(counters[FILLED]),
         levels=levels,
         peak_level=int(counters[PEAK_LEVEL]),

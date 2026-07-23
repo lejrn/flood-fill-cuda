@@ -103,23 +103,33 @@ def _run_round_robin(runners, repeats=GPU_REPEATS):
     {name: (last_result, stats_dict)}.
     """
     names = list(runners)
-    samples = {n: [] for n in names}
+    samples = {n: {"k": [], "ph": [], "uth": []} for n in names}
     last = {}
     for i in range(repeats):
         order = names if i % 2 == 0 else list(reversed(names))
         for n in order:
             ms, r = runners[n]()
-            samples[n].append(ms)
+            samples[n]["k"].append(ms)
+            ph = getattr(r, "phase_ms", None)
+            if ph:
+                samples[n]["ph"].append(dict(ph))
+                samples[n]["uth"].append(r.union_thread_ms)
             last[n] = r
         gc.collect()
     out = {}
     for n in names:
-        k = samples[n]
+        k = samples[n]["k"]
+        ph_rounds = samples[n]["ph"]
+        phase_med = ({key: _median([p[key] for p in ph_rounds])
+                      for key in ph_rounds[0]} if ph_rounds else {})
         out[n] = (last[n], {
             "ms": _median(k),
             "ms_min": min(k),
             "ms_max": max(k),
             "ms_stdev": statistics.stdev(k) if len(k) > 1 else 0.0,
+            "phase_ms": phase_med,
+            "union_thread_ms": (_median(samples[n]["uth"])
+                                if samples[n]["uth"] else 0.0),
         })
     return out
 
@@ -177,6 +187,21 @@ def bench_scene(name, builder, note, peak_gb_s):
         "cclp_ms": cclp_ms,
         "merge_fill_est_ms": merge_ms - scan_ms,
         "ccl_fill_est_ms": ccl_ms - cclp_ms,
+        # IN-KERNEL phase attribution: tid-0 %globaltimer stamps at the
+        # phase barriers (medians over the same interleaved rounds) — no
+        # separate-launch subtraction caveat, this is the fused kernel
+        # timing itself
+        "merge_init_dev_ms": ms_merge["phase_ms"].get("init"),
+        "merge_scan_dev_ms": ms_merge["phase_ms"].get("scan"),
+        "merge_fill_dev_ms": ms_merge["phase_ms"].get("fill"),
+        "merge_flatten_dev_ms": ms_merge["phase_ms"].get("flatten"),
+        # aggregate thread-time inside in-flight _union calls (clock64
+        # cycle sum / base clock; concurrent, so NOT wall time)
+        "merge_union_thread_ms": ms_merge["union_thread_ms"],
+        "ccl_init_dev_ms": ms_ccl["phase_ms"].get("init"),
+        "ccl_union_dev_ms": ms_ccl["phase_ms"].get("union_merge"),
+        "ccl_flatten_seed_dev_ms": ms_ccl["phase_ms"].get("flatten_seed"),
+        "ccl_fill_dev_ms": ms_ccl["phase_ms"].get("fill"),
         # observer overhead
         "merge_bare_ms": merge_bare_ms,
         "merge_overhead_pct": 100.0 * (merge_ms - merge_bare_ms)
@@ -290,6 +315,21 @@ def main():
           f"{'(min)':>7s} {'tax':>6s}")
     rows = [bench_scene(name, builder, note, peak_gb_s)
             for name, builder, note in SCENES]
+
+    print(f"\nIn-kernel phase attribution (device %globaltimer stamps, "
+          f"median ms; u-thr = aggregate thread-ms inside in-flight "
+          f"unions, concurrent not wall):")
+    print(f"{'scene':16s} | {'mg init':>8s} {'scan':>7s} {'fill':>9s} "
+          f"{'flatten':>8s} {'u-thr':>8s} | {'ccl init':>8s} {'union':>9s} "
+          f"{'flat+seed':>9s} {'fill':>9s}")
+    for r in rows:
+        print(f"{r['scene']:16s} | {r['merge_init_dev_ms']:8.2f} "
+              f"{r['merge_scan_dev_ms']:7.2f} {r['merge_fill_dev_ms']:9.2f} "
+              f"{r['merge_flatten_dev_ms']:8.2f} "
+              f"{r['merge_union_thread_ms']:8.3f} | "
+              f"{r['ccl_init_dev_ms']:8.2f} {r['ccl_union_dev_ms']:9.2f} "
+              f"{r['ccl_flatten_seed_dev_ms']:9.2f} "
+              f"{r['ccl_fill_dev_ms']:9.2f}")
 
     print("\nNotes: all GPU times are kernel-only medians over an "
           "INTERLEAVED round-robin (every config timed once per round, "

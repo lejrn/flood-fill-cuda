@@ -129,13 +129,19 @@ def sd_table():
     head = ("<tr><th>scene</th><th>filled px</th><th>blobs</th>"
             "<th>candidates</th><th>@njit ms</th>"
             "<th>merge ms</th><th>ccl ms</th><th>ccl/merge</th>"
-            "<th>(min)</th><th>scan ms</th><th>ccl-pass ms</th>"
+            "<th>(min)</th><th>scan ms</th><th>flatten ms</th>"
+            "<th>ccl union ms</th>"
             "<th>tax merge</th><th>tax ccl</th>"
             "<th>vs @njit</th><th>GB/s (merge)</th><th>% peak</th></tr>")
     body = []
     for r in SD_ROWS:
         tax_m = r.get("discovery_tax_merge")
         tax_c = r.get("discovery_tax_ccl")
+        # in-kernel device stamps where the JSON has them; the standalone
+        # phase-kernel times as the pre-instrumentation fallback
+        scan = r.get("merge_scan_dev_ms", r["scan_ms"])
+        flat = r.get("merge_flatten_dev_ms")
+        cclu = r.get("ccl_union_dev_ms", r["cclp_ms"])
         body.append(
             "<tr>"
             f"<td>{sd_label(r['scene'])}</td>"
@@ -147,8 +153,9 @@ def sd_table():
             f"<td>{fmt_ms(r['ccl_ms'])}</td>"
             f"<td>{r['merge_vs_ccl']:.2f}×</td>"
             f"<td>{r['merge_vs_ccl_min']:.2f}×</td>"
-            f"<td>{fmt_ms(r['scan_ms'])}</td>"
-            f"<td>{fmt_ms(r['cclp_ms'])}</td>"
+            f"<td>{fmt_ms(scan)}</td>"
+            f"<td>{fmt_ms(flat) if flat is not None else '—'}</td>"
+            f"<td>{fmt_ms(cclu)}</td>"
             f"<td>{f'{tax_m:.2f}×' if tax_m else '—'}</td>"
             f"<td>{f'{tax_c:.2f}×' if tax_c else '—'}</td>"
             f"<td>{max(r['speedup_merge_vs_njit'], r['speedup_ccl_vs_njit']):.1f}×</td>"
@@ -261,14 +268,15 @@ few big blobs reward waves that discover while they fill.</p>
 
 <div class="card">
 <h2>All numbers — seed-discovery stage</h2>
-<p class="note">'scan' and 'ccl-pass' are the standalone discovery
-phases (fused − phase ≈ fill, with the separate-launch subtraction
-caveat). The discovery-tax columns compare against ch04's multisource
-conn8 kernel WITH host-given seeds on the ch04-comparable scenes — the
-price of finding out vs being told. GB/s is the ch05 derived model
-(discovery + label-map terms included, see the benchmark JSON's
-bandwidth_model note) against the measured {SD_PEAK:.0f} GB/s copy
-peak.</p>
+<p class="note">'scan', 'flatten' and 'ccl union' are IN-KERNEL phase
+wall times: tid-0 %globaltimer stamps at the grid.sync phase
+boundaries, medians over the same interleaved rounds (no
+separate-launch subtraction caveat). The discovery-tax columns compare
+against ch04's multisource conn8 kernel WITH host-given seeds on the
+ch04-comparable scenes — the price of finding out vs being told. GB/s
+is the ch05 derived model (discovery + label-map terms included, see
+the benchmark JSON's bandwidth_model note) against the measured
+{SD_PEAK:.0f} GB/s copy peak.</p>
 <details open><summary>Per-scene results table</summary>
 <div class="tablewrap">{sd_table()}</div></details>
 </div>
