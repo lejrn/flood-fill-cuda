@@ -17,6 +17,7 @@
   const PAINT_COLOR = "rgba(70, 74, 92, 0.94)";   // neutral "wet chalk" stroke
   const MAX_BACKING_PIXELS = 3.5e6;
   const MAX_LIVE_SHAPES = 24;
+  const STATS_LIFETIME_MS = 5000;   // results readout: shown, then just gone, no fade
 
   // Wave animation: frontier pixels are brightest, cooling to a dark,
   // saturated resting shade as the wave passes them. BRIGHT_L/DARK_L are
@@ -385,14 +386,26 @@
       `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
       `${levels} levels · ${stats.kernelMs.toFixed(2)} ms`;
     wrap.appendChild(label);
+    return label;
   }
 
-  function startFadeOut(wrap) {
-    wrap.addEventListener("animationend", () => {
-      wrap.remove();
-      liveShapes = liveShapes.filter((s) => s !== wrap);
-    }, { once: true });
-    wrap.classList.add("fading");
+  // The stats label and the blob fade independently: the label just
+  // disappears outright (no transition) after STATS_LIFETIME_MS, while
+  // only the blob (the inner canvas) gets the CSS fade.
+  function scheduleStatsRemoval(label) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        label.remove();
+        resolve();
+      }, STATS_LIFETIME_MS);
+    });
+  }
+
+  function startFadeOut(inner) {
+    return new Promise((resolve) => {
+      inner.addEventListener("animationend", () => resolve(), { once: true });
+      inner.classList.add("fading");
+    });
   }
 
   async function spawnShape(shapeCanvas, screenX, screenY, screenW, screenH, mode, seedX, seedY) {
@@ -415,22 +428,31 @@
     const sctx = shapeCanvas.getContext("2d");
     const origImageData = sctx.getImageData(0, 0, shapeCanvas.width, shapeCanvas.height);
 
+    let labelDone = Promise.resolve();
     try {
       const { levels, depth, stats } = await requestFill(shapeCanvas, mode, seedX, seedY);
       // Shown the instant the fill computation's result is known, right
       // above the blob, so the timing is legible exactly when it matters.
-      showStatsLabel(wrap, stats, levels);
+      // Its own lifetime (STATS_LIFETIME_MS) runs independently of the
+      // blob's fade below.
+      const label = showStatsLabel(wrap, stats, levels);
+      labelDone = scheduleStatsRemoval(label);
       if (levels > 0) {
         await animateFill(sctx, origImageData, depth, levels, stats.kernelMs);
       }
     } catch (err) {
-      // Network hiccup or server error: let the shape fall as painted
+      // Network hiccup or server error: let the shape fade as painted
       // rather than stranding it on screen.
       console.error(err);
     }
 
     // Shape stays fully still on screen throughout painting AND the fill
-    // animation above; only now does it start fading.
-    startFadeOut(wrap);
+    // animation above; only now does the blob start fading. wrap itself
+    // stays in the DOM until both the blob's fade and the label's own
+    // lifetime are done, so the label keeps its anchor even after the
+    // blob underneath it has faded away.
+    await Promise.all([startFadeOut(inner), labelDone]);
+    wrap.remove();
+    liveShapes = liveShapes.filter((s) => s !== wrap);
   }
 })();
