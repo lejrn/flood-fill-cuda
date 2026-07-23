@@ -329,7 +329,72 @@ def test_deterministic_across_runs(variant):
     assert a.seeds == b.seeds
 
 
+# ------------------------------------------------------------ cross-variant
+
+@pytest.mark.parametrize("name", SCENES.keys())
+def test_variants_agree_on_labels_and_seeds(name):
+    """The chapter's central claim: opposite strategies, identical
+    canonical answer. Depth may differ (nearest-candidate vs canonical
+    seed) — labels, seeds and coverage may not."""
+    img, _ = SCENES[name]()
+    a = flood_fill(img, variant="seed_merge")
+    b = flood_fill(img, variant="ccl_fill")
+    np.testing.assert_array_equal(a.label, b.label)
+    np.testing.assert_array_equal(a.visited, b.visited)
+    assert a.seeds == b.seeds
+    assert a.n_blobs == b.n_blobs
+    assert a.filled == b.filled
+
+
 # ------------------------------------------------------- union accounting
+
+def test_seed_merge_candidate_accounting():
+    """The scan finds exactly the oracle's candidates; every one starts
+    a level-0 wave; each effective union retires exactly one of them."""
+    for name in ("two_squares", "two_disks", "u_shape", "comb",
+                 "blob_grid", "disk"):
+        img, _ = SCENES[name]()
+        r = flood_fill(img, variant="seed_merge")
+        n_candidates = int(cpu_candidates(img).sum())
+        assert r.candidates == n_candidates, name
+        assert (r.depth == 0).sum() == n_candidates, name
+        np.testing.assert_array_equal((r.depth == 0).astype(np.int32),
+                                      cpu_candidates(img))
+        assert r.union_done == r.candidates - r.n_blobs, name
+        assert r.union_attempts >= r.union_done
+
+
+def test_seed_merge_forced_merges():
+    """u_shape and comb are the scenes where the local scan CANNOT nail
+    uniqueness — the merge path must actually run."""
+    for name, n_cand in (("u_shape", 2), ("comb", 80)):
+        img, _ = SCENES[name]()
+        r = flood_fill(img, variant="seed_merge")
+        assert r.n_blobs == 1
+        assert r.candidates == n_cand
+        assert r.union_done == n_cand - 1
+        # one surviving label: the canonical (lex-min) one
+        assert np.unique(r.label[r.visited == 1]).size == 1
+
+
+def test_seed_merge_prov_label_snapshot():
+    """The instrumented twin preserves the pre-merge picture: every
+    filled pixel's provisional label is a candidate of its OWN blob, and
+    on multi-candidate blobs more than one provisional wave survives to
+    the snapshot."""
+    img, _ = SCENES["u_shape"]()
+    height = img.shape[1]
+    r = flood_fill(img, variant="seed_merge")
+    vis = r.visited == 1
+    assert (r.prov_label[~vis] == -1).all()
+    provs = np.unique(r.prov_label[vis])
+    cand = cpu_candidates(img)
+    for p in provs:
+        px, py = int(p) // height, int(p) % height
+        assert cand[px, py] == 1              # a real candidate...
+        assert r.label[px, py] == r.label[vis][0]  # ...of this blob
+    assert provs.size == 2  # both arms' waves reached the snapshot
+
 
 def test_ccl_union_accounting():
     """Every red pixel starts as a root; each effective link retires
@@ -411,6 +476,7 @@ def test_bare_twin_reports_no_instrumentation(variant):
     assert r.processed == 0 and r.cas_attempts == 0
     assert r.candidates == 0 and r.union_attempts == 0 and r.union_done == 0
     assert r.owner.size == 0
+    assert r.prov_label.size == 0
     assert r.model_bytes == 0 and r.model_gb_s == 0.0
     assert r.filled > 0 and r.levels > 0
     assert r.n_blobs == 2 and len(r.seeds) == 2  # label map still full
