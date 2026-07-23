@@ -669,3 +669,92 @@ def seed_merge_bare_kernel(img, visited, depth, parent, label_map, queue,
     if tid == 0:
         counters[FILLED] = q_state[Q_REAR]
         counters[LEVELS] = level
+
+
+# ------------------------------------------------- benchmark phase kernels
+# Discovery WITHOUT the fill, for benchmark.py's phase attribution
+# (fill ~= fused_total - phase). seed_scan_kernel is seed_merge's P0-P1;
+# ccl_kernel is ccl_fill's P0-P2. They call the same device functions as
+# the fused kernels, so the measured phase cannot drift from the real
+# one. Exit stores the discovery queue rear in counters[CANDIDATES].
+
+
+@cuda.jit
+def seed_scan_kernel(img, visited, label_map, parent, queue, q_state,
+                     counters):
+    grid = cuda.cg.this_grid()
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            found = False
+            for d in range(4):
+                nx = x + pdx[d]
+                ny = y + pdy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    found = True
+            if not found:
+                visited[x, y] = 1
+                label_map[x, y] = i
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    grid.sync()
+    if tid == 0:
+        counters[CANDIDATES] = q_state[Q_REAR]
+
+
+@cuda.jit
+def ccl_kernel(img, visited, label_map, parent, queue, q_state, counters):
+    grid = cuda.cg.this_grid()
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            for d in range(4):
+                nx = x + pdx[d]
+                ny = y + pdy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    _union(parent, i, nx * height + ny)
+    grid.sync()
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            root = _find(parent, i)
+            label_map[x, y] = root
+            if root == i:
+                visited[x, y] = 1
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    grid.sync()
+    if tid == 0:
+        counters[CANDIDATES] = q_state[Q_REAR]
