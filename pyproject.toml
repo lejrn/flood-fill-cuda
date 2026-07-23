@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flood-fill-cuda"
-version = "0.12.0"
+version = "0.13.0"
 description = "GPU-accelerated flood fill algorithm implementation using CUDA and Numba"
 authors = [
     {name = "TL"}
