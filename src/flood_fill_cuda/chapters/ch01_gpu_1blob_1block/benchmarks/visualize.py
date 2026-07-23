@@ -24,6 +24,9 @@ import os
 import sys
 
 from ....shared import results_paths
+from ....shared.viz import (
+    fmt_ms, fmt_int, decimate, legend, chain_strip, CHAIN_NOTE, log_dot_plot,
+)
 
 RESULTS_DIR = results_paths.results_dir("ch01_gpu_1blob_1block", "benchmark_results")
 
@@ -59,20 +62,6 @@ SWEEP = DATA["tpb_sweep"]
 
 def scene_label(name):
     return SCENE_LABELS.get(name, name)
-
-
-def fmt_ms(v):
-    if v is None:
-        return "—"
-    if v < 1:
-        return f"{v:.2f}"
-    if v < 10:
-        return f"{v:.1f}"
-    return f"{v:,.0f}"
-
-
-def fmt_int(v):
-    return f"{v:,}"
 
 
 # ---------------------------------------------------------------- dot plot
@@ -250,20 +239,6 @@ def occ_chart():
 # ------------------------------------------------------------ frontier panels
 PANEL_SCENES = ["sq_2000_center", "sq_4000_corner", "disk_1024",
                 "serpentine_256", "sq_6000_center"]
-
-
-def decimate(values, max_pts=600):
-    n = len(values)
-    if n <= max_pts:
-        return list(range(n)), values
-    bin_size = math.ceil(n / max_pts)
-    xs, ys = [], []
-    for start in range(0, n, bin_size):
-        chunk = values[start:start + bin_size]
-        j = max(range(len(chunk)), key=chunk.__getitem__)
-        xs.append(start + j)
-        ys.append(chunk[j])
-    return xs, ys
 
 
 def panels():
@@ -692,7 +667,96 @@ legend_act = ('<div class="legend">'
               'lanes woken — engaged warps × 32</span>'
               '</div>')
 
-html = f"""<!doctype html>
+
+# ---------------------------------------------------------- dashboard contract
+# Exports consumed by the assembled cross-chapter dashboard: SBS_ROWS/SWEEP
+# are this chapter's own ROWS/SWEEP under the name the dashboard expects;
+# sbs_chart/sbs_table are a simpler, dashboard-styled rendering of the same
+# data as dot_plot()/table() above (kept separate -- this chapter's own
+# standalone page keeps its richer charts unchanged).
+SBS_ROWS = ROWS
+SBS_SWEEP = SWEEP
+
+SBS_LABELS = {
+    "sq_256_center": "square 256² · center",
+    "sq_512_center": "square 512² · center",
+    "sq_1024_center": "square 1024² · center",
+    "sq_2000_center": "square 2000² · center",
+    "sq_4000_corner": "square 4000² · corner",
+    "serpentine_256": "serpentine 256²",
+    "disk_1024": "disk r=480",
+    "sq_2600_full_center": "square 2600² full · center",
+    "sq_4000_center": "square 4000² · center",
+    "sq_5000_center": "square 5000² · center",
+    "sq_6000_center": "square 6000² · center",
+}
+
+
+def sbs_chart():
+    series = [(lambda r: r["njit_ms"], "@njit CPU", "s2"),
+              (lambda r: r.get("pure_ms"), "pure Python", "s3"),
+              (lambda r: r.get("gpu_kernel_ms"), "v1 ring kernel", "s4"),
+              (lambda r: r["spill_kernel_ms"], "v2 spill kernel", "s1")]
+    return log_dot_plot(SBS_ROWS, series,
+                        "Single-block stage runtime per scene, log scale",
+                        lambda r: SBS_LABELS.get(r["scene"], r["scene"]))
+
+
+def sbs_table():
+    head = ("<tr><th>scene</th><th>filled px</th><th>levels</th>"
+            "<th>ring ms</th><th>spill ms</th><th>spilled px</th>"
+            "<th>@njit ms</th><th>pure ms</th></tr>")
+    body = []
+    for r in SBS_ROWS:
+        body.append(
+            "<tr>"
+            f"<td>{SBS_LABELS.get(r['scene'], r['scene'])}</td>"
+            f"<td>{fmt_int(r['filled'])}</td>"
+            f"<td>{fmt_int(r['levels'])}</td>"
+            f"<td>{fmt_ms(r.get('gpu_kernel_ms'))}</td>"
+            f"<td>{fmt_ms(r['spill_kernel_ms'])}</td>"
+            f"<td>{fmt_int(r['spilled_px'])}</td>"
+            f"<td>{fmt_ms(r['njit_ms'])}</td>"
+            f"<td>{fmt_ms(r.get('pure_ms'))}</td>"
+            "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
+
+
+_sbs_v2_36m = next(r for r in SBS_ROWS if r["scene"] == "sq_6000_center")
+
+CHAIN_11 = [("CPU (@njit)", _sbs_v2_36m["njit_ms"]),
+           ("v2 spill kernel", _sbs_v2_36m["spill_kernel_ms"])]
+
+
+LEG_SBS = legend([("@njit CPU", "s2"), ("pure Python", "s3"),
+                  ("v1 ring kernel", "s4"), ("v2 spill kernel", "s1")])
+
+
+SECTION_1_1 = f"""<h3 class="subsection-h">1.1 Single block</h3>
+<div class="card">
+<h2>Runtime — v1 ring vs v2 spill vs @njit</h2>
+<p class="note">Log scale — each decade gridline is 10×. v1 (the pure
+shared-memory ring) is fastest until the frontier outgrows it; v2 (the
+spill tier) is what every later stage is measured against. Pure Python
+was skipped above 2M px.</p>
+{LEG_SBS}
+{sbs_chart()}
+<details><summary>Single-block per-scene results table</summary>
+<div class="tablewrap">{sbs_table()}</div></details>
+</div>
+
+<div class="card">
+<h2>What one GPU block buys — chained from the CPU</h2>
+<p class="note">v2's own speedup vs @njit, from single_block_shared's own
+benchmark session, at its biggest scene (36M px).</p>
+{chain_strip(CHAIN_11, footnote=CHAIN_NOTE, total_cls="s1")}
+</div>"""
+
+# This chapter contributes no project tile.
+TILES = []
+
+def main():
+    html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Single-block flood fill — benchmark</title>
@@ -782,6 +846,11 @@ theoretical occupancy.</p>
 </body></html>
 """
 
-with open(OUT_PATH, "w") as f:
-    f.write(html)
-print(f"rendered {os.path.basename(JSON_PATH)} -> {OUT_PATH} ({len(html):,} bytes)")
+    with open(OUT_PATH, "w") as f:
+        f.write(html)
+    print(f"rendered {os.path.basename(JSON_PATH)} -> {OUT_PATH} ({len(html):,} bytes)")
+
+
+
+if __name__ == "__main__":
+    main()
