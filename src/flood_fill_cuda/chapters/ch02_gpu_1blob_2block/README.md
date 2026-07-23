@@ -234,9 +234,9 @@ uv run pytest src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/test_correctnes
 # tpb sweep, the placement experiment, and instrumentation overhead.
 uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.benchmark
 
-# Render the combined cross-chapter dashboard from the newest JSONs of
-# every chapter — open the HTML in a browser.
-uv run python -m flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks.visualize
+# Render the whole-project dashboard (every chapter's section, including
+# this one) from the newest JSONs — open the HTML in a browser.
+uv run python -m flood_fill_cuda.dashboard
 ```
 
 ```python
@@ -283,11 +283,12 @@ flood_fill(img, x, y, kernel="pinned",
 
 ## Roadmap
 
-- ~~Dashboard~~ — done: `benchmarks/visualize.py` renders
-  `results/ch02_gpu_1blob_2block/benchmark_results/dual_block_benchmark.html`
-  (runtime comparison, speedup-vs-v2, the placement experiment with
-  observed smids, balance-over-time panels, the merged tpb sweep,
-  instrumentation overhead, and the appended single-block stage).
+- ~~Dashboard~~ — done: this chapter's `benchmarks/visualize.py` renders
+  its own §1.2 section (runtime comparison, speedup-vs-v2, the placement
+  experiment with observed smids, balance-over-time panels, the merged
+  tpb sweep, instrumentation overhead); `uv run python -m
+  flood_fill_cuda.dashboard` assembles it with every other chapter's
+  section into `results/dashboard/project_dashboard.html`.
 - ~~The natural next stage: N blocks~~ — done: `../ch03_gpu_1blob_nblock/`
   scales the global-queue winner to the cooperative maximum (48 blocks at
   tpb=256), adds bandwidth instrumentation, and finds the scaling plateau.
