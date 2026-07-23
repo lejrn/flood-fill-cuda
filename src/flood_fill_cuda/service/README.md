@@ -3,12 +3,18 @@
 A webpage where anyone can paint a thick blob with the mouse (or a finger)
 using one of a few brush shapes; on release, the fill spreads from wherever
 the pointer was let go, computed on either ch03's single-seed cooperative
-GPU kernel or ch01's sequential CPU oracle (the frontend's CPU/GPU toggle),
-and the browser replays the frontier spreading outward from the depth
-timeline the engine returns — at the engine's own real elapsed compute
-time, not a stylized pace, so the GPU/CPU speed difference is something you
-*see*, not just a number. The finished shape then falls off-screen like a
-feather.
+GPU kernel or ch01's sequential CPU oracle (the frontend's CPU/GPU toggle).
+Every fill actually runs twice: once on the blob exactly as painted (what's
+drawn on screen — the visual size never changes), and once on the same
+shape amplified to ~50x the pixel count (see `engine.py`'s module
+docstring), purely so the reported timing and pixel counts — and the
+animation's real-time pacing — are honest at the scale where the GPU's
+advantage actually shows up; a Full HD brush stroke alone never gets close.
+The browser replays the frontier as a brightness wave spreading outward
+from the depth timeline the engine returns — brightest at the leading
+edge, cooling to a dark, saturated resting color behind it — paced to the
+engine's own real elapsed compute time at that amplified scale, not a
+stylized pace. The finished shape fades out over about a second.
 
 No websockets, no frame streaming: the engine runs the *entire* BFS in one
 call and returns a per-pixel `depth` array (the level each pixel was filled
@@ -70,7 +76,11 @@ levels`, all `uint32` LE) followed by `width*height` `uint16` LE values,
 row-major: `0` = not part of the blob, else `min(depth+1, 65535)`. See
 `app.py`'s module docstring for the exact byte layout and the reasoning for
 this framing over JSON. `X-Mode` on the response echoes back which engine
-actually ran.
+actually ran. `X-Filled` is the real, painted-mask pixel count (matches the
+returned depth array exactly); `X-Amplified-Filled`, `X-Kernel-Ms`, and
+`X-Total-Ms` report the *amplified*-scale run instead — see `engine.py`'s
+module docstring for why the response mixes real-size depth data with
+amplified-scale timing.
 
 `GET /healthz` → `{"status", "warm", "device"}`.
 
