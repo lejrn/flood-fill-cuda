@@ -38,34 +38,27 @@ import sys
 
 from ....shared import results_paths
 from ....shared import viz
+from ...ch01_gpu_1blob_1block.benchmarks import visualize as sbs_viz
 from ...ch03_gpu_1blob_nblock.benchmarks import visualize as mb_viz
 from ...ch04_gpu_2blob_nblock.benchmarks import visualize as db_viz
 
 RESULTS_DIR = results_paths.results_dir("ch02_gpu_1blob_2block", "benchmark_results")
-SBS_RESULTS_DIR = results_paths.results_dir("ch01_gpu_1blob_1block", "benchmark_results")
 
 
 _newest = results_paths.newest
-_newest_optional = results_paths.newest_optional
 
 
 DUAL_PATH = sys.argv[1] if len(sys.argv) > 1 else _newest("dual_block_*.json",
                                                           RESULTS_DIR)
-SBS_PATH = _newest("single_block_shared_*.json", SBS_RESULTS_DIR)
-# The per-barrier work experiments (radius-2 + warp-coop) write their own
-# JSONs; both are optional (graceful degradation, same contract as DB).
 OUT_PATH = os.path.join(RESULTS_DIR, "dual_block_benchmark.html")
 
 with open(DUAL_PATH) as f:
     DUAL = json.load(f)
-with open(SBS_PATH) as f:
-    SBS = json.load(f)
 
 ROWS = DUAL["scenes"]
 SWEEP = DUAL["tpb_sweep"]
 PLACEMENT = DUAL["placement"]
-SBS_ROWS = SBS["scenes"]
-SBS_SWEEP = SBS["tpb_sweep"]
+SBS_SWEEP = sbs_viz.SWEEP
 
 
 KERNELS = ["split", "global", "dirsplit"]
@@ -74,19 +67,6 @@ KERNELS = ["split", "global", "dirsplit"]
 KCLS = {"split": "s3", "global": "s4", "dirsplit": "s5"}
 
 SCENE_LABELS = viz.SCENE_LABELS
-SBS_LABELS = {
-    "sq_256_center": "square 256² · center",
-    "sq_512_center": "square 512² · center",
-    "sq_1024_center": "square 1024² · center",
-    "sq_2000_center": "square 2000² · center",
-    "sq_4000_corner": "square 4000² · corner",
-    "serpentine_256": "serpentine 256²",
-    "disk_1024": "disk r=480",
-    "sq_2600_full_center": "square 2600² full · center",
-    "sq_4000_center": "square 4000² · center",
-    "sq_5000_center": "square 5000² · center",
-    "sq_6000_center": "square 6000² · center",
-}
 
 
 label = viz.label
@@ -385,14 +365,6 @@ def overhead_chart():
 
 
 
-def sbs_chart():
-    series = [(lambda r: r["njit_ms"], "@njit CPU", "s2"),
-              (lambda r: r.get("pure_ms"), "pure Python", "s3"),
-              (lambda r: r.get("gpu_kernel_ms"), "v1 ring kernel", "s4"),
-              (lambda r: r["spill_kernel_ms"], "v2 spill kernel", "s1")]
-    return log_dot_plot(SBS_ROWS, series,
-                        "Single-block stage runtime per scene, log scale",
-                        lambda r: SBS_LABELS.get(r["scene"], r["scene"]))
 
 
 def dual_table():
@@ -427,24 +399,6 @@ def dual_table():
     return f"<table>{head}{''.join(body)}</table>"
 
 
-def sbs_table():
-    head = ("<tr><th>scene</th><th>filled px</th><th>levels</th>"
-            "<th>ring ms</th><th>spill ms</th><th>spilled px</th>"
-            "<th>@njit ms</th><th>pure ms</th></tr>")
-    body = []
-    for r in SBS_ROWS:
-        body.append(
-            "<tr>"
-            f"<td>{SBS_LABELS.get(r['scene'], r['scene'])}</td>"
-            f"<td>{fmt_int(r['filled'])}</td>"
-            f"<td>{fmt_int(r['levels'])}</td>"
-            f"<td>{fmt_ms(r.get('gpu_kernel_ms'))}</td>"
-            f"<td>{fmt_ms(r['spill_kernel_ms'])}</td>"
-            f"<td>{fmt_int(r['spilled_px'])}</td>"
-            f"<td>{fmt_ms(r['njit_ms'])}</td>"
-            f"<td>{fmt_ms(r.get('pure_ms'))}</td>"
-            "</tr>")
-    return f"<table>{head}{''.join(body)}</table>"
 
 
 
@@ -480,7 +434,7 @@ tiles_html = "".join(
 
 
 
-PROJECT_TILES = list(mb_viz.TILES) + list(db_viz.TILES)
+PROJECT_TILES = list(sbs_viz.TILES) + list(mb_viz.TILES) + list(db_viz.TILES)
 project_tiles_html = "".join(
     f'<div class="tile"><div class="tile-v">{v}</div>'
     f'<div class="tile-l">{l}</div><div class="tile-src">{s}</div></div>'
@@ -495,13 +449,10 @@ project_tiles_html = "".join(
 # never a cross-session multiply. (Three multi_block_*.json sessions on
 # disk disagree slightly on njit/kernel timings from normal GPU clock
 # drift; only the newest file's own numbers ever get multiplied here.)
-_sbs_v2_36m = next(r for r in SBS_ROWS if r["scene"] == "sq_6000_center")
 _dual_36m = next(r for r in ROWS if r["scene"] == "sq_6000_center")
 
 CHAIN_NOTE = viz.CHAIN_NOTE
 
-CHAIN_11 = [("CPU (@njit)", _sbs_v2_36m["njit_ms"]),
-           ("v2 spill kernel", _sbs_v2_36m["spill_kernel_ms"])]
 CHAIN_12 = [("CPU (@njit)", _dual_36m["njit_ms"]),
            ("single-block v2", _dual_36m["v2_kernel_ms"]),
            ("dual global", _dual_36m["global_kernel_ms"])]
@@ -560,8 +511,6 @@ LEG5 = legend([("@njit CPU", "s2"), ("single-block v2", "s1"),
                ("split", "s3"), ("global", "s4"), ("dirsplit", "s5")])
 LEG3 = legend([("split", "s3"), ("global", "s4"), ("dirsplit", "s5")])
 LEG_BAL = legend([("block 0", "s1"), ("block 1", "s4")])
-LEG_SBS = legend([("@njit CPU", "s2"), ("pure Python", "s3"),
-                  ("v1 ring kernel", "s4"), ("v2 spill kernel", "s1")])
 
 
 
@@ -586,25 +535,7 @@ observed via %smid</div>
 
 <h2 class="domain-h" style="margin-top:8px">1. Single blob</h2>
 
-<h3 class="subsection-h">1.1 Single block</h3>
-<div class="card">
-<h2>Runtime — v1 ring vs v2 spill vs @njit</h2>
-<p class="note">Log scale — each decade gridline is 10×. v1 (the pure
-shared-memory ring) is fastest until the frontier outgrows it; v2 (the
-spill tier) is what every later stage is measured against. Pure Python
-was skipped above 2M px.</p>
-{LEG_SBS}
-{sbs_chart()}
-<details><summary>Single-block per-scene results table</summary>
-<div class="tablewrap">{sbs_table()}</div></details>
-</div>
-
-<div class="card">
-<h2>What one GPU block buys — chained from the CPU</h2>
-<p class="note">v2's own speedup vs @njit, from single_block_shared's own
-benchmark session, at its biggest scene (36M px).</p>
-{chain_strip(CHAIN_11, footnote=CHAIN_NOTE, total_cls="s1")}
-</div>
+{sbs_viz.SECTION_1_1}
 
 <h3 class="subsection-h">1.2 Dual blocks — split, global, dirsplit</h3>
 <div class="tiles">{tiles_html}</div>
@@ -707,5 +638,5 @@ _nb_part = (f" + {os.path.basename(mb_viz.NB_PATH)}" if mb_viz.NB_PATH
 _dbr2_part = (f" + {os.path.basename(db_viz.DBR2_PATH)}" if db_viz.DBR2_PATH
               else " (no dual_blob_radius2 JSON — §2 r2 card omitted)")
 print(f"rendered {os.path.basename(mb_viz.MB_PATH)} + {os.path.basename(DUAL_PATH)}"
-      f" + {os.path.basename(SBS_PATH)}{_nb_part}{_db_part}{_dbr2_part}"
+      f" + {os.path.basename(sbs_viz.JSON_PATH)}{_nb_part}{_db_part}{_dbr2_part}"
       f" -> {OUT_PATH} ({len(html):,} bytes)")
