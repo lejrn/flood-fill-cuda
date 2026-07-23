@@ -8,13 +8,13 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs
-                                     │                                      │                            │                                    │
-                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:
-                                     ▼                            one BFS? where do they run?"    what stops it — and is          who owns each pixel?"
-                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;
-                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum
-                                                                                                  plateau at 512 threads/SM      (1.6–1.8×)
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs
+                                     │                                      │                            │                                    │                                   │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:
+                                     ▼                            one BFS? where do they run?"    what stops it — and is          who owns each pixel?"             candidate waves + atomicMin
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry
+                                                                                                  plateau at 512 threads/SM      (1.6–1.8×)                        (755k blobs in 25 ms)
 ```
 
 ---
@@ -308,13 +308,19 @@ structure, sharpening what `ncu` must arbitrate.
 | small scene (180k px) | **0.5×** — the CPU still wins; two 300² blobs cannot fill 12,288 threads |
 
 ### New problems and lessons
-- **A launch-uniform value cannot be read from mutable global memory.**
-  Replacing the hardcoded `rear = 1` with a read of the host-written seed
+- **A launch-uniform value cannot be read from mutable global memory
+  *without a barrier between the writes and the read*.** Replacing the
+  hardcoded `rear = 1` with an unbarriered read of the host-written seed
   count *deadlocks the GPU*: blocks do not start in lockstep, an early
   block enqueues (mutating rear) before a late block's initial read, and
-  the two disagree about the level-0 window forever at `grid.sync`. The
-  count must arrive as a kernel parameter — which is retroactively *why*
-  every earlier kernel hardcoded it.
+  the two disagree about the level-0 window forever at `grid.sync`. This
+  chapter's fix was a kernel parameter — which is retroactively *why*
+  every earlier kernel hardcoded it. (*Corrected by Chapter 5*, which
+  needs a GPU-produced seed count no host parameter can carry: the rule
+  as first written here overshot. A read behind a
+  `grid.sync(); read; grid.sync()` fence sandwich — the same pattern
+  every level of every live kernel already uses — is safe, and ch05's
+  kernels drop the n_seeds parameter entirely.)
 - **Concurrent cooperative grids are a placement lottery, not a
   scheduling guarantee.** Fresh-process probes: 48+48 and 80+80 blocks
   ran, 88+88 wedged permanently, 96+96 co-scheduled once and hung in
@@ -339,12 +345,75 @@ structure, sharpening what `ncu` must arbitrate.
 1. **Finding the seeds.** This stage is *given* two seeds. Real multi-blob
    work must discover components itself — connected-component labeling,
    where label inheritance stops being a rider and becomes the algorithm.
+   *→ became Chapter 5.*
 2. **N blobs.** The `xy` format already carries 6 label bits (64 blobs);
    the open question is scheduling N waves in one queue when they are
-   *not* disjoint.
+   *not* disjoint. *→ became Chapter 5 (which retires the entry format
+   for a per-pixel label map).*
 3. **`ncu`**, still the arbiter — now also for "labels are traffic-free."
 4. **Is the cooperative-launch wedge WSL2-specific?** The same probe on
    native Linux or under MPS would say.
+
+---
+
+## Chapter 5 — N blobs, N blocks, zero seeds given (`ch05_gpu_nblob_nblock/`)
+
+### Inherited problems
+1. Every stage so far is *told* where to start; real multi-blob work must
+   discover its own components. "How many blobs?" is now the kernel's
+   question to answer.
+2. The in-entry label format caps at 64 blobs, and discovery labels are
+   pixel indices — no entry format holds them.
+3. The seed count is produced ON the GPU, but Chapter 4's lesson says the
+   kernel may not read the initial rear from mutable state. (Resolved:
+   the lesson was narrower than written — see below.)
+
+### Approaches — what each bets
+| approach | the bet |
+|---|---|
+| **canonical labels** (both variants) | a blob's label = its minimum linear index; its seed = that pixel. Deterministic, oracle-computable, and exactly what union-by-`atomicMin` converges to |
+| **`seed_merge`** | discovery rides *inside* the fill: flood from every candidate (red pixel with no red lex-predecessor — ≥1 per blob, its lex-min among them), colliding waves union their labels in flight, one flatten at the end. Union work scales with *collisions*. Paint deferred — that is what makes collisions detectable |
+| **`ccl_fill`** | solve connectivity *first*: one data-independent union-find pass over every red adjacency (Playne-Stephens style), then exactly one seed per blob feeds the ch03 fill unchanged. Union work scales with *area* |
+| per-pixel `label_map` | ch04's free in-entry label cannot survive discovery (the CAS loser must ask "who owns this pixel?"); entries revert to plain `lin`, labels get priced |
+| fence-sandwich rear read | the GPU-produced seed count is read via `grid.sync(); read; grid.sync()` — no n_seeds parameter at all |
+
+### Results (RTX 4060 Laptop, tpb=256, 48 blocks, 193 GB/s measured peak)
+| finding | number |
+|---|---|
+| headline | **755,577 blobs** discovered, labeled and filled in **24.8 ms** (one launch, no seeds given) — 21.5× the discovery-included `@njit` baseline |
+| `seed_merge` vs `ccl_fill` | merge wins 6/7 scenes, 1.28–2.11×; the disks flip it (0.74×) — 500 staircase candidates make collision traffic expensive |
+| union volume | merge: 0–2k unions per scene (~400k on the noise); ccl: one per red adjacency — 15.7M on the squares, a 53 ms prepass ≈ a whole fill |
+| discovery tax | 2.10–2.15× vs ch04's given-seeds multisource on comparable scenes |
+| serpentine | 65 candidates chop 32,641 levels into **257** → seed_merge beats ccl_fill **88×**; `@njit` still beats both (33k px can't feed 12,288 threads) |
+| candidate scan alone | 0.9–1.8 ms at every size — discovery is nearly free; it's the *merging* strategies that differ |
+| observer overhead | unmeasurable — five scenes read negative (to −26%), ch04's verdict with stronger evidence |
+
+### New problems and lessons
+- **The Chapter 4 deadlock lesson, refined:** the rule was never "no
+  reads of rear" but "no *unbarriered* reads." All discovery enqueues
+  precede sync #1, nothing moves rear before sync #2 — every thread reads
+  the same count. Chapter 4's text is corrected in place.
+- **Labels stop being free** once they leave the queue entry: claim
+  write + dequeue read + flatten sweep, all priced in the model. ch04's
+  zero-byte claim was a property of given, few seeds — not of labeling.
+- **Union work should scale with collisions, not area** — the whole
+  seed_merge margin on solid scenes. BUF-style 2×2-block unions are the
+  obvious lever on the ccl side.
+- **Multi-source seeding shortens the BFS clock itself** (serpentine:
+  127× fewer levels). Where nearest-candidate depth is acceptable,
+  merge's clock is strictly cheaper than any single-seed fill.
+- **Deferred paint keeps probes hot:** merge's claimed pixels stay red
+  until the flatten, so every probe of a claimed neighbor pays a CAS
+  attempt — the suspected mechanism behind the disks loss. `ncu` owes
+  the verdict.
+
+### Open problems → Chapter 6 candidates
+1. **BUF/BKE 2×2-block union-find** to cut ccl's per-adjacency volume.
+2. **`ncu`** — owed three verdicts now: label-map traffic, the
+   deferred-paint CAS mechanism, the negative observer overheads.
+3. **Recoloring past 6 palette rows** (`label % 6` collides hues at
+   N=100+; the label map, not the paint, is ground truth).
+4. **The cooperative-launch wedge question stands.**
 
 ---
 
