@@ -6,23 +6,27 @@
 
   const stage = document.getElementById("stage");
   const canvas = document.getElementById("paint");
-  const statsEl = document.getElementById("stats");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
   const BRUSH = 48;              // backing-store px; a thick blob-forming brush
-  const BRUSH_PAD = BRUSH / 2 + 2;
+  // Covers the largest stamp's extent from its center (star/square corners
+  // reach further than BRUSH/2), plus a small buffer, so onStrokeEnd's crop
+  // never clips a stamp.
+  const BRUSH_PAD = Math.ceil(BRUSH * 0.65) + 4;
+  const BRUSH_STEP = 10;         // backing-store px between stamps along a drag
   const PAINT_COLOR = "rgba(70, 74, 92, 0.94)";   // neutral "wet chalk" stroke
-  const FILL_PALETTE = [
-    [255, 183, 3], [33, 158, 188], [251, 133, 0],
-    [6, 214, 160], [239, 71, 111], [131, 56, 236],
-  ];
   const MAX_BACKING_PIXELS = 3.5e6;
   const MAX_LIVE_SHAPES = 24;
+
+  // A fixed, unmistakable red for the leading edge of the fill — kept
+  // separate from the interior's shifting gradient so it always pops.
+  const FRONTIER_COLOR = [255, 46, 46];
 
   let painting = false;
   let lastX = 0, lastY = 0;
   let bbox = null;
   let liveShapes = [];
+  let currentShape = "circle";
 
   // ---- canvas sizing -------------------------------------------------
   // Backing-store resolution is CSS px * devicePixelRatio (capped at 1.5
@@ -43,11 +47,9 @@
     canvas.height = h;
     canvas.style.width = rect.width + "px";
     canvas.style.height = rect.height + "px";
-    ctx.lineWidth = BRUSH;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
     ctx.fillStyle = PAINT_COLOR;
     ctx.strokeStyle = PAINT_COLOR;
+    ctx.lineCap = "round";
   }
   window.addEventListener("resize", sizeCanvas);
   sizeCanvas();
@@ -81,6 +83,97 @@
     bbox = null;
   }
 
+  // ---- brush shapes ---------------------------------------------------
+  // Each stamp draws one dab centered at (x, y) in backing-store px, using
+  // the already-set fillStyle/strokeStyle. Dragging calls these repeatedly
+  // along the path (see strokeSegment), so consecutive dabs must overlap
+  // enough to stay one connected blob for the kernel.
+
+  function stampCircle(x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, BRUSH / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function stampSquare(x, y) {
+    const s = BRUSH * 0.86;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((Math.random() - 0.5) * 0.5);
+    ctx.fillRect(-s / 2, -s / 2, s, s);
+    ctx.restore();
+  }
+
+  function stampStar(x, y) {
+    const outer = BRUSH * 0.62;
+    const inner = outer * 0.42;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.random() * Math.PI * 2);
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const px = Math.cos(a) * r, py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // A cluster of short jittered strokes per dab, so a drag builds up a
+  // rough, hand-scratched hatch texture instead of a smooth fill.
+  function stampScratchy(x, y) {
+    const r = BRUSH / 2;
+    const prevWidth = ctx.lineWidth;
+    ctx.lineWidth = Math.max(3, BRUSH * 0.16);
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const len = r * (0.6 + Math.random() * 0.7);
+      const ox = (Math.random() * 2 - 1) * r * 0.35;
+      const oy = (Math.random() * 2 - 1) * r * 0.35;
+      const cx = x + ox, cy = y + oy;
+      ctx.beginPath();
+      ctx.moveTo(cx - Math.cos(a) * len / 2, cy - Math.sin(a) * len / 2);
+      ctx.lineTo(cx + Math.cos(a) * len / 2, cy + Math.sin(a) * len / 2);
+      ctx.stroke();
+    }
+    ctx.lineWidth = prevWidth;
+  }
+
+  const BRUSH_SHAPES = {
+    circle: stampCircle,
+    square: stampSquare,
+    star: stampStar,
+    scratchy: stampScratchy,
+  };
+
+  function stampBrush(x, y) {
+    BRUSH_SHAPES[currentShape](x, y);
+  }
+
+  // Dabs the current brush shape at fixed spacing along a segment, so
+  // fast drags don't leave gaps and every shape (not just round strokes)
+  // gets continuous coverage.
+  function strokeSegment(x0, y0, x1, y1) {
+    const dist = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.max(1, Math.ceil(dist / BRUSH_STEP));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      stampBrush(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+    }
+  }
+
+  const toolbarButtons = document.querySelectorAll("#toolbar .brush-btn");
+  toolbarButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      toolbarButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentShape = btn.dataset.shape;
+    });
+  });
+
   // ---- painting --------------------------------------------------------
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -90,19 +183,14 @@
     bbox = null;
     const [x, y] = toCanvasXY(e);
     lastX = x; lastY = y;
-    ctx.beginPath();
-    ctx.arc(x, y, BRUSH / 2, 0, Math.PI * 2);
-    ctx.fill();
+    stampBrush(x, y);
     growBBox(x, y);
   });
 
   canvas.addEventListener("pointermove", (e) => {
     if (!painting) return;
     const [x, y] = toCanvasXY(e);
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    strokeSegment(lastX, lastY, x, y);
     growBBox(x, y);
     lastX = x; lastY = y;
   });
@@ -155,10 +243,11 @@
     const height = dv.getUint32(8, true);
     const levels = dv.getUint32(12, true);
     const depth = new Uint16Array(buf, 16);
-    statsEl.textContent =
-      `${resp.headers.get("x-filled")} px · ${levels} levels · ` +
-      `kernel ${parseFloat(resp.headers.get("x-kernel-ms")).toFixed(2)} ms`;
-    return { width, height, levels, depth };
+    const stats = {
+      filled: parseInt(resp.headers.get("x-filled"), 10) || 0,
+      kernelMs: parseFloat(resp.headers.get("x-kernel-ms")) || 0,
+    };
+    return { width, height, levels, depth, stats };
   }
 
   // Bucket pixel indices by BFS level once, so the animation loop only
@@ -174,12 +263,27 @@
     return buckets;
   }
 
-  function animateFill(sctx, origImageData, depth, levels, fillColor) {
+  function hslToRgb(h, s, l) {
+    h = (((h % 360) + 360) % 360) / 360;
+    const k = (n) => (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+  }
+
+  // Interior color as a function of normalized BFS depth (0 at the seed,
+  // 1 at the outermost level): purple -> blue -> green as the fill
+  // spreads outward, so the fixed-red frontier band always reads clearly
+  // against it rather than blending into a flat fill color.
+  function levelColor(t) {
+    return hslToRgb(270 - 130 * t, 0.68, 0.56);
+  }
+
+  function animateFill(sctx, origImageData, depth, levels) {
     return new Promise((resolve) => {
       const buckets = bucketByLevel(depth, levels);
       const out = sctx.createImageData(origImageData.width, origImageData.height);
       out.data.set(origImageData.data);
-      const bandColor = fillColor.map((c) => Math.min(255, c + 90));
 
       const duration = Math.min(2000, Math.max(600, levels * 12));
       let start = null;
@@ -202,12 +306,14 @@
         if (t > levels - 1) t = levels - 1;
 
         for (let lvl = prevLevel + 1; lvl <= t; lvl++) {
-          for (const idx of buckets[lvl]) paintLevel(idx, fillColor);
+          const color = levelColor(levels > 1 ? lvl / (levels - 1) : 0);
+          for (const idx of buckets[lvl]) paintLevel(idx, color);
         }
-        for (let b = 1; b <= 2; b++) {
-          const lvl = t + b;
-          if (lvl >= levels) break;
-          for (const idx of buckets[lvl]) paintLevel(idx, bandColor);
+        // The frontier itself: a one-level-wide red line just ahead of
+        // the interior, so it always shows as a thin, unmistakable edge.
+        const frontierLvl = t + 1;
+        if (frontierLvl < levels) {
+          for (const idx of buckets[frontierLvl]) paintLevel(idx, FRONTIER_COLOR);
         }
         sctx.putImageData(out, 0, 0);
         prevLevel = t;
@@ -224,6 +330,15 @@
     while (liveShapes.length > MAX_LIVE_SHAPES) {
       liveShapes.shift().remove();
     }
+  }
+
+  function showStatsLabel(wrap, stats, levels) {
+    const label = document.createElement("div");
+    label.className = "shape-stats";
+    label.textContent =
+      `${stats.filled.toLocaleString()} px · ${levels} levels · ` +
+      `kernel ${stats.kernelMs.toFixed(2)} ms`;
+    wrap.appendChild(label);
   }
 
   function startFall(wrap, inner) {
@@ -262,12 +377,14 @@
 
     const sctx = shapeCanvas.getContext("2d");
     const origImageData = sctx.getImageData(0, 0, shapeCanvas.width, shapeCanvas.height);
-    const fillColor = FILL_PALETTE[Math.floor(Math.random() * FILL_PALETTE.length)];
 
     try {
-      const { levels, depth } = await requestFill(shapeCanvas);
+      const { levels, depth, stats } = await requestFill(shapeCanvas);
+      // Shown the instant the fill computation's result is known, right
+      // above the blob, so the timing is legible exactly when it matters.
+      showStatsLabel(wrap, stats, levels);
       if (levels > 0) {
-        await animateFill(sctx, origImageData, depth, levels, fillColor);
+        await animateFill(sctx, origImageData, depth, levels);
       }
     } catch (err) {
       // Network hiccup or server error: let the shape fall as painted
