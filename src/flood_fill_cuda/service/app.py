@@ -13,7 +13,11 @@ browser side (new Uint16Array(buf, 16) needs no parsing):
 
 ?mode=cpu|gpu (default gpu) picks the engine — see engine.py's module
 docstring for why the two are a fair side-by-side comparison. X-Mode on
-the response echoes back which one actually ran.
+the response echoes back which one actually ran. X-Kernel-Ms/X-Total-Ms
+and X-Amplified-Filled report the *amplified*-scale run (see engine.py's
+module docstring) -- honest timing/pixel-count at the scale where the
+GPU's advantage is real, even though the returned depth map itself is at
+the size actually painted.
 
 GZipMiddleware is worthwhile here specifically because the encoding makes
 the background all-zeros: a real stroke's payload compresses hard.
@@ -157,6 +161,7 @@ async def fill(request: Request):
         media_type="application/octet-stream",
         headers={
             "X-Filled": str(outcome.filled),
+            "X-Amplified-Filled": str(outcome.amplified_filled),
             "X-Kernel-Ms": f"{outcome.kernel_ms:.3f}",
             "X-Total-Ms": f"{outcome.total_ms:.3f}",
             "X-Mode": outcome.mode,

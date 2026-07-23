@@ -180,6 +180,44 @@ def test_cpu_mode_reports_real_compute_time():
     assert out.total_ms == out.kernel_ms
 
 
+def test_amplified_filled_scales_up_a_small_mask():
+    """A small mask is well under MAX_AMPLIFIED_PIXELS, so the amplified
+    run should actually happen and report a substantially bigger pixel
+    count than the real (painted) one -- while the returned depth map
+    stays at the real, painted size."""
+    mask = _disc_mask(41, 41, 20, 20, 15)
+    out = engine.run_fill(mask)
+    assert out.amplified_filled > out.filled
+    assert out.depth_u16.shape == (41, 41)
+    assert out.filled == int(mask.sum())
+
+
+def test_amplify_mask_skips_when_already_at_cap():
+    """_amplify_mask must not try to upscale past its own ceiling -- a
+    mask already at/over MAX_AMPLIFIED_PIXELS comes back unchanged
+    (scale 1.0). Exercised directly since run_fill's own (much lower)
+    MAX_PIXELS input-validation gate means no request ever reaches
+    run_fill's amplification step already this large."""
+    side = int(engine.MAX_AMPLIFIED_PIXELS ** 0.5) + 10
+    mask = np.zeros((side, side), dtype=bool)
+    mask[0:5, 0:5] = True
+    big_mask, scale = engine._amplify_mask(
+        mask, engine.AMPLIFY_FACTOR, engine.MAX_AMPLIFIED_PIXELS)
+    assert scale == 1.0
+    assert big_mask is mask
+
+
+def test_amplify_mask_respects_ceiling_and_shape():
+    """A mask well under the ceiling amplifies to roughly factor x its
+    pixel count (capped), and the upscaled mask preserves the original
+    shape's footprint (every original True pixel maps to a True block)."""
+    mask = _disc_mask(31, 31, 15, 15, 10)
+    big_mask, scale = engine._amplify_mask(mask, 50, engine.MAX_AMPLIFIED_PIXELS)
+    assert scale > 1.0
+    assert big_mask.sum() > mask.sum()
+    assert big_mask.shape[0] * big_mask.shape[1] <= engine.MAX_AMPLIFIED_PIXELS
+
+
 def test_invalid_mode_raises():
     mask = _disc_mask(64, 64, 32, 32, 20)
     with pytest.raises(ValueError, match="mode"):

@@ -65,6 +65,7 @@ def test_fill_round_trip(client):
     assert depth.size == width * height
     assert (depth > 0).sum() > 0     # something got filled
     assert (depth > 0).sum() == int(r.headers["x-filled"])
+    assert int(r.headers["x-amplified-filled"]) >= int(r.headers["x-filled"])
     assert float(r.headers["x-kernel-ms"]) >= 0
     assert float(r.headers["x-total-ms"]) >= 0
     assert r.headers["x-mode"] == "gpu"   # default mode

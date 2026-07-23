@@ -1,5 +1,5 @@
 // Paint-and-fill frontend: thick-brush strokes -> POST /api/fill -> replay
-// the returned depth timeline as a spreading recolor -> feather-fall away.
+// the returned depth timeline as a spreading brightness wave -> fade away.
 // No build step, no dependencies.
 (() => {
   "use strict";
@@ -18,9 +18,14 @@
   const MAX_BACKING_PIXELS = 3.5e6;
   const MAX_LIVE_SHAPES = 24;
 
-  // A fixed, unmistakable red for the leading edge of the fill — kept
-  // separate from the interior's shifting gradient so it always pops.
-  const FRONTIER_COLOR = [255, 46, 46];
+  // Wave animation: frontier pixels are brightest, cooling to a dark,
+  // saturated resting shade as the wave passes them. BRIGHT_L/DARK_L are
+  // HSL lightness; DECAY_FRACTION is how much of the total level range
+  // the cooldown takes (5% -- a fast, tight trailing glow).
+  const BRIGHT_L = 0.80;
+  const DARK_L = 0.26;
+  const WAVE_SAT = 0.72;
+  const DECAY_FRACTION = 0.05;
 
   let painting = false;
   let lastX = 0, lastY = 0;
@@ -263,6 +268,7 @@
     const depth = new Uint16Array(buf, 16);
     const stats = {
       filled: parseInt(resp.headers.get("x-filled"), 10) || 0,
+      amplifiedFilled: parseInt(resp.headers.get("x-amplified-filled"), 10) || 0,
       kernelMs: parseFloat(resp.headers.get("x-kernel-ms")) || 0,
       mode: resp.headers.get("x-mode") || mode,
     };
@@ -290,12 +296,15 @@
     return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
   }
 
-  // Interior color as a function of normalized BFS depth (0 at the seed,
-  // 1 at the outermost level): purple -> blue -> green as the fill
-  // spreads outward, so the fixed-red frontier band always reads clearly
-  // against it rather than blending into a flat fill color.
-  function levelColor(t) {
-    return hslToRgb(270 - 130 * t, 0.68, 0.56);
+  // Wave color as a function of normalized BFS depth (0 at the seed, 1 at
+  // the outermost level, hue purple -> blue -> green) and how far behind
+  // the frontier this pixel currently is, in levels: bright right at the
+  // frontier, cooling linearly to a dark stable shade over decayLevels.
+  function waveColor(levelNorm, distanceBehindFrontier, decayLevels) {
+    const hue = 270 - 130 * levelNorm;
+    const t = Math.min(1, Math.max(0, distanceBehindFrontier / decayLevels));
+    const light = BRIGHT_L + (DARK_L - BRIGHT_L) * t;
+    return hslToRgb(hue, WAVE_SAT, light);
   }
 
   // durationMs is the engine's own reported compute time: the replay
@@ -309,8 +318,8 @@
       out.data.set(origImageData.data);
 
       const duration = Math.max(durationMs, 1);
+      const decayLevels = Math.max(1, Math.round(levels * DECAY_FRACTION));
       let start = null;
-      let prevLevel = -1;
 
       function paintLevel(idx, color) {
         const p = idx * 4;
@@ -322,27 +331,36 @@
         out.data[p + 3] = origImageData.data[p + 3];
       }
 
+      function paintWindow(currentLevel) {
+        const hi = Math.floor(currentLevel);
+        const lo = Math.max(0, Math.floor(currentLevel - decayLevels));
+        for (let lvl = lo; lvl <= hi; lvl++) {
+          const levelNorm = levels > 1 ? lvl / (levels - 1) : 0;
+          const color = waveColor(levelNorm, currentLevel - lvl, decayLevels);
+          for (const idx of buckets[lvl]) paintLevel(idx, color);
+        }
+      }
+
       function frame(ts) {
         if (start === null) start = ts;
         const elapsed = ts - start;
-        let t = Math.floor((elapsed / duration) * levels);
-        if (t > levels - 1) t = levels - 1;
-
-        for (let lvl = prevLevel + 1; lvl <= t; lvl++) {
-          const color = levelColor(levels > 1 ? lvl / (levels - 1) : 0);
-          for (const idx of buckets[lvl]) paintLevel(idx, color);
-        }
-        // The frontier itself: a one-level-wide red line just ahead of
-        // the interior, so it always shows as a thin, unmistakable edge.
-        const frontierLvl = t + 1;
-        if (frontierLvl < levels) {
-          for (const idx of buckets[frontierLvl]) paintLevel(idx, FRONTIER_COLOR);
-        }
+        const currentLevel = Math.min(levels - 1, (elapsed / duration) * levels);
+        paintWindow(currentLevel);
         sctx.putImageData(out, 0, 0);
-        prevLevel = t;
 
-        if (elapsed < duration) requestAnimationFrame(frame);
-        else resolve();
+        if (elapsed < duration) {
+          requestAnimationFrame(frame);
+        } else {
+          // Final settle pass: every level fully cooled, so the finished
+          // shape never freezes mid-brighten at its outermost ring.
+          for (let lvl = 0; lvl < levels; lvl++) {
+            const levelNorm = levels > 1 ? lvl / (levels - 1) : 0;
+            const color = waveColor(levelNorm, decayLevels, decayLevels);
+            for (const idx of buckets[lvl]) paintLevel(idx, color);
+          }
+          sctx.putImageData(out, 0, 0);
+          resolve();
+        }
       }
       requestAnimationFrame(frame);
     });
@@ -355,30 +373,26 @@
     }
   }
 
+  // The painted pixel count and the amplified (real GPU/CPU-scale) pixel
+  // count are shown side by side: the shape you see stays exactly the
+  // size you painted, but the numbers -- and the pacing below -- are
+  // honest at the scale where CPU vs GPU actually differs.
   function showStatsLabel(wrap, stats, levels) {
     const label = document.createElement("div");
     label.className = "shape-stats";
     label.textContent =
-      `${stats.mode.toUpperCase()} · ${stats.filled.toLocaleString()} px · ` +
+      `${stats.mode.toUpperCase()} · ${stats.filled.toLocaleString()} px → ` +
+      `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
       `${levels} levels · ${stats.kernelMs.toFixed(2)} ms`;
     wrap.appendChild(label);
   }
 
-  function startFall(wrap, inner) {
-    const fallDur = (6 + Math.random() * 3).toFixed(2);
-    const swayDur = (1.2 + Math.random() * 0.6).toFixed(2);
-    const drift = (4 + Math.random() * 5).toFixed(1);
-    const rot = (5 + Math.random() * 6).toFixed(1);
-    wrap.style.setProperty("--fall-dur", fallDur + "s");
-    inner.style.setProperty("--sway-dur", swayDur + "s");
-    inner.style.setProperty("--drift", drift + "vw");
-    inner.style.setProperty("--rot", rot + "deg");
+  function startFadeOut(wrap) {
     wrap.addEventListener("animationend", () => {
       wrap.remove();
       liveShapes = liveShapes.filter((s) => s !== wrap);
     }, { once: true });
-    wrap.classList.add("falling");
-    inner.classList.add("swaying");
+    wrap.classList.add("fading");
   }
 
   async function spawnShape(shapeCanvas, screenX, screenY, screenW, screenH, mode, seedX, seedY) {
@@ -416,7 +430,7 @@
     }
 
     // Shape stays fully still on screen throughout painting AND the fill
-    // animation above; only now does it start falling.
-    startFall(wrap, inner);
+    // animation above; only now does it start fading.
+    startFadeOut(wrap);
   }
 })();
