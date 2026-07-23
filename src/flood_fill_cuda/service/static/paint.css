@@ -37,14 +37,58 @@ html, body {
   padding: 0 16px;
 }
 
-#stats {
+#toolbar {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
-  font-size: 11px;
-  color: #5a5a68;
-  font-variant-numeric: tabular-nums;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 6px;
+  backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+.brush-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #cfcfe0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s, color .15s;
+}
+
+.brush-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+.brush-btn.active { background: #4c6ef5; color: #fff; }
+
+.shape-stats {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 10px;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #f2f2f8;
+  background: rgba(20, 22, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 5px 12px;
+  border-radius: 8px;
   pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .shape-wrap {
@@ -93,5 +137,12 @@ html, body {
 @media (prefers-color-scheme: light) {
   html, body { background: #f3f3f6; color: #24242c; }
   #hint { color: #6a6a78; }
-  #stats { color: #b0b0bc; }
+  #toolbar { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1); }
+  .brush-btn { color: #46465a; }
+  .brush-btn:hover { background: rgba(0, 0, 0, 0.06); }
+  .shape-stats {
+    color: #20202a;
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
 }

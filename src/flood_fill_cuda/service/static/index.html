@@ -11,8 +11,14 @@
   <canvas id="paint"></canvas>
 </div>
 
+<div id="toolbar" role="group" aria-label="Brush shape">
+  <button class="brush-btn active" data-shape="circle" title="Circle" aria-label="Circle brush">●</button>
+  <button class="brush-btn" data-shape="star" title="Star" aria-label="Star brush">★</button>
+  <button class="brush-btn" data-shape="square" title="Square" aria-label="Square brush">■</button>
+  <button class="brush-btn" data-shape="scratchy" title="Scratchy" aria-label="Scratchy brush">✎</button>
+</div>
+
 <div id="hint">Paint a thick blob, then let go — the GPU floods it, then it falls.</div>
-<div id="stats"></div>
 
 <script src="/paint.js" defer></script>
 </body>
