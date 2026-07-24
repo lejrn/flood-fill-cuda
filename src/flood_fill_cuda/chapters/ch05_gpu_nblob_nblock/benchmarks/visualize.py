@@ -59,6 +59,16 @@ if TU_PATH:
 TU_ROWS = TU["scenes"] if TU else []
 HAS_TUNING = HAS_SEED and bool(TU_ROWS)
 
+# The same cross-product on external PNG inputs (the png_ prefix keeps
+# these runs out of the canonical tuning_*.json glob above).
+PT_PATH = results_paths.newest_optional("png_tuning_*.json", RESULTS_DIR)
+PT = None
+if PT_PATH:
+    with open(PT_PATH) as f:
+        PT = json.load(f)
+PT_ROWS = PT["scenes"] if PT else []
+HAS_PNG = HAS_TUNING and bool(PT_ROWS)
+
 SD_LABELS = {
     "two_sq_2800": "two squares 2800²",
     "two_disks_r1400": "two disks r=1400",
@@ -718,6 +728,103 @@ table</summary>
 </div>
 """
 
+
+# --------------------------------------- the cross-product off the bench
+def pt_build_chart(r):
+    """One line per build, each stride showing that build's best RULE
+    (min of L and I) as speedup over v1 — the tooltip names the cell."""
+    order = ["S" + str(s) for s in PT["strides"]]
+    v1 = r["configs"]["v1"]["ms"]
+    series = []
+    for b in ("fused", "r128", "split"):
+        pts = []
+        for s in PT["strides"]:
+            cells = [(f"{b}_{rule}{s}", r["configs"].get(f"{b}_{rule}{s}"))
+                     for rule in ("L", "I")]
+            cells = [(nm, c) for nm, c in cells if c]
+            if not cells:
+                pts.append((None, ""))
+                continue
+            nm, c = min(cells, key=lambda t: t[1]["ms"])
+            sp = v1 / c["ms"]
+            tip = (f"{r['scene']} — {nm}: {fmt_ms(c['ms'])} ms "
+                   f"({sp:.2f}× vs v1) · {fmt_int(c['levels'])} levels · "
+                   f"{fmt_int(c['candidates'])} candidates")
+            pts.append((sp, tip))
+        series.append((_TU_BUILD_LABELS[b], _TU_BUILD_SLOTS[b], pts))
+    return _curve_chart(order, series,
+                        f"Best rule per stride and build on {r['scene']}, "
+                        f"speedup over v1",
+                        (0.25, 0.5, 2, 4), lambda t: f"{t:g}×",
+                        ref=1.0, ref_label="1× = v1")
+
+
+def pt_matrix_table(r):
+    strides = PT["strides"]
+    head = ("<tr><th>build/rule</th><th>S0</th>"
+            + "".join(f"<th>S{s}</th>" for s in strides) + "</tr>")
+    body = []
+    for b in ("fused", "r128", "split"):
+        for rule in ("L", "I"):
+            cells = [f"<td>{b}/{rule}</td>"]
+            names = ([b + "_0"] if rule == "L" else [None]) \
+                + [f"{b}_{rule}{s}" for s in strides]
+            for nm in names:
+                c = r["configs"].get(nm) if nm else None
+                if c is None:
+                    cells.append("<td>—</td>")
+                    continue
+                v = fmt_ms(c["ms"])
+                if nm == r["best_cfg"]:
+                    v = f"<b>{v}</b>"
+                cells.append(f'<td title="{fmt_int(c["levels"])} levels, '
+                             f'{fmt_int(c["candidates"])} candidates">'
+                             f'{v}</td>')
+            body.append("<tr>" + "".join(cells) + "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
+
+
+_png_card = ""
+if HAS_PNG:
+    _pt_blocks = []
+    for _pr in PT_ROWS:
+        _pv1 = _pr["configs"]["v1"]
+        _pbest = _pr["configs"][_pr["best_cfg"]]
+        _pgif = f"{_WAVEFRONT_RELPATH}/{_pr['scene']}_final.gif"
+        _pt_blocks.append(f"""
+<p class="note"><b>{_pr['scene']}</b> ({_pr['width']}×{_pr['height']},
+<code>{_pr.get('source', '')}</code>) — {fmt_int(_pv1['filled'])} red
+pixels in {fmt_int(_pv1['n_blobs'])} blobs, crosscheck
+{_pr['crosscheck']}. v1 {fmt_ms(_pv1['ms'])} ms · ccl
+{fmt_ms(_pr['configs']['ccl']['ms'])} ms · best
+<b>{_pr['best_cfg']}: {fmt_ms(_pbest['ms'])} ms</b>
+({_pr['best_vs_v1']:.2f}× vs v1, {_pr['best_vs_ccl']:.2f}× vs ccl).
+Each line takes the build's better rule at every stride — hover a dot
+for the exact cell.</p>
+{legend([(_TU_BUILD_LABELS[b], _TU_BUILD_SLOTS[b])
+         for b in ("fused", "r128", "split")])}
+{pt_build_chart(_pr)}
+<p class="note">
+<img src="{_pgif}" alt="Discovery replay of {_pr['scene']}: every blob
+hued by its canonical label, light→dark by fill level."
+ style="max-width:340px; border-radius:8px; margin:10px 0;
+ vertical-align:top;"></p>
+<details><summary>All 53 configs — {_pr['scene']}</summary>
+<div class="tablewrap">{pt_matrix_table(_pr)}</div></details>
+""")
+    _png_card = f"""
+<div class="card">
+<h2>Off the bench — the cross-product on external PNGs</h2>
+<p class="note">The same 53 configs on images that were never designed
+as scenes: loaded from disk, red-dominant pixels snapped to pure red,
+no ground truth attached. Correctness rides on the crosscheck — all 53
+configs must agree on the filled pixel count and the blob count. The
+replays below run at full resolution; the 9000² one is subsampled 10:1
+only for rendering.</p>
+{"".join(_pt_blocks)}
+</div>
+"""
+
 if HAS_SEED:
     _sd_most_blobs = max(SD_ROWS, key=lambda r: r["n_blobs"])
     _sd_biggest = max(SD_ROWS, key=lambda r: r["filled"])
@@ -850,6 +957,8 @@ few big blobs reward waves that discover while they fill.</p>
 {_tu_stride_card}
 
 {_tu_best_card}
+
+{_png_card}
 
 {_sd_wavefront_note}
 
