@@ -36,6 +36,7 @@ from ...shared.bandwidth import model_gb_s as _model_gb_s
 from .kernels import (
     ccl_fill_kernel, ccl_fill_bare_kernel,
     seed_merge_kernel, seed_merge_bare_kernel,
+    seed_merge_lat_kernel, seed_merge_lat_bare_kernel,
     seed_scan_kernel, ccl_kernel,
     PALETTE_HOST, N_PALETTE,
     NUM_COUNTERS, N_PHASES,
@@ -48,12 +49,22 @@ from numba import cuda
 
 VARIANTS = ("seed_merge", "ccl_fill")
 
-# (variant, bare) -> kernel
+# (kernel_key, bare) -> kernel. "seed_merge_lat" is seed_merge's
+# lattice-seeded v2 twin, selected by the driver when lattice is not None.
 _KERNELS = {
     ("seed_merge", False): seed_merge_kernel,
     ("seed_merge", True): seed_merge_bare_kernel,
+    ("seed_merge_lat", False): seed_merge_lat_kernel,
+    ("seed_merge_lat", True): seed_merge_lat_bare_kernel,
     ("ccl_fill", False): ccl_fill_kernel,
     ("ccl_fill", True): ccl_fill_bare_kernel,
+}
+
+# kernel_key -> phase_ms keys (order matches the kernel's phase_ns stamps)
+_PHASE_KEYS = {
+    "seed_merge": ("init", "scan", "fill", "flatten"),
+    "seed_merge_lat": ("init", "scan", "fill", "compress", "flatten"),
+    "ccl_fill": ("init", "union_merge", "flatten_seed", "fill"),
 }
 
 # variant -> discovery-only phase kernel (benchmark attribution)
@@ -117,6 +128,7 @@ class SeedDiscoveryResult:
                             # instrumented only; empty otherwise)
     owner: np.ndarray      # (w, h) int16, block id per pixel; empty for bare
     variant: str
+    lattice: object        # None (v1 corner rule) or int stride (v2 twin)
     threads_per_block: int
     blocks: int
     bare: bool
@@ -201,34 +213,38 @@ def _device_buffers(img_host, variant, instrumented, launch_blocks,
         bufs["stats"] = cuda.to_device(stats_host)
         bufs["trace"] = cuda.device_array(trace_capacity, dtype=np.int32)
         bufs["phase"] = cuda.to_device(np.zeros(N_PHASES, dtype=np.int64))
-        if variant == "seed_merge":
+        if variant != "ccl_fill":
             bufs["prov"] = cuda.to_device(
                 np.full((width, height), -1, dtype=np.int32))
     return bufs
 
 
-def _kernel_args(variant, bare, bufs):
+def _kernel_args(kernel_key, bare, bufs, lattice=None):
     if bare:
-        return (bufs["img"], bufs["visited"], bufs["depth"], bufs["parent"],
+        args = (bufs["img"], bufs["visited"], bufs["depth"], bufs["parent"],
                 bufs["label"], bufs["queue"], bufs["q_state"],
                 bufs["counters"])
-    if variant == "seed_merge":
-        return (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
+    elif kernel_key != "ccl_fill":
+        args = (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
                 bufs["parent"], bufs["label"], bufs["prov"], bufs["queue"],
                 bufs["q_state"], bufs["counters"], bufs["stats"],
                 bufs["trace"], bufs["phase"])
-    return (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
-            bufs["parent"], bufs["label"], bufs["queue"], bufs["q_state"],
-            bufs["counters"], bufs["stats"], bufs["trace"], bufs["phase"])
+    else:
+        args = (bufs["img"], bufs["visited"], bufs["depth"], bufs["owner"],
+                bufs["parent"], bufs["label"], bufs["queue"], bufs["q_state"],
+                bufs["counters"], bufs["stats"], bufs["trace"], bufs["phase"])
+    if kernel_key == "seed_merge_lat":
+        args = args + (int(lattice),)
+    return args
 
 
-def _warmup(variant, bare):
+def _warmup(kernel_key, bare):
     """JIT-compile (and NVRTC-link) each kernel once, off the clock."""
-    key = (variant, bare)
+    key = (kernel_key, bare)
     if key in _warmed:
         return
-    bufs = _device_buffers(_tiny_scene(), variant, not bare, 1, 4)
-    _KERNELS[key][1, 32](*_kernel_args(variant, bare, bufs))
+    bufs = _device_buffers(_tiny_scene(), kernel_key, not bare, 1, 4)
+    _KERNELS[key][1, 32](*_kernel_args(kernel_key, bare, bufs, lattice=2))
     cuda.synchronize()
     _warmed.add(key)
 
@@ -260,22 +276,39 @@ def _cycles_to_ms(cycles):
     return cycles / _clock_rate_hz * 1000 if _clock_rate_hz else 0.0
 
 
-def max_blocks(variant="seed_merge", threads_per_block=256, bare=False):
+def _kernel_key(variant, lattice):
+    return ("seed_merge_lat"
+            if variant == "seed_merge" and lattice is not None else variant)
+
+
+def max_blocks(variant="seed_merge", threads_per_block=256, bare=False,
+               lattice=None):
     """The largest cooperative grid this GPU can host at threads_per_block.
     Queried per kernel — never assumed equal across variants/twins (the
     union-find loops change register pressure)."""
-    _warmup(variant, bare)
-    return _coop_max_blocks(_KERNELS[(variant, bare)], threads_per_block)
+    key = _kernel_key(variant, lattice)
+    _warmup(key, bare)
+    return _coop_max_blocks(_KERNELS[(key, bare)], threads_per_block)
 
 
 def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
-               blocks=None, bare=False):
+               blocks=None, bare=False, lattice=None):
     """Discover, label and flood-fill every red blob — no seeds taken.
 
     img_host: (width, height, 3) uint8. Not modified; a painted copy is
     returned. Raises ValueError for bad inputs and RuntimeError if the
     GPU cannot host the requested cooperative launch (or a structural
     tripwire fires).
+
+    lattice (seed_merge only): None runs the corner-rule v1 kernel;
+    an int >= 0 runs the lattice-seeded v2 twin — candidates are the
+    corner-rule set PLUS every red pixel at (x % lattice == 0,
+    y % lattice == 0), and a compression pass flattens the parent
+    chains before the repaint. lattice=0 keeps the corner rule only
+    (isolating the compression); lattice=1 seeds every red pixel.
+    Canonical labels/seeds are identical for every lattice value; only
+    depth (distance to the nearest candidate) and the phase profile
+    change.
     """
     if img_host.ndim != 3 or img_host.shape[2] != 3 or img_host.dtype != np.uint8:
         raise ValueError("img must be a (width, height, 3) uint8 array")
@@ -297,9 +330,19 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
             raise ValueError(f"blocks must be an int or None, got {blocks!r}")
         if blocks < 1:
             raise ValueError(f"blocks must be >= 1, got {blocks}")
+    if lattice is not None:
+        if variant != "seed_merge":
+            raise ValueError(
+                "lattice seeding only applies to variant='seed_merge' "
+                f"(got variant={variant!r})")
+        if (not isinstance(lattice, (int, np.integer))
+                or isinstance(lattice, bool) or lattice < 0):
+            raise ValueError(
+                f"lattice must be an int >= 0 or None, got {lattice!r}")
 
-    _warmup(variant, bare)
-    kernel_fn = _KERNELS[(variant, bare)]
+    kernel_key = _kernel_key(variant, lattice)
+    _warmup(kernel_key, bare)
+    kernel_fn = _KERNELS[(kernel_key, bare)]
     coop_max = _coop_max_blocks(kernel_fn, threads_per_block)
     if blocks is None:
         launch_blocks = coop_max
@@ -315,13 +358,13 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
     trace_capacity = min(n, LEVEL_TRACE_CAPACITY)
 
     t_total0 = time.perf_counter()
-    bufs = _device_buffers(img_host, variant, instrumented, launch_blocks,
+    bufs = _device_buffers(img_host, kernel_key, instrumented, launch_blocks,
                            trace_capacity)
     cuda.synchronize()
     t_kernel0 = time.perf_counter()
 
     kernel_fn[launch_blocks, threads_per_block](
-        *_kernel_args(variant, bare, bufs))
+        *_kernel_args(kernel_key, bare, bufs, lattice))
     cuda.synchronize()
     t_d2h0 = time.perf_counter()
     kernel_ms = (t_d2h0 - t_kernel0) * 1000
@@ -341,14 +384,11 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
         stats = bufs["stats"].copy_to_host()
         trace = bufs["trace"][:min(levels, trace_capacity)].copy_to_host()
         prov_out = (bufs["prov"].copy_to_host()
-                    if variant == "seed_merge"
+                    if kernel_key != "ccl_fill"
                     else np.zeros((0, 0), dtype=np.int32))
         stamps = bufs["phase"].copy_to_host()
-        keys = (("init", "scan", "fill", "flatten")
-                if variant == "seed_merge"
-                else ("init", "union_merge", "flatten_seed", "fill"))
         phase_ms = {k: max(int(stamps[i + 1] - stamps[i]), 0) / 1e6
-                    for i, k in enumerate(keys)}
+                    for i, k in enumerate(_PHASE_KEYS[kernel_key])}
     else:
         owner_out = np.zeros((0, 0), dtype=np.int16)
         stats = None
@@ -387,6 +427,7 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
         prov_label=prov_out,
         owner=owner_out,
         variant=variant,
+        lattice=(int(lattice) if lattice is not None else None),
         threads_per_block=threads_per_block,
         blocks=launch_blocks,
         bare=bare,

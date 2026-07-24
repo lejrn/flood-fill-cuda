@@ -460,6 +460,134 @@ def test_model_bytes_consistency(variant):
     assert r.model_gb_s > 0
 
 
+# -------------------------------------------------------- lattice seeding
+
+def assert_lat_matches_oracle(img, lattice, **gpu_kwargs):
+    """v2 contract: exact against the lattice-widened oracle, canonical
+    seeds unchanged from the corner rule."""
+    ref_v, ref_d, ref_l, ref_levels, ref_filled = \
+        cpu_fill_from_candidates(img, lattice)
+    r = flood_fill(img, variant="seed_merge", lattice=lattice, **gpu_kwargs)
+    np.testing.assert_array_equal(r.visited, ref_v)
+    np.testing.assert_array_equal(r.label, ref_l)
+    np.testing.assert_array_equal(r.depth, ref_d)
+    assert r.levels == ref_levels
+    assert r.filled == ref_filled
+    vis = ref_v.astype(bool)
+    np.testing.assert_array_equal(r.img[vis],
+                                  PALETTE_HOST[ref_l[vis] % N_PALETTE])
+    np.testing.assert_array_equal(r.img[~vis], img[~vis])
+    assert r.lattice == lattice
+    return r
+
+
+def test_oracle_lattice_widens_the_candidate_set():
+    img, n_blobs = SCENES["two_squares"]()
+    corner = cpu_candidates(img)
+    for S in (1, 5, 32):
+        lat = cpu_candidates(img, S)
+        assert (lat[corner == 1] == 1).all()      # superset of corner
+        assert lat.sum() >= corner.sum()
+    # S=1: every red pixel is a candidate
+    np.testing.assert_array_equal(cpu_candidates(img, 1).astype(bool),
+                                  _red_mask(img))
+    # the lemma survives every stride: lex-min pixels stay candidates
+    seed_mask = _canonical_seed_mask(img)
+    for S in (1, 5, 32):
+        assert (cpu_candidates(img, S)[seed_mask] == 1).all()
+
+
+@pytest.mark.parametrize("lattice", [0, 1, 5, 32])
+@pytest.mark.parametrize("name", ["two_squares", "two_disks", "u_shape",
+                                  "comb", "blob_grid", "serpentine_like"])
+def test_lattice_matches_oracle(name, lattice):
+    if name == "serpentine_like":
+        img, _ = scenes.serpentine_scene(48, 48)
+    else:
+        img, _ = SCENES[name]()
+    assert_lat_matches_oracle(img, lattice)
+
+
+def test_lattice_zero_is_bit_exact_with_v1():
+    """S=0 isolates the v2 deltas that must be output-neutral (the
+    compression pass and the rule refactor): identical everything."""
+    for name in ("two_squares", "u_shape", "comb"):
+        img, _ = SCENES[name]()
+        v1 = flood_fill(img, variant="seed_merge")
+        v2 = flood_fill(img, variant="seed_merge", lattice=0)
+        np.testing.assert_array_equal(v1.img, v2.img)
+        np.testing.assert_array_equal(v1.label, v2.label)
+        np.testing.assert_array_equal(v1.depth, v2.depth)
+        np.testing.assert_array_equal(v1.visited, v2.visited)
+        assert v1.seeds == v2.seeds
+        assert v1.candidates == v2.candidates
+
+
+@pytest.mark.parametrize("lattice", [1, 5, 32])
+def test_lattice_labels_and_seeds_are_stride_invariant(lattice):
+    """The chapter's central claim, extended: seeding density changes the
+    clock, never the answer."""
+    for name in ("two_squares", "u_shape", "random_like"):
+        if name == "random_like":
+            img, _ = scenes.random_blobs_scene(96, 96, density=0.3,
+                                               rng_seed=3)
+        else:
+            img, _ = SCENES[name]()
+        r = flood_fill(img, variant="seed_merge", lattice=lattice)
+        c = flood_fill(img, variant="ccl_fill")
+        np.testing.assert_array_equal(r.label, c.label)
+        assert r.seeds == c.seeds
+        assert r.n_blobs == c.n_blobs
+
+
+def test_lattice_one_degenerates_to_one_level():
+    """S=1: every red pixel is its own wave — the ccl-like boundary."""
+    img, n_blobs = SCENES["two_squares"]()
+    r = flood_fill(img, variant="seed_merge", lattice=1)
+    red = int(_red_mask(img).sum())
+    assert r.candidates == red
+    assert r.levels == 1
+    assert (r.depth[r.visited == 1] == 0).all()
+    assert r.union_done == r.candidates - n_blobs
+
+
+def test_lattice_shortens_the_clock():
+    img, _ = SCENES["two_squares"]()
+    v1 = flood_fill(img, variant="seed_merge")
+    v2 = flood_fill(img, variant="seed_merge", lattice=8)
+    assert v2.levels < v1.levels
+    assert v2.candidates > v1.candidates
+
+
+def test_lattice_phase_keys_include_compress():
+    img, _ = SCENES["u_shape"]()
+    r = flood_fill(img, variant="seed_merge", lattice=8)
+    assert tuple(r.phase_ms) == ("init", "scan", "fill", "compress",
+                                 "flatten")
+    assert all(v >= 0 for v in r.phase_ms.values())
+
+
+def test_lattice_bare_twin_parity():
+    img, _ = SCENES["blob_grid"]()
+    inst = flood_fill(img, variant="seed_merge", lattice=8)
+    bare = flood_fill(img, variant="seed_merge", lattice=8, bare=True)
+    np.testing.assert_array_equal(inst.img, bare.img)
+    np.testing.assert_array_equal(inst.label, bare.label)
+    np.testing.assert_array_equal(inst.depth, bare.depth)
+    assert inst.levels == bare.levels and inst.filled == bare.filled
+    assert bare.phase_ms == {}
+
+
+def test_lattice_validation():
+    img, _ = SCENES["two_squares"]()
+    with pytest.raises(ValueError, match="lattice"):
+        flood_fill(img, variant="ccl_fill", lattice=8)
+    with pytest.raises(ValueError, match="lattice"):
+        flood_fill(img, variant="seed_merge", lattice=-1)
+    with pytest.raises(ValueError, match="lattice"):
+        flood_fill(img, variant="seed_merge", lattice=2.5)
+
+
 # ------------------------------------------------------------ phase timing
 
 def test_phase_timing_reported():
