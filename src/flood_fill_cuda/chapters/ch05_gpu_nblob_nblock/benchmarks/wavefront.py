@@ -141,7 +141,8 @@ def render_timeline(img, time_map, label, ticks, stem, upscale,
     print(f"  {'  '.join(out)}")
 
 
-# (scene builder, variant, stem, upscale, render prov replay too?)
+# (scene builder, variant, stem, upscale, render prov replay too?,
+#  optional extra flood_fill kwargs)
 COMBOS = [
     # THE money shot: one U, two candidates. prov = two waves in two
     # colors racing until they collide at the bridge; final = one color,
@@ -161,14 +162,24 @@ COMBOS = [
     # the shatter: hundreds of blobs discovered and filled at once
     (lambda: scenes.random_blobs_scene(192, 192, density=0.3, rng_seed=7),
      "ccl_fill", "random192_ccl", 3, False),
+    # the interior rule made visible: same disk twice. Corner seeding =
+    # one wave sweeping radially through the level ramp; interior S1 =
+    # every 8-neighbors-red pixel is a seed, the whole mass lights at
+    # level 0 and only the staircase edge fills late.
+    (lambda: scenes.disk_scene(192, 192, 80),
+     "seed_merge", "disk192_corner", 3, False),
+    (lambda: scenes.disk_scene(192, 192, 80),
+     "seed_merge", "disk192_interior", 3, False,
+     dict(lattice=1, interior=True)),
 ]
 
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    for builder, variant, stem, upscale, prov_replay in COMBOS:
+    for builder, variant, stem, upscale, prov_replay, *rest in COMBOS:
+        ff_kwargs = rest[0] if rest else {}
         img, _ = builder()
-        r = flood_fill(img, variant=variant)
+        r = flood_fill(img, variant=variant, **ff_kwargs)
         print(f"{stem}: blobs={r.n_blobs:,d} candidates={r.candidates:,d} "
               f"unions={r.union_done:,d} filled={r.filled:,d} "
               f"levels={r.levels}")
