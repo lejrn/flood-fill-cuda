@@ -49,6 +49,16 @@ if SW_PATH:
 SW_ROWS = SW["scenes"] if SW else []
 HAS_SWEEP = HAS_SEED and bool(SW_ROWS)
 
+# The tuning cross-product (builds x rules x strides) — optional, same
+# contract again.
+TU_PATH = results_paths.newest_optional("tuning_*.json", RESULTS_DIR)
+TU = None
+if TU_PATH:
+    with open(TU_PATH) as f:
+        TU = json.load(f)
+TU_ROWS = TU["scenes"] if TU else []
+HAS_TUNING = HAS_SEED and bool(TU_ROWS)
+
 SD_LABELS = {
     "two_sq_2800": "two squares 2800²",
     "two_disks_r1400": "two disks r=1400",
@@ -218,6 +228,56 @@ scenes — best case {_sw_best_gain['best_vs_v1']:.2f}× over v1
 </div>
 """
 
+def tu_table():
+    builds = ("fused", "r128", "split")
+    head = ("<tr><th>scene</th><th>v1 ms</th><th>ccl ms</th>"
+            + "".join(f"<th>{b} best</th>" for b in builds)
+            + "<th>overall best</th><th>vs v1</th><th>vs ccl</th></tr>")
+    body = []
+    for r in TU_ROWS:
+        cells = [f"<td>{sd_label(r['scene'])}</td>",
+                 f"<td>{fmt_ms(r['configs']['v1']['ms'])}</td>",
+                 f"<td>{fmt_ms(r['configs']['ccl']['ms'])}</td>"]
+        for b in builds:
+            n = r["best_per_build"][b]
+            c = r["configs"][n]
+            label = n.split("_", 1)[1]
+            v = f"{label}: {fmt_ms(c['ms'])}"
+            if n == r["best_cfg"]:
+                v = f"<b>{v}</b>"
+            cells.append(f'<td title="{fmt_int(c["levels"])} levels, '
+                         f'{fmt_int(c["candidates"])} candidates">{v}</td>')
+        cells.append(f"<td>{r['best_cfg']}</td>")
+        cells.append(f"<td>{r['best_vs_v1']:.2f}×</td>")
+        cells.append(f"<td>{r['best_vs_ccl']:.2f}×</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
+
+
+_tu_card = ""
+if HAS_TUNING:
+    _tu_binfo = TU.get("builds", {})
+    _tu_regs = " · ".join(
+        f"{k}: {v.get('regs', '?')} regs → {v.get('coop_256', '?')} blocks"
+        for k, v in _tu_binfo.items())
+    _tu_best_gain = max(TU_ROWS, key=lambda r: r["best_vs_v1"])
+    _tu_card = f"""
+<div class="card">
+<h2>The tuning cross-product — builds × rules × strides</h2>
+<p class="note">Three levers raced at once. BUILDS attack the register
+handicap ({_tu_regs} — the fused lattice kernel sits ONE register over
+the 128 line that decides two-blocks-per-SM). RULES compare the plain
+lattice (L) against the interior lattice (I: lattice seeds must have
+all 8 neighbors red — inside the mass, off the blob edges). STRIDES
+fill the factor-4 gaps ({{1,4,8,16,32,64,128,256}}). Cell format:
+rule+stride: ms; bold = the scene's overall best. Best case:
+{_tu_best_gain['best_vs_v1']:.2f}× over v1
+({_tu_best_gain['best_cfg']} on {sd_label(_tu_best_gain['scene'])}).
+Full 53-config-per-scene data in the tuning JSON/CSV.</p>
+<div class="tablewrap">{tu_table()}</div>
+</div>
+"""
+
 if HAS_SEED:
     _sd_most_blobs = max(SD_ROWS, key=lambda r: r["n_blobs"])
     _sd_biggest = max(SD_ROWS, key=lambda r: r["filled"])
@@ -318,6 +378,8 @@ few big blobs reward waves that discover while they fill.</p>
 </div>
 
 {_sw_card}
+
+{_tu_card}
 
 {_sd_wavefront_note}
 
