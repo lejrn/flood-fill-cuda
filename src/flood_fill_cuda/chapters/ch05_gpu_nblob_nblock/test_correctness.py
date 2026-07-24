@@ -588,6 +588,97 @@ def test_lattice_validation():
         flood_fill(img, variant="seed_merge", lattice=2.5)
 
 
+# --------------------------------------------- interior rule + builds
+
+def test_oracle_interior_rule_relations():
+    """interior-lattice candidates sit between corner and plain lattice:
+    corner ⊆ interior-lattice ⊆ lattice; thin shapes (single pixel,
+    serpentine) stay fully covered — the corner net catches what the
+    interior test cannot see."""
+    img, _ = SCENES["two_disks"]()
+    corner = cpu_candidates(img)
+    lat = cpu_candidates(img, 16)
+    lat_int = cpu_candidates(img, 16, 1)
+    assert (lat_int[corner == 1] == 1).all()
+    assert (lat[lat_int == 1] == 1).all()
+    assert corner.sum() <= lat_int.sum() <= lat.sum()
+
+    for name in ("single_pixel",):
+        img, n_blobs = SCENES[name]()
+        seed_mask = _canonical_seed_mask(img)
+        assert (cpu_candidates(img, 8, 1)[seed_mask] == 1).all()
+    img, _ = scenes.serpentine_scene(48, 48)
+    # a 1-px snake has NO interior pixels: interior-lattice == corner
+    np.testing.assert_array_equal(cpu_candidates(img, 8, 1),
+                                  cpu_candidates(img))
+
+
+@pytest.mark.parametrize("lattice", [1, 5, 32])
+@pytest.mark.parametrize("name", ["two_squares", "two_disks", "u_shape",
+                                  "single_pixel", "serpentine_like"])
+def test_interior_matches_oracle(name, lattice):
+    if name == "serpentine_like":
+        img, _ = scenes.serpentine_scene(48, 48)
+    else:
+        img, _ = SCENES[name]()
+    ref_v, ref_d, ref_l, ref_levels, ref_filled = \
+        cpu_fill_from_candidates(img, lattice, 1)
+    r = flood_fill(img, variant="seed_merge", lattice=lattice,
+                   interior=True)
+    np.testing.assert_array_equal(r.visited, ref_v)
+    np.testing.assert_array_equal(r.label, ref_l)
+    np.testing.assert_array_equal(r.depth, ref_d)
+    assert r.levels == ref_levels and r.filled == ref_filled
+    assert r.interior
+
+
+@pytest.mark.parametrize("build", ["r128", "split"])
+def test_builds_are_bit_exact_with_fused(build):
+    """The register experiments change occupancy, never the answer."""
+    for name, kw in (("two_squares", {}), ("u_shape", {}),
+                     ("comb", {}), ("blob_grid", {"interior": True})):
+        img, _ = SCENES[name]()
+        fused = flood_fill(img, variant="seed_merge", lattice=16, **kw)
+        other = flood_fill(img, variant="seed_merge", lattice=16,
+                           build=build, **kw)
+        np.testing.assert_array_equal(fused.img, other.img)
+        np.testing.assert_array_equal(fused.label, other.label)
+        np.testing.assert_array_equal(fused.depth, other.depth)
+        np.testing.assert_array_equal(fused.visited, other.visited)
+        # prov_label is deliberately NOT compared exactly: it records
+        # which wave won each claim race, and at equidistant seam pixels
+        # the winner is timing-dependent — different grids shuffle it.
+        # Structural check instead: prov covers exactly the visited set.
+        np.testing.assert_array_equal(other.prov_label >= 0,
+                                      other.visited.astype(bool))
+        assert fused.seeds == other.seeds
+        assert fused.candidates == other.candidates
+        assert other.build == build
+
+
+def test_split_build_phase_keys_match_fused():
+    img, _ = SCENES["u_shape"]()
+    r = flood_fill(img, variant="seed_merge", lattice=16, build="split")
+    assert tuple(r.phase_ms) == ("init", "scan", "fill", "compress",
+                                 "flatten")
+    assert r.phase_ms["compress"] >= 0 and r.phase_ms["flatten"] >= 0
+
+
+def test_build_and_interior_validation():
+    img, _ = SCENES["two_squares"]()
+    with pytest.raises(ValueError, match="build"):
+        flood_fill(img, variant="seed_merge", lattice=16, build="turbo")
+    with pytest.raises(ValueError, match="build"):
+        flood_fill(img, variant="seed_merge", build="split")  # no lattice
+    with pytest.raises(ValueError, match="instrumented-only"):
+        flood_fill(img, variant="seed_merge", lattice=16, build="split",
+                   bare=True)
+    with pytest.raises(ValueError, match="interior"):
+        flood_fill(img, variant="seed_merge", interior=True)  # no lattice
+    with pytest.raises(ValueError, match="interior"):
+        flood_fill(img, variant="seed_merge", lattice=0, interior=True)
+
+
 # ------------------------------------------------------------ phase timing
 
 def test_phase_timing_reported():

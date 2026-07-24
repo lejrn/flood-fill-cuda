@@ -169,6 +169,19 @@ def _warp_enqueue_global(arr, state, rear_slot, item, counters):
 
 
 @cuda.jit(device=True, inline=True)
+def _is_interior(img, x, y, width, height, dx, dy):
+    """All 8 neighbors in-bounds and red — the interior-seeding test
+    (lattice hits only; the corner rule stays the coverage guarantee,
+    because thin shapes have NO interior pixels at all)."""
+    for d in range(8):
+        nx = x + dx[d]
+        ny = y + dy[d]
+        if not (0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny)):
+            return False
+    return True
+
+
+@cuda.jit(device=True, inline=True)
 def _find(parent, i):
     """Chase to the root. Read-only — never compresses (concurrent-phase
     safe); a stale read costs the caller one atomic.min retry at worst."""
@@ -755,8 +768,9 @@ def seed_merge_bare_kernel(img, visited, depth, parent, label_map, queue,
 @cuda.jit(link=[SMID_CU])
 def seed_merge_lat_kernel(img, visited, depth, owner, parent, label_map,
                           prov_label, queue, q_state, counters, block_stats,
-                          level_sizes, phase_ns, lat_stride):
-    """Host contract: as seed_merge_kernel, plus lat_stride (int >= 0)."""
+                          level_sizes, phase_ns, lat_stride, lat_interior):
+    """Host contract: as seed_merge_kernel, plus lat_stride (int >= 0)
+    and lat_interior (0/1: lattice hits must also pass _is_interior)."""
     grid = cuda.cg.this_grid()
     bx = cuda.blockIdx.x
     tid = cuda.grid(1)
@@ -786,13 +800,16 @@ def seed_merge_lat_kernel(img, visited, depth, owner, parent, label_map,
     if tid == 0:
         phase_ns[1] = get_globaltimer()
 
-    # P1: candidate scan — corner rule OR lattice point
+    # P1: candidate scan — corner rule OR (lattice point [AND interior])
     for i in range(tid, n, stride):
         x = i // height
         y = i % height
         if _is_red(img, x, y):
             is_cand = (lat_stride > 0 and x % lat_stride == 0
-                       and y % lat_stride == 0)
+                       and y % lat_stride == 0
+                       and (lat_interior == 0
+                            or _is_interior(img, x, y, width, height,
+                                            dx, dy)))
             if not is_cand:
                 found = False
                 for d in range(4):
@@ -921,7 +938,8 @@ def seed_merge_lat_kernel(img, visited, depth, owner, parent, label_map,
 
 @cuda.jit
 def seed_merge_lat_bare_kernel(img, visited, depth, parent, label_map,
-                               queue, q_state, counters, lat_stride):
+                               queue, q_state, counters, lat_stride,
+                               lat_interior):
     grid = cuda.cg.this_grid()
     tid = cuda.grid(1)
     stride = cuda.gridsize(1)
@@ -945,7 +963,10 @@ def seed_merge_lat_bare_kernel(img, visited, depth, parent, label_map,
         y = i % height
         if _is_red(img, x, y):
             is_cand = (lat_stride > 0 and x % lat_stride == 0
-                       and y % lat_stride == 0)
+                       and y % lat_stride == 0
+                       and (lat_interior == 0
+                            or _is_interior(img, x, y, width, height,
+                                            dx, dy)))
             if not is_cand:
                 found = False
                 for d in range(4):
@@ -1012,6 +1033,208 @@ def seed_merge_lat_bare_kernel(img, visited, depth, parent, label_map,
     if tid == 0:
         counters[FILLED] = q_state[Q_REAR]
         counters[LEVELS] = level
+
+
+# ------------------------------------------- register-experiment builds
+# The lat kernel crossed the 128-regs/thread line (65,536 regs/SM / 256
+# threads / 2 blocks) and dropped the cooperative grid from 48 to 24
+# blocks. Two candidate fixes, raced by benchmarks/tuning.py; both are
+# EXPERIMENT builds — instrumented only, no bare twins (their claim is
+# about occupancy, not observer cost; the fused family stays the
+# published one).
+#
+# r128: the identical Python function compiled with max_registers=128 —
+# the compiler must spill the excess values to local memory (slow, L1/
+# L2-cached) in exchange for two resident blocks per SM.
+seed_merge_lat_r128_kernel = cuda.jit(
+    link=[SMID_CU], max_registers=128)(seed_merge_lat_kernel.py_func)
+
+
+# split: the cooperative kernel keeps only what NEEDS grid.sync (P0 iota,
+# P1 scan, P2 fill) — hopefully back under the register line — while
+# compress and flatten move to two ordinary kernels below. Those are
+# plain grid-stride sweeps with no barrier inside; the required ordering
+# (compress completes before flatten reads parent) is free, because
+# kernel launches on one stream execute in order. They run at FULL
+# occupancy, unconstrained by the cooperative-residency rule.
+
+
+@cuda.jit(link=[SMID_CU])
+def seed_merge_lat_core_kernel(img, visited, depth, owner, parent,
+                               label_map, queue, q_state, counters,
+                               block_stats, level_sizes, phase_ns,
+                               lat_stride, lat_interior):
+    """Host contract: as seed_merge_lat_kernel minus prov_label — the
+    host must follow this launch with lat_compress_kernel then
+    lat_finish_kernel (stream-ordered) to produce final labels/paint."""
+    grid = cuda.cg.this_grid()
+    bx = cuda.blockIdx.x
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+
+    my_union_attempts = 0
+    my_union_done = 0
+    my_union_cycles = 0
+
+    if tid == 0:
+        phase_ns[0] = get_globaltimer()
+
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+    if tid == 0:
+        phase_ns[1] = get_globaltimer()
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            is_cand = (lat_stride > 0 and x % lat_stride == 0
+                       and y % lat_stride == 0
+                       and (lat_interior == 0
+                            or _is_interior(img, x, y, width, height,
+                                            dx, dy)))
+            if not is_cand:
+                found = False
+                for d in range(4):
+                    nx = x + pdx[d]
+                    ny = y + pdy[d]
+                    if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                        found = True
+                is_cand = not found
+            if is_cand:
+                visited[x, y] = 1
+                label_map[x, y] = i
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    grid.sync()
+    if tid == 0:
+        phase_ns[2] = get_globaltimer()
+    rear = q_state[Q_REAR]
+    grid.sync()
+    n_candidates = rear
+
+    front = 0
+    level = 0
+    peak_level = 0
+    peak_occ = 0
+    active_thread_sum = 0
+    active_warp_sum = 0
+    my_processed = 0
+    my_cas_attempts = 0
+
+    while front < rear:
+        level_size = rear - front
+        if level_size > peak_level:
+            peak_level = level_size
+        active = min(level_size, stride)
+        active_thread_sum += active
+        active_warp_sum += (active + 31) // 32
+        if tid == 0 and level < level_sizes.shape[0]:
+            level_sizes[level] = level_size
+
+        for i in range(front + tid, rear, stride):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+
+            lbl = label_map[x, y]
+            depth[x, y] = level
+            owner[x, y] = bx
+            my_processed += 1
+
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    my_cas_attempts += 1
+                    if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                        label_map[nx, ny] = lbl
+                        _warp_enqueue_global(queue, q_state, Q_REAR,
+                                             nx * height + ny, counters)
+                    else:
+                        other = label_map[nx, ny]
+                        if other >= 0 and other != lbl:
+                            my_union_attempts += 1
+                            t0 = get_clock64()
+                            my_union_done += _union(parent, lbl, other)
+                            my_union_cycles += get_clock64() - t0
+
+        grid.sync()
+        new_rear = q_state[Q_REAR]
+        grid.sync()
+
+        level += 1
+        occ = new_rear - front
+        if occ > peak_occ:
+            peak_occ = occ
+        front = rear
+        rear = new_rear
+
+    if tid == 0:
+        phase_ns[3] = get_globaltimer()
+
+    cuda.atomic.add(counters, PROCESSED, my_processed)
+    cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
+    cuda.atomic.add(counters, UNION_ATTEMPTS, my_union_attempts)
+    cuda.atomic.add(counters, UNION_DONE, my_union_done)
+    cuda.atomic.add(counters, UNION_CYCLES, my_union_cycles)
+    cuda.atomic.add(block_stats, (bx, BS_PROCESSED), my_processed)
+    if cuda.threadIdx.x == 0:
+        block_stats[bx, BS_SMID] = get_smid()
+    if tid == 0:
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
+        counters[PEAK_LEVEL] = peak_level
+        counters[PEAK_OCC] = peak_occ
+        counters[ACTIVE_THREAD_SUM] = active_thread_sum
+        counters[ACTIVE_WARP_SUM] = active_warp_sum
+        counters[CANDIDATES] = n_candidates
+
+
+@cuda.jit
+def lat_compress_kernel(parent):
+    """Plain grid-stride: rewrite every retired slot to its true root.
+    Post-fill the roots are static, so one pass fully flattens."""
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+    for i in range(tid, parent.shape[0], stride):
+        if parent[i] != i:
+            parent[i] = _find(parent, i)
+
+
+@cuda.jit
+def lat_finish_kernel(img, parent, label_map, prov_label):
+    """Plain grid-stride: prov snapshot, resolve (<= 1 hop after
+    lat_compress_kernel), relabel, paint. Must launch AFTER
+    lat_compress_kernel on the same stream."""
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+    palette = cuda.const.array_like(PALETTE_HOST)
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        prov = label_map[x, y]
+        if prov >= 0:
+            prov_label[x, y] = prov
+            final = _find(parent, prov)
+            label_map[x, y] = final
+            c = final % N_PALETTE
+            img[x, y, 0] = palette[c, 0]
+            img[x, y, 1] = palette[c, 1]
+            img[x, y, 2] = palette[c, 2]
 
 
 # ------------------------------------------------- benchmark phase kernels
