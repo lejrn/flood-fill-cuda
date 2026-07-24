@@ -54,13 +54,22 @@ def _is_red(img, x, y):
 
 
 @njit(cache=True)
-def cpu_candidates(img):
-    """int32 (width, height) mask: 1 where the candidate rule fires."""
+def cpu_candidates(img, lattice=0):
+    """int32 (width, height) mask: 1 where the candidate rule fires.
+
+    lattice=0 is the pure corner rule. lattice=S > 0 ADDS every red pixel
+    at (x % S == 0, y % S == 0) — the seeding-density experiment's
+    enlarged set. The corner rule always stays included, so the lex-min
+    pixel of every blob is a candidate at any S and canonical labels are
+    stride-invariant."""
     width, height = img.shape[0], img.shape[1]
     mask = np.zeros((width, height), dtype=np.int32)
     for x in range(width):
         for y in range(height):
             if not _is_red(img, x, y):
+                continue
+            if lattice > 0 and x % lattice == 0 and y % lattice == 0:
+                mask[x, y] = 1
                 continue
             found = False
             for d in range(4):
@@ -174,15 +183,16 @@ def cpu_fill_canonical(img):
 
 
 @njit(cache=True)
-def cpu_fill_from_candidates(img):
+def cpu_fill_from_candidates(img, lattice=0):
     """seed_merge oracle: every candidate starts a wave at level 0.
 
     Returns (visited, depth, label, levels, filled); depth is the exact
     BFS distance to the NEAREST candidate of the pixel's own blob, label
     the canonical map (identical to cpu_fill_canonical's — merging must
-    erase any trace of which candidate got there first).
+    erase any trace of which candidate got there first). lattice widens
+    the candidate set exactly as cpu_candidates does.
     """
     label, _ = cpu_label_components(img)
-    seed_mask = cpu_candidates(img)
+    seed_mask = cpu_candidates(img, lattice)
     visited, depth, levels, filled = _multisource_fill(img, seed_mask)
     return visited, depth, label, levels, filled

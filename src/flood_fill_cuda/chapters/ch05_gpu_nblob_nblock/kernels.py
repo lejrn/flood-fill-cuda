@@ -119,11 +119,12 @@ NUM_COUNTERS = 13
 # stamps written by tid 0 at grid.sync boundaries (instrumented kernels
 # only). The stamps sit at barriers, so each delta is the WALL time of
 # one phase for the whole grid:
-#   seed_merge: [0] entry  [1] iota done  [2] scan done  [3] fill done
-#               [4] flatten+repaint done
-#   ccl_fill:   [0] entry  [1] iota done  [2] union merge done
-#               [3] flatten+seed-extract done  [4] fill done
-N_PHASES = 5
+#   seed_merge:     [0] entry  [1] iota done  [2] scan done  [3] fill done
+#                   [4] flatten+repaint done
+#   seed_merge_lat: as seed_merge plus [4] compress done, [5] flatten done
+#   ccl_fill:       [0] entry  [1] iota done  [2] union merge done
+#                   [3] flatten+seed-extract done  [4] fill done
+N_PHASES = 6
 
 # Columns of the (blocks, 2) int64 block_stats array
 BS_PROCESSED = 0        # pixels this block dequeued -> N-way load balance
@@ -710,6 +711,291 @@ def seed_merge_bare_kernel(img, visited, depth, parent, label_map, queue,
         level += 1
         front = rear
         rear = new_rear
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        prov = label_map[x, y]
+        if prov >= 0:
+            final = _find(parent, prov)
+            label_map[x, y] = final
+            c = final % N_PALETTE
+            img[x, y, 0] = palette[c, 0]
+            img[x, y, 1] = palette[c, 1]
+            img[x, y, 2] = palette[c, 2]
+
+    if tid == 0:
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
+
+
+# ----------------------------------------------- seed_merge_lat (v2 twins)
+# The seeding-density experiment: same collision/union protocol as
+# seed_merge, three deltas —
+#   1. P1 also seeds every red pixel on a lat_stride x lat_stride lattice
+#      (a launch-uniform HOST parameter — host-known, so the ch04 lesson
+#      does not apply). The corner rule stays included, so the lex-min
+#      pixel is still a candidate and canonical labels are unchanged for
+#      every stride. lat_stride=0 disables the lattice (isolating delta
+#      3); lat_stride=1 makes every red pixel a wave of its own — the
+#      ccl-like boundary where levels collapse to 1 and ALL connectivity
+#      flows through collisions.
+#   2. P2 is verbatim: adjacent level-0 candidates are already handled by
+#      the ordinary collision branch (both pre-visited; the dequeuer's
+#      probe CAS-fails and unions).
+#   3. A COMPRESS phase between fill and flatten: one grid-stride pass
+#      rewrites every retired parent slot to its true root. Post-fill the
+#      roots are static; each thread chases to a root before writing, and
+#      a concurrent chase that reads a fresh write only shortcuts — one
+#      pass fully flattens, so the per-pixel find in the repaint is <= 1
+#      hop regardless of how many thousands of lattice seeds merged
+#      (the fix for the comb's measured 57 ms chain-walk).
+
+
+@cuda.jit(link=[SMID_CU])
+def seed_merge_lat_kernel(img, visited, depth, owner, parent, label_map,
+                          prov_label, queue, q_state, counters, block_stats,
+                          level_sizes, phase_ns, lat_stride):
+    """Host contract: as seed_merge_kernel, plus lat_stride (int >= 0)."""
+    grid = cuda.cg.this_grid()
+    bx = cuda.blockIdx.x
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+    palette = cuda.const.array_like(PALETTE_HOST)
+
+    my_union_attempts = 0
+    my_union_done = 0
+    my_union_cycles = 0
+
+    if tid == 0:
+        phase_ns[0] = get_globaltimer()
+
+    # P0: every pixel its own root
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+    if tid == 0:
+        phase_ns[1] = get_globaltimer()
+
+    # P1: candidate scan — corner rule OR lattice point
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            is_cand = (lat_stride > 0 and x % lat_stride == 0
+                       and y % lat_stride == 0)
+            if not is_cand:
+                found = False
+                for d in range(4):
+                    nx = x + pdx[d]
+                    ny = y + pdy[d]
+                    if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                        found = True
+                is_cand = not found
+            if is_cand:
+                visited[x, y] = 1
+                label_map[x, y] = i
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    # The fence sandwich (see module doc)
+    grid.sync()
+    if tid == 0:
+        phase_ns[2] = get_globaltimer()
+    rear = q_state[Q_REAR]
+    grid.sync()
+    n_candidates = rear
+
+    # P2: racing multisource fill — verbatim seed_merge
+    front = 0
+    level = 0
+    peak_level = 0
+    peak_occ = 0
+    active_thread_sum = 0
+    active_warp_sum = 0
+    my_processed = 0
+    my_cas_attempts = 0
+
+    while front < rear:
+        level_size = rear - front
+        if level_size > peak_level:
+            peak_level = level_size
+        active = min(level_size, stride)
+        active_thread_sum += active
+        active_warp_sum += (active + 31) // 32
+        if tid == 0 and level < level_sizes.shape[0]:
+            level_sizes[level] = level_size
+
+        for i in range(front + tid, rear, stride):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+
+            lbl = label_map[x, y]
+            depth[x, y] = level
+            owner[x, y] = bx
+            my_processed += 1
+
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    my_cas_attempts += 1
+                    if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                        label_map[nx, ny] = lbl
+                        _warp_enqueue_global(queue, q_state, Q_REAR,
+                                             nx * height + ny, counters)
+                    else:
+                        other = label_map[nx, ny]
+                        if other >= 0 and other != lbl:
+                            my_union_attempts += 1
+                            t0 = get_clock64()
+                            my_union_done += _union(parent, lbl, other)
+                            my_union_cycles += get_clock64() - t0
+
+        grid.sync()
+        new_rear = q_state[Q_REAR]
+        grid.sync()
+
+        level += 1
+        occ = new_rear - front
+        if occ > peak_occ:
+            peak_occ = occ
+        front = rear
+        rear = new_rear
+
+    if tid == 0:
+        phase_ns[3] = get_globaltimer()
+
+    # COMPRESS: rewrite every retired slot to its true root (delta 3)
+    for i in range(tid, n, stride):
+        if parent[i] != i:
+            parent[i] = _find(parent, i)
+    grid.sync()
+    if tid == 0:
+        phase_ns[4] = get_globaltimer()
+
+    # P3: flatten + relabel + repaint — find is now <= 1 hop
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        prov = label_map[x, y]
+        if prov >= 0:
+            prov_label[x, y] = prov
+            final = _find(parent, prov)
+            label_map[x, y] = final
+            c = final % N_PALETTE
+            img[x, y, 0] = palette[c, 0]
+            img[x, y, 1] = palette[c, 1]
+            img[x, y, 2] = palette[c, 2]
+
+    grid.sync()
+    if tid == 0:
+        phase_ns[5] = get_globaltimer()
+
+    cuda.atomic.add(counters, PROCESSED, my_processed)
+    cuda.atomic.add(counters, CAS_ATTEMPTS, my_cas_attempts)
+    cuda.atomic.add(counters, UNION_ATTEMPTS, my_union_attempts)
+    cuda.atomic.add(counters, UNION_DONE, my_union_done)
+    cuda.atomic.add(counters, UNION_CYCLES, my_union_cycles)
+    cuda.atomic.add(block_stats, (bx, BS_PROCESSED), my_processed)
+    if cuda.threadIdx.x == 0:
+        block_stats[bx, BS_SMID] = get_smid()
+    if tid == 0:
+        counters[FILLED] = q_state[Q_REAR]
+        counters[LEVELS] = level
+        counters[PEAK_LEVEL] = peak_level
+        counters[PEAK_OCC] = peak_occ
+        counters[ACTIVE_THREAD_SUM] = active_thread_sum
+        counters[ACTIVE_WARP_SUM] = active_warp_sum
+        counters[CANDIDATES] = n_candidates
+
+
+@cuda.jit
+def seed_merge_lat_bare_kernel(img, visited, depth, parent, label_map,
+                               queue, q_state, counters, lat_stride):
+    grid = cuda.cg.this_grid()
+    tid = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    width = img.shape[0]
+    height = img.shape[1]
+    n = width * height
+
+    dx = cuda.const.array_like(DX8_HOST)
+    dy = cuda.const.array_like(DY8_HOST)
+    pdx = cuda.const.array_like(PDX_HOST)
+    pdy = cuda.const.array_like(PDY_HOST)
+    palette = cuda.const.array_like(PALETTE_HOST)
+
+    for i in range(tid, n, stride):
+        parent[i] = i
+    grid.sync()
+
+    for i in range(tid, n, stride):
+        x = i // height
+        y = i % height
+        if _is_red(img, x, y):
+            is_cand = (lat_stride > 0 and x % lat_stride == 0
+                       and y % lat_stride == 0)
+            if not is_cand:
+                found = False
+                for d in range(4):
+                    nx = x + pdx[d]
+                    ny = y + pdy[d]
+                    if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                        found = True
+                is_cand = not found
+            if is_cand:
+                visited[x, y] = 1
+                label_map[x, y] = i
+                _warp_enqueue_global(queue, q_state, Q_REAR, i, counters)
+
+    grid.sync()
+    rear = q_state[Q_REAR]
+    grid.sync()
+
+    front = 0
+    level = 0
+
+    while front < rear:
+        for i in range(front + tid, rear, stride):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+            lbl = label_map[x, y]
+            depth[x, y] = level
+            for d in range(8):
+                nx = x + dx[d]
+                ny = y + dy[d]
+                if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):
+                    if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:
+                        label_map[nx, ny] = lbl
+                        _warp_enqueue_global(queue, q_state, Q_REAR,
+                                             nx * height + ny, counters)
+                    else:
+                        other = label_map[nx, ny]
+                        if other >= 0 and other != lbl:
+                            _union(parent, lbl, other)
+        grid.sync()
+        new_rear = q_state[Q_REAR]
+        grid.sync()
+        level += 1
+        front = rear
+        rear = new_rear
+
+    for i in range(tid, n, stride):
+        if parent[i] != i:
+            parent[i] = _find(parent, i)
+    grid.sync()
 
     for i in range(tid, n, stride):
         x = i // height
