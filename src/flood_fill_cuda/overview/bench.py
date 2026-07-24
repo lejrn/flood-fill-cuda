@@ -1,22 +1,35 @@
 """The grand table: every approach from every chapter, one common grid.
 
 Rows are shapes x scales (squares, disks, serpentine, comb, two-blob
-pairs, random noise); columns are ALL kernel variants from ch01-ch05
-plus the two CPU bars. Cells are median kernel ms — the same
-measurement every chapter's own benchmark reports. Empty cells are part
-of the story: "—" means the job is outside that approach's contract
-(one-blob kernels cannot fill a two-blob scene, two-blob kernels cannot
-fill N), "overflow" means the ring capacity tripped, "capped" means the
-pure-Python bar would take too long at that scale.
+pairs, random noise, plus any external PNGs present in images/input/);
+columns are ALL kernel variants from ch01-ch05 plus the two CPU bars.
+Cells are median kernel ms — the same measurement every chapter's own
+benchmark reports.
+
+Every cell answers "what would it cost THIS stage to do the WHOLE
+job", even beyond its native contract:
+
+- one-blob kernels (ch01-ch03) on a two-blob scene: MEASURED as the
+  sum of one call per blob (what using that stage would really cost).
+- one/two-blob kernels on an N-blob scene: a full loop is hours at
+  755k blobs, so the cell is an ESTIMATE — one call per blob (per pair
+  for ch04), median per-call kernel ms over a k-blob sample x the call
+  count. Estimated cells are marked, carry their formula, and never
+  win a row.
+- "—" survives only where the job cannot be expressed at all: ch04's
+  kernel takes exactly two blobs in two components, so one-blob scenes
+  are outside its input space.
+- pure Python runs everything (single run above 300k px) up to a 20M
+  red-px cap.
 
 Every shape is the same component set under 4- and 8-connectivity
 (solid shapes, gaps >= 8), so cross-connectivity cells compare the same
-job; the per-row crosscheck asserts every completed GPU cell agrees on
-the filled pixel count.
+job; the per-row crosscheck asserts every completed (non-estimated)
+cell agrees on the filled pixel count.
 
 Run:  PYTHONUNBUFFERED=1 uv run python -m flood_fill_cuda.overview.bench
 Writes overview_<stamp>.json to results/overview/benchmark_results/.
-Budget ~5-10 min (15 rows x up to 20 columns x 5 GPU rounds).
+Budget ~20-35 min (17 rows x up to 20 columns; sampling for estimates).
 """
 
 import os
@@ -51,7 +64,10 @@ RESULTS_DIR = results_paths.results_dir("overview", "benchmark_results")
 TPB = 256
 GPU_REPEATS = 5
 NJIT_REPEATS = 3
-PURE_CAP = 1_500_000     # est. filled px above which pure Python is "capped"
+PURE_CAP = 20_000_000        # red px above which pure Python is "capped"
+PURE_SINGLE = 300_000        # above this: single pure-Python run, not 3
+EST_SAMPLE = 16              # blobs sampled per estimated cell
+EST_SAMPLE_HUGE = 6          # ... on images past ~20M px
 
 
 def _lex_min_seed(img):
@@ -64,27 +80,49 @@ def _lex_min_seed(img):
     return int(x), int(y)
 
 
-def pure_python_bfs(img, seed_x, seed_y):
-    """The ch00 bar: classic sequential 4-conn BFS on a copy."""
+def _component_seeds(img):
+    """One seed per blob: the oracle's canonical labels ARE the lex-min
+    linear indices, so the unique label values decode straight into one
+    red pixel per component."""
+    label, _ = oracle5.cpu_label_components(img)
+    height = img.shape[1]
+    roots = np.unique(label[label >= 0])
+    return [(int(v) // height, int(v) % height) for v in roots]
+
+
+_CONN4 = ((1, 0), (0, 1), (-1, 0), (0, -1))
+_CONN8 = _CONN4 + ((1, 1), (1, -1), (-1, 1), (-1, -1))
+
+
+def pure_python_bfs(img, seeds, connectivity=4):
+    """The ch00 bar: classic sequential BFS on a copy — one shared
+    visited array, one BFS per seed (blobs are disjoint). 4-conn on the
+    solid shapes (the historical ch00 bar; identical fill there), 8-conn
+    on N-blob rows where the components are 8-conn by definition."""
     out = img.copy()
     width, height = out.shape[0], out.shape[1]
+    offsets = _CONN4 if connectivity == 4 else _CONN8
     visited = np.zeros((width, height), dtype=np.uint8)
-    visited[seed_x, seed_y] = 1
-    queue = deque([(seed_x, seed_y)])
     filled = 0
-    while queue:
-        x, y = queue.popleft()
-        out[x, y, 0] = 0
-        out[x, y, 1] = 0
-        out[x, y, 2] = 255
-        filled += 1
-        for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < width and 0 <= ny < height and not visited[nx, ny]:
-                p = out[nx, ny]
-                if p[0] == 255 and p[1] == 0 and p[2] == 0:
-                    visited[nx, ny] = 1
-                    queue.append((nx, ny))
+    for seed_x, seed_y in seeds:
+        if visited[seed_x, seed_y]:
+            continue
+        visited[seed_x, seed_y] = 1
+        queue = deque([(seed_x, seed_y)])
+        while queue:
+            x, y = queue.popleft()
+            out[x, y, 0] = 0
+            out[x, y, 1] = 0
+            out[x, y, 2] = 255
+            filled += 1
+            for dx, dy in offsets:
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < width and 0 <= ny < height
+                        and not visited[nx, ny]):
+                    p = out[nx, ny]
+                    if p[0] == 255 and p[1] == 0 and p[2] == 0:
+                        visited[nx, ny] = 1
+                        queue.append((nx, ny))
     return filled
 
 
@@ -161,6 +199,19 @@ ROWS = [
      _n(lambda: ch05_scenes.random_blobs_scene(4000, 4000, density=0.3,
                                                rng_seed=0))),
 ]
+
+# External PNGs (gitignored inputs — rows appear only when present).
+_PNG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        *[".."] * 3, "images", "input")
+for _key, _fname, _note, _est in (
+        ("png_blobs", "input_blobs.png",
+         "external PNG, 9000², ~2.5k blobs (13.5M red px)", 13_451_960),
+        ("png_blocks", "input_blocks.png",
+         "external PNG, 1000², ~21.6k blocks", 387_587)):
+    _p = os.path.abspath(os.path.join(_PNG_DIR, _fname))
+    if os.path.exists(_p):
+        ROWS.append((_key, "external PNG", _note, _est,
+                     _n(lambda p=_p: ch05_scenes.png_scene(p))))
 
 
 # --------------------------------------------------------------- columns
@@ -298,14 +349,88 @@ def _cell_pure(ctx, est_filled):
     if est_filled > PURE_CAP:
         return {"skip": "capped"}
     if ctx["kind"] == "one":
-        seeds = [(ctx["sx"], ctx["sy"])]
+        seeds, conn = [(ctx["sx"], ctx["sy"])], 4
+    elif ctx["kind"] == "two":
+        seeds, conn = ctx["seeds"], 4
     else:
-        seeds = ctx["seeds"]
-    t0 = time.perf_counter()
-    filled = sum(pure_python_bfs(ctx["img"], sx, sy) for sx, sy in seeds)
-    ms = (time.perf_counter() - t0) * 1000.0
-    return {"ms": ms, "ms_min": ms, "ms_max": ms, "filled": filled,
+        seeds, conn = ctx["seeds"], 8      # N-blob components are 8-conn
+    repeats = 1 if est_filled > PURE_SINGLE else NJIT_REPEATS
+    vals, filled = [], 0
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        filled = pure_python_bfs(ctx["img"], seeds, connectivity=conn)
+        vals.append((time.perf_counter() - t0) * 1000.0)
+    return {**_stats(vals), "filled": filled, "skip": None}
+
+
+def _cell_gpu_loop(runner, ctx):
+    """A one-blob kernel doing a multi-blob job, MEASURED: one call per
+    blob, kernel times summed per round. This is what really using that
+    stage on this scene would cost."""
+    seeds = ctx["seeds"]
+    subs = [{"kind": "one", "img": ctx["img"], "sx": sx, "sy": sy}
+            for sx, sy in seeds]
+    filled = 0
+    try:
+        for sub in subs:                    # probe + shape warmup
+            r = runner(sub)
+            filled += int(r.filled)
+            del r
+    except RuntimeError as e:
+        msg = str(e).lower()
+        return {"skip": ("overflow" if any(w in msg for w in
+                                           ("overflow", "capacity", "ring"))
+                         else f"error:{type(e).__name__}")}
+    except NotImplementedError:
+        return {"skip": "unsupported"}
+    vals = []
+    for _ in range(GPU_REPEATS):
+        total = 0.0
+        for sub in subs:
+            r = runner(sub)
+            total += r.kernel_ms
+            del r
+        vals.append(total)
+    return {**_stats(vals), "filled": filled, "calls": len(subs),
             "skip": None}
+
+
+def _cell_gpu_est(runner, ctx, pair=False):
+    """A one/two-blob kernel on an N-blob scene, ESTIMATED: median
+    per-call kernel ms over a k-blob sample x the number of calls a
+    full loop would need. Marked est; never a row winner."""
+    seeds = ctx["seeds"]
+    n = len(seeds)
+    w, h = ctx["img"].shape[0], ctx["img"].shape[1]
+    k = EST_SAMPLE_HUGE if w * h > 20_000_000 else EST_SAMPLE
+    if pair:
+        n_calls = (n + 1) // 2
+        pairs = [(seeds[i], seeds[i + 1]) for i in range(0, n - 1, 2)]
+        idx = np.linspace(0, len(pairs) - 1,
+                          min(k, len(pairs))).astype(int)
+        subs = [{"kind": "two", "img": ctx["img"], "seeds": list(pairs[i])}
+                for i in np.unique(idx)]
+    else:
+        n_calls = n
+        idx = np.linspace(0, n - 1, min(k, n)).astype(int)
+        subs = [{"kind": "one", "img": ctx["img"],
+                 "sx": seeds[i][0], "sy": seeds[i][1]}
+                for i in np.unique(idx)]
+    vals = []
+    try:
+        for sub in subs:
+            r = runner(sub)
+            vals.append(r.kernel_ms)
+            del r
+    except RuntimeError as e:
+        msg = str(e).lower()
+        return {"skip": ("overflow" if any(w_ in msg for w_ in
+                                           ("overflow", "capacity", "ring"))
+                         else f"error:{type(e).__name__}")}
+    except NotImplementedError:
+        return {"skip": "unsupported"}
+    return {"ms": statistics.median(vals) * n_calls, "est": True,
+            "sample": len(subs), "calls": n_calls, "skip": None}
 
 
 def _warmup():
@@ -332,11 +457,13 @@ def _warmup():
 def bench_row(key, family, note, est_filled, build):
     ctx = build()
     img = ctx["img"]
+    if ctx["kind"] == "n":
+        # one seed per blob, for the CPU bar and the loop/estimate cells
+        ctx["seeds"] = _component_seeds(img)
+        ctx["n_blobs"] = len(ctx["seeds"])
     cells = {}
     for col_key, _, _, kinds in CPU_COLS:
-        if ctx["kind"] not in kinds:
-            cells[col_key] = {"skip": "na"}
-        elif col_key == "pure_python":
+        if col_key == "pure_python":
             cells[col_key] = _cell_pure(ctx, est_filled)
         else:
             cells[col_key] = _cell_njit(ctx)
@@ -345,15 +472,24 @@ def bench_row(key, family, note, est_filled, build):
             cells[col_key] = {"skip": STATIC_SKIPS[col_key]}
         elif ctx["kind"] in kinds:
             cells[col_key] = _cell_gpu(runner, ctx)
+        elif ctx["kind"] == "two" and kinds == ("one",):
+            cells[col_key] = _cell_gpu_loop(runner, ctx)
+        elif ctx["kind"] == "n" and kinds == ("one",):
+            cells[col_key] = _cell_gpu_est(runner, ctx)
+        elif ctx["kind"] == "n" and kinds == ("two",):
+            cells[col_key] = _cell_gpu_est(runner, ctx, pair=True)
         else:
+            # the one truly impossible family: ch04 needs exactly two
+            # blobs in two components — one-blob scenes are outside
+            # its input space
             cells[col_key] = {"skip": "na"}
 
     fills = {c["filled"] for c in cells.values()
              if c.get("skip") is None and "filled" in c}
     crosscheck = "OK" if len(fills) <= 1 else "MISMATCH"
     gpu_ms = {k: c["ms"] for k, c in cells.items()
-              if c.get("skip") is None and k != "pure_python"
-              and k != "njit"}
+              if c.get("skip") is None and not c.get("est")
+              and k != "pure_python" and k != "njit"}
     best = min(gpu_ms, key=gpu_ms.get) if gpu_ms else None
 
     row = {"row": key, "family": family, "note": note,
@@ -366,8 +502,12 @@ def bench_row(key, family, note, est_filled, build):
     parts = []
     for col_key in [c[0] for c in CPU_COLS] + [c[0] for c in COLS]:
         c = cells[col_key]
-        parts.append(f"{col_key}="
-                     f"{'%.2f' % c['ms'] if c.get('skip') is None else c['skip']}")
+        if c.get("skip") is not None:
+            parts.append(f"{col_key}={c['skip']}")
+        elif c.get("est"):
+            parts.append(f"{col_key}≈{c['ms']:.0f}")
+        else:
+            parts.append(f"{col_key}={c['ms']:.2f}")
     print(f"\n{key}  ({note})  [{crosscheck}]  best={best}")
     print("  " + "  ".join(parts))
 
@@ -401,10 +541,16 @@ def main():
                     + [{"key": k, "group": g, "label": l}
                        for k, g, l, _, _ in COLS]),
         "experiment": (
-            "the grand table: every chapter's every variant on one "
-            "common scene x scale grid, kernel-only median ms; 'na' = "
-            "outside the approach's contract, 'overflow' = ring "
-            "capacity, 'capped' = pure Python too slow at this scale"),
+            "the grand table, full coverage: every chapter's every "
+            "variant on one common scene x scale grid, kernel-only "
+            "median ms. One-blob kernels on multi-blob scenes run one "
+            "call per blob — measured (summed) on two-blob rows, "
+            "estimated (k-blob sample x call count, est:true) on "
+            "N-blob rows. 'na' survives only for ch04 on one-blob "
+            "scenes (its kernel takes exactly two components); "
+            "'overflow' = ring capacity; 'capped' = pure Python past "
+            "20M red px; 'n/s' = the documented ch04-streams "
+            "cross-chapter deadlock"),
         "rows": [],
     }
     for key, family, note, est_filled, build in ROWS:

@@ -26,6 +26,15 @@ OUT_PATH = os.path.join(_REPO_ROOT, "site", "index.html")
 
 SKIP_LABELS = {"na": "—", "overflow": "overflow", "capped": "capped",
                "unsupported": "n/s"}
+SKIP_TIPS = {
+    "na": "ch04's kernel takes exactly two blobs in two components — "
+          "a one-blob scene is outside its input space",
+    "overflow": "ch01's shared-memory ring exceeded its 8192-slot "
+                "frontier capacity",
+    "capped": "pure Python past the 20M red-pixel cap",
+    "unsupported": "ch04 streams deadlocks after ch03's cooperative "
+                   "kernels in the same process — documented, skipped",
+}
 
 EXTRA_CSS = """
 .hero p { max-width: 68ch; }
@@ -49,6 +58,7 @@ dl.gloss dd { margin: 0; color: var(--ink-2); max-width: 90ch; }
   var(--grid); }
 .grand .skip { color: var(--muted); }
 .grand .best { font-weight: 700; }
+.grand .est { color: var(--ink-2); font-style: italic; }
 """
 
 
@@ -89,7 +99,8 @@ GLOSSARY = [
      "transfers."),
     ("median of N", "Each GPU cell is the median of 5 timed runs after "
      "one untimed warmup (JIT compilation and caches settle first); "
-     "@njit cells are median of 3; pure Python runs once."),
+     "@njit cells are median of 3; pure Python is median of 3 up to "
+     "300k px, a single run above."),
     ("blob / component", "A maximal group of red pixels connected to "
      "each other — the thing one flood fill fills."),
     ("seed", "A starting pixel handed to the kernel. Chapters 1–4 must "
@@ -131,12 +142,24 @@ GLOSSARY = [
     ("interior rule (I)", "A lattice seed only counts if all 8 of its "
      "neighbors are red — seeds land inside the mass, not on noisy "
      "staircase edges. Wins on rasterized disks."),
-    ("— / overflow / capped / n/s", "'—': the job is outside the "
-     "approach's contract (a one-blob kernel cannot fill a two-blob "
-     "scene; only ch05 can attempt N blobs). 'overflow': ch01's "
-     "shared-memory ring exceeded its 8192-slot capacity. 'capped': "
-     "pure Python would take too long at this scale (it runs only "
-     "≤1.5M filled px). 'n/s': not supported on this machine."),
+    ("per-blob loop", "A one-blob kernel (ch01–ch03) doing a multi-blob "
+     "job runs one call per blob. On two-blob rows the cell is the "
+     "MEASURED sum of both calls — what using that stage would really "
+     "cost. Kernel time only; each call would also pay allocation and "
+     "copies."),
+    ("≈ estimated", "On N-blob rows a full per-blob loop would take "
+     "hours (755k calls), so ch01–ch04 cells are estimates: median "
+     "per-call kernel ms over a k-blob sample × the number of calls "
+     "(one per blob; one per PAIR for ch04). Italic with '≈'; never "
+     "eligible to be a row winner and excluded from the crosscheck."),
+    ("— / overflow / capped / n/s", "'—': the job cannot be expressed "
+     "at all — ch04's kernel takes exactly two blobs in two distinct "
+     "components, so one-blob scenes are outside its input space. "
+     "'overflow': ch01's shared-memory ring exceeded its 8192-slot "
+     "capacity. 'capped': pure Python past the 20M red-px cap. 'n/s': "
+     "ch04's streams mode deadlocks after ch03's cooperative kernels "
+     "have run in the same process — a real cross-chapter finding, "
+     "documented in the bench source."),
 ]
 
 
@@ -169,10 +192,24 @@ def grand_table(data):
             skip = cell.get("skip")
             if skip is not None:
                 mark = SKIP_LABELS.get(skip, "err")
-                cells.append(f'<td class="skip">{mark}</td>')
+                tip = SKIP_TIPS.get(skip, "")
+                t = f' title="{tip}"' if tip else ""
+                cells.append(f'<td class="skip"{t}>{mark}</td>')
+                continue
+            if cell.get("est"):
+                tip = (f"ESTIMATED: {fmt_int(cell['calls'])} calls (one "
+                       f"per blob{' pair' if 'ch04' in c['key'] else ''}) "
+                       f"× median per-call kernel ms from a "
+                       f"{cell['sample']}-blob sample. Never a row "
+                       f"winner.")
+                cells.append(f'<td class="est" title="{tip}">'
+                             f'≈{fmt_ms(cell["ms"])}</td>')
                 continue
             tip = (f"median {cell['ms']:.3f} ms "
                    f"(min {cell['ms_min']:.3f}, max {cell['ms_max']:.3f})")
+            if cell.get("calls"):
+                tip += (f" · MEASURED sum of {cell['calls']} per-blob "
+                        f"calls")
             if "filled" in cell:
                 tip += f" · {fmt_int(cell['filled'])} px filled"
             if "levels" in cell:
@@ -225,14 +262,16 @@ protocol; and a kernel that lost half the GPU to a single register —
 
 <div class="card">
 <h2>The grand table — every approach × every shape</h2>
-<p class="note">Rows: {n_rows} scenes (shape × scale). Columns:
-{n_cols} approaches in chapter order. Cells: median kernel ms on
-{data['device']} ({data['sm_count']} SMs, tpb={data['tpb']}), hover for
-min/max/filled/levels. <b>Bold = fastest GPU approach for that row.</b>
-Reading the empty cells top-left to bottom-right is the project's whole
-arc: each chapter widens the set of jobs it can even attempt —
-crosscheck: {ok}/{n_rows} rows with every completed approach agreeing
-on the exact filled pixel count.</p>
+<p class="note">Rows: {n_rows} scenes (shape × scale, including two
+external PNG inputs). Columns: {n_cols} approaches in chapter order.
+Cells: median kernel ms on {data['device']} ({data['sm_count']} SMs,
+tpb={data['tpb']}), hover any cell for details. <b>Bold = fastest
+measured GPU approach for that row.</b> Every approach attempts every
+job: one-blob kernels run one call per blob on multi-blob scenes —
+measured sums on the two-blob rows, italic ≈estimates on the N-blob
+rows (a full 755k-call loop would take hours; see the glossary).
+Crosscheck: {ok}/{n_rows} rows with every completed measured approach
+agreeing on the exact filled pixel count.</p>
 {grand_table(data)}
 </div>
 
