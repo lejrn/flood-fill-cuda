@@ -12,6 +12,47 @@ a living document that narrates the evolution chapter by chapter
 exposed), on real hardware, with every kernel proven pixel-exact against
 a CPU reference.
 
+## Abstract
+
+The same job — find the red blobs in a white image and fill them — is
+solved over and over, each chapter answering the previous one's
+measured weakness:
+
+```
+CPU BFS ──► 1 block ──► 2 blocks ──► N blocks ──► 2 blobs ──► N blobs
+ "one core   "one SM is    "2 SMs      "one blob    "who finds
+ is serial"  4% of the     are 8%"     is one BFS"  the seeds?"
+             GPU"
+```
+
+Chapter 1 puts a level-synchronous BFS inside one CUDA block and hits
+the shared-memory wall (a ring that overflows, solved by a spill tier).
+Chapter 2 adds a second block and buys almost nothing — until the queue
+goes global. Chapter 3 goes cooperative: N co-resident blocks with
+grid-wide barriers between BFS levels, plus the 8-connectivity and
+radius-2 experiments. Chapter 4 fills two blobs at once and shows one
+multisource launch beats two sequential ones. Chapter 5 removes the last
+crutch — the seeds themselves: the GPU finds every blob's canonical
+seed, merges colliding flood waves with an atomicMin union-find, and
+discovers-labels-fills 755,000 blobs in ~25 ms, one launch, zero seeds
+given. The tuning epilogue densifies seeding on a stride lattice
+(S8 optimal on solids), adds an interior seeding rule (3.2× on disks),
+and closes with a comic register lesson: the lattice kernel spent 129
+registers per thread where the two-blocks-per-SM line is exactly 128 —
+one register cost half the GPU, fixed twice over (compiler cap and a
+split build), the fixes landing in a dead heat.
+
+Every kernel is pixel-exact against a compiled CPU oracle; every number
+is a committed benchmark JSON. The one-page overview —
+**abstract, glossary, and the grand table (every approach × every shape
+× scale)** — lives at [`site/index.html`](site/index.html); rebuild it
+with:
+
+```bash
+uv run python -m flood_fill_cuda.overview.bench    # ~5-10 min GPU session
+uv run python -m flood_fill_cuda.overview.build    # writes site/index.html
+```
+
 ## Quickstart
 
 ```bash
