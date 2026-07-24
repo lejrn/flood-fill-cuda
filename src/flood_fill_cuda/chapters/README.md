@@ -388,6 +388,7 @@ structure, sharpening what `ncu` must arbitrate.
 | candidate scan alone | 0.9–1.8 ms at every size — discovery is nearly free; it's the *merging* strategies that differ |
 | observer overhead | unmeasurable — five scenes read negative (to −26%), ch04's verdict with stronger evidence |
 | **seeding density** (lattice twin: corner rule + every red pixel on an S×S lattice, + a parent-compression pass) | S16 wins every big solid — **flips the disks loss to 2.21×** — S4 takes the comb 5.2× (compression alone: 2.6×), S1 wins the serpentine (0.53 ms, **328×** vs ccl); with the right stride the in-flight variant beats the CCL prepass on **all 7 scenes**. Canonical labels provably stride-invariant. Caveats: the lat kernel's coop capacity is 24 vs 48 blocks (register pressure), and the S64 dip awaits `ncu` |
+| **tuning cross-product** (builds × rules × strides, 53 configs/scene) | the fused lat kernel sits **one register over the 128 line** (129 vs v1's 114) — that register cost half the grid; both fixes (`max_registers=128` → 122 regs, and a split build → 114) restore 48 blocks, are near-tied, and beat fused ~25–40% on solids. Optimum stride moves **S16 → S8** with occupancy back; the **interior rule** (lattice seeds need all 8 neighbors red) takes the disks outright (27.5 ms at S1, 3.21× vs v1) and reads flat on the serpentine exactly as the coverage theory demands. The "S64 dip" is really a broad **S≥32 hump** — slower than v1 at 15× fewer levels, `ncu`'s clearest target. Best-vs-ccl now 1.18×–373× |
 
 ### New problems and lessons
 - **The Chapter 4 deadlock lesson, refined:** the rule was never "no
@@ -414,16 +415,16 @@ structure, sharpening what `ncu` must arbitrate.
 
 ### Open problems → Chapter 6 candidates
 1. **BUF/BKE 2×2-block union-find** to cut ccl's per-adjacency volume.
-2. **`ncu`** — owed four verdicts now: label-map traffic, the
-   deferred-paint CAS mechanism, the negative observer overheads, and
-   the seeding sweep's S64 dip.
-3. **The lat kernel's register diet** — its 24-vs-48-block capacity
-   handicap taxes every stride; the S16 wins stand despite it.
-4. **Auto-stride** — pick S from a cheap image statistic and the
-   seeding win becomes automatic instead of scene-tuned.
-5. **Recoloring past 6 palette rows** (`label % 6` collides hues at
+2. **`ncu`** — owed label-map traffic, the negative observer overheads,
+   and above all the **S≥32 hump** (slower than v1 at 15× fewer
+   levels: a memory-system mystery with a clean reproducer).
+3. **Promote a default** — fold the register fix into the published
+   kernel and pick stride/rule from a cheap image statistic
+   (auto-stride: S8 on solids, S1/interior on staircase or thin
+   shapes, off for dense noise).
+4. **Recoloring past 6 palette rows** (`label % 6` collides hues at
    N=100+; the label map, not the paint, is ground truth).
-6. **The cooperative-launch wedge question stands.**
+5. **The cooperative-launch wedge question stands.**
 
 ---
 
