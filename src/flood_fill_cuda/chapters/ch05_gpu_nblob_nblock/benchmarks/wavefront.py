@@ -48,7 +48,8 @@ _GOLDEN = 137.508
 def _hues_for(labels):
     """label value -> hue fraction, rank-spread. Few labels get an even
     spread; many get golden-angle steps so neighbors-by-rank stay far
-    apart on the wheel."""
+    apart on the wheel. Hues quantize to 0.5-degree steps so the LUT
+    cache below stays small at any label count."""
     uniq = sorted(int(l) for l in labels)
     n = len(uniq)
     hues = {}
@@ -57,7 +58,7 @@ def _hues_for(labels):
             deg = _HUE_LO + _HUE_SPAN * (i + 0.5) / n
         else:
             deg = _HUE_LO + (i * _GOLDEN) % _HUE_SPAN
-        hues[l] = deg / 360.0
+        hues[l] = round(deg * 2) / 2 / 360.0
     return hues
 
 
@@ -78,16 +79,23 @@ def _frontier_color(hue):
                     dtype=np.uint8)
 
 
-def gradient_colors(time_map, label, ticks, luts):
-    """(W, H, 3) uint8: every filled pixel colored by (label hue, global
-    fill tick)."""
+def color_maps(time_map, label, reached, ticks, labels, hues):
+    """Two (W, H, 3) uint8 maps: the light->dark gradient color of every
+    pixel and its frontier-flash color. Fully vectorized — per-label
+    LUTs are stacked and fancy-indexed, so the cost is O(pixels)
+    regardless of the label count (a 21k-blob input would take hours
+    with a mask-per-label loop)."""
+    cache = {}
+    for h in hues.values():
+        if h not in cache:
+            cache[h] = (_ramp_lut(h), _frontier_color(h))
+    lut_stack = np.stack([cache[hues[int(l)]][0] for l in labels])
+    front_stack = np.stack([cache[hues[int(l)]][1] for l in labels])
+    idx = np.searchsorted(labels, label).clip(max=len(labels) - 1)
+    idx[~reached] = 0        # arbitrary — masked out by callers
     frac = np.clip(time_map.astype(np.float64) / max(ticks - 1, 1), 0, 1)
     bins = (frac * 255).astype(np.int64)
-    out = np.zeros(time_map.shape + (3,), dtype=np.uint8)
-    for lbl, lut in luts.items():
-        mask = label == lbl
-        out[mask] = lut[bins[mask]]
-    return out
+    return lut_stack[idx, bins], front_stack[idx]
 
 
 def to_image(arr_xy3, upscale):
@@ -105,9 +113,8 @@ def render_timeline(img, time_map, label, ticks, stem, upscale,
     reached = time_map >= 0
     labels = np.unique(label[reached])
     hues = _hues_for(labels)
-    luts = {l: _ramp_lut(h) for l, h in hues.items()}
-    fronts = {l: _frontier_color(h) for l, h in hues.items()}
-    grad = gradient_colors(time_map, label, ticks, luts)
+    grad, front_colors = color_maps(time_map, label, reached, ticks,
+                                    labels, hues)
 
     final = img.copy()
     final[reached] = grad[reached]
@@ -126,8 +133,7 @@ def render_timeline(img, time_map, label, ticks, stem, upscale,
             filled = reached & (time_map <= t)
             frame[filled] = grad[filled]
             band = reached & (time_map > prev_t) & (time_map <= t)
-            for lbl, front in fronts.items():
-                frame[band & (label == lbl)] = front
+            frame[band] = front_colors[band]
             frames.append(to_image(frame, upscale))
             durations.append(FRAME_MS)
             prev_t = t
@@ -142,7 +148,9 @@ def render_timeline(img, time_map, label, ticks, stem, upscale,
 
 
 # (scene builder, variant, stem, upscale, render prov replay too?,
-#  optional extra flood_fill kwargs)
+#  optional extra flood_fill kwargs, optional downscale — nearest-
+#  neighbor ::d subsample of the FINISHED run before rendering, for
+#  inputs too large to rasterize frame by frame)
 COMBOS = [
     # THE money shot: one U, two candidates. prov = two waves in two
     # colors racing until they collide at the bridge; final = one color,
@@ -173,21 +181,40 @@ COMBOS = [
      dict(lattice=1, interior=True)),
 ]
 
+# External PNGs (gitignored — appended only when present). The 9000²
+# blobs image is subsampled 10:1 for rendering; the run itself is full
+# resolution.
+_PNG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        *[".."] * 5, "images", "input")
+for _stem, _ds in (("input_blobs", 10), ("input_blocks", 2)):
+    _p = os.path.join(_PNG_DIR, _stem + ".png")
+    if os.path.exists(_p):
+        COMBOS.append((lambda p=_p: scenes.png_scene(p),
+                       "seed_merge", _stem, 1, False, {}, _ds))
+
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     for builder, variant, stem, upscale, prov_replay, *rest in COMBOS:
         ff_kwargs = rest[0] if rest else {}
+        downscale = rest[1] if len(rest) > 1 else 1
         img, _ = builder()
         r = flood_fill(img, variant=variant, **ff_kwargs)
         print(f"{stem}: blobs={r.n_blobs:,d} candidates={r.candidates:,d} "
               f"unions={r.union_done:,d} filled={r.filled:,d} "
               f"levels={r.levels}")
 
-        render_timeline(img, r.depth, r.label, r.levels,
+        img_r, depth_r, label_r, prov_r = img, r.depth, r.label, r.prov_label
+        if downscale > 1:
+            img_r = img_r[::downscale, ::downscale]
+            depth_r = depth_r[::downscale, ::downscale]
+            label_r = label_r[::downscale, ::downscale]
+            if prov_r is not None:
+                prov_r = prov_r[::downscale, ::downscale]
+        render_timeline(img_r, depth_r, label_r, r.levels,
                         f"{stem}_final", upscale)
         if prov_replay:
-            render_timeline(img, r.depth, r.prov_label, r.levels,
+            render_timeline(img_r, depth_r, prov_r, r.levels,
                             f"{stem}_prov", upscale)
 
     print(f"\nWritten to {OUT_DIR}")
