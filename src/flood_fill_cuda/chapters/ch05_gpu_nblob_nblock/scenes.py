@@ -170,3 +170,19 @@ def random_blobs_scene(width, height, density=0.3, rng_seed=0):
     img[rng.random((width, height)) < density] = RED
     _, n_blobs = cpu_label_components(img)
     return img, int(n_blobs)
+
+
+def png_scene(path):
+    """Load an external PNG as a seedless scene, img[x, y] pure red on
+    white: red-dominant pixels (R >= 128, G < 128, B < 128) snap to RED,
+    everything else to WHITE. Returns (img, None) — foreign inputs carry
+    no ground-truth blob count; the benchmark's cross-config crosscheck
+    stands in for it.
+    """
+    from PIL import Image
+    arr = np.array(Image.open(path).convert("RGB"))        # [y, x, 3]
+    red = ((arr[..., 0] >= 128) & (arr[..., 1] < 128)
+           & (arr[..., 2] < 128))
+    img = np.full(arr.shape, 255, dtype=np.uint8)
+    img[red] = RED
+    return np.ascontiguousarray(np.transpose(img, (1, 0, 2))), None
