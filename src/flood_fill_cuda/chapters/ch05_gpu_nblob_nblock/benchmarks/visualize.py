@@ -39,6 +39,16 @@ SD_ROWS = SD["scenes"] if SD else []
 SD_PEAK = SD["measured_peak_gb_s"] if SD else 0.0
 HAS_SEED = bool(SD_ROWS)
 
+# The seeding-density sweep postdates the main session's JSON — optional,
+# same contract: absent file, absent card.
+SW_PATH = results_paths.newest_optional("seeding_*.json", RESULTS_DIR)
+SW = None
+if SW_PATH:
+    with open(SW_PATH) as f:
+        SW = json.load(f)
+SW_ROWS = SW["scenes"] if SW else []
+HAS_SWEEP = HAS_SEED and bool(SW_ROWS)
+
 SD_LABELS = {
     "two_sq_2800": "two squares 2800²",
     "two_disks_r1400": "two disks r=1400",
@@ -165,6 +175,49 @@ def sd_table():
     return f"<table>{head}{''.join(body)}</table>"
 
 
+def sw_table():
+    order = ["v1"] + ["S" + str(s) for s in SW["strides"]] + ["ccl"]
+    head = ("<tr><th>scene</th>"
+            + "".join(f"<th>{c} ms</th>" for c in order)
+            + "<th>best</th><th>vs v1</th><th>vs ccl</th></tr>")
+    body = []
+    for r in SW_ROWS:
+        cells = [f"<td>{sd_label(r['scene'])}</td>"]
+        for cfg in order:
+            c = r["configs"][cfg]
+            v = fmt_ms(c["ms"])
+            if cfg == r["best_cfg"]:
+                v = f"<b>{v}</b>"
+            cells.append(f'<td title="{fmt_int(c["levels"])} levels, '
+                         f'{fmt_int(c["candidates"])} candidates">{v}</td>')
+        cells.append(f"<td>{r['best_cfg']}</td>")
+        cells.append(f"<td>{r['best_vs_v1']:.2f}×</td>")
+        cells.append(f"<td>{r['best_vs_ccl']:.2f}×</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    return f"<table>{head}{''.join(body)}</table>"
+
+
+_sw_card = ""
+if HAS_SWEEP:
+    _sw_best_gain = max(SW_ROWS, key=lambda r: r["best_vs_v1"])
+    _sw_wins = sum(1 for r in SW_ROWS if r["best_cfg"] != "v1")
+    _sw_card = f"""
+<div class="card">
+<h2>Seeding density — how many seeds should discovery plant?</h2>
+<p class="note">The corner rule plants one seed per solid rectangle, so
+the fill clock runs O(blob diameter). The lattice twin ADDS a seed at
+every red pixel on an S×S grid (canonical labels provably unchanged for
+every S) and compresses the parent chains before the repaint. S=0 is
+the compression-only control; S=1 seeds every red pixel — the ccl-like
+boundary where all connectivity flows through collisions. Bold = the
+scene's best in-flight config; hover a cell for its levels/candidates.
+Densified seeding beat the corner rule on {_sw_wins} of {len(SW_ROWS)}
+scenes — best case {_sw_best_gain['best_vs_v1']:.2f}× over v1
+({_sw_best_gain['best_cfg']} on {sd_label(_sw_best_gain['scene'])}).</p>
+<div class="tablewrap">{sw_table()}</div>
+</div>
+"""
+
 if HAS_SEED:
     _sd_most_blobs = max(SD_ROWS, key=lambda r: r["n_blobs"])
     _sd_biggest = max(SD_ROWS, key=lambda r: r["filled"])
@@ -263,6 +316,8 @@ scene shape: many tiny blobs (candidates ≈ blobs) reward the prepass;
 few big blobs reward waves that discover while they fill.</p>
 {sd_ab_chart()}
 </div>
+
+{_sw_card}
 
 {_sd_wavefront_note}
 
