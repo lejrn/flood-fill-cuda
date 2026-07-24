@@ -153,22 +153,78 @@ curve in `results/.../seeding_*.json` and the dashboard card):
   S16 and S256 despite a monotone level count — not a drift artifact
   (consistent across scenes). `ncu` owes the answer.
 
+## The tuning cross-product — builds × rules × strides
+
+The follow-up experiment (user-requested, full cross-product: 53
+configs per scene): the register handicap attacked two ways, the
+interior seeding rule, and the stride gaps {8, 32, 128} filled in.
+
+**The register story, measured** (65,536 regs/SM ÷ 256 threads ÷ 2
+blocks = 128 regs/thread is the two-blocks-per-SM line):
+
+| build | regs/thread | coop blocks @tpb256 |
+|---|---|---|
+| v1 (corner) | 114 | 48 |
+| lat fused | **129** | **24** |
+| lat r128 (`max_registers=128`) | 122 | 48 |
+| lat split (core P0–P2 + plain cleanup) | 114 | 48 |
+
+The fused kernel sat **one register** over the line — and the cap
+landed at 122, *below* its own limit: the compiler had the slack all
+along and simply didn't try. No meaningful spill cost was observed
+(r128 ≈ split everywhere, within drift).
+
+**Best config per scene** (medians, interleaved; full 53-config tables
+in `results/.../tuning_*.json` and the dashboard card):
+
+| scene | best | ms | vs v1 | vs ccl |
+|---|---|---|---|---|
+| two squares 2800² | split_L8 | 32.7 | 1.61× | 3.49× |
+| two disks r=1400 | **split_I1** | 27.5 | 3.21× | 2.42× |
+| asym 4000²+800² | r128_L8 | 35.7 | 1.69× | 2.50× |
+| grid of 100 blobs | split_L8 | 26.8 | 1.20× | 2.02× |
+| random noise 4000² | r128_L1 | 24.9 | 1.02× (wash) | 1.18× |
+| comb, 2000 teeth | fused_L8 | 13.4 | 5.00× | 6.28× |
+| serpentine 256² | r128_L1 | 0.49 | 4.07× | **373×** |
+
+**Findings:**
+
+- **Occupancy was the bottleneck, not the fix's flavor.** r128 and
+  split are near-tied; both beat fused by ~25–40% on the solids. The
+  one-register line was worth more than any seeding refinement.
+- **With 48 blocks restored, the optimum stride moves S16 → S8** on
+  every solid scene — the 24-block build couldn't exploit the finer
+  frontier, the 48-block builds can.
+- **The interior rule earns its keep exactly where predicted**: the
+  disks' best config is interior seeding at S1 — every 8-red-neighbor
+  pixel a seed, the noisy staircase boundary seedless (27.5 ms, from
+  90 ms at the corner rule). And on the serpentine it measures as
+  theory demands: a 1-px snake has no interior pixels, so every
+  interior row reads flat corner-only times — the coverage argument,
+  benchmarked.
+- **The "S64 dip" resolves into a broad S≥32 hump**: on the solids,
+  everything from S32 to S256 is *slower than v1* despite 15–90×
+  fewer levels (e.g. two_sq r128: S16 36.3 → S32 54.1; S256 58.9 vs
+  v1 52.9). Fewer barriers with worse time means the loss is in the
+  memory system, not the sync count — `ncu`'s clearest target yet.
+- Best-config-vs-ccl now spans **1.18×–373×** across all seven scenes.
+
 ## Open problems → Chapter 6 candidates
 
 1. **BUF/BKE block-based union-find** — 2×2-block unions to cut ccl's
    per-adjacency volume; the literature's standard next step.
-2. **`ncu`** — now owed four verdicts: the label-map traffic claim, the
-   deferred-paint CAS mechanism on the disks, the negative observer
-   overheads, and the seeding sweep's S64 dip.
-3. **The lat kernel's register diet** — recover the 48-block capacity
-   its 24-block handicap costs on every stride.
-4. **Auto-stride** — the sweep says the optimum is shape-dependent
-   (S16 for solids, S1 for geodesic monsters, off for dense noise);
-   picking S from a cheap image statistic would make the win automatic.
-5. **Recoloring past 6 palette rows** — `label % 6` collides adjacent
+2. **`ncu`** — owed the label-map traffic claim, the negative observer
+   overheads, and above all the **S≥32 hump** (slower than v1 at 15×
+   fewer levels — a memory-system mystery with a clean reproducer).
+3. **Promote a default** — the cross-product says "a 48-block build at
+   S8 (interior on staircase-heavy shapes, S1 on thin ones)"; folding
+   the register fix into the published kernel and picking stride/rule
+   from a cheap image statistic (**auto-stride**) is the natural
+   Chapter 6.
+4. **Recoloring past 6 palette rows** — `label % 6` collides adjacent
    hues at N=100+; a host-side dense re-rank (or per-label LUT like the
    wavefront's) would give every blob its own color.
-6. **The wedge question stands** — is the cooperative-launch lottery
+5. **The wedge question stands** — is the cooperative-launch lottery
    WSL2-specific?
 
 ## Files
