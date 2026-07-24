@@ -387,6 +387,7 @@ structure, sharpening what `ncu` must arbitrate.
 | serpentine | 65 candidates chop 32,641 levels into **257** → seed_merge beats ccl_fill **88×**; `@njit` still beats both (33k px can't feed 12,288 threads) |
 | candidate scan alone | 0.9–1.8 ms at every size — discovery is nearly free; it's the *merging* strategies that differ |
 | observer overhead | unmeasurable — five scenes read negative (to −26%), ch04's verdict with stronger evidence |
+| **seeding density** (lattice twin: corner rule + every red pixel on an S×S lattice, + a parent-compression pass) | S16 wins every big solid — **flips the disks loss to 2.21×** — S4 takes the comb 5.2× (compression alone: 2.6×), S1 wins the serpentine (0.53 ms, **328×** vs ccl); with the right stride the in-flight variant beats the CCL prepass on **all 7 scenes**. Canonical labels provably stride-invariant. Caveats: the lat kernel's coop capacity is 24 vs 48 blocks (register pressure), and the S64 dip awaits `ncu` |
 
 ### New problems and lessons
 - **The Chapter 4 deadlock lesson, refined:** the rule was never "no
@@ -401,7 +402,11 @@ structure, sharpening what `ncu` must arbitrate.
   obvious lever on the ccl side.
 - **Multi-source seeding shortens the BFS clock itself** (serpentine:
   127× fewer levels). Where nearest-candidate depth is acceptable,
-  merge's clock is strictly cheaper than any single-seed fill.
+  merge's clock is strictly cheaper than any single-seed fill — and the
+  seeding-density experiment turned this from an observation into a
+  DIAL: plant seeds on a stride-S lattice and the clock collapses to
+  ~O(S), with the optimum shape-dependent (S16 solids, S1 geodesic
+  monsters, off for already-dense noise).
 - **Deferred paint keeps probes hot:** merge's claimed pixels stay red
   until the flatten, so every probe of a claimed neighbor pays a CAS
   attempt — the suspected mechanism behind the disks loss. `ncu` owes
@@ -409,11 +414,16 @@ structure, sharpening what `ncu` must arbitrate.
 
 ### Open problems → Chapter 6 candidates
 1. **BUF/BKE 2×2-block union-find** to cut ccl's per-adjacency volume.
-2. **`ncu`** — owed three verdicts now: label-map traffic, the
-   deferred-paint CAS mechanism, the negative observer overheads.
-3. **Recoloring past 6 palette rows** (`label % 6` collides hues at
+2. **`ncu`** — owed four verdicts now: label-map traffic, the
+   deferred-paint CAS mechanism, the negative observer overheads, and
+   the seeding sweep's S64 dip.
+3. **The lat kernel's register diet** — its 24-vs-48-block capacity
+   handicap taxes every stride; the S16 wins stand despite it.
+4. **Auto-stride** — pick S from a cheap image statistic and the
+   seeding win becomes automatic instead of scene-tuned.
+5. **Recoloring past 6 palette rows** (`label % 6` collides hues at
    N=100+; the label map, not the paint, is ground truth).
-4. **The cooperative-launch wedge question stands.**
+6. **The cooperative-launch wedge question stands.**
 
 ---
 

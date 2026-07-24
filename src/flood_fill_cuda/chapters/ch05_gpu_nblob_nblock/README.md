@@ -99,18 +99,76 @@ session's drift casualty; direction is consistent, magnitude is not.
   so every probe of a claimed neighbor pays a CAS attempt — the likely
   mechanism behind the disks loss (500 staircase waves → long internal
   seams → maximal collision-branch traffic). `ncu` is the arbiter.
+  (*Superseded in practice by the seeding experiment below: at stride 16
+  the disks flip to a 2.21× seed_merge win.*)
+
+## Seeding density — the stride experiment
+
+Raised while reading the phase table above: the corner rule plants ONE
+seed on a solid rectangle, so the fill clock runs O(blob diameter)
+levels while the flatten costs ~2%. What if the scan planted more? The
+`seed_merge_lat` twin seeds the corner-rule set PLUS every red pixel on
+an S×S lattice (S a host parameter; canonical labels provably
+stride-invariant, since the corner rule — and with it the lex-min lemma
+— stays included), and adds a COMPRESS phase that rewrites every
+retired parent slot to its true root in one pass, so the repaint's find
+is ≤ 1 hop at any seed count.
+
+Sweep (median ms, interleaved; * = scene's best in-flight config; full
+curve in `results/.../seeding_*.json` and the dashboard card):
+
+| scene | v1 | S0 | S1 | S4 | S16 | S64 | S256 | ccl |
+|---|---|---|---|---|---|---|---|---|
+| two squares 2800² | 55.7 | 57.4 | 90.3 | 67.9 | **49.3*** | 67.1 | 64.7 | 117.4 |
+| two disks r=1400 | 90.0 | 107.8 | 69.7 | 55.0 | **40.7*** | 53.3 | 50.0 | 63.2 |
+| asym 4000²+800² | 61.2 | 63.0 | 97.4 | 72.5 | **54.1*** | 71.2 | 63.0 | 91.4 |
+| grid of 100 blobs | **35.0*** | 36.7 | 77.2 | 56.2 | 40.0 | 50.2 | 40.7 | 59.1 |
+| random noise 4000² | **24.8*** | 33.3 | 33.8 | 37.9 | 36.5 | 34.6 | 33.2 | 27.6 |
+| comb, 2000 teeth | 67.9 | 25.9 | 26.3 | **13.0*** | 27.8 | 24.4 | 26.6 | 85.1 |
+| serpentine 256² | 1.88 | 1.72 | **0.53*** | 1.11 | 1.73 | 1.78 | 1.74 | 174.1 |
+
+**Findings:**
+
+- **The hypothesis holds.** S16 collapses the big solids' clocks
+  (2,800–4,000 levels → 16) and wins all three — including **flipping
+  the disks**, this chapter's one seed_merge loss, to 2.21× over v1 and
+  1.55× over ccl. With the right stride, the in-flight variant now
+  beats the CCL prepass on **all seven scenes** (1.11×–328×).
+- **The compression pass alone is worth 2.6× on the comb** (v1's 47.6 ms
+  chain-walking flatten → 2.1 ms at S0), and S4's lattice additionally
+  halves the comb's levels: 13.0 ms total, 5.2× over v1.
+- **The optimum is shape-dependent, and the extremes are real
+  configurations**: S1 (every red pixel a wave, levels=1) loses on
+  solids as predicted — but wins the serpentine outright (0.53 ms,
+  328× over ccl's 174 ms geodesic crawl) and even beats v1 on the
+  disks. Already-dense scenes (random noise: 1.15M corner candidates)
+  gain nothing and keep v1 best — densifying what is already dense
+  only pays the handicap below.
+- **The handicap: the lat kernel's cooperative capacity is 24 blocks vs
+  v1's 48** (register pressure from the extra phase/parameter). Every
+  stride pays it — S0, which does the same work as v1 plus one cheap
+  sweep, reads ~3-8% slower on that alone. The S16 wins stand DESPITE
+  half the grid; a register diet is an obvious lever.
+- **Unexplained: the S64 dip.** On the solids S64 is slower than both
+  S16 and S256 despite a monotone level count — not a drift artifact
+  (consistent across scenes). `ncu` owes the answer.
 
 ## Open problems → Chapter 6 candidates
 
 1. **BUF/BKE block-based union-find** — 2×2-block unions to cut ccl's
    per-adjacency volume; the literature's standard next step.
-2. **`ncu`** — now owed three verdicts: the label-map traffic claim, the
-   deferred-paint CAS mechanism on the disks, and the negative observer
-   overheads.
-3. **Recoloring past 6 palette rows** — `label % 6` collides adjacent
+2. **`ncu`** — now owed four verdicts: the label-map traffic claim, the
+   deferred-paint CAS mechanism on the disks, the negative observer
+   overheads, and the seeding sweep's S64 dip.
+3. **The lat kernel's register diet** — recover the 48-block capacity
+   its 24-block handicap costs on every stride.
+4. **Auto-stride** — the sweep says the optimum is shape-dependent
+   (S16 for solids, S1 for geodesic monsters, off for dense noise);
+   picking S from a cheap image statistic would make the win automatic.
+5. **Recoloring past 6 palette rows** — `label % 6` collides adjacent
    hues at N=100+; a host-side dense re-rank (or per-label LUT like the
    wavefront's) would give every blob its own color.
-4. **The wedge question stands** — is the cooperative-launch lottery
+6. **The wedge question stands** — is the cooperative-launch lottery
    WSL2-specific?
 
 ## Files
