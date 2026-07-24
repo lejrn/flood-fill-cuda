@@ -1,0 +1,2744 @@
+{
+  "device": "NVIDIA GeForce RTX 4060 Laptop GPU\u0000",
+  "sm_count": 24,
+  "tpb": 256,
+  "gpu_repeats": 5,
+  "columns": [
+    {
+      "key": "pure_python",
+      "group": "CPU",
+      "label": "pure Python BFS"
+    },
+    {
+      "key": "njit",
+      "group": "CPU",
+      "label": "@njit BFS / CCL+fill"
+    },
+    {
+      "key": "ch01_ring",
+      "group": "ch01 \u00b7 1 block",
+      "label": "ring"
+    },
+    {
+      "key": "ch01_spill",
+      "group": "ch01 \u00b7 1 block",
+      "label": "spill"
+    },
+    {
+      "key": "ch02_split",
+      "group": "ch02 \u00b7 2 blocks",
+      "label": "split"
+    },
+    {
+      "key": "ch02_global",
+      "group": "ch02 \u00b7 2 blocks",
+      "label": "global"
+    },
+    {
+      "key": "ch02_dirsplit",
+      "group": "ch02 \u00b7 2 blocks",
+      "label": "dirsplit"
+    },
+    {
+      "key": "ch02_pinned",
+      "group": "ch02 \u00b7 2 blocks",
+      "label": "pinned (spread, tpb 768)"
+    },
+    {
+      "key": "ch03_conn4",
+      "group": "ch03 \u00b7 N blocks",
+      "label": "conn4"
+    },
+    {
+      "key": "ch03_conn8",
+      "group": "ch03 \u00b7 N blocks",
+      "label": "conn8"
+    },
+    {
+      "key": "ch03_conn8_r2",
+      "group": "ch03 \u00b7 N blocks",
+      "label": "conn8 r=2"
+    },
+    {
+      "key": "ch04_seq",
+      "group": "ch04 \u00b7 2 blobs",
+      "label": "sequential"
+    },
+    {
+      "key": "ch04_streams",
+      "group": "ch04 \u00b7 2 blobs",
+      "label": "streams"
+    },
+    {
+      "key": "ch04_multi",
+      "group": "ch04 \u00b7 2 blobs",
+      "label": "multisource"
+    },
+    {
+      "key": "ch05_merge",
+      "group": "ch05 \u00b7 N blobs, no seeds",
+      "label": "seed_merge"
+    },
+    {
+      "key": "ch05_ccl",
+      "group": "ch05 \u00b7 N blobs, no seeds",
+      "label": "ccl_fill"
+    },
+    {
+      "key": "ch05_fused_L8",
+      "group": "ch05 \u00b7 N blobs, no seeds",
+      "label": "fused_L8"
+    },
+    {
+      "key": "ch05_r128_L8",
+      "group": "ch05 \u00b7 N blobs, no seeds",
+      "label": "r128_L8"
+    },
+    {
+      "key": "ch05_split_L8",
+      "group": "ch05 \u00b7 N blobs, no seeds",
+      "label": "split_L8"
+    },
+    {
+      "key": "ch05_split_I1",
+      "group": "ch05 \u00b7 N blobs, no seeds",
+      "label": "split_I1 (interior)"
+    }
+  ],
+  "experiment": "the grand table, full coverage: every chapter's every variant on one common scene x scale grid, kernel-only median ms. One-blob kernels on multi-blob scenes run one call per blob \u2014 measured (summed) on two-blob rows, estimated (k-blob sample x call count, est:true) on N-blob rows. 'na' survives only for ch04 on one-blob scenes (its kernel takes exactly two components); 'overflow' = ring capacity; 'capped' = pure Python past 20M red px; 'n/s' = the documented ch04-streams cross-chapter deadlock",
+  "rows": [
+    {
+      "row": "sq_256",
+      "family": "square",
+      "note": "256\u00b2, 128\u00b2 blob, center seed",
+      "width": 256,
+      "height": 256,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 17.1627750096377,
+          "ms_min": 17.113512003561482,
+          "ms_max": 17.37394797964953,
+          "filled": 16384,
+          "skip": null
+        },
+        "njit": {
+          "ms": 0.151552987517789,
+          "ms_min": 0.1278109848499298,
+          "ms_max": 0.1524259860161692,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 2.9969949973747134,
+          "ms_min": 2.9053949983790517,
+          "ms_max": 3.0134599946904927,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 3.4484310017433017,
+          "ms_min": 3.368623001733795,
+          "ms_max": 9.434264997253194,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 4.829148994758725,
+          "ms_min": 4.7239179839380085,
+          "ms_max": 23.029945004964247,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 4.697755997767672,
+          "ms_min": 4.681535006966442,
+          "ms_max": 4.725723993033171,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 4.75715400534682,
+          "ms_min": 4.689418012276292,
+          "ms_max": 5.751420016167685,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 3.5994120116811246,
+          "ms_min": 1.108739001210779,
+          "ms_max": 12.401247018715367,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 1.2335230130702257,
+          "ms_min": 1.2025040050502867,
+          "ms_max": 1.5875769895501435,
+          "filled": 16384,
+          "levels": 129,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 0.8571839716751128,
+          "ms_min": 0.8385640103369951,
+          "ms_max": 0.8887670119293034,
+          "filled": 16384,
+          "levels": 65,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 0.9882120066322386,
+          "ms_min": 0.9616989991627634,
+          "ms_max": 1.1867769935633987,
+          "filled": 16384,
+          "levels": 33,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 1.8118339939974248,
+          "ms_min": 1.7823440139181912,
+          "ms_max": 2.0858499919995666,
+          "filled": 16384,
+          "levels": 128,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 1.7326580127701163,
+          "ms_min": 1.7047279980033636,
+          "ms_max": 1.754975994117558,
+          "filled": 16384,
+          "levels": 128,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 0.36536299739964306,
+          "ms_min": 0.34082800266332924,
+          "ms_max": 0.43126201489940286,
+          "filled": 16384,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 0.3762010019272566,
+          "ms_min": 0.37030200473964214,
+          "ms_max": 0.5468510207720101,
+          "filled": 16384,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 0.49810201744548976,
+          "ms_min": 0.459667993709445,
+          "ms_max": 0.5566510080825537,
+          "filled": 16384,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 0.7257180113811046,
+          "ms_min": 0.6348910101223737,
+          "ms_max": 0.8109450282063335,
+          "filled": 16384,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch05_fused_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "sq_1024",
+      "family": "square",
+      "note": "1024\u00b2, 512\u00b2 blob",
+      "width": 1024,
+      "height": 1024,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 288.5979470156599,
+          "ms_min": 284.8189919895958,
+          "ms_max": 289.24883299623616,
+          "filled": 262144,
+          "skip": null
+        },
+        "njit": {
+          "ms": 4.480143979890272,
+          "ms_min": 3.9942850125953555,
+          "ms_max": 8.759571996051818,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 6.492759013781324,
+          "ms_min": 6.338904000585899,
+          "ms_max": 7.959075010148808,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 7.047421007882804,
+          "ms_min": 6.961781007703394,
+          "ms_max": 7.270742004038766,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 4.595464997692034,
+          "ms_min": 4.320473002735525,
+          "ms_max": 4.802929004654288,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 4.196402995148674,
+          "ms_min": 4.079367994563654,
+          "ms_max": 4.2350629810243845,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 4.247030999977142,
+          "ms_min": 4.192631022306159,
+          "ms_max": 4.703895974671468,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 3.963622002629563,
+          "ms_min": 3.9359079964924604,
+          "ms_max": 4.251710983226076,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 3.9566729974467307,
+          "ms_min": 3.814880008576438,
+          "ms_max": 4.432560002896935,
+          "filled": 262144,
+          "levels": 513,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 2.414639020571485,
+          "ms_min": 2.3523240233771503,
+          "ms_max": 3.1377729901578277,
+          "filled": 262144,
+          "levels": 257,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 2.6455319894012064,
+          "ms_min": 2.5337549741379917,
+          "ms_max": 2.6738189917523414,
+          "filled": 262144,
+          "levels": 129,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 5.521919985767454,
+          "ms_min": 5.493358010426164,
+          "ms_max": 6.065938010578975,
+          "filled": 262144,
+          "levels": 512,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 6.609278992982581,
+          "ms_min": 6.193387001985684,
+          "ms_max": 7.047723978757858,
+          "filled": 262144,
+          "levels": 512,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 1.0749019857030362,
+          "ms_min": 1.0216759983450174,
+          "ms_max": 1.1617380077950656,
+          "filled": 262144,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 0.8738170145079494,
+          "ms_min": 0.8314329897984862,
+          "ms_max": 1.1190719960723072,
+          "filled": 262144,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 0.8943440043367445,
+          "ms_min": 0.8572709921281785,
+          "ms_max": 0.9391880012117326,
+          "filled": 262144,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 1.4773580187465996,
+          "ms_min": 1.4189719804562628,
+          "ms_max": 1.851597015047446,
+          "filled": 262144,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "sq_4000",
+      "family": "square",
+      "note": "4000\u00b2, 2000\u00b2 blob (4M px)",
+      "width": 4000,
+      "height": 4000,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 5206.593087990768,
+          "ms_min": 5206.593087990768,
+          "ms_max": 5206.593087990768,
+          "filled": 4000000,
+          "skip": null
+        },
+        "njit": {
+          "ms": 120.03937698318623,
+          "ms_min": 112.55176400300115,
+          "ms_max": 132.27199998800643,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 72.08193902624771,
+          "ms_min": 67.1206480183173,
+          "ms_max": 76.34863298153505,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 73.58465599827468,
+          "ms_min": 70.8493760030251,
+          "ms_max": 82.3919289978221,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 48.22608400718309,
+          "ms_min": 44.7535400162451,
+          "ms_max": 59.511079016374424,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 39.384124014759436,
+          "ms_min": 39.28994300076738,
+          "ms_max": 42.336365004302934,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 41.38185200281441,
+          "ms_min": 41.24295699875802,
+          "ms_max": 43.74978301348165,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 27.952757984166965,
+          "ms_min": 27.911598997889087,
+          "ms_max": 36.0532840131782,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 16.546589991776273,
+          "ms_min": 16.027737990953028,
+          "ms_max": 18.531519977841526,
+          "filled": 4000000,
+          "levels": 2001,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 10.10464399587363,
+          "ms_min": 10.066062008263543,
+          "ms_max": 10.24842998594977,
+          "filled": 4000000,
+          "levels": 1001,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 13.13109599868767,
+          "ms_min": 13.10586798354052,
+          "ms_max": 13.14961098250933,
+          "filled": 4000000,
+          "levels": 501,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 24.386623001191765,
+          "ms_min": 24.346339982002974,
+          "ms_max": 24.633969995193183,
+          "filled": 4000000,
+          "levels": 2000,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 34.39838200574741,
+          "ms_min": 32.233740988885984,
+          "ms_max": 36.38706999481656,
+          "filled": 4000000,
+          "levels": 2000,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 16.094839986180887,
+          "ms_min": 14.539441996021196,
+          "ms_max": 16.910395002923906,
+          "filled": 4000000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 12.561119016027078,
+          "ms_min": 12.012456980301067,
+          "ms_max": 13.372090994380414,
+          "filled": 4000000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 8.725400984985754,
+          "ms_min": 8.639039006084204,
+          "ms_max": 10.02149100531824,
+          "filled": 4000000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 14.502600010018796,
+          "ms_min": 11.230126983718947,
+          "ms_max": 18.32210799329914,
+          "filled": 4000000,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch05_split_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "disk_256",
+      "family": "disk",
+      "note": "r=120 disk",
+      "width": 256,
+      "height": 256,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 46.27904001972638,
+          "ms_min": 45.79963599098846,
+          "ms_max": 46.55485099647194,
+          "filled": 45225,
+          "skip": null
+        },
+        "njit": {
+          "ms": 0.3950210229959339,
+          "ms_min": 0.3925990022253245,
+          "ms_max": 0.4217750101815909,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 1.202457002364099,
+          "ms_min": 1.1874859919771552,
+          "ms_max": 1.598308008396998,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 1.3025079970248044,
+          "ms_min": 1.2973900011274964,
+          "ms_max": 1.7116460076067597,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 1.613028987776488,
+          "ms_min": 1.4139800041448325,
+          "ms_max": 2.0001679949928075,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 1.426204020390287,
+          "ms_min": 1.3800039887428284,
+          "ms_max": 4.2504940065555274,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 1.3918070180807263,
+          "ms_min": 1.3756809930782765,
+          "ms_max": 2.039487997535616,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 1.5167089877650142,
+          "ms_min": 1.4160449791233987,
+          "ms_max": 1.8212510040029883,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 1.8124119960702956,
+          "ms_min": 1.6431480180472136,
+          "ms_max": 2.8454829880502075,
+          "filled": 45225,
+          "levels": 170,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 1.3862110208719969,
+          "ms_min": 1.3269490154925734,
+          "ms_max": 1.4935049985069782,
+          "filled": 45225,
+          "levels": 121,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 1.558913994813338,
+          "ms_min": 1.495320990215987,
+          "ms_max": 2.4087860074359924,
+          "filled": 45225,
+          "levels": 61,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 4.296113998861983,
+          "ms_min": 3.648141020676121,
+          "ms_max": 4.948115005390719,
+          "filled": 45225,
+          "levels": 213,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 2.15680300607346,
+          "ms_min": 2.1207190002314746,
+          "ms_max": 2.738924027653411,
+          "filled": 45225,
+          "levels": 241,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 0.45166999916546047,
+          "ms_min": 0.4291950026527047,
+          "ms_max": 0.5021410179324448,
+          "filled": 45225,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 0.42871900950558484,
+          "ms_min": 0.41573899216018617,
+          "ms_max": 0.7162760011851788,
+          "filled": 45225,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 0.5318090261425823,
+          "ms_min": 0.49227700219489634,
+          "ms_max": 0.6060480081941932,
+          "filled": 45225,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 0.7559419900644571,
+          "ms_min": 0.6865979812573642,
+          "ms_max": 0.9583430073689669,
+          "filled": 45225,
+          "levels": 3,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "disk_1024",
+      "family": "disk",
+      "note": "r=480 disk",
+      "width": 1024,
+      "height": 1024,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 911.7733130115084,
+          "ms_min": 911.7733130115084,
+          "ms_max": 911.7733130115084,
+          "filled": 723749,
+          "skip": null
+        },
+        "njit": {
+          "ms": 8.767991996137425,
+          "ms_min": 8.45068899798207,
+          "ms_max": 8.80495400633663,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 11.982569005340338,
+          "ms_min": 11.642951983958483,
+          "ms_max": 13.329656998394057,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 13.434595981379971,
+          "ms_min": 11.993141990387812,
+          "ms_max": 13.659892982104793,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 8.835979999275878,
+          "ms_min": 8.50178100517951,
+          "ms_max": 9.29054300650023,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 8.302175992866978,
+          "ms_min": 8.082980988547206,
+          "ms_max": 8.629852993180975,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 8.397523983148858,
+          "ms_min": 8.250189013779163,
+          "ms_max": 9.010912996018305,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 6.460199016146362,
+          "ms_min": 6.358057988109067,
+          "ms_max": 6.855358020402491,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 4.780462011694908,
+          "ms_min": 4.740469012176618,
+          "ms_max": 4.868382995482534,
+          "filled": 723749,
+          "levels": 679,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 4.235331987729296,
+          "ms_min": 4.2307750263717026,
+          "ms_max": 4.400976002216339,
+          "filled": 723749,
+          "levels": 481,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 4.6568070247303694,
+          "ms_min": 4.63203398976475,
+          "ms_max": 4.680104000726715,
+          "filled": 723749,
+          "levels": 241,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 16.18098298786208,
+          "ms_min": 15.728287980891764,
+          "ms_max": 17.932871996890754,
+          "filled": 723749,
+          "levels": 836,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 10.074573016026989,
+          "ms_min": 9.623200981877744,
+          "ms_max": 10.929846990620717,
+          "filled": 723749,
+          "levels": 961,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 2.3437589989043772,
+          "ms_min": 2.2650879982393235,
+          "ms_max": 2.657215023646131,
+          "filled": 723749,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 1.851826993515715,
+          "ms_min": 1.8174260039813817,
+          "ms_max": 2.2247990127652884,
+          "filled": 723749,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 1.9742200092878193,
+          "ms_min": 1.844362006522715,
+          "ms_max": 2.1242719958536327,
+          "filled": 723749,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 2.2941520146559924,
+          "ms_min": 2.2274880029726774,
+          "ms_max": 2.362026018090546,
+          "filled": 723749,
+          "levels": 3,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "disk_4000",
+      "family": "disk",
+      "note": "r=1900 disk (11.3M px)",
+      "width": 4000,
+      "height": 4000,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 14301.859253988368,
+          "ms_min": 14301.859253988368,
+          "ms_max": 14301.859253988368,
+          "filled": 11340981,
+          "skip": null
+        },
+        "njit": {
+          "ms": 269.48476300458424,
+          "ms_min": 257.85502599319443,
+          "ms_max": 279.1111519909464,
+          "skip": null
+        },
+        "ch01_ring": {
+          "skip": "overflow"
+        },
+        "ch01_spill": {
+          "ms": 190.30272497911938,
+          "ms_min": 182.49379098415375,
+          "ms_max": 193.32871897495352,
+          "filled": 11340981,
+          "levels": 2688,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 103.56024198699743,
+          "ms_min": 102.3806519806385,
+          "ms_max": 107.7600670105312,
+          "filled": 11340981,
+          "levels": 2688,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 96.07509899069555,
+          "ms_min": 93.77061898703687,
+          "ms_max": 98.75874000135809,
+          "filled": 11340981,
+          "levels": 2688,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 117.86784100695513,
+          "ms_min": 115.42448500404134,
+          "ms_max": 120.5538600042928,
+          "filled": 11340981,
+          "levels": 2688,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 73.06400701054372,
+          "ms_min": 61.64201800129376,
+          "ms_max": 73.24836100451648,
+          "filled": 11340981,
+          "levels": 2688,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 27.305573981720954,
+          "ms_min": 27.15209499001503,
+          "ms_max": 30.377324001165107,
+          "filled": 11340981,
+          "levels": 2688,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 24.126767995767295,
+          "ms_min": 23.305409005843103,
+          "ms_max": 24.194558995077386,
+          "filled": 11340981,
+          "levels": 1901,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 35.95745997154154,
+          "ms_min": 30.78348998678848,
+          "ms_max": 38.11673301970586,
+          "filled": 11340981,
+          "levels": 951,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 111.9937019830104,
+          "ms_min": 102.58227802114561,
+          "ms_max": 122.55141299101524,
+          "filled": 11340981,
+          "levels": 3247,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 79.47662199148908,
+          "ms_min": 67.2067359846551,
+          "ms_max": 90.36145199206658,
+          "filled": 11340981,
+          "levels": 3801,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 47.10165300639346,
+          "ms_min": 37.08102600648999,
+          "ms_max": 49.88544702064246,
+          "filled": 11340981,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 29.359134001424536,
+          "ms_min": 25.433356990106404,
+          "ms_max": 30.394913017516956,
+          "filled": 11340981,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 27.41193602560088,
+          "ms_min": 24.76626299903728,
+          "ms_max": 30.322745005832985,
+          "filled": 11340981,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 37.199507001787424,
+          "ms_min": 29.092918994138017,
+          "ms_max": 37.92355698533356,
+          "filled": 11340981,
+          "levels": 3,
+          "skip": null
+        }
+      },
+      "best": "ch03_conn8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "serp_128",
+      "family": "serpentine",
+      "note": "1-px snake, ~8k levels",
+      "width": 128,
+      "height": 128,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 16.465406981296837,
+          "ms_min": 16.35726899257861,
+          "ms_max": 21.230812999419868,
+          "filled": 8256,
+          "skip": null
+        },
+        "njit": {
+          "ms": 0.11313200229778886,
+          "ms_min": 0.10188401211053133,
+          "ms_max": 0.11668200022540987,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 10.975326993502676,
+          "ms_min": 10.104032990057021,
+          "ms_max": 15.602498984662816,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 17.317227000603452,
+          "ms_min": 17.225884017534554,
+          "ms_max": 19.83590199961327,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 39.90683899610303,
+          "ms_min": 34.44096801104024,
+          "ms_max": 42.21755298203789,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 37.66039299080148,
+          "ms_min": 30.860692000715062,
+          "ms_max": 39.28237600484863,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 34.48805899824947,
+          "ms_min": 34.3165069934912,
+          "ms_max": 37.34303201781586,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 29.67358098248951,
+          "ms_min": 29.58721501636319,
+          "ms_max": 30.21233098115772,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 35.792729002423584,
+          "ms_min": 35.29186800005846,
+          "ms_max": 35.95710301306099,
+          "filled": 8256,
+          "levels": 8256,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 42.09801901015453,
+          "ms_min": 41.93585299071856,
+          "ms_max": 42.8399249794893,
+          "filled": 8256,
+          "levels": 8129,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 47.179557994240895,
+          "ms_min": 47.0459760108497,
+          "ms_max": 47.22391199902631,
+          "filled": 8256,
+          "levels": 8129,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 1.0187169827986509,
+          "ms_min": 1.0004460054915398,
+          "ms_max": 1.084534014808014,
+          "filled": 8256,
+          "levels": 129,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 43.546448985580355,
+          "ms_min": 43.415738007752225,
+          "ms_max": 43.98100098478608,
+          "filled": 8256,
+          "levels": 8129,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 0.8966079913079739,
+          "ms_min": 0.8862990071065724,
+          "ms_max": 0.9685379918664694,
+          "filled": 8256,
+          "levels": 129,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 0.9970809915103018,
+          "ms_min": 0.9814449877012521,
+          "ms_max": 1.1612520029302686,
+          "filled": 8256,
+          "levels": 129,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 1.0496500181034207,
+          "ms_min": 1.0303400049451739,
+          "ms_max": 1.0783470061141998,
+          "filled": 8256,
+          "levels": 129,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 1.0232829954475164,
+          "ms_min": 1.0136890050489455,
+          "ms_max": 1.0715759999584407,
+          "filled": 8256,
+          "levels": 129,
+          "skip": null
+        }
+      },
+      "best": "ch05_fused_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "serp_256",
+      "family": "serpentine",
+      "note": "1-px snake, ~33k levels",
+      "width": 256,
+      "height": 256,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 50.36439097602852,
+          "ms_min": 47.66007501166314,
+          "ms_max": 70.78971201553941,
+          "filled": 32896,
+          "skip": null
+        },
+        "njit": {
+          "ms": 0.3857680130749941,
+          "ms_min": 0.34544497611932456,
+          "ms_max": 0.4011860000900924,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 38.49687002366409,
+          "ms_min": 38.207760982913896,
+          "ms_max": 42.403169005410746,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 53.329752990975976,
+          "ms_min": 53.25517902383581,
+          "ms_max": 53.52772798505612,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 149.41840601386502,
+          "ms_min": 144.69365400145762,
+          "ms_max": 152.26606899523176,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 141.50718800374307,
+          "ms_min": 117.50238799140789,
+          "ms_max": 145.5561630136799,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 129.1163979913108,
+          "ms_min": 128.81559200468473,
+          "ms_max": 131.30116899264976,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 121.02971799322404,
+          "ms_min": 112.8687419986818,
+          "ms_max": 133.91524998587556,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 133.89532300061546,
+          "ms_min": 133.2262599898968,
+          "ms_max": 152.24329198827036,
+          "filled": 32896,
+          "levels": 32896,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 174.02055001002736,
+          "ms_min": 165.04415700910613,
+          "ms_max": 204.24625600571744,
+          "filled": 32896,
+          "levels": 32641,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 189.46457101264969,
+          "ms_min": 184.2653719941154,
+          "ms_max": 193.45749999047257,
+          "filled": 32896,
+          "levels": 32641,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 1.8873740045819432,
+          "ms_min": 1.8500610021874309,
+          "ms_max": 1.8950150115415454,
+          "filled": 32896,
+          "levels": 257,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 170.061127981171,
+          "ms_min": 169.71004800871015,
+          "ms_max": 174.2439740046393,
+          "filled": 32896,
+          "levels": 32641,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 1.6792720125522465,
+          "ms_min": 1.6597089997958392,
+          "ms_max": 1.7816799809224904,
+          "filled": 32896,
+          "levels": 257,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 1.832287001889199,
+          "ms_min": 1.805093022994697,
+          "ms_max": 1.8556819995865226,
+          "filled": 32896,
+          "levels": 257,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 1.861725002527237,
+          "ms_min": 1.8331359897274524,
+          "ms_max": 1.893262000521645,
+          "filled": 32896,
+          "levels": 257,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 1.8835369846783578,
+          "ms_min": 1.861839002231136,
+          "ms_max": 2.246708987513557,
+          "filled": 32896,
+          "levels": 257,
+          "skip": null
+        }
+      },
+      "best": "ch05_fused_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "comb_24",
+      "family": "comb",
+      "note": "24 teeth, 96\u00d764",
+      "width": 96,
+      "height": 64,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 2.6357730093877763,
+          "ms_min": 2.260859007947147,
+          "ms_max": 2.6816470199264586,
+          "filled": 1818,
+          "skip": null
+        },
+        "njit": {
+          "ms": 0.01652201171964407,
+          "ms_min": 0.01622599666006863,
+          "ms_max": 0.017308018868789077,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 0.3758760285563767,
+          "ms_min": 0.3628109989222139,
+          "ms_max": 0.4580550012178719,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 0.4636799858417362,
+          "ms_min": 0.44647400500252843,
+          "ms_max": 0.49648998538032174,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 0.8372169977519661,
+          "ms_min": 0.8336649916600436,
+          "ms_max": 0.9039309807121754,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 0.8081539999693632,
+          "ms_min": 0.801747984951362,
+          "ms_max": 0.830486009363085,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 0.8664729830343276,
+          "ms_min": 0.8428020228166133,
+          "ms_max": 0.8918280072975904,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 0.7820640166755766,
+          "ms_min": 0.7624450081493706,
+          "ms_max": 0.8234650013037026,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 0.9527619986329228,
+          "ms_min": 0.9194359881803393,
+          "ms_max": 0.9824940061662346,
+          "filled": 1818,
+          "levels": 175,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 1.1252330150455236,
+          "ms_min": 1.1038199882023036,
+          "ms_max": 1.1492460034787655,
+          "filled": 1818,
+          "levels": 173,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 1.2665020185522735,
+          "ms_min": 1.222289982251823,
+          "ms_max": 1.3011829869356006,
+          "filled": 1818,
+          "levels": 151,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 0.6824290030635893,
+          "ms_min": 0.6480559823103249,
+          "ms_max": 0.8004400006029755,
+          "filled": 1818,
+          "levels": 70,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 1.1865189881063998,
+          "ms_min": 1.1847570131067187,
+          "ms_max": 1.2078039871994406,
+          "filled": 1818,
+          "levels": 173,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 0.36488400655798614,
+          "ms_min": 0.3503990010358393,
+          "ms_max": 0.420061987824738,
+          "filled": 1818,
+          "levels": 35,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 0.40236100903712213,
+          "ms_min": 0.3943009942304343,
+          "ms_max": 0.41505799163132906,
+          "filled": 1818,
+          "levels": 35,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 0.4306409973651171,
+          "ms_min": 0.419272982981056,
+          "ms_max": 0.4907300171907991,
+          "filled": 1818,
+          "levels": 35,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 0.4087990091647953,
+          "ms_min": 0.3940710157621652,
+          "ms_max": 0.45931400381959975,
+          "filled": 1818,
+          "levels": 33,
+          "skip": null
+        }
+      },
+      "best": "ch05_fused_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "comb_2000",
+      "family": "comb",
+      "note": "2000 teeth, 3000\u00d74001 (4.8M px)",
+      "width": 3000,
+      "height": 4001,
+      "kind": "one",
+      "cells": {
+        "pure_python": {
+          "ms": 7255.315415008226,
+          "ms_min": 7255.315415008226,
+          "ms_max": 7255.315415008226,
+          "filled": 4831992,
+          "skip": null
+        },
+        "njit": {
+          "ms": 158.71878998586908,
+          "ms_min": 152.86514299805276,
+          "ms_max": 167.56944698863663,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 79.29599800263532,
+          "ms_min": 78.2957979827188,
+          "ms_max": 81.70697899186052,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 100.25819999282248,
+          "ms_min": 92.92124898638576,
+          "ms_max": 103.42237699660473,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 94.34919801424257,
+          "ms_min": 86.95166400866583,
+          "ms_max": 98.34702400257811,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 74.57760701072402,
+          "ms_min": 72.40291900234297,
+          "ms_max": 79.86260700272396,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 114.54469899763353,
+          "ms_min": 113.8149659964256,
+          "ms_max": 119.26620799931698,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 66.9757790165022,
+          "ms_min": 63.95053002052009,
+          "ms_max": 69.42130799870938,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 58.838646014919505,
+          "ms_min": 52.948336000554264,
+          "ms_max": 63.85325000155717,
+          "filled": 4831992,
+          "levels": 8799,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 77.23013500799425,
+          "ms_min": 74.25924198469147,
+          "ms_max": 80.07106601144187,
+          "filled": 4831992,
+          "levels": 8797,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 79.42406201618724,
+          "ms_min": 66.51784499990754,
+          "ms_max": 81.68572801514529,
+          "filled": 4831992,
+          "levels": 6799,
+          "skip": null
+        },
+        "ch04_seq": {
+          "skip": "na"
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "skip": "na"
+        },
+        "ch05_merge": {
+          "ms": 67.18473299406469,
+          "ms_min": 59.41034998977557,
+          "ms_max": 71.71406201086938,
+          "filled": 4831992,
+          "levels": 2408,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 86.5811490220949,
+          "ms_min": 78.56529499986209,
+          "ms_max": 93.1517540011555,
+          "filled": 4831992,
+          "levels": 8797,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 16.14960201550275,
+          "ms_min": 13.431539991870522,
+          "ms_max": 16.391226992709562,
+          "filled": 4831992,
+          "levels": 1204,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 15.002856991486624,
+          "ms_min": 11.70054599060677,
+          "ms_max": 15.628153021680191,
+          "filled": 4831992,
+          "levels": 1204,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 15.451182989636436,
+          "ms_min": 12.720803002594039,
+          "ms_max": 15.59758500661701,
+          "filled": 4831992,
+          "levels": 1204,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 17.48311100527644,
+          "ms_min": 16.73104800283909,
+          "ms_max": 19.551224017050117,
+          "filled": 4831992,
+          "levels": 1201,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "two_sq_300",
+      "family": "two squares",
+      "note": "2 \u00d7 300\u00b2 squares, 700\u00d7400",
+      "width": 700,
+      "height": 400,
+      "kind": "two",
+      "cells": {
+        "pure_python": {
+          "ms": 198.41303300927393,
+          "ms_min": 196.49319202289917,
+          "ms_max": 200.58085600612685,
+          "filled": 180000,
+          "skip": null
+        },
+        "njit": {
+          "ms": 2.305124973645434,
+          "ms_min": 2.170669991755858,
+          "ms_max": 2.7742719976231456,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 3.9831390022300184,
+          "ms_min": 3.697806008858606,
+          "ms_max": 6.324764981400222,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 4.615464014932513,
+          "ms_min": 4.156762006459758,
+          "ms_max": 6.934681005077437,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 6.005135044688359,
+          "ms_min": 5.599730997346342,
+          "ms_max": 6.125100975623354,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 4.260600981069729,
+          "ms_min": 4.187240992905572,
+          "ms_max": 4.561498994007707,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 4.3207779817748815,
+          "ms_min": 4.285710019757971,
+          "ms_max": 4.835822008317336,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 4.60618399665691,
+          "ms_min": 4.286426003091037,
+          "ms_max": 4.86185698537156,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 4.558360989904031,
+          "ms_min": 4.265344003215432,
+          "ms_max": 6.621349981287494,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 2.860939013771713,
+          "ms_min": 2.695770002901554,
+          "ms_max": 4.95982397114858,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 2.857354993466288,
+          "ms_min": 2.845520997652784,
+          "ms_max": 2.964912011520937,
+          "filled": 180000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 4.1767790098674595,
+          "ms_min": 4.1446019895374775,
+          "ms_max": 6.9371110294014215,
+          "filled": 180000,
+          "levels": 301,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 2.136302995495498,
+          "ms_min": 2.126628009136766,
+          "ms_max": 2.415196009678766,
+          "filled": 180000,
+          "levels": 301,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 5.403713992564008,
+          "ms_min": 3.085790987825021,
+          "ms_max": 5.568241991568357,
+          "filled": 180000,
+          "levels": 300,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 5.202926986385137,
+          "ms_min": 2.968610991956666,
+          "ms_max": 5.391981016146019,
+          "filled": 180000,
+          "levels": 300,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 0.7619599928148091,
+          "ms_min": 0.6884839967824519,
+          "ms_max": 2.5456820148974657,
+          "filled": 180000,
+          "levels": 7,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 0.6578610045835376,
+          "ms_min": 0.6335770012810826,
+          "ms_max": 1.7936369986273348,
+          "filled": 180000,
+          "levels": 7,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 0.6980110192671418,
+          "ms_min": 0.6612350116483867,
+          "ms_max": 2.9309609963092953,
+          "filled": 180000,
+          "levels": 7,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 1.3922039943281561,
+          "ms_min": 1.03411398595199,
+          "ms_max": 3.4001630265265703,
+          "filled": 180000,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "two_sq_2800",
+      "family": "two squares",
+      "note": "2 \u00d7 7.8M px squares, 6000\u00d73200",
+      "width": 6000,
+      "height": 3200,
+      "kind": "two",
+      "cells": {
+        "pure_python": {
+          "ms": 19082.66366700991,
+          "ms_min": 19082.66366700991,
+          "ms_max": 19082.66366700991,
+          "filled": 15680000,
+          "skip": null
+        },
+        "njit": {
+          "ms": 683.5135059955064,
+          "ms_min": 644.2189039953519,
+          "ms_max": 763.8335709925741,
+          "skip": null
+        },
+        "ch01_ring": {
+          "skip": "overflow"
+        },
+        "ch01_spill": {
+          "ms": 307.88848199881613,
+          "ms_min": 258.91370300087146,
+          "ms_max": 328.5898939939216,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 293.5453599784523,
+          "ms_min": 287.81811601947993,
+          "ms_max": 305.69602601462975,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 161.16816399153322,
+          "ms_min": 152.31516200583428,
+          "ms_max": 163.43014599988237,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 174.88585101091303,
+          "ms_min": 146.33788098581135,
+          "ms_max": 180.3052350296639,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 107.81882100855,
+          "ms_min": 106.06988397194073,
+          "ms_max": 108.35247300565243,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 50.97643000772223,
+          "ms_min": 45.68861800362356,
+          "ms_max": 53.06428999756463,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 34.831086959457025,
+          "ms_min": 34.637576987734064,
+          "ms_max": 36.638123012380674,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 52.872556989314035,
+          "ms_min": 47.523900982923806,
+          "ms_max": 54.658086970448494,
+          "filled": 15680000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 55.049971997505054,
+          "ms_min": 47.80156401102431,
+          "ms_max": 62.81444802880287,
+          "filled": 15680000,
+          "levels": 2801,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 36.88050000346266,
+          "ms_min": 29.61319498717785,
+          "ms_max": 154.0529429912567,
+          "filled": 15680000,
+          "levels": 2801,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 53.45425897394307,
+          "ms_min": 50.23171997163445,
+          "ms_max": 56.98974701226689,
+          "filled": 15680000,
+          "levels": 2800,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 104.90535598364659,
+          "ms_min": 97.27792601916008,
+          "ms_max": 121.12599099054933,
+          "filled": 15680000,
+          "levels": 2800,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 47.846135013969615,
+          "ms_min": 46.06521999812685,
+          "ms_max": 48.47381301806308,
+          "filled": 15680000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 31.729877984616905,
+          "ms_min": 31.038535991683602,
+          "ms_max": 32.09801099728793,
+          "filled": 15680000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 36.12036400591023,
+          "ms_min": 32.00038502109237,
+          "ms_max": 40.622000000439584,
+          "filled": 15680000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 39.97231100220233,
+          "ms_min": 35.55592297925614,
+          "ms_max": 42.13390900986269,
+          "filled": 15680000,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "asym_4000_800",
+      "family": "asymmetric",
+      "note": "16M + 0.6M px pair, 5200\u00d74400",
+      "width": 5200,
+      "height": 4400,
+      "kind": "two",
+      "cells": {
+        "pure_python": {
+          "ms": 20600.603116006823,
+          "ms_min": 20600.603116006823,
+          "ms_max": 20600.603116006823,
+          "filled": 16640000,
+          "skip": null
+        },
+        "njit": {
+          "ms": 731.7226029990707,
+          "ms_min": 690.2918459963985,
+          "ms_max": 804.722843982745,
+          "skip": null
+        },
+        "ch01_ring": {
+          "skip": "overflow"
+        },
+        "ch01_spill": {
+          "ms": 267.58399995742366,
+          "ms_min": 262.3774519888684,
+          "ms_max": 287.50703498371877,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 186.71865097712725,
+          "ms_min": 184.91679700673558,
+          "ms_max": 199.35010399785824,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 153.9383929921314,
+          "ms_min": 148.43534500687383,
+          "ms_max": 173.56496598222293,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 169.94497401174158,
+          "ms_min": 155.1132680324372,
+          "ms_max": 187.71895600366406,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 95.1855170133058,
+          "ms_min": 94.65693298261613,
+          "ms_max": 116.48965999484062,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 43.72524601058103,
+          "ms_min": 43.460540007799864,
+          "ms_max": 45.95219300244935,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 30.601176025811583,
+          "ms_min": 30.452838022029027,
+          "ms_max": 30.884338018950075,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 45.99038700689562,
+          "ms_min": 45.83275000914,
+          "ms_max": 48.506813996937126,
+          "filled": 16640000,
+          "calls": 2,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 44.39205597736873,
+          "ms_min": 43.755500024417415,
+          "ms_max": 52.71759897004813,
+          "filled": 16640000,
+          "levels": 4001,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 37.24185097962618,
+          "ms_min": 37.00038802344352,
+          "ms_max": 52.74909100262448,
+          "filled": 16640000,
+          "levels": 4001,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 56.53260700637475,
+          "ms_min": 55.239487992366776,
+          "ms_max": 57.885732006980106,
+          "filled": 16640000,
+          "levels": 4000,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 81.4891740155872,
+          "ms_min": 78.63085600547493,
+          "ms_max": 87.82612602226436,
+          "filled": 16640000,
+          "levels": 4000,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 50.17237598076463,
+          "ms_min": 49.26594899734482,
+          "ms_max": 53.49083099281415,
+          "filled": 16640000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 35.0394629931543,
+          "ms_min": 32.952292007394135,
+          "ms_max": 40.621822990942746,
+          "filled": 16640000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 38.85303999413736,
+          "ms_min": 35.0324519968126,
+          "ms_max": 44.567550998181105,
+          "filled": 16640000,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 47.93619300471619,
+          "ms_min": 42.96067199902609,
+          "ms_max": 50.01663899747655,
+          "filled": 16640000,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch03_conn8",
+      "crosscheck": "OK"
+    },
+    {
+      "row": "random_1000",
+      "family": "random noise",
+      "note": "density 0.3, ~thousands of blobs",
+      "width": 1000,
+      "height": 1000,
+      "kind": "n",
+      "cells": {
+        "pure_python": {
+          "ms": 938.6898259981535,
+          "ms_min": 882.1366220072377,
+          "ms_max": 962.0121300104074,
+          "filled": 299991,
+          "skip": null
+        },
+        "njit": {
+          "ms": 22.94776198687032,
+          "ms_min": 22.35307398950681,
+          "ms_max": 23.979805991984904,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 8861.351066152565,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 10018.343804767937,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 11851.703588545206,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 11061.345081834588,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 9470.501997275278,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 11227.018201898318,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 11159.65715231141,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 11786.892433738103,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 13744.106924496009,
+          "est": true,
+          "sample": 16,
+          "calls": 47655,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 12374.035647604614,
+          "est": true,
+          "sample": 16,
+          "calls": 23828,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 7778.030907618813,
+          "est": true,
+          "sample": 16,
+          "calls": 23828,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 5.1211100071668625,
+          "ms_min": 4.226007993565872,
+          "ms_max": 6.460923992563039,
+          "filled": 299991,
+          "levels": 21,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 5.282658996293321,
+          "ms_min": 4.390906018670648,
+          "ms_max": 14.952197001548484,
+          "filled": 299991,
+          "levels": 64,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 3.8025029934942722,
+          "ms_min": 3.2329859968740493,
+          "ms_max": 4.344799002865329,
+          "filled": 299991,
+          "levels": 21,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 2.058294980088249,
+          "ms_min": 2.0494749769568443,
+          "ms_max": 4.516137996688485,
+          "filled": 299991,
+          "levels": 21,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 2.2534960007760674,
+          "ms_min": 1.9986889965366572,
+          "ms_max": 3.5578259848989546,
+          "filled": 299991,
+          "levels": 21,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 2.3684960033278912,
+          "ms_min": 2.355356002226472,
+          "ms_max": 3.475659992545843,
+          "filled": 299991,
+          "levels": 21,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK",
+      "n_blobs": 47655
+    },
+    {
+      "row": "random_4000",
+      "family": "random noise",
+      "note": "density 0.3, ~755k blobs",
+      "width": 4000,
+      "height": 4000,
+      "kind": "n",
+      "cells": {
+        "pure_python": {
+          "ms": 13488.26958698919,
+          "ms_min": 13488.26958698919,
+          "ms_max": 13488.26958698919,
+          "filled": 4802736,
+          "skip": null
+        },
+        "njit": {
+          "ms": 608.1599130120594,
+          "ms_min": 602.3013470112346,
+          "ms_max": 623.6033040040638,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 182338.85291070328,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 184953.1560431351,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 233492.55297784111,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 279921.25499971735,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 228529.18132820923,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 154371.9336601789,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 197124.37154509826,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 195755.27362800494,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 201400.5609115411,
+          "est": true,
+          "sample": 16,
+          "calls": 755577,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 168928.736055037,
+          "est": true,
+          "sample": 16,
+          "calls": 377789,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 124979.77603360778,
+          "est": true,
+          "sample": 16,
+          "calls": 377789,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 31.495431991061196,
+          "ms_min": 29.66743300203234,
+          "ms_max": 38.70721400016919,
+          "filled": 4802736,
+          "levels": 23,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 37.26240299874917,
+          "ms_min": 35.7117380190175,
+          "ms_max": 40.69406498456374,
+          "filled": 4802736,
+          "levels": 85,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 42.64878199319355,
+          "ms_min": 40.76299601001665,
+          "ms_max": 51.207768003223464,
+          "filled": 4802736,
+          "levels": 23,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 28.574233001563698,
+          "ms_min": 27.107188012450933,
+          "ms_max": 31.36997201363556,
+          "filled": 4802736,
+          "levels": 23,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 29.28753601736389,
+          "ms_min": 27.117334015201777,
+          "ms_max": 33.958473009988666,
+          "filled": 4802736,
+          "levels": 23,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 31.874654989223927,
+          "ms_min": 30.925590981496498,
+          "ms_max": 34.391164022963494,
+          "filled": 4802736,
+          "levels": 23,
+          "skip": null
+        }
+      },
+      "best": "ch05_r128_L8",
+      "crosscheck": "OK",
+      "n_blobs": 755577
+    },
+    {
+      "row": "png_blobs",
+      "family": "external PNG",
+      "note": "external PNG, 9000\u00b2, ~2.5k blobs (13.5M red px)",
+      "width": 9000,
+      "height": 9000,
+      "kind": "n",
+      "cells": {
+        "pure_python": {
+          "ms": 24083.017569995718,
+          "ms_min": 24083.017569995718,
+          "ms_max": 24083.017569995718,
+          "filled": 13451960,
+          "skip": null
+        },
+        "njit": {
+          "ms": 1345.9424880275037,
+          "ms_min": 1246.3508409855422,
+          "ms_max": 1496.7991360172164,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 1221.543304331135,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 1383.665025816299,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 2200.341563002439,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 2077.2730446478818,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 1916.2433662859257,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 1978.5594440763816,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 2334.6847403154243,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 2181.0634566645604,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 2301.8356970860623,
+          "est": true,
+          "sample": 6,
+          "calls": 2522,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 2744.92901978374,
+          "est": true,
+          "sample": 6,
+          "calls": 1261,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 1368.0191666207975,
+          "est": true,
+          "sample": 6,
+          "calls": 1261,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 69.39118800801225,
+          "ms_min": 66.61603000247851,
+          "ms_max": 69.98579399078153,
+          "filled": 13451960,
+          "levels": 82,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 104.95527100283653,
+          "ms_min": 102.05658999620937,
+          "ms_max": 107.495239994023,
+          "filled": 13451960,
+          "levels": 479,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 80.07630199426785,
+          "ms_min": 78.41787999495864,
+          "ms_max": 92.7501659898553,
+          "filled": 13451960,
+          "levels": 19,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 58.62615798832849,
+          "ms_min": 53.7725760077592,
+          "ms_max": 60.05573700531386,
+          "filled": 13451960,
+          "levels": 19,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 51.0294399864506,
+          "ms_min": 49.8842480010353,
+          "ms_max": 59.25535998539999,
+          "filled": 13451960,
+          "levels": 19,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 62.147993012331426,
+          "ms_min": 57.38067702623084,
+          "ms_max": 86.29770702100359,
+          "filled": 13451960,
+          "levels": 15,
+          "skip": null
+        }
+      },
+      "best": "ch05_split_L8",
+      "crosscheck": "OK",
+      "n_blobs": 2522
+    },
+    {
+      "row": "png_blocks",
+      "family": "external PNG",
+      "note": "external PNG, 1000\u00b2, ~21.6k blocks",
+      "width": 1000,
+      "height": 1000,
+      "kind": "n",
+      "cells": {
+        "pure_python": {
+          "ms": 813.5078369814437,
+          "ms_min": 813.5078369814437,
+          "ms_max": 813.5078369814437,
+          "filled": 387587,
+          "skip": null
+        },
+        "njit": {
+          "ms": 11.166542011778802,
+          "ms_min": 10.269983991747722,
+          "ms_max": 13.69090098887682,
+          "skip": null
+        },
+        "ch01_ring": {
+          "ms": 5203.798311209539,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch01_spill": {
+          "ms": 6420.145978830988,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch02_split": {
+          "ms": 8131.535145192174,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch02_global": {
+          "ms": 5648.210773098981,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch02_dirsplit": {
+          "ms": 4296.609587094281,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch02_pinned": {
+          "ms": 4217.931044579018,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch03_conn4": {
+          "ms": 4900.271352584241,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch03_conn8": {
+          "ms": 4955.753466056194,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch03_conn8_r2": {
+          "ms": 4894.239532324718,
+          "est": true,
+          "sample": 16,
+          "calls": 21618,
+          "skip": null
+        },
+        "ch04_seq": {
+          "ms": 4144.386816158658,
+          "est": true,
+          "sample": 16,
+          "calls": 10809,
+          "skip": null
+        },
+        "ch04_streams": {
+          "skip": "unsupported"
+        },
+        "ch04_multi": {
+          "ms": 2948.4790413844166,
+          "est": true,
+          "sample": 16,
+          "calls": 10809,
+          "skip": null
+        },
+        "ch05_merge": {
+          "ms": 2.4415479856543243,
+          "ms_min": 1.610117993550375,
+          "ms_max": 2.590204996522516,
+          "filled": 387587,
+          "levels": 40,
+          "skip": null
+        },
+        "ch05_ccl": {
+          "ms": 2.5758300034794956,
+          "ms_min": 2.2837630240246654,
+          "ms_max": 4.1920230141840875,
+          "filled": 387587,
+          "levels": 40,
+          "skip": null
+        },
+        "ch05_fused_L8": {
+          "ms": 2.4979159934446216,
+          "ms_min": 2.167589991586283,
+          "ms_max": 3.4917030134238303,
+          "filled": 387587,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_r128_L8": {
+          "ms": 1.3541530061047524,
+          "ms_min": 1.2454309908207506,
+          "ms_max": 4.493988992180675,
+          "filled": 387587,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_L8": {
+          "ms": 1.2352830090094358,
+          "ms_min": 1.1969720071647316,
+          "ms_max": 1.2386870221234858,
+          "filled": 387587,
+          "levels": 8,
+          "skip": null
+        },
+        "ch05_split_I1": {
+          "ms": 1.9949779962189496,
+          "ms_min": 1.7090550099965185,
+          "ms_max": 2.0947140001226217,
+          "filled": 387587,
+          "levels": 2,
+          "skip": null
+        }
+      },
+      "best": "ch05_split_L8",
+      "crosscheck": "OK",
+      "n_blobs": 21618
+    }
+  ]
+}
