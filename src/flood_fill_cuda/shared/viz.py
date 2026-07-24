@@ -239,8 +239,9 @@ svg { width: 100%; height: auto; display: block; }
 .m1 { fill: var(--m1); } .m2 { fill: var(--m2); }
 .m3 { fill: var(--m3); } .m4 { fill: var(--m4); } .m5 { fill: var(--m5); }
 .line { fill: none; stroke-width: 2; }
-.s1l { stroke: var(--s1); } .s3l { stroke: var(--s3); }
-.s4l { stroke: var(--s4); } .s5l { stroke: var(--s5); }
+.s1l { stroke: var(--s1); } .s2l { stroke: var(--s2); }
+.s3l { stroke: var(--s3); } .s4l { stroke: var(--s4); }
+.s5l { stroke: var(--s5); } .s6l { stroke: var(--s6); }
 .s7l { stroke: var(--s7); } .s8l { stroke: var(--s8); }
 .m1l { stroke: var(--m1); } .m2l { stroke: var(--m2); }
 .m3l { stroke: var(--m3); } .m4l { stroke: var(--m4); }

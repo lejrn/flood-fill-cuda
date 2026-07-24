@@ -71,8 +71,9 @@ svg { width: 100%; height: auto; display: block; }
 .m1 { fill: var(--m1); } .m2 { fill: var(--m2); }
 .m3 { fill: var(--m3); } .m4 { fill: var(--m4); } .m5 { fill: var(--m5); }
 .line { fill: none; stroke-width: 2; }
-.s1l { stroke: var(--s1); } .s3l { stroke: var(--s3); }
-.s4l { stroke: var(--s4); } .s5l { stroke: var(--s5); }
+.s1l { stroke: var(--s1); } .s2l { stroke: var(--s2); }
+.s3l { stroke: var(--s3); } .s4l { stroke: var(--s4); }
+.s5l { stroke: var(--s5); } .s6l { stroke: var(--s6); }
 .s7l { stroke: var(--s7); } .s8l { stroke: var(--s8); }
 .m1l { stroke: var(--m1); } .m2l { stroke: var(--m2); }
 .m3l { stroke: var(--m3); } .m4l { stroke: var(--m4); }
@@ -166,7 +167,7 @@ multiplier from single block to N blocks. 4-connectivity throughout
 except where 8-direction twins are charted explicitly · placement
 observed via %smid</div>
 
-<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">no seeds given: discovered, labeled and filled in one cooperative launch — see §3</div><div class="tile-src">seed-discovery stage</div></div></div>
+<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">no seeds given: discovered, labeled and filled in one cooperative launch — see §3</div><div class="tile-src">seed-discovery stage</div></div><div class="tile"><div class="tile-v">129 vs 128</div><div class="tile-l">one register cost half the GPU — found and fixed in the tuning cross-product, see §3</div><div class="tile-src">tuning cross-product</div></div></div>
 
 <h2 class="domain-h" style="margin-top:8px">1. Single blob</h2>
 
@@ -1995,7 +1996,7 @@ cap) for a per-pixel label map — priced, not free — and both drop the
 n_seeds parameter: the GPU-produced seed count is read behind a
 grid.sync fence sandwich, the refined form of ch04's deadlock lesson.</p>
 
-<div class="tiles"><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">discovered, labeled and filled in ONE launch · random noise 4000² · zero seeds given</div></div><div class="tile"><div class="tile-v">5/7</div><div class="tile-l">scenes where seed_merge (discovery riding inside the fill) beat the ccl_fill prepass</div></div><div class="tile"><div class="tile-v">1.88×–4.14×</div><div class="tile-l">discovery tax: kernel time vs ch04's given-seeds multisource (8-conn) on the two-blob scenes</div></div></div>
+<div class="tiles"><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">discovered, labeled and filled in ONE launch · random noise 4000² · zero seeds given</div></div><div class="tile"><div class="tile-v">5/7</div><div class="tile-l">scenes where seed_merge (discovery riding inside the fill) beat the ccl_fill prepass</div></div><div class="tile"><div class="tile-v">1.88×–4.14×</div><div class="tile-l">discovery tax: kernel time vs ch04's given-seeds multisource (8-conn) on the two-blob scenes</div></div><div class="tile"><div class="tile-v">129 vs 128</div><div class="tile-l">one register over the two-blocks-per-SM line cost the lattice kernel half the GPU — fixed two ways in the cross-product cards</div></div><div class="tile"><div class="tile-v">3.21×</div><div class="tile-l">the disks with split_I1 — interior seeding floods the mass at level 0, the staircase edge stays seedless</div></div></div>
 
 <div class="card">
 <h2>Runtime per scene — discovery included</h2>
@@ -2119,29 +2120,463 @@ the fill clock runs O(blob diameter). The lattice twin ADDS a seed at
 every red pixel on an S×S grid (canonical labels provably unchanged for
 every S) and compresses the parent chains before the repaint. S=0 is
 the compression-only control; S=1 seeds every red pixel — the ccl-like
-boundary where all connectivity flows through collisions. Bold = the
-scene's best in-flight config; hover a cell for its levels/candidates.
-Densified seeding beat the corner rule on 5 of 7
-scenes — best case 5.23× over v1
-(S4 on comb, 2000 teeth).</p>
-<div class="tablewrap"><table><tr><th>scene</th><th>v1 ms</th><th>S0 ms</th><th>S1 ms</th><th>S4 ms</th><th>S16 ms</th><th>S64 ms</th><th>S256 ms</th><th>ccl ms</th><th>best</th><th>vs v1</th><th>vs ccl</th></tr><tr><td>two squares 2800²</td><td title="2,800 levels, 2 candidates">56</td><td title="2,800 levels, 2 candidates">57</td><td title="1 levels, 15,680,000 candidates">90</td><td title="4 levels, 980,000 candidates">68</td><td title="16 levels, 61,252 candidates"><b>49</b></td><td title="57 levels, 3,786 candidates">67</td><td title="184 levels, 244 candidates">65</td><td title="2,800 levels, 2 candidates">117</td><td>S16</td><td>1.13×</td><td>2.38×</td></tr><tr><td>two disks r=1400</td><td title="2,420 levels, 500 candidates">90</td><td title="2,420 levels, 500 candidates">108</td><td title="1 levels, 12,314,954 candidates">70</td><td title="5 levels, 770,147 candidates">55</td><td title="16 levels, 48,603 candidates"><b>41</b></td><td title="64 levels, 3,512 candidates">53</td><td title="244 levels, 690 candidates">50</td><td title="2,801 levels, 2 candidates">63</td><td>S16</td><td>2.21×</td><td>1.55×</td></tr><tr><td>asymmetric 4000²+800²</td><td title="4,000 levels, 2 candidates">61</td><td title="4,000 levels, 2 candidates">63</td><td title="1 levels, 16,640,000 candidates">97</td><td title="4 levels, 1,040,000 candidates">72</td><td title="16 levels, 65,002 candidates"><b>54</b></td><td title="57 levels, 4,064 candidates">71</td><td title="249 levels, 267 candidates">63</td><td title="4,000 levels, 2 candidates">91</td><td>S16</td><td>1.13×</td><td>1.69×</td></tr><tr><td>grid of 100 blobs</td><td title="360 levels, 100 candidates"><b>35</b></td><td title="360 levels, 100 candidates">37</td><td title="1 levels, 12,960,000 candidates">77</td><td title="4 levels, 810,000 candidates">56</td><td title="13 levels, 48,500 candidates">40</td><td title="61 levels, 3,125 candidates">50</td><td title="253 levels, 269 candidates">41</td><td title="360 levels, 100 candidates">59</td><td>v1</td><td>1.00×</td><td>1.69×</td></tr><tr><td>random noise 4000²</td><td title="23 levels, 1,154,024 candidates"><b>25</b></td><td title="23 levels, 1,154,024 candidates">33</td><td title="1 levels, 4,802,736 candidates">34</td><td title="19 levels, 1,381,695 candidates">38</td><td title="23 levels, 1,168,215 candidates">36</td><td title="23 levels, 1,154,906 candidates">35</td><td title="23 levels, 1,154,064 candidates">33</td><td title="85 levels, 755,577 candidates">28</td><td>v1</td><td>1.00×</td><td>1.11×</td></tr><tr><td>comb, 2000 teeth</td><td title="2,408 levels, 2,000 candidates">68</td><td title="2,408 levels, 2,000 candidates">26</td><td title="1 levels, 4,831,992 candidates">26</td><td title="1,202 levels, 3,998 candidates"><b>13</b></td><td title="2,408 levels, 2,000 candidates">28</td><td title="2,408 levels, 2,000 candidates">24</td><td title="2,408 levels, 2,000 candidates">27</td><td title="8,797 levels, 1 candidates">85</td><td>S4</td><td>5.23×</td><td>6.55×</td></tr><tr><td>serpentine 256²</td><td title="257 levels, 65 candidates">1.9</td><td title="257 levels, 65 candidates">1.7</td><td title="1 levels, 32,896 candidates"><b>0.53</b></td><td title="130 levels, 4,160 candidates">1.1</td><td title="257 levels, 320 candidates">1.7</td><td title="257 levels, 80 candidates">1.8</td><td title="257 levels, 65 candidates">1.7</td><td title="32,641 levels, 1 candidates">174</td><td>S1</td><td>3.55×</td><td>328.01×</td></tr></table></div>
+boundary where all connectivity flows through collisions. One line per
+scene, y = speedup over v1 (log scale), the dashed line is v1 itself:
+above it densified seeding wins, below it the extra unions cost more
+than the shorter fill saves. Densified seeding beat the corner rule on
+5 of 7 scenes — best case
+5.23× over v1 (S4
+on comb, 2000 teeth). Two shapes to notice: the rise
+into S16 and the sag at S64 — the cross-product below chases both with
+a finer stride curve. Hover any dot for ms, levels, candidates and the
+fill/flatten phase split.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s1)"></i>two squares 2800²</span><span><i class="chip" style="background:var(--s8)"></i>two disks r=1400</span><span><i class="chip" style="background:var(--s6)"></i>asymmetric 4000²+800²</span><span><i class="chip" style="background:var(--s5)"></i>grid of 100 blobs</span><span><i class="chip" style="background:var(--s3)"></i>random noise 4000²</span><span><i class="chip" style="background:var(--s4)"></i>comb, 2000 teeth</span><span><i class="chip" style="background:var(--s7)"></i>serpentine 256²</span></div>
+<svg viewBox="0 0 860 268" role="img" aria-label="Speedup over v1 across seeding strides, per scene">
+<line x1="118.7" y1="10" x2="118.7" y2="240" class="rowline"/>
+<text x="118.7" y="262" class="tick" text-anchor="middle">v1</text>
+<line x1="228.1" y1="10" x2="228.1" y2="240" class="rowline"/>
+<text x="228.1" y="262" class="tick" text-anchor="middle">S0</text>
+<line x1="337.6" y1="10" x2="337.6" y2="240" class="rowline"/>
+<text x="337.6" y="262" class="tick" text-anchor="middle">S1</text>
+<line x1="447.0" y1="10" x2="447.0" y2="240" class="rowline"/>
+<text x="447.0" y="262" class="tick" text-anchor="middle">S4</text>
+<line x1="556.4" y1="10" x2="556.4" y2="240" class="rowline"/>
+<text x="556.4" y="262" class="tick" text-anchor="middle">S16</text>
+<line x1="665.9" y1="10" x2="665.9" y2="240" class="rowline"/>
+<text x="665.9" y="262" class="tick" text-anchor="middle">S64</text>
+<line x1="775.3" y1="10" x2="775.3" y2="240" class="rowline"/>
+<text x="775.3" y="262" class="tick" text-anchor="middle">S256</text>
+<line x1="64" y1="221.0" x2="830" y2="221.0" class="grid"/>
+<text x="56" y="225.0" class="tick" text-anchor="end">0.5×</text>
+<line x1="64" y1="102.5" x2="830" y2="102.5" class="grid"/>
+<text x="56" y="106.5" class="tick" text-anchor="end">2×</text>
+<line x1="64" y1="43.3" x2="830" y2="43.3" class="grid"/>
+<text x="56" y="47.3" class="tick" text-anchor="end">4×</text>
+<line x1="64" y1="161.8" x2="830" y2="161.8" class="satline"/>
+<text x="56" y="165.8" class="tick" text-anchor="end" font-weight="650">1× = v1</text>
+<polyline points="118.7,161.8 228.1,164.3 337.6,203.0 447.0,178.6 556.4,151.4 665.9,177.7 775.3,174.6" class="line s1l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s1" data-tip="two squares 2800² — v1: 56 ms (1.00× vs v1) · 2,800 levels · 2 candidates · fill 53 / flatten 1.6 ms"/>
+<circle cx="228.1" cy="164.3" r="4" class="dot s1" data-tip="two squares 2800² — S0: 57 ms (0.97× vs v1) · 2,800 levels · 2 candidates · fill 52 / flatten 2.3 ms"/>
+<circle cx="337.6" cy="203.0" r="4" class="dot s1" data-tip="two squares 2800² — S1: 90 ms (0.62× vs v1) · 1 levels · 15,680,000 candidates · fill 86 / flatten 3.1 ms"/>
+<circle cx="447.0" cy="178.6" r="4" class="dot s1" data-tip="two squares 2800² — S4: 68 ms (0.82× vs v1) · 4 levels · 980,000 candidates · fill 61 / flatten 2.6 ms"/>
+<circle cx="556.4" cy="151.4" r="4" class="dot s1" data-tip="two squares 2800² — S16: 49 ms (1.13× vs v1) · 16 levels · 61,252 candidates · fill 43 / flatten 2.5 ms"/>
+<circle cx="665.9" cy="177.7" r="4" class="dot s1" data-tip="two squares 2800² — S64: 67 ms (0.83× vs v1) · 57 levels · 3,786 candidates · fill 61 / flatten 2.3 ms"/>
+<circle cx="775.3" cy="174.6" r="4" class="dot s1" data-tip="two squares 2800² — S256: 65 ms (0.86× vs v1) · 184 levels · 244 candidates · fill 57 / flatten 2.7 ms"/>
+<polyline points="118.7,161.8 228.1,177.2 337.6,140.0 447.0,119.6 556.4,93.9 665.9,117.0 775.3,111.5" class="line s8l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s8" data-tip="two disks r=1400 — v1: 90 ms (1.00× vs v1) · 2,420 levels · 500 candidates · fill 88 / flatten 1.8 ms"/>
+<circle cx="228.1" cy="177.2" r="4" class="dot s8" data-tip="two disks r=1400 — S0: 108 ms (0.83× vs v1) · 2,420 levels · 500 candidates · fill 103 / flatten 2.0 ms"/>
+<circle cx="337.6" cy="140.0" r="4" class="dot s8" data-tip="two disks r=1400 — S1: 70 ms (1.29× vs v1) · 1 levels · 12,314,954 candidates · fill 63 / flatten 2.6 ms"/>
+<circle cx="447.0" cy="119.6" r="4" class="dot s8" data-tip="two disks r=1400 — S4: 55 ms (1.64× vs v1) · 5 levels · 770,147 candidates · fill 48 / flatten 2.3 ms"/>
+<circle cx="556.4" cy="93.9" r="4" class="dot s8" data-tip="two disks r=1400 — S16: 41 ms (2.21× vs v1) · 16 levels · 48,603 candidates · fill 34 / flatten 2.1 ms"/>
+<circle cx="665.9" cy="117.0" r="4" class="dot s8" data-tip="two disks r=1400 — S64: 53 ms (1.69× vs v1) · 64 levels · 3,512 candidates · fill 48 / flatten 2.2 ms"/>
+<circle cx="775.3" cy="111.5" r="4" class="dot s8" data-tip="two disks r=1400 — S256: 50 ms (1.80× vs v1) · 244 levels · 690 candidates · fill 45 / flatten 1.9 ms"/>
+<polyline points="118.7,161.8 228.1,164.3 337.6,201.6 447.0,176.3 556.4,151.4 665.9,174.8 775.3,164.3" class="line s6l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — v1: 61 ms (1.00× vs v1) · 4,000 levels · 2 candidates · fill 58 / flatten 1.6 ms"/>
+<circle cx="228.1" cy="164.3" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — S0: 63 ms (0.97× vs v1) · 4,000 levels · 2 candidates · fill 57 / flatten 2.3 ms"/>
+<circle cx="337.6" cy="201.6" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — S1: 97 ms (0.63× vs v1) · 1 levels · 16,640,000 candidates · fill 87 / flatten 3.4 ms"/>
+<circle cx="447.0" cy="176.3" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — S4: 72 ms (0.84× vs v1) · 4 levels · 1,040,000 candidates · fill 65 / flatten 2.9 ms"/>
+<circle cx="556.4" cy="151.4" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — S16: 54 ms (1.13× vs v1) · 16 levels · 65,002 candidates · fill 45 / flatten 3.1 ms"/>
+<circle cx="665.9" cy="174.8" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — S64: 71 ms (0.86× vs v1) · 57 levels · 4,064 candidates · fill 64 / flatten 2.8 ms"/>
+<circle cx="775.3" cy="164.3" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — S256: 63 ms (0.97× vs v1) · 249 levels · 267 candidates · fill 57 / flatten 2.7 ms"/>
+<polyline points="118.7,161.8 228.1,166.0 337.6,229.5 447.0,202.4 556.4,173.4 665.9,192.7 775.3,174.7" class="line s5l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s5" data-tip="grid of 100 blobs — v1: 35 ms (1.00× vs v1) · 360 levels · 100 candidates · fill 32 / flatten 1.2 ms"/>
+<circle cx="228.1" cy="166.0" r="4" class="dot s5" data-tip="grid of 100 blobs — S0: 37 ms (0.95× vs v1) · 360 levels · 100 candidates · fill 30 / flatten 1.7 ms"/>
+<circle cx="337.6" cy="229.5" r="4" class="dot s5" data-tip="grid of 100 blobs — S1: 77 ms (0.45× vs v1) · 1 levels · 12,960,000 candidates · fill 69 / flatten 2.5 ms"/>
+<circle cx="447.0" cy="202.4" r="4" class="dot s5" data-tip="grid of 100 blobs — S4: 56 ms (0.62× vs v1) · 4 levels · 810,000 candidates · fill 49 / flatten 2.1 ms"/>
+<circle cx="556.4" cy="173.4" r="4" class="dot s5" data-tip="grid of 100 blobs — S16: 40 ms (0.87× vs v1) · 13 levels · 48,500 candidates · fill 34 / flatten 2.3 ms"/>
+<circle cx="665.9" cy="192.7" r="4" class="dot s5" data-tip="grid of 100 blobs — S64: 50 ms (0.70× vs v1) · 61 levels · 3,125 candidates · fill 45 / flatten 2.1 ms"/>
+<circle cx="775.3" cy="174.7" r="4" class="dot s5" data-tip="grid of 100 blobs — S256: 41 ms (0.86× vs v1) · 253 levels · 269 candidates · fill 34 / flatten 1.8 ms"/>
+<polyline points="118.7,161.8 228.1,186.9 337.6,188.2 447.0,198.0 556.4,194.7 665.9,190.1 775.3,186.6" class="line s3l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s3" data-tip="random noise 4000² — v1: 25 ms (1.00× vs v1) · 23 levels · 1,154,024 candidates · fill 20 / flatten 2.1 ms"/>
+<circle cx="228.1" cy="186.9" r="4" class="dot s3" data-tip="random noise 4000² — S0: 33 ms (0.75× vs v1) · 23 levels · 1,154,024 candidates · fill 25 / flatten 3.0 ms"/>
+<circle cx="337.6" cy="188.2" r="4" class="dot s3" data-tip="random noise 4000² — S1: 34 ms (0.73× vs v1) · 1 levels · 4,802,736 candidates · fill 26 / flatten 3.4 ms"/>
+<circle cx="447.0" cy="198.0" r="4" class="dot s3" data-tip="random noise 4000² — S4: 38 ms (0.65× vs v1) · 19 levels · 1,381,695 candidates · fill 29 / flatten 3.4 ms"/>
+<circle cx="556.4" cy="194.7" r="4" class="dot s3" data-tip="random noise 4000² — S16: 36 ms (0.68× vs v1) · 23 levels · 1,168,215 candidates · fill 27 / flatten 3.2 ms"/>
+<circle cx="665.9" cy="190.1" r="4" class="dot s3" data-tip="random noise 4000² — S64: 35 ms (0.72× vs v1) · 23 levels · 1,154,906 candidates · fill 27 / flatten 3.4 ms"/>
+<circle cx="775.3" cy="186.6" r="4" class="dot s3" data-tip="random noise 4000² — S256: 33 ms (0.75× vs v1) · 23 levels · 1,154,064 candidates · fill 24 / flatten 3.2 ms"/>
+<polyline points="118.7,161.8 228.1,79.4 337.6,80.7 447.0,20.5 556.4,85.3 665.9,74.4 775.3,81.6" class="line s4l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s4" data-tip="comb, 2000 teeth — v1: 68 ms (1.00× vs v1) · 2,408 levels · 2,000 candidates · fill 24 / flatten 48 ms"/>
+<circle cx="228.1" cy="79.4" r="4" class="dot s4" data-tip="comb, 2000 teeth — S0: 26 ms (2.62× vs v1) · 2,408 levels · 2,000 candidates · fill 23 / flatten 1.4 ms"/>
+<circle cx="337.6" cy="80.7" r="4" class="dot s4" data-tip="comb, 2000 teeth — S1: 26 ms (2.58× vs v1) · 1 levels · 4,831,992 candidates · fill 21 / flatten 1.8 ms"/>
+<circle cx="447.0" cy="20.5" r="4" class="dot s4" data-tip="comb, 2000 teeth — S4: 13 ms (5.23× vs v1) · 1,202 levels · 3,998 candidates · fill 8.2 / flatten 1.4 ms"/>
+<circle cx="556.4" cy="85.3" r="4" class="dot s4" data-tip="comb, 2000 teeth — S16: 28 ms (2.45× vs v1) · 2,408 levels · 2,000 candidates · fill 23 / flatten 1.4 ms"/>
+<circle cx="665.9" cy="74.4" r="4" class="dot s4" data-tip="comb, 2000 teeth — S64: 24 ms (2.78× vs v1) · 2,408 levels · 2,000 candidates · fill 20 / flatten 1.4 ms"/>
+<circle cx="775.3" cy="81.6" r="4" class="dot s4" data-tip="comb, 2000 teeth — S256: 27 ms (2.56× vs v1) · 2,408 levels · 2,000 candidates · fill 23 / flatten 1.4 ms"/>
+<polyline points="118.7,161.8 228.1,154.2 337.6,53.6 447.0,116.4 556.4,154.4 665.9,156.9 775.3,154.9" class="line s7l"/>
+<circle cx="118.7" cy="161.8" r="4" class="dot s7" data-tip="serpentine 256² — v1: 1.9 ms (1.00× vs v1) · 257 levels · 65 candidates · fill 1.7 / flatten 0.01 ms"/>
+<circle cx="228.1" cy="154.2" r="4" class="dot s7" data-tip="serpentine 256² — S0: 1.7 ms (1.09× vs v1) · 257 levels · 65 candidates · fill 1.6 / flatten 0.01 ms"/>
+<circle cx="337.6" cy="53.6" r="4" class="dot s7" data-tip="serpentine 256² — S1: 0.53 ms (3.55× vs v1) · 1 levels · 32,896 candidates · fill 0.25 / flatten 0.01 ms"/>
+<circle cx="447.0" cy="116.4" r="4" class="dot s7" data-tip="serpentine 256² — S4: 1.1 ms (1.70× vs v1) · 130 levels · 4,160 candidates · fill 0.89 / flatten 0.01 ms"/>
+<circle cx="556.4" cy="154.4" r="4" class="dot s7" data-tip="serpentine 256² — S16: 1.7 ms (1.09× vs v1) · 257 levels · 320 candidates · fill 1.6 / flatten 0.01 ms"/>
+<circle cx="665.9" cy="156.9" r="4" class="dot s7" data-tip="serpentine 256² — S64: 1.8 ms (1.06× vs v1) · 257 levels · 80 candidates · fill 1.7 / flatten 0.01 ms"/>
+<circle cx="775.3" cy="154.9" r="4" class="dot s7" data-tip="serpentine 256² — S256: 1.7 ms (1.08× vs v1) · 257 levels · 65 candidates · fill 1.6 / flatten 0.01 ms"/>
+</svg>
+<details><summary>All numbers — stride sweep (this run: 24-block lattice
+build, before the register fixes below)</summary>
+<div class="tablewrap"><table><tr><th>scene</th><th>v1 ms</th><th>S0 ms</th><th>S1 ms</th><th>S4 ms</th><th>S16 ms</th><th>S64 ms</th><th>S256 ms</th><th>ccl ms</th><th>best</th><th>vs v1</th><th>vs ccl</th></tr><tr><td>two squares 2800²</td><td title="2,800 levels, 2 candidates">56</td><td title="2,800 levels, 2 candidates">57</td><td title="1 levels, 15,680,000 candidates">90</td><td title="4 levels, 980,000 candidates">68</td><td title="16 levels, 61,252 candidates"><b>49</b></td><td title="57 levels, 3,786 candidates">67</td><td title="184 levels, 244 candidates">65</td><td title="2,800 levels, 2 candidates">117</td><td>S16</td><td>1.13×</td><td>2.38×</td></tr><tr><td>two disks r=1400</td><td title="2,420 levels, 500 candidates">90</td><td title="2,420 levels, 500 candidates">108</td><td title="1 levels, 12,314,954 candidates">70</td><td title="5 levels, 770,147 candidates">55</td><td title="16 levels, 48,603 candidates"><b>41</b></td><td title="64 levels, 3,512 candidates">53</td><td title="244 levels, 690 candidates">50</td><td title="2,801 levels, 2 candidates">63</td><td>S16</td><td>2.21×</td><td>1.55×</td></tr><tr><td>asymmetric 4000²+800²</td><td title="4,000 levels, 2 candidates">61</td><td title="4,000 levels, 2 candidates">63</td><td title="1 levels, 16,640,000 candidates">97</td><td title="4 levels, 1,040,000 candidates">72</td><td title="16 levels, 65,002 candidates"><b>54</b></td><td title="57 levels, 4,064 candidates">71</td><td title="249 levels, 267 candidates">63</td><td title="4,000 levels, 2 candidates">91</td><td>S16</td><td>1.13×</td><td>1.69×</td></tr><tr><td>grid of 100 blobs</td><td title="360 levels, 100 candidates"><b>35</b></td><td title="360 levels, 100 candidates">37</td><td title="1 levels, 12,960,000 candidates">77</td><td title="4 levels, 810,000 candidates">56</td><td title="13 levels, 48,500 candidates">40</td><td title="61 levels, 3,125 candidates">50</td><td title="253 levels, 269 candidates">41</td><td title="360 levels, 100 candidates">59</td><td>v1</td><td>1.00×</td><td>1.69×</td></tr><tr><td>random noise 4000²</td><td title="23 levels, 1,154,024 candidates"><b>25</b></td><td title="23 levels, 1,154,024 candidates">33</td><td title="1 levels, 4,802,736 candidates">34</td><td title="19 levels, 1,381,695 candidates">38</td><td title="23 levels, 1,168,215 candidates">36</td><td title="23 levels, 1,154,906 candidates">35</td><td title="23 levels, 1,154,064 candidates">33</td><td title="85 levels, 755,577 candidates">28</td><td>v1</td><td>1.00×</td><td>1.11×</td></tr><tr><td>comb, 2000 teeth</td><td title="2,408 levels, 2,000 candidates">68</td><td title="2,408 levels, 2,000 candidates">26</td><td title="1 levels, 4,831,992 candidates">26</td><td title="1,202 levels, 3,998 candidates"><b>13</b></td><td title="2,408 levels, 2,000 candidates">28</td><td title="2,408 levels, 2,000 candidates">24</td><td title="2,408 levels, 2,000 candidates">27</td><td title="8,797 levels, 1 candidates">85</td><td>S4</td><td>5.23×</td><td>6.55×</td></tr><tr><td>serpentine 256²</td><td title="257 levels, 65 candidates">1.9</td><td title="257 levels, 65 candidates">1.7</td><td title="1 levels, 32,896 candidates"><b>0.53</b></td><td title="130 levels, 4,160 candidates">1.1</td><td title="257 levels, 320 candidates">1.7</td><td title="257 levels, 80 candidates">1.8</td><td title="257 levels, 65 candidates">1.7</td><td title="32,641 levels, 1 candidates">174</td><td>S1</td><td>3.55×</td><td>328.01×</td></tr></table></div></details>
 </div>
 
 
 
 <div class="card">
-<h2>The tuning cross-product — builds × rules × strides</h2>
-<p class="note">Three levers raced at once. BUILDS attack the register
-handicap (v1: 114 regs → 48 blocks · fused: 129 regs → 24 blocks · r128: 122 regs → 48 blocks · split: 114 regs → 48 blocks — the fused lattice kernel sits ONE register over
-the 128 line that decides two-blocks-per-SM). RULES compare the plain
-lattice (L) against the interior lattice (I: lattice seeds must have
-all 8 neighbors red — inside the mass, off the blob edges). STRIDES
-fill the factor-4 gaps ({1,4,8,16,32,64,128,256}). Cell format:
-rule+stride: ms; bold = the scene's overall best. Best case:
-5.00× over v1
-(fused_L8 on comb, 2000 teeth).
-Full 53-config-per-scene data in the tuning JSON/CSV.</p>
-<div class="tablewrap"><table><tr><th>scene</th><th>v1 ms</th><th>ccl ms</th><th>fused best</th><th>r128 best</th><th>split best</th><th>overall best</th><th>vs v1</th><th>vs ccl</th></tr><tr><td>two squares 2800²</td><td>53</td><td>114</td><td title="16 levels, 61,252 candidates">L16: 46</td><td title="8 levels, 245,000 candidates">L8: 34</td><td title="8 levels, 245,000 candidates"><b>L8: 33</b></td><td>split_L8</td><td>1.61×</td><td>3.49×</td></tr><tr><td>two disks r=1400</td><td>88</td><td>67</td><td title="16 levels, 48,603 candidates">L16: 38</td><td title="8 levels, 192,936 candidates">L8: 28</td><td title="3 levels, 12,293,062 candidates"><b>I1: 28</b></td><td>split_I1</td><td>3.21×</td><td>2.42×</td></tr><tr><td>asymmetric 4000²+800²</td><td>60</td><td>89</td><td title="16 levels, 65,002 candidates">L16: 51</td><td title="8 levels, 260,000 candidates"><b>L8: 36</b></td><td title="8 levels, 260,000 candidates">L8: 37</td><td>r128_L8</td><td>1.69×</td><td>2.50×</td></tr><tr><td>grid of 100 blobs</td><td>32</td><td>54</td><td title="360 levels, 100 candidates">0: 36</td><td title="5 levels, 202,600 candidates">L8: 28</td><td title="5 levels, 202,600 candidates"><b>L8: 27</b></td><td>split_L8</td><td>1.20×</td><td>2.02×</td></tr><tr><td>random noise 4000²</td><td>25</td><td>30</td><td title="23 levels, 1,154,906 candidates">L64: 35</td><td title="1 levels, 4,802,736 candidates"><b>L1: 25</b></td><td title="23 levels, 1,154,024 candidates">I256: 26</td><td>r128_L1</td><td>1.02×</td><td>1.18×</td></tr><tr><td>comb, 2000 teeth</td><td>67</td><td>84</td><td title="1,204 levels, 2,499 candidates"><b>L8: 13</b></td><td title="1,202 levels, 3,998 candidates">L4: 14</td><td title="1,203 levels, 2,999 candidates">I4: 14</td><td>fused_L8</td><td>5.00×</td><td>6.28×</td></tr><tr><td>serpentine 256²</td><td>2.0</td><td>183</td><td title="1 levels, 32,896 candidates">L1: 0.56</td><td title="1 levels, 32,896 candidates"><b>L1: 0.49</b></td><td title="1 levels, 32,896 candidates">L1: 0.66</td><td>r128_L1</td><td>4.07×</td><td>373.40×</td></tr></table></div>
+<h2>One register cost half the GPU — the builds</h2>
+<p class="note">The register file decides cooperative occupancy: 65,536
+registers per SM ÷ 256 threads ÷ 2 blocks = 128 registers per thread,
+exactly. The fused lattice kernel compiled to
+129 — ONE over the line — and dropped from 48
+to 24 co-resident blocks: half the GPU
+lost to a single register. Both fixes work and land within noise of
+each other: r128 caps the compiler at 128 (it settles at
+122, BELOW the cap — there
+was room all along), and split keeps only the fill core cooperative
+(back to 114 regs, the
+compress/flatten cleanup runs as plain full-occupancy kernels). Either
+one beats the fused build by ~25–40% on the big solid scenes: occupancy
+was the whole bottleneck, which fix you pick barely matters.</p>
+<svg viewBox="0 0 860 200" role="img" aria-label="Registers per thread and cooperative blocks per build">
+<line x1="214.0" y1="4" x2="214.0" y2="144" class="grid"/>
+<text x="214.0" y="162" class="tick" text-anchor="middle">0</text>
+<line x1="334.7" y1="4" x2="334.7" y2="144" class="grid"/>
+<text x="334.7" y="162" class="tick" text-anchor="middle">32</text>
+<line x1="455.4" y1="4" x2="455.4" y2="144" class="grid"/>
+<text x="455.4" y="162" class="tick" text-anchor="middle">64</text>
+<line x1="576.1" y1="4" x2="576.1" y2="144" class="grid"/>
+<text x="576.1" y="162" class="tick" text-anchor="middle">96</text>
+<line x1="696.7" y1="0" x2="696.7" y2="144" class="xhair"/>
+<text x="696.7" y="162" class="tick" text-anchor="middle" font-weight="650">128</text>
+<text x="696.7" y="180" class="tick" text-anchor="middle">the 2-blocks-per-SM line: 65,536 regs ÷ 256 threads ÷ 2 blocks</text>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">v1 (corner rule)</text>
+<rect x="214" y="9.0" width="429.9" height="18" rx="3" class="s7" data-tip="v1 (corner rule): 114 regs/thread → 48 cooperative blocks at tpb 256 (96 at tpb 128)"/>
+<text x="649.9" y="22.0" class="rowval" font-weight="650">114</text>
+<text x="784" y="22.0" class="rowval">→ 48 blocks</text>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">fused lattice</text>
+<rect x="214" y="45.0" width="486.5" height="18" rx="3" class="m1" data-tip="fused lattice: 129 regs/thread → 24 cooperative blocks at tpb 256 (72 at tpb 128)"/>
+<text x="706.5" y="58.0" class="rowval" font-weight="650">129</text>
+<text x="784" y="58.0" class="rowval" font-weight="650">→ 24 blocks</text>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">r128 — compiler cap</text>
+<rect x="214" y="81.0" width="460.1" height="18" rx="3" class="m3" data-tip="r128 — compiler cap: 122 regs/thread → 48 cooperative blocks at tpb 256 (96 at tpb 128)"/>
+<text x="680.1" y="94.0" class="rowval" font-weight="650">122</text>
+<text x="784" y="94.0" class="rowval">→ 48 blocks</text>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">split — core + plain cleanup</text>
+<rect x="214" y="117.0" width="429.9" height="18" rx="3" class="m5" data-tip="split — core + plain cleanup: 114 regs/thread → 48 cooperative blocks at tpb 256 (96 at tpb 128)"/>
+<text x="649.9" y="130.0" class="rowval" font-weight="650">114</text>
+<text x="784" y="130.0" class="rowval">→ 48 blocks</text>
+</svg>
+<div class="tablewrap"><table><tr><th>build</th><th>regs/thread</th><th>coop blocks (tpb 256)</th><th>verdict</th></tr><tr><td>v1 (corner rule)</td><td>114</td><td>48</td><td>the reference</td></tr><tr><td>fused lattice</td><td>129</td><td>24</td><td>the handicapped one — ONE register over the line</td></tr><tr><td>r128 — compiler cap</td><td>122</td><td>48</td><td>works — and 122 is BELOW the cap: the compiler had room all along, it just didn't try</td></tr><tr><td>split — core + plain cleanup</td><td>114</td><td>48</td><td>works equally well — the cooperative core alone never needed the extra registers</td></tr></table></div>
+</div>
+
+
+
+<div class="card">
+<h2>The interior rule — seeds inside the mass</h2>
+<p class="note">The plain lattice (L) seeds every S-th red pixel — on a
+rasterized disk that includes the staircase edge, where seeds buy
+little. The interior rule (I) keeps a lattice seed only if all 8 of its
+neighbors are red: seeds land inside the mass and the noisy boundary
+stays seedless (the corner rule still runs underneath as the coverage
+net, so single pixels and 1-px snakes are never lost). Amber dot = best
+L cell, green dot = best I cell, any build and stride; gutter = the
+ratio. On the disks the interior rule is worth 1.02× over the best plain lattice (split_I1: 28 ms vs r128_L8: 28 ms) and 3.21× over v1. And the serpentine is the safety net made
+visible: a 1-px snake has NO interior pixels, so every I cell measures
+identical to its L twin — "even".</p>
+<div class="legend"><span><i class="chip" style="background:var(--s4)"></i>best plain lattice (L)</span><span><i class="chip" style="background:var(--s5)"></i>best interior (I)</span></div>
+<svg viewBox="0 0 860 286" role="img" aria-label="Best plain-lattice vs best interior config per scene">
+<line x1="214.0" y1="4" x2="214.0" y2="252" class="grid"/>
+<text x="214.0" y="270" class="tick" text-anchor="middle">0.1</text>
+<line x1="420.4" y1="4" x2="420.4" y2="252" class="grid"/>
+<text x="420.4" y="270" class="tick" text-anchor="middle">1</text>
+<line x1="626.9" y1="4" x2="626.9" y2="252" class="grid"/>
+<text x="626.9" y="270" class="tick" text-anchor="middle">10</text>
+<text x="768" y="270" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="768" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">two squares 2800²</text>
+<line x1="733.2" y1="18.0" x2="738.2" y2="18.0" class="pairline-db"/>
+<circle cx="733.2" cy="18.0" r="5" class="dot s4" data-tip="two squares 2800² — best plain lattice split_L8: 33 ms · 245,000 candidates · 8 levels"/>
+<circle cx="738.2" cy="18.0" r="5" class="dot s5" data-tip="two squares 2800² — best interior r128_I8: 35 ms · 243,604 candidates · 9 levels"/>
+<text x="776.0" y="22.0" class="rowval">1.06× L</text>
+<line x1="214" y1="54.0" x2="768" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">two disks r=1400</text>
+<line x1="719.6" y1="54.0" x2="717.6" y2="54.0" class="pairline-db"/>
+<circle cx="719.6" cy="54.0" r="5" class="dot s4" data-tip="two disks r=1400 — best plain lattice r128_L8: 28 ms · 192,936 candidates · 8 levels"/>
+<circle cx="717.6" cy="54.0" r="5" class="dot s5" data-tip="two disks r=1400 — best interior split_I1: 28 ms · 12,293,062 candidates · 3 levels"/>
+<text x="776.0" y="58.0" class="rowval" font-weight="650">1.02× I</text>
+<line x1="214" y1="90.0" x2="768" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">asymmetric 4000²+800²</text>
+<line x1="740.9" y1="90.0" x2="744.5" y2="90.0" class="pairline-db"/>
+<circle cx="740.9" cy="90.0" r="5" class="dot s4" data-tip="asymmetric 4000²+800² — best plain lattice r128_L8: 36 ms · 260,000 candidates · 8 levels"/>
+<circle cx="744.5" cy="90.0" r="5" class="dot s5" data-tip="asymmetric 4000²+800² — best interior r128_I8: 37 ms · 258,804 candidates · 9 levels"/>
+<text x="776.0" y="94.0" class="rowval">1.04× L</text>
+<line x1="214" y1="126.0" x2="768" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">grid of 100 blobs</text>
+<line x1="715.3" y1="126.0" x2="717.4" y2="126.0" class="pairline-db"/>
+<circle cx="715.3" cy="126.0" r="5" class="dot s4" data-tip="grid of 100 blobs — best plain lattice split_L8: 27 ms · 202,600 candidates · 5 levels"/>
+<circle cx="717.4" cy="126.0" r="5" class="dot s5" data-tip="grid of 100 blobs — best interior split_I8: 27 ms · 202,600 candidates · 5 levels"/>
+<text x="776.0" y="130.0" class="rowval">1.02× L</text>
+<line x1="214" y1="162.0" x2="768" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">random noise 4000²</text>
+<line x1="708.7" y1="162.0" x2="712.0" y2="162.0" class="pairline-db"/>
+<circle cx="708.7" cy="162.0" r="5" class="dot s4" data-tip="random noise 4000² — best plain lattice r128_L1: 25 ms · 4,802,736 candidates · 1 levels"/>
+<circle cx="712.0" cy="162.0" r="5" class="dot s5" data-tip="random noise 4000² — best interior split_I256: 26 ms · 1,154,024 candidates · 23 levels"/>
+<text x="776.0" y="166.0" class="rowval">1.04× L</text>
+<line x1="214" y1="198.0" x2="768" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">comb, 2000 teeth</text>
+<line x1="653.2" y1="198.0" x2="657.5" y2="198.0" class="pairline-db"/>
+<circle cx="653.2" cy="198.0" r="5" class="dot s4" data-tip="comb, 2000 teeth — best plain lattice fused_L8: 13 ms · 2,499 candidates · 1,204 levels"/>
+<circle cx="657.5" cy="198.0" r="5" class="dot s5" data-tip="comb, 2000 teeth — best interior fused_I4: 14 ms · 2,999 candidates · 1,203 levels"/>
+<text x="776.0" y="202.0" class="rowval">1.05× L</text>
+<line x1="214" y1="234.0" x2="768" y2="234.0" class="rowline"/>
+<text x="204" y="238.0" class="rowlab" text-anchor="end">serpentine 256²</text>
+<line x1="356.3" y1="234.0" x2="472.1" y2="234.0" class="pairline-db"/>
+<circle cx="356.3" cy="234.0" r="5" class="dot s4" data-tip="serpentine 256² — best plain lattice r128_L1: 0.49 ms · 32,896 candidates · 1 levels"/>
+<circle cx="472.1" cy="234.0" r="5" class="dot s5" data-tip="serpentine 256² — best interior fused_I256: 1.8 ms · 65 candidates · 257 levels"/>
+<text x="776.0" y="238.0" class="rowval">3.64× L</text>
+</svg>
+<p class="note">
+<img src="../ch05_gpu_nblob_nblock/wavefront/disk192_corner_final.gif"
+ alt="Corner-seeded disk replay: one wave sweeps radially through 140
+ levels, light to dark." style="max-width:280px; border-radius:8px;
+ margin:10px 12px 10px 0; vertical-align:top;">
+<img src="../ch05_gpu_nblob_nblock/wavefront/disk192_interior_final.gif"
+ alt="Interior-S1 replay of the same disk: the whole mass lights at
+ level 0, only the staircase edge fills late — 3 levels total."
+ style="max-width:280px; border-radius:8px; margin:10px 0;
+ vertical-align:top;">
+<br>The same disk twice. Left, corner seeding: one wave, 140 levels of
+light→dark ramp. Right, interior S=1: every 8-neighbors-red pixel is a
+seed, the whole mass is level 0 and only the staircase edge fills late
+— 3 levels total.</p>
+</div>
+
+
+
+<div class="card">
+<h2>The stride curve — S8, and the S≥32 mystery</h2>
+<p class="note">The fine curve with occupancy restored (split build,
+plain lattice, one line per scene, speedup over v1 on a log axis). With
+48 blocks back, the optimum moved from the coarse sweep's S16 to S8 on
+every solid scene. And the old "S64 dip" turns out to be a broad slow
+zone: EVERY S≥32 config sinks toward or below the v1 line even though
+it runs 15–90× fewer levels. Fewer levels means fewer grid-wide
+barriers — if less synchronization measures slower, the loss is in the
+memory system, not the sync. That is now the clearest question this
+chapter owes the ncu profiler.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s1)"></i>two squares 2800²</span><span><i class="chip" style="background:var(--s8)"></i>two disks r=1400</span><span><i class="chip" style="background:var(--s6)"></i>asymmetric 4000²+800²</span><span><i class="chip" style="background:var(--s5)"></i>grid of 100 blobs</span><span><i class="chip" style="background:var(--s3)"></i>random noise 4000²</span><span><i class="chip" style="background:var(--s4)"></i>comb, 2000 teeth</span><span><i class="chip" style="background:var(--s7)"></i>serpentine 256²</span></div>
+<svg viewBox="0 0 860 268" role="img" aria-label="Speedup over v1 across strides, split build">
+<line x1="111.9" y1="10" x2="111.9" y2="240" class="rowline"/>
+<text x="111.9" y="262" class="tick" text-anchor="middle">S1</text>
+<line x1="207.6" y1="10" x2="207.6" y2="240" class="rowline"/>
+<text x="207.6" y="262" class="tick" text-anchor="middle">S4</text>
+<line x1="303.4" y1="10" x2="303.4" y2="240" class="rowline"/>
+<text x="303.4" y="262" class="tick" text-anchor="middle">S8</text>
+<line x1="399.1" y1="10" x2="399.1" y2="240" class="rowline"/>
+<text x="399.1" y="262" class="tick" text-anchor="middle">S16</text>
+<line x1="494.9" y1="10" x2="494.9" y2="240" class="rowline"/>
+<text x="494.9" y="262" class="tick" text-anchor="middle">S32</text>
+<line x1="590.6" y1="10" x2="590.6" y2="240" class="rowline"/>
+<text x="590.6" y="262" class="tick" text-anchor="middle">S64</text>
+<line x1="686.4" y1="10" x2="686.4" y2="240" class="rowline"/>
+<text x="686.4" y="262" class="tick" text-anchor="middle">S128</text>
+<line x1="782.1" y1="10" x2="782.1" y2="240" class="rowline"/>
+<text x="782.1" y="262" class="tick" text-anchor="middle">S256</text>
+<line x1="64" y1="109.7" x2="830" y2="109.7" class="grid"/>
+<text x="56" y="113.7" class="tick" text-anchor="end">2×</text>
+<line x1="64" y1="34.4" x2="830" y2="34.4" class="grid"/>
+<text x="56" y="38.4" class="tick" text-anchor="end">4×</text>
+<line x1="64" y1="185.0" x2="830" y2="185.0" class="satline"/>
+<text x="56" y="189.0" class="tick" text-anchor="end" font-weight="650">1× = v1</text>
+<polyline points="111.9,184.4 207.6,162.0 303.4,133.0 399.1,148.5 494.9,183.2 590.6,205.1 686.4,203.1 782.1,193.8" class="line s1l"/>
+<circle cx="111.9" cy="184.4" r="4" class="dot s1" data-tip="two squares 2800² — split_L1: 53 ms (1.01× vs v1) · 1 levels · 15,680,000 candidates"/>
+<circle cx="207.6" cy="162.0" r="4" class="dot s1" data-tip="two squares 2800² — split_L4: 43 ms (1.24× vs v1) · 4 levels · 980,000 candidates"/>
+<circle cx="303.4" cy="133.0" r="4" class="dot s1" data-tip="two squares 2800² — split_L8: 33 ms (1.61× vs v1) · 8 levels · 245,000 candidates"/>
+<circle cx="399.1" cy="148.5" r="4" class="dot s1" data-tip="two squares 2800² — split_L16: 38 ms (1.40× vs v1) · 16 levels · 61,252 candidates"/>
+<circle cx="494.9" cy="183.2" r="4" class="dot s1" data-tip="two squares 2800² — split_L32: 52 ms (1.02× vs v1) · 25 levels · 15,314 candidates"/>
+<circle cx="590.6" cy="205.1" r="4" class="dot s1" data-tip="two squares 2800² — split_L64: 64 ms (0.83× vs v1) · 57 levels · 3,786 candidates"/>
+<circle cx="686.4" cy="203.1" r="4" class="dot s1" data-tip="two squares 2800² — split_L128: 62 ms (0.85× vs v1) · 65 levels · 970 candidates"/>
+<circle cx="782.1" cy="193.8" r="4" class="dot s1" data-tip="two squares 2800² — split_L256: 57 ms (0.92× vs v1) · 184 levels · 244 candidates"/>
+<polyline points="111.9,95.3 207.6,77.1 303.4,63.3 399.1,73.9 494.9,123.1 590.6,118.5 686.4,117.4 782.1,109.3" class="line s8l"/>
+<circle cx="111.9" cy="95.3" r="4" class="dot s8" data-tip="two disks r=1400 — split_L1: 39 ms (2.28× vs v1) · 1 levels · 12,314,954 candidates"/>
+<circle cx="207.6" cy="77.1" r="4" class="dot s8" data-tip="two disks r=1400 — split_L4: 33 ms (2.70× vs v1) · 5 levels · 770,147 candidates"/>
+<circle cx="303.4" cy="63.3" r="4" class="dot s8" data-tip="two disks r=1400 — split_L8: 29 ms (3.07× vs v1) · 8 levels · 192,936 candidates"/>
+<circle cx="399.1" cy="73.9" r="4" class="dot s8" data-tip="two disks r=1400 — split_L16: 32 ms (2.78× vs v1) · 16 levels · 48,603 candidates"/>
+<circle cx="494.9" cy="123.1" r="4" class="dot s8" data-tip="two disks r=1400 — split_L32: 50 ms (1.77× vs v1) · 32 levels · 12,530 candidates"/>
+<circle cx="590.6" cy="118.5" r="4" class="dot s8" data-tip="two disks r=1400 — split_L64: 48 ms (1.84× vs v1) · 64 levels · 3,512 candidates"/>
+<circle cx="686.4" cy="117.4" r="4" class="dot s8" data-tip="two disks r=1400 — split_L128: 47 ms (1.86× vs v1) · 128 levels · 1,261 candidates"/>
+<circle cx="782.1" cy="109.3" r="4" class="dot s8" data-tip="two disks r=1400 — split_L256: 44 ms (2.01× vs v1) · 244 levels · 690 candidates"/>
+<polyline points="111.9,179.5 207.6,153.6 303.4,131.2 399.1,142.3 494.9,184.7 590.6,192.0 686.4,193.4 782.1,189.7" class="line s6l"/>
+<circle cx="111.9" cy="179.5" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L1: 57 ms (1.05× vs v1) · 1 levels · 16,640,000 candidates"/>
+<circle cx="207.6" cy="153.6" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L4: 45 ms (1.34× vs v1) · 4 levels · 1,040,000 candidates"/>
+<circle cx="303.4" cy="131.2" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L8: 37 ms (1.64× vs v1) · 8 levels · 260,000 candidates"/>
+<circle cx="399.1" cy="142.3" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L16: 41 ms (1.48× vs v1) · 16 levels · 65,002 candidates"/>
+<circle cx="494.9" cy="184.7" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L32: 60 ms (1.00× vs v1) · 32 levels · 16,252 candidates"/>
+<circle cx="590.6" cy="192.0" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L64: 64 ms (0.94× vs v1) · 57 levels · 4,064 candidates"/>
+<circle cx="686.4" cy="193.4" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L128: 65 ms (0.93× vs v1) · 121 levels · 1,005 candidates"/>
+<circle cx="782.1" cy="189.7" r="4" class="dot s6" data-tip="asymmetric 4000²+800² — split_L256: 63 ms (0.96× vs v1) · 249 levels · 267 candidates"/>
+<polyline points="111.9,215.0 207.6,189.0 303.4,165.1 399.1,184.5 494.9,224.8 590.6,229.5 686.4,221.8 782.1,200.6" class="line s5l"/>
+<circle cx="111.9" cy="215.0" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L1: 42 ms (0.76× vs v1) · 1 levels · 12,960,000 candidates"/>
+<circle cx="207.6" cy="189.0" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L4: 33 ms (0.96× vs v1) · 4 levels · 810,000 candidates"/>
+<circle cx="303.4" cy="165.1" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L8: 27 ms (1.20× vs v1) · 5 levels · 202,600 candidates"/>
+<circle cx="399.1" cy="184.5" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L16: 32 ms (1.00× vs v1) · 13 levels · 48,500 candidates"/>
+<circle cx="494.9" cy="224.8" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L32: 46 ms (0.69× vs v1) · 29 levels · 12,200 candidates"/>
+<circle cx="590.6" cy="229.5" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L64: 49 ms (0.66× vs v1) · 61 levels · 3,125 candidates"/>
+<circle cx="686.4" cy="221.8" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L128: 45 ms (0.71× vs v1) · 125 levels · 829 candidates"/>
+<circle cx="782.1" cy="200.6" r="4" class="dot s5" data-tip="grid of 100 blobs — split_L256: 37 ms (0.87× vs v1) · 253 levels · 269 candidates"/>
+<polyline points="111.9,204.8 207.6,202.4 303.4,211.1 399.1,197.7 494.9,199.5 590.6,205.4 686.4,200.4 782.1,196.5" class="line s3l"/>
+<circle cx="111.9" cy="204.8" r="4" class="dot s3" data-tip="random noise 4000² — split_L1: 30 ms (0.83× vs v1) · 1 levels · 4,802,736 candidates"/>
+<circle cx="207.6" cy="202.4" r="4" class="dot s3" data-tip="random noise 4000² — split_L4: 30 ms (0.85× vs v1) · 19 levels · 1,381,695 candidates"/>
+<circle cx="303.4" cy="211.1" r="4" class="dot s3" data-tip="random noise 4000² — split_L8: 32 ms (0.79× vs v1) · 23 levels · 1,211,046 candidates"/>
+<circle cx="399.1" cy="197.7" r="4" class="dot s3" data-tip="random noise 4000² — split_L16: 29 ms (0.89× vs v1) · 23 levels · 1,168,215 candidates"/>
+<circle cx="494.9" cy="199.5" r="4" class="dot s3" data-tip="random noise 4000² — split_L32: 29 ms (0.88× vs v1) · 23 levels · 1,157,620 candidates"/>
+<circle cx="590.6" cy="205.4" r="4" class="dot s3" data-tip="random noise 4000² — split_L64: 31 ms (0.83× vs v1) · 23 levels · 1,154,906 candidates"/>
+<circle cx="686.4" cy="200.4" r="4" class="dot s3" data-tip="random noise 4000² — split_L128: 29 ms (0.87× vs v1) · 23 levels · 1,154,244 candidates"/>
+<circle cx="782.1" cy="196.5" r="4" class="dot s3" data-tip="random noise 4000² — split_L256: 28 ms (0.90× vs v1) · 23 levels · 1,154,064 candidates"/>
+<polyline points="111.9,34.5 207.6,20.5 303.4,30.2 399.1,101.9 494.9,108.6 590.6,108.0 686.4,98.3 782.1,97.6" class="line s4l"/>
+<circle cx="111.9" cy="34.5" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L1: 17 ms (4.00× vs v1) · 1 levels · 4,831,992 candidates"/>
+<circle cx="207.6" cy="20.5" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L4: 15 ms (4.55× vs v1) · 1,202 levels · 3,998 candidates"/>
+<circle cx="303.4" cy="30.2" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L8: 16 ms (4.16× vs v1) · 1,204 levels · 2,499 candidates"/>
+<circle cx="399.1" cy="101.9" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L16: 31 ms (2.15× vs v1) · 2,408 levels · 2,000 candidates"/>
+<circle cx="494.9" cy="108.6" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L32: 33 ms (2.02× vs v1) · 2,408 levels · 2,000 candidates"/>
+<circle cx="590.6" cy="108.0" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L64: 33 ms (2.03× vs v1) · 2,408 levels · 2,000 candidates"/>
+<circle cx="686.4" cy="98.3" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L128: 30 ms (2.22× vs v1) · 2,408 levels · 2,000 candidates"/>
+<circle cx="782.1" cy="97.6" r="4" class="dot s4" data-tip="comb, 2000 teeth — split_L256: 30 ms (2.24× vs v1) · 2,408 levels · 2,000 candidates"/>
+<polyline points="111.9,64.3 207.6,126.4 303.4,184.5 399.1,183.5 494.9,187.5 590.6,187.8 686.4,187.2 782.1,185.2" class="line s7l"/>
+<circle cx="111.9" cy="64.3" r="4" class="dot s7" data-tip="serpentine 256² — split_L1: 0.66 ms (3.04× vs v1) · 1 levels · 32,896 candidates"/>
+<circle cx="207.6" cy="126.4" r="4" class="dot s7" data-tip="serpentine 256² — split_L4: 1.2 ms (1.72× vs v1) · 130 levels · 4,160 candidates"/>
+<circle cx="303.4" cy="184.5" r="4" class="dot s7" data-tip="serpentine 256² — split_L8: 2.0 ms (1.01× vs v1) · 257 levels · 1,088 candidates"/>
+<circle cx="399.1" cy="183.5" r="4" class="dot s7" data-tip="serpentine 256² — split_L16: 2.0 ms (1.01× vs v1) · 257 levels · 320 candidates"/>
+<circle cx="494.9" cy="187.5" r="4" class="dot s7" data-tip="serpentine 256² — split_L32: 2.0 ms (0.98× vs v1) · 257 levels · 128 candidates"/>
+<circle cx="590.6" cy="187.8" r="4" class="dot s7" data-tip="serpentine 256² — split_L64: 2.0 ms (0.97× vs v1) · 257 levels · 80 candidates"/>
+<circle cx="686.4" cy="187.2" r="4" class="dot s7" data-tip="serpentine 256² — split_L128: 2.0 ms (0.98× vs v1) · 257 levels · 68 candidates"/>
+<circle cx="782.1" cy="185.2" r="4" class="dot s7" data-tip="serpentine 256² — split_L256: 2.0 ms (1.00× vs v1) · 257 levels · 65 candidates"/>
+</svg>
+<p class="note">The occupancy gap itself, on the two-squares scene: raw
+ms per stride for the three builds (light→dark = fused 24 blocks, r128,
+split 48 blocks), dashed line = v1. r128 and split run near-tied and
+~25–40% under the fused build at every useful stride.</p>
+<div class="legend"><span><i class="chip" style="background:var(--m1)"></i>fused lattice</span><span><i class="chip" style="background:var(--m3)"></i>r128 — compiler cap</span><span><i class="chip" style="background:var(--m5)"></i>split — core + plain cleanup</span></div>
+<svg viewBox="0 0 860 268" role="img" aria-label="Build comparison on two squares 2800², ms across strides">
+<line x1="111.9" y1="10" x2="111.9" y2="240" class="rowline"/>
+<text x="111.9" y="262" class="tick" text-anchor="middle">S1</text>
+<line x1="207.6" y1="10" x2="207.6" y2="240" class="rowline"/>
+<text x="207.6" y="262" class="tick" text-anchor="middle">S4</text>
+<line x1="303.4" y1="10" x2="303.4" y2="240" class="rowline"/>
+<text x="303.4" y="262" class="tick" text-anchor="middle">S8</text>
+<line x1="399.1" y1="10" x2="399.1" y2="240" class="rowline"/>
+<text x="399.1" y="262" class="tick" text-anchor="middle">S16</text>
+<line x1="494.9" y1="10" x2="494.9" y2="240" class="rowline"/>
+<text x="494.9" y="262" class="tick" text-anchor="middle">S32</text>
+<line x1="590.6" y1="10" x2="590.6" y2="240" class="rowline"/>
+<text x="590.6" y="262" class="tick" text-anchor="middle">S64</text>
+<line x1="686.4" y1="10" x2="686.4" y2="240" class="rowline"/>
+<text x="686.4" y="262" class="tick" text-anchor="middle">S128</text>
+<line x1="782.1" y1="10" x2="782.1" y2="240" class="rowline"/>
+<text x="782.1" y="262" class="tick" text-anchor="middle">S256</text>
+<line x1="64" y1="201.9" x2="830" y2="201.9" class="grid"/>
+<text x="56" y="205.9" class="tick" text-anchor="end">40</text>
+<line x1="64" y1="166.4" x2="830" y2="166.4" class="grid"/>
+<text x="56" y="170.4" class="tick" text-anchor="end">50</text>
+<line x1="64" y1="130.8" x2="830" y2="130.8" class="grid"/>
+<text x="56" y="134.8" class="tick" text-anchor="end">60</text>
+<line x1="64" y1="95.3" x2="830" y2="95.3" class="grid"/>
+<text x="56" y="99.3" class="tick" text-anchor="end">70</text>
+<line x1="64" y1="59.8" x2="830" y2="59.8" class="grid"/>
+<text x="56" y="63.8" class="tick" text-anchor="end">80</text>
+<line x1="64" y1="24.2" x2="830" y2="24.2" class="grid"/>
+<text x="56" y="28.2" class="tick" text-anchor="end">90</text>
+<line x1="64" y1="156.2" x2="830" y2="156.2" class="satline"/>
+<text x="56" y="160.2" class="tick" text-anchor="end" font-weight="650">v1: 53</text>
+<polyline points="111.9,22.3 207.6,108.2 303.4,170.3 399.1,180.9 494.9,139.1 590.6,122.8 686.4,127.0 782.1,139.9" class="line m1l"/>
+<circle cx="111.9" cy="22.3" r="4" class="dot m1" data-tip="two squares 2800² — fused_L1: 91 ms (24 blocks) · 1 levels"/>
+<circle cx="207.6" cy="108.2" r="4" class="dot m1" data-tip="two squares 2800² — fused_L4: 66 ms (24 blocks) · 4 levels"/>
+<circle cx="303.4" cy="170.3" r="4" class="dot m1" data-tip="two squares 2800² — fused_L8: 49 ms (24 blocks) · 8 levels"/>
+<circle cx="399.1" cy="180.9" r="4" class="dot m1" data-tip="two squares 2800² — fused_L16: 46 ms (24 blocks) · 16 levels"/>
+<circle cx="494.9" cy="139.1" r="4" class="dot m1" data-tip="two squares 2800² — fused_L32: 58 ms (24 blocks) · 25 levels"/>
+<circle cx="590.6" cy="122.8" r="4" class="dot m1" data-tip="two squares 2800² — fused_L64: 62 ms (24 blocks) · 57 levels"/>
+<circle cx="686.4" cy="127.0" r="4" class="dot m1" data-tip="two squares 2800² — fused_L128: 61 ms (24 blocks) · 65 levels"/>
+<circle cx="782.1" cy="139.9" r="4" class="dot m1" data-tip="two squares 2800² — fused_L256: 57 ms (24 blocks) · 184 levels"/>
+<polyline points="111.9,152.5 207.6,196.2 303.4,223.0 399.1,215.1 494.9,151.7 590.6,126.4 686.4,125.4 782.1,134.6" class="line m3l"/>
+<circle cx="111.9" cy="152.5" r="4" class="dot m3" data-tip="two squares 2800² — r128_L1: 54 ms (48 blocks) · 1 levels"/>
+<circle cx="207.6" cy="196.2" r="4" class="dot m3" data-tip="two squares 2800² — r128_L4: 42 ms (48 blocks) · 4 levels"/>
+<circle cx="303.4" cy="223.0" r="4" class="dot m3" data-tip="two squares 2800² — r128_L8: 34 ms (48 blocks) · 8 levels"/>
+<circle cx="399.1" cy="215.1" r="4" class="dot m3" data-tip="two squares 2800² — r128_L16: 36 ms (48 blocks) · 16 levels"/>
+<circle cx="494.9" cy="151.7" r="4" class="dot m3" data-tip="two squares 2800² — r128_L32: 54 ms (48 blocks) · 25 levels"/>
+<circle cx="590.6" cy="126.4" r="4" class="dot m3" data-tip="two squares 2800² — r128_L64: 61 ms (48 blocks) · 57 levels"/>
+<circle cx="686.4" cy="125.4" r="4" class="dot m3" data-tip="two squares 2800² — r128_L128: 62 ms (48 blocks) · 65 levels"/>
+<circle cx="782.1" cy="134.6" r="4" class="dot m3" data-tip="two squares 2800² — r128_L256: 59 ms (48 blocks) · 184 levels"/>
+<polyline points="111.9,157.2 207.6,192.0 303.4,227.7 399.1,209.8 494.9,159.3 590.6,118.0 686.4,122.2 782.1,140.4" class="line m5l"/>
+<circle cx="111.9" cy="157.2" r="4" class="dot m5" data-tip="two squares 2800² — split_L1: 53 ms (48 blocks) · 1 levels"/>
+<circle cx="207.6" cy="192.0" r="4" class="dot m5" data-tip="two squares 2800² — split_L4: 43 ms (48 blocks) · 4 levels"/>
+<circle cx="303.4" cy="227.7" r="4" class="dot m5" data-tip="two squares 2800² — split_L8: 33 ms (48 blocks) · 8 levels"/>
+<circle cx="399.1" cy="209.8" r="4" class="dot m5" data-tip="two squares 2800² — split_L16: 38 ms (48 blocks) · 16 levels"/>
+<circle cx="494.9" cy="159.3" r="4" class="dot m5" data-tip="two squares 2800² — split_L32: 52 ms (48 blocks) · 25 levels"/>
+<circle cx="590.6" cy="118.0" r="4" class="dot m5" data-tip="two squares 2800² — split_L64: 64 ms (48 blocks) · 57 levels"/>
+<circle cx="686.4" cy="122.2" r="4" class="dot m5" data-tip="two squares 2800² — split_L128: 62 ms (48 blocks) · 65 levels"/>
+<circle cx="782.1" cy="140.4" r="4" class="dot m5" data-tip="two squares 2800² — split_L256: 57 ms (48 blocks) · 184 levels"/>
+</svg>
+</div>
+
+
+
+<div class="card">
+<h2>Best per scene — and the recipe that falls out</h2>
+<p class="note">Every scene's best tuned cell against the two
+references. Best case: 5.00× over v1
+(fused_L8 on
+comb, 2000 teeth). The practical recipe: a 48-block
+build at S8 for big solid shapes · interior S1 for staircase-edged
+shapes · S1 for thin snakes · plain v1 for dense noise. The winners
+stay variants for now — promoting a default (or choosing the stride
+automatically from a cheap image statistic) is Chapter 6 material.
+Full per-cell data below and in the tuning JSON/CSV (53 configs × 7
+scenes).</p>
+<div class="legend"><span><i class="chip" style="background:var(--s7)"></i>v1 (corner rule)</span><span><i class="chip" style="background:var(--s8)"></i>ccl_fill</span><span><i class="chip" style="background:var(--s6)"></i>best tuned config</span></div>
+<svg viewBox="0 0 860 286" role="img" aria-label="v1 vs ccl_fill vs best tuned config per scene, log scale">
+<line x1="214.0" y1="4" x2="214.0" y2="252" class="grid"/>
+<text x="214.0" y="270" class="tick" text-anchor="middle">0.1</text>
+<line x1="396.5" y1="4" x2="396.5" y2="252" class="grid"/>
+<text x="396.5" y="270" class="tick" text-anchor="middle">1</text>
+<line x1="579.0" y1="4" x2="579.0" y2="252" class="grid"/>
+<text x="579.0" y="270" class="tick" text-anchor="middle">10</text>
+<line x1="761.5" y1="4" x2="761.5" y2="252" class="grid"/>
+<text x="830" y="270" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="830" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">two squares 2800²</text>
+<circle cx="711.0" cy="11.5" r="5" class="dot s7" data-tip="two squares 2800² — v1 (corner rule): 53 ms"/>
+<circle cx="772.1" cy="18.0" r="5" class="dot s8" data-tip="two squares 2800² — ccl_fill: 114 ms"/>
+<circle cx="673.0" cy="24.5" r="5" class="dot s6" data-tip="two squares 2800² — best tuned config: 33 ms"/>
+<line x1="214" y1="54.0" x2="830" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">two disks r=1400</text>
+<circle cx="751.6" cy="47.5" r="5" class="dot s7" data-tip="two disks r=1400 — v1 (corner rule): 88 ms"/>
+<circle cx="729.4" cy="54.0" r="5" class="dot s8" data-tip="two disks r=1400 — ccl_fill: 67 ms"/>
+<circle cx="659.2" cy="60.5" r="5" class="dot s6" data-tip="two disks r=1400 — best tuned config: 28 ms"/>
+<line x1="214" y1="90.0" x2="830" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">asymmetric 4000²+800²</text>
+<circle cx="721.3" cy="83.5" r="5" class="dot s7" data-tip="asymmetric 4000²+800² — v1 (corner rule): 60 ms"/>
+<circle cx="752.6" cy="90.0" r="5" class="dot s8" data-tip="asymmetric 4000²+800² — ccl_fill: 89 ms"/>
+<circle cx="679.8" cy="96.5" r="5" class="dot s6" data-tip="asymmetric 4000²+800² — best tuned config: 36 ms"/>
+<line x1="214" y1="126.0" x2="830" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">grid of 100 blobs</text>
+<circle cx="671.7" cy="119.5" r="5" class="dot s7" data-tip="grid of 100 blobs — v1 (corner rule): 32 ms"/>
+<circle cx="713.0" cy="126.0" r="5" class="dot s8" data-tip="grid of 100 blobs — ccl_fill: 54 ms"/>
+<circle cx="657.2" cy="132.5" r="5" class="dot s6" data-tip="grid of 100 blobs — best tuned config: 27 ms"/>
+<line x1="214" y1="162.0" x2="830" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">random noise 4000²</text>
+<circle cx="652.8" cy="155.5" r="5" class="dot s7" data-tip="random noise 4000² — v1 (corner rule): 25 ms"/>
+<circle cx="664.8" cy="162.0" r="5" class="dot s8" data-tip="random noise 4000² — ccl_fill: 30 ms"/>
+<circle cx="651.4" cy="168.5" r="5" class="dot s6" data-tip="random noise 4000² — best tuned config: 25 ms"/>
+<line x1="214" y1="198.0" x2="830" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">comb, 2000 teeth</text>
+<circle cx="729.9" cy="191.5" r="5" class="dot s7" data-tip="comb, 2000 teeth — v1 (corner rule): 67 ms"/>
+<circle cx="747.9" cy="198.0" r="5" class="dot s8" data-tip="comb, 2000 teeth — ccl_fill: 84 ms"/>
+<circle cx="602.3" cy="204.5" r="5" class="dot s6" data-tip="comb, 2000 teeth — best tuned config: 13 ms"/>
+<line x1="214" y1="234.0" x2="830" y2="234.0" class="rowline"/>
+<text x="204" y="238.0" class="rowlab" text-anchor="end">serpentine 256²</text>
+<circle cx="451.1" cy="227.5" r="5" class="dot s7" data-tip="serpentine 256² — v1 (corner rule): 2.0 ms"/>
+<circle cx="809.2" cy="234.0" r="5" class="dot s8" data-tip="serpentine 256² — ccl_fill: 183 ms"/>
+<circle cx="339.8" cy="240.5" r="5" class="dot s6" data-tip="serpentine 256² — best tuned config: 0.49 ms"/>
+</svg>
+<details><summary>Best per build and scene — the cross-product
+table</summary>
+<div class="tablewrap"><table><tr><th>scene</th><th>v1 ms</th><th>ccl ms</th><th>fused best</th><th>r128 best</th><th>split best</th><th>overall best</th><th>vs v1</th><th>vs ccl</th></tr><tr><td>two squares 2800²</td><td>53</td><td>114</td><td title="16 levels, 61,252 candidates">L16: 46</td><td title="8 levels, 245,000 candidates">L8: 34</td><td title="8 levels, 245,000 candidates"><b>L8: 33</b></td><td>split_L8</td><td>1.61×</td><td>3.49×</td></tr><tr><td>two disks r=1400</td><td>88</td><td>67</td><td title="16 levels, 48,603 candidates">L16: 38</td><td title="8 levels, 192,936 candidates">L8: 28</td><td title="3 levels, 12,293,062 candidates"><b>I1: 28</b></td><td>split_I1</td><td>3.21×</td><td>2.42×</td></tr><tr><td>asymmetric 4000²+800²</td><td>60</td><td>89</td><td title="16 levels, 65,002 candidates">L16: 51</td><td title="8 levels, 260,000 candidates"><b>L8: 36</b></td><td title="8 levels, 260,000 candidates">L8: 37</td><td>r128_L8</td><td>1.69×</td><td>2.50×</td></tr><tr><td>grid of 100 blobs</td><td>32</td><td>54</td><td title="360 levels, 100 candidates">0: 36</td><td title="5 levels, 202,600 candidates">L8: 28</td><td title="5 levels, 202,600 candidates"><b>L8: 27</b></td><td>split_L8</td><td>1.20×</td><td>2.02×</td></tr><tr><td>random noise 4000²</td><td>25</td><td>30</td><td title="23 levels, 1,154,906 candidates">L64: 35</td><td title="1 levels, 4,802,736 candidates"><b>L1: 25</b></td><td title="23 levels, 1,154,024 candidates">I256: 26</td><td>r128_L1</td><td>1.02×</td><td>1.18×</td></tr><tr><td>comb, 2000 teeth</td><td>67</td><td>84</td><td title="1,204 levels, 2,499 candidates"><b>L8: 13</b></td><td title="1,202 levels, 3,998 candidates">L4: 14</td><td title="1,203 levels, 2,999 candidates">I4: 14</td><td>fused_L8</td><td>5.00×</td><td>6.28×</td></tr><tr><td>serpentine 256²</td><td>2.0</td><td>183</td><td title="1 levels, 32,896 candidates">L1: 0.56</td><td title="1 levels, 32,896 candidates"><b>L1: 0.49</b></td><td title="1 levels, 32,896 candidates">L1: 0.66</td><td>r128_L1</td><td>4.07×</td><td>373.40×</td></tr></table></div></details>
 </div>
 
 
