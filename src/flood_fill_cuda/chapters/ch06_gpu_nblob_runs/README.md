@@ -2,7 +2,7 @@
 
 **Stop moving pixels.** Chapter 5 discovers, labels and fills every blob
 in `images/input/input_blobs.png` — 9000×9000, 13.45M red pixels, 2,522
-blobs — in **53 ms**. This chapter asks what the same job costs if it is
+blobs — in **~58 ms**. This chapter asks what the same job costs if it is
 bounded only by memory, and answers it by changing the *unit of work*
 from the pixel to the **run**: a maximal contiguous span of red inside
 one row.
@@ -24,7 +24,7 @@ that must still touch pixels: one read and one write.
 
 | | ch05 best | ch06 rgb | ch06 mask | ch06 labeling only |
 |---|---|---|---|---|
-| `input_blobs.png` | 53.26 ms | **3.03 ms** (17.6×) | **1.35 ms** (39.5×) | **0.70 ms** |
+| `input_blobs.png` | 58.51 ms | **2.96 ms** (19.8×) | **1.46 ms** (40.2×) | **0.78 ms** |
 
 ## Inherited problems
 
@@ -105,38 +105,86 @@ There is no BFS, so there is **no `depth` map and no level count**.
 Chapters 1–5 measure a geodesic clock; this one has no geodesic
 structure at all — `merge` is a single data-independent pass over run
 adjacencies. That is why the serpentine, which cost ch03 32,641 levels,
-costs the same here as a square: **0.49 ms, 37.8× ch05**.
+costs the same here as a square: **0.47 ms, 39.9× ch05**.
 
-## Results (RTX 4060 Laptop, 24 SMs; measured peaks: 193 GB/s copy, 167 GB/s read, 169 GB/s write)
+## Results (RTX 4060 Laptop, 24 SMs; measured peaks: 186 GB/s copy, 213 GB/s read, 217 GB/s write)
 
 | scene | px | runs | blobs | mean run | ch05 `split_L8` | ch06 rgb | ch06 mask | label only | ×rgb | ×mask |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **`input_blobs.png`** | 81M | 539,207 | 2,522 | 24.9 px | 53.26 ms | **3.03 ms** | **1.35 ms** | 0.70 ms | 17.6× | **39.5×** |
-| `input_blocks.png` | 1M | 61,479 | 21,618 | 6.3 px | 1.55 ms | 0.48 ms | 0.41 ms | 0.30 ms | 3.2× | 3.8× |
-| grid of 100 blobs | 16M | 36,000 | 100 | 360 px | 25.46 ms | 0.78 ms | 0.61 ms | 0.30 ms | 32.5× | 41.4× |
-| random noise 4000² | 16M | 3,361,514 | 755,577 | 1.4 px | 24.16 ms | 6.35 ms | 5.94 ms | 2.62 ms | 3.8× | 4.1× |
-| disk r=2000 | 17.6M | 4,001 | 1 | 3141 px | 27.46 ms | 1.11 ms | 0.92 ms | 0.24 ms | 24.7× | 29.8× |
-| serpentine 2048² | 4M | 2,048 | 1 | 1024 px | 18.68 ms | 0.60 ms | 0.49 ms | 0.31 ms | 31.2× | 37.8× |
+| **`input_blobs.png`** | 81M | 539,207 | 2,522 | 24.9 px | 58.51 ms | **2.96 ms** | **1.46 ms** | 0.78 ms | 19.8× | **40.2×** |
+| `input_blocks.png` | 1M | 61,479 | 21,618 | 6.3 px | 1.36 ms | 0.46 ms | 0.41 ms | 0.29 ms | 3.0× | 3.3× |
+| grid of 100 blobs | 16M | 36,000 | 100 | 360 px | 26.80 ms | 0.80 ms | 0.62 ms | 0.27 ms | 33.5× | 43.5× |
+| random noise 4000² | 16M | 3,361,514 | 755,577 | 1.4 px | 24.50 ms | 6.32 ms | 6.18 ms | 2.72 ms | 3.9× | 4.0× |
+| disk r=2000 | 17.6M | 4,001 | 1 | 3141 px | 26.43 ms | 1.17 ms | 1.00 ms | 0.30 ms | 22.6× | 26.5× |
+| serpentine 2048² | 4.2M | 2,048 | 1 | 1024 px | 18.79 ms | 0.50 ms | 0.47 ms | 0.29 ms | 37.7× | 39.9× |
 
 ch05 runs the config its own tuning picked for the headline image
 everywhere, which is not its per-scene best — read the non-PNG rows as
 indicative, not as ch05's ceiling.
 
+**Session spread is ±8%**, on a laptop GPU that never reaches its rated
+clock (see the measurement lesson below): a second full session read
+53.26 ms for ch05 and 1.35 ms for ch06-mask. Both JSONs are committed.
+The *ratios* move much less than the absolute times, which is the
+argument for always measuring the baseline in the same session.
+
 **Phase breakdown, `input_blobs.png`, rgb contract (ms):**
 
 | pack | count | scan | emit | merge | flatten | paint |
 |---|---|---|---|---|---|---|
-| 1.65 | 0.08 | 0.02 | 0.23 | 0.32 | 0.03 | 0.65 |
+| 1.67 | 0.05 | 0.02 | 0.22 | 0.31 | 0.03 | 0.64 |
 
 Two phases are the runtime. `pack` is the only full-resolution read;
 `paint` is the only write. **The entire connected-components problem —
-count, scan, emit, merge, flatten — is 0.68 ms**, and 0.32 of that is
-the union-find.
+count, scan, emit, merge, flatten — is 0.64 ms**, and 0.31 of that is
+the union-find. The measured floor for this contract (read 243 MB at
+213 GB/s + write 40.4 MB at 217 GB/s) is 1.33 ms, so `pack` at 1.67 is
+within 1.25× of the read peak and the whole pipeline within 2.2× of a
+floor that assumes the labeling is free.
+
+### Where the 1 ms and 0.5 ms marks actually are
+
+The chapter's target was "1 ms, or even 0.5 ms". On the full 9000²
+image the honest answer is no for the recolor and yes for the labeling —
+but "did we hit 1 ms" is the wrong question, because the limit is
+arithmetic no algorithm escapes. The useful question is **at what size**,
+and `benchmarks/scaling.py` measures it on centered *crops* of the real
+image (not resizes — a crop preserves run length, red fraction and blob
+size distribution, which is what the cost depends on):
+
+| crop | Mpx | runs | blobs | rgb | mask | labeling |
+|---|---|---|---|---|---|---|
+| 1000² | 1.0 | 8,086 | 39 | 0.414 | 0.350 | 0.255 |
+| 2000² | 4.0 | 31,152 | 158 | 0.399 | 0.364 | 0.265 |
+| 3000² | 9.0 | 66,872 | 323 | 0.446 | 0.382 | 0.284 |
+| 4000² | 16.0 | 116,284 | 572 | 0.717 | 0.459 | 0.323 |
+| 5000² | 25.0 | 182,558 | 866 | 1.152 | 0.657 | 0.412 |
+| 6000² | 36.0 | 258,868 | 1,239 | 1.538 | 0.812 | 0.449 |
+| 7000² | 49.0 | 341,459 | 1,684 | 2.004 | **0.984** | 0.518 |
+| 8000² | 64.0 | 446,300 | 2,172 | 2.576 | 1.272 | 0.656 |
+| 9000² | 81.0 | 539,207 | 2,522 | 3.207 | 1.548 | **0.795** |
+
+| tier | ≤ 1 ms up to | ≤ 0.5 ms up to |
+|---|---|---|
+| rgb contract | **21.9 Mpx** | 10.4 Mpx |
+| mask contract | **49.8 Mpx** | 17.9 Mpx |
+| labeling only | the whole sweep | 45.6 Mpx |
+
+So the packed-mask recolor holds 1 ms out to ~50 Mpx and the labeling
+never leaves it. On the 81 Mpx image the recolor is 1.55 ms and the
+labeling 0.80 ms.
+
+The other thing the sweep exposes: **below ~4 Mpx the curve is flat at
+~0.35–0.40 ms.** That is not the image — it is the six kernel launches.
+Host enqueue for one pipeline costs 0.33 ms from Python, so small images
+are launch-bound, and CUDA graphs (not a better algorithm) are what
+would move them.
 
 ### Two contracts, and why both are always reported
 
 At 81 Mpx the RGB image is 243 MB and the packed mask is 10.15 MB. At
-the measured read peak, *merely reading the RGB* costs ~1.3 ms.
+the measured read peak, *merely reading the RGB* costs 1.14 ms (1.45 ms
+in the session where the clock sat lower).
 
 > **No algorithm of any kind recolors this image from RGB in under a
 > millisecond on this hardware.** The sub-millisecond numbers belong to

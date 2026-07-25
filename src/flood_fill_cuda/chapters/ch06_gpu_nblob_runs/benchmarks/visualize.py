@@ -26,6 +26,15 @@ if RN_PATH:
     with open(RN_PATH) as f:
         RN = json.load(f)
 
+# The scale sweep postdates the main session — optional, same contract:
+# absent file, absent card.
+SC_PATH = results_paths.newest_optional("scaling_*.json", RESULTS_DIR)
+SC = None
+if SC_PATH:
+    with open(SC_PATH) as f:
+        SC = json.load(f)
+SC_ROWS = SC["rows"] if SC else []
+
 ROWS = RN["scenes"] if RN else []
 HAS = bool(ROWS)
 PEAK = RN["measured_peak_gb_s"] if RN else 0.0
@@ -137,8 +146,101 @@ def _table():
     return f"<table>{head}{''.join(body)}</table>"
 
 
+def _scale_chart():
+    """Runtime vs megapixels, with the 1 ms and 0.5 ms lines drawn — the
+    chapter's target made into a question with an answer."""
+    if not SC_ROWS:
+        return ""
+    hi_ms = max(r["rgb"]["median_ms"] for r in SC_ROWS) * 1.1
+    hi_mpx = max(r["n_pixels"] for r in SC_ROWS) / 1e6
+    h = 300
+    x0, y0 = GUT_L, 20
+    plot_w, plot_h = W - GUT_L - GUT_R, h - 60
+
+    def px(mpx):
+        return x0 + mpx / hi_mpx * plot_w
+
+    def py(ms):
+        return y0 + plot_h - (ms / hi_ms) * plot_h
+
+    parts = [f'<svg viewBox="0 0 {W} {h}" role="img" aria-label='
+             f'"Runtime versus image size with the 1 ms and 0.5 ms targets">']
+    for target, lab in ((1.0, "1 ms target"), (0.5, "0.5 ms target")):
+        if target > hi_ms:
+            continue
+        y = py(target)
+        parts.append(f'<line x1="{x0}" y1="{y:.1f}" x2="{x0 + plot_w}" '
+                     f'y2="{y:.1f}" class="grid" stroke-dasharray="5,3"/>')
+        parts.append(f'<text x="{x0 + plot_w}" y="{y - 4:.1f}" class="tick" '
+                     f'text-anchor="end">{lab}</text>')
+    for mpx in (0, 20, 40, 60, 80):
+        if mpx > hi_mpx:
+            continue
+        parts.append(f'<text x="{px(mpx):.1f}" y="{h - 26}" class="tick" '
+                     f'text-anchor="middle">{mpx}</text>')
+    parts.append(f'<text x="{x0 + plot_w / 2:.1f}" y="{h - 8}" class="tick" '
+                 f'text-anchor="middle">megapixels</text>')
+    for key, sub, name, cls in (
+            ("rgb", "median_ms", "rgb contract", "s2"),
+            ("mask", "median_ms", "mask contract", "s3"),
+            ("mask", "label_only_ms", "labeling only", "s4")):
+        pts = []
+        for r in SC_ROWS:
+            v = r[key][sub]
+            pts.append(f"{px(r['n_pixels'] / 1e6):.1f},{py(v):.1f}")
+        parts.append(f'<polyline points="{" ".join(pts)}" fill="none" '
+                     f'stroke="var(--{cls})" stroke-width="2"/>')
+        for r in SC_ROWS:
+            v = r[key][sub]
+            tip = (f"{r['side']}² = {r['n_pixels']/1e6:.1f} Mpx — {name}: "
+                   f"{fmt_ms(v)} ms ({fmt_int(r['n_blobs'])} blobs)")
+            parts.append(
+                f'<circle cx="{px(r["n_pixels"] / 1e6):.1f}" '
+                f'cy="{py(v):.1f}" r="4" class="dot {cls}" '
+                f'data-tip="{tip}"/>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def _crossing_text():
+    if not SC:
+        return ""
+    c = SC["crossings"]
+
+    def fmt(tier, target):
+        v = c[tier][f"{target}ms_at_mpx"]
+        if v is None:
+            return "not reached"
+        if v == float("inf") or v > 1e12:
+            return "the whole sweep"
+        return f"{v:.1f} Mpx"
+    return (f"<p class=\"note\"><strong>Under 1 ms up to:</strong> "
+            f"rgb {fmt('rgb', 1.0)}, mask <strong>{fmt('mask', 1.0)}</strong>, "
+            f"labeling {fmt('label_only', 1.0)}. "
+            f"<strong>Under 0.5 ms up to:</strong> rgb {fmt('rgb', 0.5)}, "
+            f"mask {fmt('mask', 0.5)}, labeling {fmt('label_only', 0.5)}.</p>")
+
+
 TILES = []
 _section = ""
+
+_scale_card = ""
+if SC_ROWS:
+    _scale_card = f"""
+<div class="card">
+<h2>Where the 1 ms and 0.5 ms marks actually are</h2>
+<p class="note">Centered <em>crops</em> of the real image, not resizes —
+a crop preserves run length (24.9 px), red fraction (16.6%) and blob
+size distribution, which is what the cost depends on; a resize would
+change all three and answer a different question. The flat left end
+below ~4 Mpx is not the image, it is the six kernel launches: 0.33 ms
+of host enqueue per pipeline, which is what CUDA graphs would move.</p>
+{_crossing_text()}
+{legend([("rgb contract", "s2"), ("mask contract", "s3"),
+         ("labeling only", "s4")])}
+{_scale_chart()}
+</div>
+"""
 
 if HAS:
     _h = _headline()
@@ -203,6 +305,8 @@ entire connected-components problem — is the thin middle.</p>
 {legend([(p, PHASE_CLS[p]) for p in PHASES])}
 {_phase_bars()}
 </div>
+
+{_scale_card}
 
 <div class="card">
 <h2>All numbers — the run-table stage</h2>
