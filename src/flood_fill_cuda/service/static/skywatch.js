@@ -24,7 +24,8 @@
   const BRUSH = 44;
   const BRUSH_STEP = 10;
   const THREAT = "rgb(255, 74, 60)";
-  const MAX_BACKING_PIXELS = 2.0e6;   // njit race stays sub-second
+  const MAX_BACKING_PIXELS = 3.5e6;   // engine caps at 4M; njit race
+                                      // stays comfortably sub-second
   const MIN_REPLAY_MS = 900;          // a 2 ms kernel is invisible at 1:1
   const GOLDEN = 137.508;
 
@@ -299,7 +300,7 @@
   }
 
   function showPhases(ph) {
-    const order = ["init", "scan", "fill", "flatten"];
+    const order = ["init", "scan", "fill", "compress", "flatten"];
     const total = order.reduce((a, k) => a + (ph[k] || 0), 0);
     phaseBar.innerHTML = "";
     if (!total) { phaseBar.hidden = true; return; }
@@ -520,7 +521,7 @@
 
   // ---- the race --------------------------------------------------------
   function runRace(s) {
-    racePanel.hidden = false;
+    racePanel.classList.remove("off");
     const gpuFill = document.getElementById("race-gpu");
     const cpuFill = document.getElementById("race-cpu");
     const gpuMs = document.getElementById("race-gpu-ms");

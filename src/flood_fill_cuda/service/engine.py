@@ -274,7 +274,12 @@ def discover(mask_hw, prov=False):
             f"{MAX_PIXELS} px cap")
 
     img = _build_image(mask_hw)
-    r = seedless_fill(img, variant="seed_merge",
+    # split_L8 — the tuning chapter's own recipe. Long thin strokes are
+    # the "snake" case: corner-rule seeding runs thousands of BFS levels
+    # on them, while the S8 lattice collapses the level count and the
+    # split build keeps all 48 cooperative blocks. Canonical labels are
+    # provably identical to v1's (stride/build-invariant).
+    r = seedless_fill(img, variant="seed_merge", lattice=8, build="split",
                       threads_per_block=THREADS_PER_BLOCK, bare=False)
 
     track_xy, seeds = _dense_tracks(r.label, height)
