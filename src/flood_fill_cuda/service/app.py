@@ -45,6 +45,14 @@ MAGIC = 0x46494C4C
 HEADER_FMT = "<IIII"   # magic, width, height, levels
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
+# /api/scan wire format v2 (SKYWATCH): header, then depth uint16[w*h],
+# then track uint16[w*h] (dense label ids, 0=background), then n_blobs
+# pairs of uint32 (x, y) — the GPU-chosen canonical seeds, row i belongs
+# to track i+1 — then, iff the prov flag bit is set, prov uint16[w*h].
+SCAN_MAGIC = 0x5343414E   # "SCAN"
+SCAN_HEADER_FMT = "<IIIIII"   # magic, width, height, levels, n_blobs, flags
+SCAN_FLAG_PROV = 1
+
 MAX_BODY_BYTES = 25 * 1024 * 1024   # PNG upload cap; engine.MAX_PIXELS is
                                      # the real (much tighter) size guard
 ALPHA_THRESHOLD = 128
@@ -169,7 +177,79 @@ async def fill(request: Request):
     )
 
 
-# Mounted LAST: routes registered above (/api/fill, /healthz) win over this
-# catch-all, and html=True serves static/index.html at "/" with no
-# separate redirect route needed.
+@app.post("/api/scan")
+async def scan(request: Request):
+    """SKYWATCH: seedless discovery over the WHOLE canvas. No seeds, no
+    mode — the GPU finds every blob (ch05 seed_merge), and the njit
+    seedless reference runs concurrently on the CPU pool for the race
+    bar. An empty canvas is valid (n_blobs=0)."""
+    global _inflight
+
+    want_prov = request.query_params.get("prov", "0") == "1"
+
+    body = await request.body()
+    if not body:
+        return JSONResponse({"detail": "empty request body"}, status_code=400)
+    if len(body) > MAX_BODY_BYTES:
+        return JSONResponse({"detail": "request body too large"},
+                            status_code=413)
+    try:
+        img = Image.open(io.BytesIO(body))
+        img.load()
+    except (UnidentifiedImageError, OSError):
+        return JSONResponse({"detail": "body is not a decodable PNG"},
+                            status_code=400)
+
+    rgba = np.array(img.convert("RGBA"))
+    mask = rgba[:, :, 3] >= ALPHA_THRESHOLD
+
+    if _inflight >= BACKLOG_CAP:
+        return JSONResponse({"detail": "server busy, try again shortly"},
+                            status_code=503)
+    _inflight += 1
+    try:
+        loop = asyncio.get_running_loop()
+        gpu_task = loop.run_in_executor(_gpu_executor, engine.discover,
+                                        mask, want_prov)
+        njit_task = loop.run_in_executor(_cpu_executor,
+                                         engine.njit_reference_ms, mask)
+        outcome = await gpu_task
+        njit_ms = await njit_task
+    except engine.MaskTooLargeError as e:
+        return JSONResponse({"detail": str(e)}, status_code=413)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    except RuntimeError as e:
+        return JSONResponse({"detail": str(e)}, status_code=500)
+    finally:
+        _inflight -= 1
+
+    flags = SCAN_FLAG_PROV if outcome.prov_u16 is not None else 0
+    header = struct.pack(SCAN_HEADER_FMT, SCAN_MAGIC, outcome.width,
+                         outcome.height, outcome.levels, outcome.n_blobs,
+                         flags)
+    seeds_bytes = outcome.seeds.astype("<u4").tobytes()
+    payload = (header + outcome.depth_u16.tobytes()
+               + outcome.track_u16.tobytes() + seeds_bytes)
+    if outcome.prov_u16 is not None:
+        payload += outcome.prov_u16.tobytes()
+    phase = ",".join(f"{k}:{v:.3f}" for k, v in outcome.phase_ms.items())
+    return Response(
+        content=payload,
+        media_type="application/octet-stream",
+        headers={
+            "X-Filled": str(outcome.filled),
+            "X-Candidates": str(outcome.candidates),
+            "X-Unions": str(outcome.unions),
+            "X-Kernel-Ms": f"{outcome.kernel_ms:.3f}",
+            "X-Total-Ms": f"{outcome.total_ms:.3f}",
+            "X-Njit-Ms": f"{njit_ms:.3f}",
+            "X-Phase-Ms": phase,
+        },
+    )
+
+
+# Mounted LAST: routes registered above (/api/fill, /api/scan, /healthz)
+# win over this catch-all, and html=True serves static/index.html at "/"
+# with no separate redirect route needed.
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

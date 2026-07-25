@@ -51,11 +51,15 @@ import numpy as np
 
 from ..chapters.ch01_gpu_1blob_1block.cpu_oracle import cpu_flood_fill
 from ..chapters.ch03_gpu_1blob_nblock.flood_fill import flood_fill
+from ..chapters.ch05_gpu_nblob_nblock.flood_fill import (
+    flood_fill as seedless_fill)
+from ..chapters.ch05_gpu_nblob_nblock.cpu_oracle import cpu_fill_canonical
 
 MAX_PIXELS = 4_000_000       # generous headroom over any realistic stroke bbox
 THREADS_PER_BLOCK = 256
 CONNECTIVITY = 4              # diamond wavefronts — the more legible animation
 DEPTH_CLAMP = 65535           # uint16 ceiling; only a >65k-level stroke clips
+MAX_TRACKS = 65_535           # dense track ids are uint16; 0 = background
 MODES = ("cpu", "gpu")
 
 AMPLIFY_FACTOR = 250          # target pixel-count multiplier for the timing run
@@ -214,11 +218,109 @@ def run_fill(mask_hw, mode="gpu", seed_x=None, seed_y=None):
     )
 
 
+@dataclass
+class ScanOutcome:
+    """One seedless discovery pass over the whole canvas (ch05)."""
+    depth_u16: np.ndarray   # (height, width) uint16, 0=unfilled else level+1
+    track_u16: np.ndarray   # (height, width) uint16, 0=background else 1..N
+    prov_u16: np.ndarray    # same encoding over provisional labels, or None
+    seeds: np.ndarray       # (n_blobs, 2) int32 (x, y), row i = track i+1
+    width: int
+    height: int
+    levels: int
+    n_blobs: int
+    filled: int
+    candidates: int
+    unions: int
+    kernel_ms: float
+    total_ms: float
+    phase_ms: dict
+
+
+def _dense_tracks(label_xy, height):
+    """Canonical labels (huge linear indices, -1 background) -> dense
+    uint16 track ids 1..N in canonical order, plus each track's seed:
+    the root IS the lex-min pixel's linear index, so it decodes straight
+    into one red pixel per blob — ordering matches the ids by
+    construction."""
+    roots = np.unique(label_xy[label_xy >= 0])
+    if len(roots) > MAX_TRACKS:
+        raise MaskTooLargeError(
+            f"{len(roots)} blobs exceed the {MAX_TRACKS}-track wire cap")
+    track_xy = np.zeros(label_xy.shape, dtype=np.int64)
+    mask = label_xy >= 0
+    track_xy[mask] = np.searchsorted(roots, label_xy[mask]) + 1
+    seeds = np.stack([roots // height, roots % height],
+                     axis=1).astype(np.int32) if len(roots) else \
+        np.empty((0, 2), dtype=np.int32)
+    return track_xy, seeds
+
+
+def discover(mask_hw, prov=False):
+    """Seedless multi-blob discovery on the whole canvas: ch05's
+    seed_merge kernel finds every blob, picks its canonical seed and
+    labels it, in one cooperative launch. An empty mask is VALID
+    (n_blobs=0) — that is the ch05 contract.
+
+    Instrumented (bare=False): the outcome carries the in-kernel phase
+    wall times and the union counters the game's HUD shows.
+    """
+    if mask_hw.ndim != 2 or mask_hw.dtype != bool:
+        raise ValueError("mask must be a 2-D boolean array")
+    height, width = mask_hw.shape
+    if width * height > MAX_PIXELS:
+        raise MaskTooLargeError(
+            f"canvas is {width}x{height} ({width * height} px), over the "
+            f"{MAX_PIXELS} px cap")
+
+    img = _build_image(mask_hw)
+    r = seedless_fill(img, variant="seed_merge",
+                      threads_per_block=THREADS_PER_BLOCK, bare=False)
+
+    track_xy, seeds = _dense_tracks(r.label, height)
+    depth_hw = r.depth.T
+    depth_u16 = np.ascontiguousarray(
+        np.where(depth_hw < 0, 0,
+                 np.minimum(depth_hw + 1, DEPTH_CLAMP)).astype('<u2'))
+    track_u16 = np.ascontiguousarray(track_xy.T.astype('<u2'))
+
+    prov_u16 = None
+    if prov and r.prov_label is not None:
+        proots = np.unique(r.prov_label[r.prov_label >= 0])
+        pmask = r.prov_label >= 0
+        prov_xy = np.zeros(r.prov_label.shape, dtype=np.int64)
+        prov_xy[pmask] = (np.searchsorted(proots, r.prov_label[pmask])
+                          % MAX_TRACKS) + 1
+        prov_u16 = np.ascontiguousarray(prov_xy.T.astype('<u2'))
+
+    return ScanOutcome(
+        depth_u16=depth_u16, track_u16=track_u16, prov_u16=prov_u16,
+        seeds=seeds, width=width, height=height,
+        levels=int(r.levels), n_blobs=int(r.n_blobs),
+        filled=int(r.filled), candidates=int(r.candidates),
+        unions=int(r.union_done),
+        kernel_ms=float(r.kernel_ms), total_ms=float(r.total_ms),
+        phase_ms=dict(r.phase_ms or {}),
+    )
+
+
+def njit_reference_ms(mask_hw):
+    """The honest CPU bar for the race: the @njit seedless reference
+    (CCL + canonical fill) on the same canvas, wall-clocked. Compiled at
+    warmup, so this is pure run time."""
+    img = _build_image(mask_hw)
+    t0 = time.perf_counter()
+    cpu_fill_canonical(img)
+    return (time.perf_counter() - t0) * 1000.0
+
+
 def warmup():
-    """Pay the first-call JIT-compile cost of both engines once, off the
+    """Pay the first-call JIT-compile cost of every engine once, off the
     request path: numba CUDA's kernel compile + cooperative-launch-capacity
     query for GPU mode, and @njit(cache=True)'s compile for CPU mode."""
     tiny = np.zeros((8, 8), dtype=bool)
     tiny[4, 4] = True
     run_fill(tiny, mode="gpu")
     run_fill(tiny, mode="cpu")
+    discover(tiny, prov=True)
+    njit_reference_ms(tiny)
