@@ -28,6 +28,7 @@ body { display: flex; flex-direction: column; }
 #hud-top, #hud-bottom {
   flex: none; padding: 8px 14px; background: rgba(4, 10, 6, 0.92);
   border-bottom: 1px solid var(--phos-dim);
+  position: relative; z-index: 5;   /* always above the scope canvases */
 }
 #hud-bottom { border-bottom: 0; border-top: 1px solid var(--phos-dim); }
 #hud-top { display: flex; align-items: baseline; gap: 18px; }
@@ -40,7 +41,8 @@ body { display: flex; flex-direction: column; }
 #hud-score { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
 
 /* ---- the scope ------------------------------------------------------- */
-#stage { position: relative; flex: 1; min-height: 0; background:
+#stage { position: relative; flex: 1; min-height: 0; overflow: hidden;
+  background:
   radial-gradient(circle at 50% 50%, #07130b 0%, var(--scope) 68%, #010202 100%); }
 
 #rings { position: absolute; inset: 0; pointer-events: none;
@@ -97,10 +99,15 @@ body { display: flex; flex-direction: column; }
 #phase-bar .ph-init { background: #23503a; }
 #phase-bar .ph-scan { background: #2e7a52; }
 #phase-bar .ph-fill { background: #46e08a; }
+#phase-bar .ph-compress { background: #8fe9b6; }
 #phase-bar .ph-flatten { background: #b7f2cf; }
 
 /* ---- the race -------------------------------------------------------- */
+/* .off hides the panel WITHOUT collapsing its space: revealing it after
+   the first scan must not resize the stage, or the already-sized
+   canvases would spill over the toolbar and eat its clicks. */
 #race-panel { margin-top: 8px; display: grid; gap: 5px; }
+#race-panel.off { visibility: hidden; }
 .race-row { display: flex; align-items: center; gap: 10px; font-size: 11px; }
 .race-lab { flex: 0 0 190px; color: var(--phos-dim); text-align: right; }
 .race-track { flex: 1; height: 12px; border: 1px solid var(--phos-dim);
