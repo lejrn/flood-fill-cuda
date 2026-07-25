@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEEP FIELD — count the stars</title>
+<link rel="stylesheet" href="/skysurvey.css">
+</head>
+<body>
+<div id="hud-top">
+  <div id="title">DEEP&nbsp;FIELD<span class="sub">ch05 seedless discovery · count the stars</span></div>
+  <div id="players">— surveying —</div>
+</div>
+
+<div id="stage">
+  <canvas id="field"></canvas>
+  <canvas id="fx"></canvas>
+  <div id="reveal" hidden>
+    <div id="counter">0</div>
+    <div id="counter-label">STARS DETECTED</div>
+    <div id="result"></div>
+  </div>
+</div>
+
+<div id="hud-bottom">
+  <div id="controls">
+    <label class="fld">YOUR CALL
+      <input id="guess" type="number" min="0" inputmode="numeric"
+             placeholder="how many stars?">
+    </label>
+    <label class="fld">ASTRONOMER
+      <input id="name" type="text" maxlength="18" placeholder="your name">
+    </label>
+    <button id="survey-btn">SURVEY ▸</button>
+    <span class="gap"></span>
+    <select id="difficulty" title="field density for the NEXT field">
+      <option value="scout">scout · ~120</option>
+      <option value="surveyor" selected>surveyor · ~550</option>
+      <option value="deepfield">deep field · ~2400</option>
+    </select>
+    <button id="new-btn">NEW FIELD</button>
+  </div>
+  <div id="board-wrap">
+    <div id="board-title">LEADERBOARD</div>
+    <table id="board"><tbody></tbody></table>
+    <div id="board-hint">closest guess wins · survey the field to reveal</div>
+  </div>
+</div>
+
+<script src="/skysurvey.js" defer></script>
+</body>
+</html>
