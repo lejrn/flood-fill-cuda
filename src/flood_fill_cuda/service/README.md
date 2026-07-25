@@ -97,6 +97,29 @@ race bar), `X-Filled`, `X-Candidates`, `X-Unions`, `X-Phase-Ms`.
 
 `GET /healthz` → `{"status", "warm", "device"}`.
 
+`GET /api/challenge` → the current shared star field as a PNG (headers
+`X-Challenge-Id`, `X-Width`, `X-Height`, `X-Difficulty`; no truth in the
+response). `POST /api/challenge/new?difficulty=scout|surveyor|deepfield`
+rolls a fresh field and resets the board. `POST /api/guess` (JSON
+`{name, guess}`) scores against the current field's TRUE count — which
+is `engine.discover(...).n_blobs`, the real kernel on the field, not the
+generator's placed count — and returns `{true_count, n_placed,
+your_error, your_rank, players, leaderboard}`. `GET /api/leaderboard` →
+the current board (names, guesses, errors) and player count. State
+persists to `results/service/state/survey_state.json`.
+
+## DEEP FIELD — the star-count game
+
+`http://127.0.0.1:8000/skysurvey.html` — a shared, generated star field
+(varied sizes, some touching). Estimate the count, press SURVEY: the
+real ch05 discovery wavefront sweeps the frame, every star lights in its
+own colour, a counter spins up to the true number, and your guess climbs
+a persistent leaderboard of names. The honest twist: stars that touch
+merge into one component, so the true count is below the number placed —
+the exact mistake a human eye makes. Astronomy source extraction
+(SExtractor is literally threshold → connected-component labelling →
+measure) turned into a party game.
+
 ## SKYWATCH — the game
 
 `http://127.0.0.1:8000/skywatch.html` — an air-defense scope on the
