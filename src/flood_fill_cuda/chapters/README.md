@@ -8,14 +8,18 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs
-                                     │                                      │                            │                                    │                                   │
-                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:
-                                     ▼                            one BFS? where do they run?"    what stops it — and is          who owns each pixel?"             candidate waves + atomicMin
-                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;
-                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs
+                                     │                                      │                            │                                    │                                   │                                    │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:
+                                     ▼                            one BFS? where do they run?"    what stops it — and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (53 ms → 1.35 ms, no BFS left)
                                                                                                   plateau at 512 threads/SM      (1.6–1.8×)                        (755k blobs in 25 ms)
 ```
+
+Chapters 1–5 all ask *how should pixels move?* Chapter 6 asks whether
+they should be the unit at all, and the answer — runs, not pixels — is
+worth more than every scheduling result before it combined.
 
 ---
 
@@ -415,6 +419,8 @@ structure, sharpening what `ncu` must arbitrate.
 
 ### Open problems → Chapter 6 candidates
 1. **BUF/BKE 2×2-block union-find** to cut ccl's per-adjacency volume.
+   *→ became Chapter 6, but with 1×N blocks (runs) rather than 2×2 —
+   and the answer was bigger than the question.*
 2. **`ncu`** — owed label-map traffic, the negative observer overheads,
    and above all the **S≥32 hump** (slower than v1 at 15× fewer
    levels: a memory-system mystery with a clean reproducer).
@@ -424,7 +430,109 @@ structure, sharpening what `ncu` must arbitrate.
    shapes, off for dense noise).
 4. **Recoloring past 6 palette rows** (`label % 6` collides hues at
    N=100+; the label map, not the paint, is ground truth).
-5. **The cooperative-launch wedge question stands.**
+5. **The cooperative-launch wedge question stands.** *(Moot for
+   Chapter 6, which has no cooperative launch at all.)*
+
+---
+
+## Chapter 6 — runs, not pixels (`ch06_gpu_nblob_runs/`)
+
+### Inherited problems
+1. **Every chapter so far moves PIXELS.** A BFS frontier is a list of
+   pixel indices; ch05's `ccl_fill` unions once per red *adjacency*
+   (15.7M on the squares scene); the label map is one int32 per pixel.
+   Five chapters optimized *how* pixels move — barriers, occupancy,
+   seeding stride, one register — and never asked whether the pixel is
+   the right unit.
+2. **ch05's clock is a geodesic clock.** BFS depth *is* the runtime, so
+   shape decides speed: the serpentine costs ch03 32,641 barriers.
+3. **Nothing has been measured against the machine's real limit.** Five
+   chapters compare against a D2D *copy* peak. A pipeline whose two ends
+   are a read and a write needs a measured *read* peak and a measured
+   *write* peak, or "we are at the floor" is an opinion.
+
+### The observation the chapter is built on
+`images/input/input_blobs.png` — 81,000,000 px, 13,451,960 red, 2,522
+blobs — contains only **539,207 maximal red runs** (mean 24.9 px). That
+is 150× fewer items than red pixels, and connectivity, canonical labels
+and the spans to paint are all facts *about runs*. Run ids emitted in
+row-major order are ordered exactly like the linear index of their first
+pixel, so **ch05's union-by-`atomicMin` protocol, applied verbatim to
+run ids, converges to the same canonical label** — the same CPU oracle
+judges both chapters, bit for bit.
+
+### Approaches — what each bets
+| approach | the bet |
+|---|---|
+| **the run table** | 539k items is a rounding error, so the entire connected-components problem stops mattering and the clock becomes one read plus one write |
+| **1-bit packed mask** | the full-resolution data is a *binary* fact; at 1 bit/px the image is 10.15 MB, not 243 MB, and every pass but the first two stops paying for RGB |
+| **six plain kernels, no cooperative launch** | this pipeline is a DAG with no loop, so stream order is the barrier — and full occupancy beats the residency cap that cost ch05 half its grid |
+| **paired start/end bit scans** | within a row the k-th start and k-th end belong to the same run, so two warp-scanned bitmask streams pair by index: no cross-word stitching, no serial walk |
+| **two contracts, always reported together** | "the runtime" is not one number; RGB-in and packed-mask-in differ by the 243 MB the RGB read costs, and hiding that would be the whole result |
+
+### Results (RTX 4060 Laptop, 24 SMs; measured 193 GB/s copy, 167 read, 169 write)
+| finding | number |
+|---|---|
+| **headline** | `input_blobs.png` — 2,522 blobs, 81 Mpx — recolored in **3.03 ms** (RGB contract) / **1.35 ms** (packed mask) against ch05's **53.26 ms**: **17.6× / 39.5×** |
+| labeling alone | **0.70 ms** — every blob discovered and canonically labeled, nothing painted |
+| the whole CCL problem | count+scan+emit+merge+flatten = **0.68 ms** of the RGB contract's 3.03; `pack` (1.65) and `paint` (0.65) are the runtime |
+| shape stopped mattering | serpentine 2048² **0.49 ms** (37.8×), disk r=2000 **0.92 ms** (29.8×), 100-blob grid **0.61 ms** (41.4×) — one data-independent merge pass, no geodesic clock |
+| where runs lose | percolation noise (1.4 px/run, 3.4M runs for 755,577 blobs): **4.1×**, the only scene where the run is barely smaller than the pixel |
+| **the RGB wall** | 243 MB read = ~1.3 ms at the measured read peak: **no algorithm recolors this image from RGB in under 1 ms on this hardware.** Sub-millisecond belongs to the mask contract, stated as such |
+| scattered writes | 40 MB of red pixels in 75-byte spans = **62 GB/s** against a 169 GB/s streaming write — every paint formulation lands within 5% of it |
+| path halving | ch05's read-only `_find` rule relaxed (safe: the write is always a same-class index below `i`, and a root returns before any store) — merge **0.367 → 0.262 ms** |
+
+### Built, measured, thrown away — the load-bearing negatives
+- **Word stores in `paint`: no difference** (64 vs 61 GB/s). Three
+  per-channel byte stores touching the same sectors *looked* like 3×
+  waste; the kernel is scatter-bound, not store-bound. Word stores do
+  win past ~64 px/run — the mean here is 25.
+- **Skipping unchanged channels: slower** (0.750 vs 0.665 ms). Every
+  painted pixel is known to be pure RED, so magenta and orange need one
+  store not three, and the test is warp-uniform — the branch still
+  costs more than the store it skips.
+- **One block per row in `pack`: 2.4× slower.** 324,000 blocks of 256
+  threads, and block dispatch outweighs the memory traffic. Capping
+  `gridDim.y` at 64: 3.71 → 1.12 ms, the device's full read peak.
+- **`prev`/`next` via shfl in `emit`: no difference** — those loads were
+  already L1 hits.
+
+### New problems and lessons
+- **The unit of work is a design decision, not a given.** Changing
+  *what* moves beat five chapters of optimizing *how* it moves, by
+  17–40×, and made blob shape irrelevant at the same time.
+- **The clock was measuring Python.** `counters.copy_to_device(zeros)`
+  is a *synchronous* numba H2D copy; once per run it turned six async
+  launches into six host-blocked round trips — **1.72 ms of host enqueue
+  time, more than the entire GPU pipeline.** Zeroing inside the scan
+  kernel instead: 0.33 ms, and one launch fewer.
+- **This GPU idles at 1470 MHz of 3105 and will not boost for short
+  kernels separated by syncs.** Cold, the pipeline reads 2.27 ms; hot,
+  1.37 ms. The same unchanged `merge` measured 0.38, 0.59 and 0.73 ms
+  across one session. Every earlier chapter's "spread is 73% of the
+  median" complaint has this underneath it — the benchmark now spins the
+  clock up for 8 s and records what it achieved.
+- **Short-circuit `and` is three dependent loads.** `a == 255 and
+  b == 0 and c == 0` will not request the G byte until the R byte
+  returns; `&` on the comparisons keeps all three in flight.
+- **`depth` is gone, deliberately.** There is no BFS here, so there is
+  no geodesic structure to report — the first chapter to give an
+  instrument up rather than add one.
+
+### Open problems → Chapter 7 candidates
+1. **`ncu`**, owed since Chapter 3, now with a sharper question: why do
+   scattered 75-byte writes cap at 62 GB/s — sector occupancy, DRAM page
+   thrash, or write-allocate?
+2. **Long runs under-parallelize**: one warp per run leaves the disk
+   scene with 4,001 warps. Splitting them needs a prefix sum over run
+   lengths — 539k items, essentially free.
+3. **The 1.4 px/run case is where a 2×2-block method (BUF/BKE) should
+   win** — ch05's original suggestion, now with a measured niche and a
+   cheap image statistic to choose by.
+4. **CUDA graphs** to collapse six launches (host enqueue is 0.33 ms
+   against 1.35 ms of GPU work), and fuse `count` into `pack`.
+5. **Sub-millisecond end to end needs the OUTPUT to stop being RGB** —
+   a paletted 1 B/px output puts the write at 13 MB instead of 40.
 
 ---
 
