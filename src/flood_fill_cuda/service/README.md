@@ -82,7 +82,34 @@ returned depth array exactly); `X-Amplified-Filled`, `X-Kernel-Ms`, and
 module docstring for why the response mixes real-size depth data with
 amplified-scale timing.
 
+`POST /api/scan?prov=0|1` — SKYWATCH's endpoint: seedless multi-blob
+discovery over the WHOLE canvas via ch05's `seed_merge` cooperative
+kernel (no seeds, no mode — that is the point). Body: RGBA PNG, alpha
+≥ 128 is "painted"; an empty canvas is valid (`n_blobs=0`). Response
+format v2 (`app.py` docstring has the layout): a 24-byte header
+(`magic "SCAN", width, height, levels, n_blobs, flags`), then `depth`
+uint16[w·h], `track` uint16[w·h] (dense per-blob label ids in canonical
+order, 0 = background), `n_blobs` uint32 (x, y) pairs — the GPU-chosen
+canonical seeds — and, iff `prov=1`, the provisional-label map for the
+merge replay. Headers: `X-Kernel-Ms`, `X-Total-Ms`, `X-Njit-Ms` (the
+@njit seedless reference, run concurrently on the CPU pool — the honest
+race bar), `X-Filled`, `X-Candidates`, `X-Unions`, `X-Phase-Ms`.
+
 `GET /healthz` → `{"status", "warm", "device"}`.
+
+## SKYWATCH — the game
+
+`http://127.0.0.1:8000/skywatch.html` — an air-defense scope on the
+real kernels. Paint the raid yourself (brushes, eraser, or the RAID
+generator), hit SCAN: one cooperative launch discovers, labels and
+fills every contact — lock-on boxes, track priorities, crosshairs on
+the GPU-chosen canonical seeds, the in-kernel phase bar, then an ENGAGE
+phase (destroy tracks in priority order against the clock). The race
+panel replays GPU vs @njit at their true measured durations from that
+very scan — and honestly reports when a sparse scope is too little work
+for 48 cooperative blocks and the CPU wins. The "merge replay" toggle
+requests provisional labels and shows colliding waves snap to canonical
+ids — the atomicMin union-find, live on your own painting.
 
 ## Phase 2 — public via Cloudflare Tunnel
 

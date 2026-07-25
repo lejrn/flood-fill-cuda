@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SKYWATCH — seedless discovery, live</title>
+<link rel="stylesheet" href="/skywatch.css">
+</head>
+<body>
+<div id="hud-top">
+  <div id="hud-title">SKYWATCH<span class="sub">ch05 seedless discovery · live GPU</span></div>
+  <div id="hud-status">ARM — paint the raid, then SCAN</div>
+  <div id="hud-score">SCORE 0</div>
+</div>
+
+<div id="stage">
+  <div id="rings"></div>
+  <div id="sweep"></div>
+  <canvas id="paint"></canvas>
+  <canvas id="fx"></canvas>
+  <div id="wave-banner" hidden></div>
+</div>
+
+<div id="hud-bottom">
+  <div id="toolbar">
+    <button class="brush-btn active" data-shape="circle" title="drone">◉</button>
+    <button class="brush-btn" data-shape="square" title="armor">▰</button>
+    <button class="brush-btn" data-shape="star" title="decoy flare">✶</button>
+    <button class="brush-btn" data-shape="scratchy" title="swarm">᳕᳕᳕</button>
+    <button class="brush-btn" data-shape="eraser" title="eraser — split blobs to spawn tracks">⌫</button>
+    <span class="tb-gap"></span>
+    <button id="raid-btn" title="procedurally spray an incoming wave">RAID</button>
+    <button id="clear-btn">CLEAR</button>
+    <span class="tb-gap"></span>
+    <label class="tog"><input type="checkbox" id="race-tog" checked>race</label>
+    <label class="tog"><input type="checkbox" id="merge-tog">merge&nbsp;replay</label>
+    <span class="tb-gap"></span>
+    <button id="scan-btn">SCAN</button>
+  </div>
+  <div id="readout">
+    <span id="stat-line">paint contacts on the scope — every scan is a real cooperative-kernel launch</span>
+    <div id="phase-bar" hidden></div>
+  </div>
+  <div id="race-panel" hidden>
+    <div class="race-row"><span class="race-lab">GPU (RTX 4060, 1 launch)</span>
+      <div class="race-track"><div class="race-fill" id="race-gpu"></div></div>
+      <span class="race-ms" id="race-gpu-ms"></span></div>
+    <div class="race-row"><span class="race-lab">CPU (@njit, same scan)</span>
+      <div class="race-track"><div class="race-fill cpu" id="race-cpu"></div></div>
+      <span class="race-ms" id="race-cpu-ms"></span></div>
+  </div>
+</div>
+
+<script src="/skywatch.js" defer></script>
+</body>
+</html>
