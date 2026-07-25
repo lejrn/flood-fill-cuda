@@ -298,7 +298,13 @@ def unpack_kernel(mask, img, height):
 
 @cuda.jit
 def count_kernel(mask, row_count):
-    """row_count[x] = number of maximal red runs in row x."""
+    """row_count[x] = number of maximal red runs in row x.
+
+    Counts STARTS only, so it reads two words per word (`cur` and the
+    predecessor for the carry bit) where `_starts_ends` reads three —
+    a run has exactly as many starts as ends, and the successor word is
+    only needed to locate the ends, which emit will do later.
+    """
     width = mask.shape[0]
     words_per_row = mask.shape[1]
     lane = cuda.laneid
@@ -312,7 +318,9 @@ def count_kernel(mask, row_count):
             w = base + lane
             starts = int64(0)
             if w < words_per_row:
-                starts, _ends = _starts_ends(mask, x, w, words_per_row)
+                cur = _word(mask, x, w, words_per_row)
+                prev = _word(mask, x, w - 1, words_per_row)
+                starts = cur & ~((cur << 1) | (prev >> 31))
             total += cuda.popc(starts)
             base += WARP
         # warp-reduce the per-lane totals

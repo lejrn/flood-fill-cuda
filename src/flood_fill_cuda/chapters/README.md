@@ -13,7 +13,7 @@ CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the G
                           "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:
                                      ▼                            one BFS? where do they run?"    what stops it — and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,
                                 v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write
-                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (53 ms → 1.35 ms, no BFS left)
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)
                                                                                                   plateau at 512 threads/SM      (1.6–1.8×)                        (755k blobs in 25 ms)
 ```
 
@@ -473,14 +473,16 @@ judges both chapters, bit for bit.
 ### Results (RTX 4060 Laptop, 24 SMs; measured 193 GB/s copy, 167 read, 169 write)
 | finding | number |
 |---|---|
-| **headline** | `input_blobs.png` — 2,522 blobs, 81 Mpx — recolored in **3.03 ms** (RGB contract) / **1.35 ms** (packed mask) against ch05's **53.26 ms**: **17.6× / 39.5×** |
-| labeling alone | **0.70 ms** — every blob discovered and canonically labeled, nothing painted |
-| the whole CCL problem | count+scan+emit+merge+flatten = **0.68 ms** of the RGB contract's 3.03; `pack` (1.65) and `paint` (0.65) are the runtime |
-| shape stopped mattering | serpentine 2048² **0.49 ms** (37.8×), disk r=2000 **0.92 ms** (29.8×), 100-blob grid **0.61 ms** (41.4×) — one data-independent merge pass, no geodesic clock |
-| where runs lose | percolation noise (1.4 px/run, 3.4M runs for 755,577 blobs): **4.1×**, the only scene where the run is barely smaller than the pixel |
-| **the RGB wall** | 243 MB read = ~1.3 ms at the measured read peak: **no algorithm recolors this image from RGB in under 1 ms on this hardware.** Sub-millisecond belongs to the mask contract, stated as such |
+| **headline** | `input_blobs.png` — 2,522 blobs, 81 Mpx — recolored in **2.96 ms** (RGB contract) / **1.46 ms** (packed mask) against ch05's **58.51 ms**: **19.8× / 40.2×** (a second full session: 53.26 / 3.03 / 1.35 — ±8% on a laptop GPU that never reaches its rated clock, which is why the baseline is always re-measured in the same session) |
+| labeling alone | **0.78 ms** — every blob discovered and canonically labeled, nothing painted |
+| the whole CCL problem | count+scan+emit+merge+flatten = **0.64 ms** of the RGB contract's 2.96; `pack` (1.67) and `paint` (0.64) are the runtime |
+| shape stopped mattering | serpentine 2048² **0.47 ms** (39.9×), disk r=2000 **1.00 ms** (26.5×), 100-blob grid **0.62 ms** (43.5×) — one data-independent merge pass, no geodesic clock |
+| where runs lose | percolation noise (1.4 px/run, 3.4M runs for 755,577 blobs): **4.0×**, the only scene where the run is barely smaller than the pixel |
+| **the RGB wall** | 243 MB read = 1.14 ms at the measured read peak: **no algorithm recolors this image from RGB in under 1 ms on this hardware.** Sub-millisecond belongs to the mask contract, stated as such |
 | scattered writes | 40 MB of red pixels in 75-byte spans = **62 GB/s** against a 169 GB/s streaming write — every paint formulation lands within 5% of it |
 | path halving | ch05's read-only `_find` rule relaxed (safe: the write is always a same-class index below `i`, and a root returns before any store) — merge **0.367 → 0.262 ms** |
+| **where 1 ms actually is** (crops of the real image, so run length and red fraction are preserved) | packed-mask recolor stays under **1 ms out to 49.8 Mpx** and under 0.5 ms to 17.9 Mpx; the RGB contract to 21.9 / 10.4 Mpx; the labeling never leaves 1 ms in the sweep and holds 0.5 ms to 45.6 Mpx. 7000² recolors in **0.984 ms** |
+| the small-image floor | below ~4 Mpx the curve is flat at 0.35–0.40 ms — that is the six kernel launches (0.33 ms of host enqueue), not the image. CUDA graphs, not a better algorithm, is what moves it |
 
 ### Built, measured, thrown away — the load-bearing negatives
 - **Word stores in `paint`: no difference** (64 vs 61 GB/s). Three

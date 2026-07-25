@@ -49,14 +49,21 @@ within a row). Connectivity, canonical labels and the spans to paint are
 all facts about runs, so the whole connected-components problem shrinks
 to 539k items and the clock collapses onto the only two things that must
 still touch pixels: one read and one write. The same image ch05 recolors
-in **53 ms** takes **3.03 ms** (RGB in, recolored in place) or
-**1.35 ms** from a packed 1-bit mask — 17.6× and 39.5×, with the
-labeling alone at 0.70 ms and blob *shape* no longer mattering (the
+in **58 ms** takes **2.96 ms** (RGB in, recolored in place) or
+**1.46 ms** from a packed 1-bit mask — 19.8× and 40.2×, with the
+labeling alone at 0.78 ms and blob *shape* no longer mattering (the
 serpentine that cost ch03 32,641 BFS levels costs one merge pass). It
-also finds the wall: at 243 MB, reading the RGB image costs ~1.3 ms at
-the measured read peak, so no algorithm recolors it from RGB in under a
-millisecond on this hardware — and the negative results (word stores,
-channel-skipping, one-block-per-row) are as load-bearing as the wins.
+also finds the wall, and says where it is: 243 MB of RGB takes 1.14 ms
+just to read at the measured peak, so nothing recolors this image from
+RGB in under a millisecond on this hardware — but a scale sweep over
+crops of the real image puts the packed-mask recolor **under 1 ms out to
+50 Mpx** and under 0.5 ms to 18 Mpx, with the labeling never leaving
+1 ms. The negative results (word stores, channel-skipping,
+one-block-per-row) are as load-bearing as the wins, and two instrument
+bugs it found — a synchronous `copy_to_device` costing more host time
+than the whole GPU pipeline, and a GPU that never leaves 1470 of
+3105 MHz for short kernels — retroactively explain five chapters of
+timing noise.
 
 Every kernel is pixel-exact against a compiled CPU oracle; every number
 is a committed benchmark JSON. The one-page overview —

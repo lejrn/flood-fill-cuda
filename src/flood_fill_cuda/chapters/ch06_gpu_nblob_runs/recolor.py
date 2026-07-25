@@ -72,8 +72,8 @@ PACK_ROW_BLOCKS = 64
 # collides (512 blocks beat 2048 by 1.6x); paint is scatter-bound and
 # flat from 512 to 2048.
 PHASE_BLOCKS = {
-    "count": 64,
-    "emit": 256,
+    "count": 256,
+    "emit": 512,
     "merge": 512,
     "flatten": 512,
     "paint": 1024,
