@@ -160,14 +160,16 @@ th { color: var(--ink-2); font-weight: 600; }
 <div class="sub">NVIDIA GeForce RTX 4060 Laptop GPU  · 24 SMs · organized by
 domain: single blob (§1.1 one block → §1.2 two blocks → §1.3 N blocks →
 §1.4 4-vs-8 connectivity → §1.5 per-barrier work experiments), dual
-blob (§2), then seed discovery (§3: no host-provided seeds — the GPU
-finds, labels and fills every blob itself). Every subsection reports
+blob (§2), seed discovery (§3: no host-provided seeds — the GPU
+finds, labels and fills every blob itself), then runs instead of pixels
+(§4: the same job with the run as the unit, measured against the
+machine's own read/write peaks). Every subsection reports
 its own speedup from its own benchmark session; §1.3 chains them into one
 multiplier from single block to N blocks. 4-connectivity throughout
 except where 8-direction twins are charted explicitly · placement
 observed via %smid</div>
 
-<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">no seeds given: discovered, labeled and filled in one cooperative launch — see §3</div><div class="tile-src">seed-discovery stage</div></div><div class="tile"><div class="tile-v">129 vs 128</div><div class="tile-l">one register cost half the GPU — found and fixed in the tuning cross-product, see §3</div><div class="tile-src">tuning cross-product</div></div></div>
+<div class="tiles"><div class="tile"><div class="tile-v">504 Mpx/s</div><div class="tile-l">fastest sweep cell · disk r=1900 · 48×256 · 8-conn</div><div class="tile-src">blocks × tpb sweep</div></div><div class="tile"><div class="tile-v">25.8× chained</div><div class="tile-l">1 block → N blocks (+8-conn) · square 8000² · center (64,000,000 px) · 100 ms — see §1.3 for the step-by-step multipliers</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">12,288 threads</div><div class="tile-l">cooperative capacity wall · 384 blocks max · ~104 regs/thread caps every grid shape at 512 threads/SM</div><div class="tile-src">N-block capacity table</div></div><div class="tile"><div class="tile-v">189 GB/s</div><div class="tile-l">measured D2D copy peak · model share ≈11% (4-conn), ≈22% (8-conn) — a lower bound</div><div class="tile-src">bandwidth instrumentation</div></div><div class="tile"><div class="tile-v">0.31 vs 62 ms</div><div class="tile-l">standing worst case · serpentine 256² · CPU vs the best GPU design (single-block v2) — every parallel kernel loses here</div><div class="tile-src">N-block scene suite</div></div><div class="tile"><div class="tile-v">723 Mpx/s</div><div class="tile-l">fastest whole-scene fill · warp-coop 8-conn · square 8000² · center (64,000,000 px) in 88 ms — see §1.5</div><div class="tile-src">per-barrier experiments</div></div><div class="tile"><div class="tile-v">2.05×</div><div class="tile-l">two blobs, one pass · multisource vs sequential · two squares 2800² — see §2</div><div class="tile-src">dual-blob stage</div></div><div class="tile"><div class="tile-v">755,577 blobs</div><div class="tile-l">no seeds given: discovered, labeled and filled in one cooperative launch — see §3</div><div class="tile-src">seed-discovery stage</div></div><div class="tile"><div class="tile-v">129 vs 128</div><div class="tile-l">one register cost half the GPU — found and fixed in the tuning cross-product, see §3</div><div class="tile-src">tuning cross-product</div></div><div class="tile"><div class="tile-v">40×</div><div class="tile-l">runs vs pixels, same image</div><div class="tile-src">ch06 · 53 → 1.3 ms</div></div><div class="tile"><div class="tile-v">0.70 ms</div><div class="tile-l">2,522 blobs labeled, 81,000,000 px</div><div class="tile-src">ch06 · discovery + canonical labels, packed input</div></div></div>
 
 <h2 class="domain-h" style="margin-top:8px">1. Single blob</h2>
 
@@ -2740,6 +2742,167 @@ the benchmark JSON's bandwidth_model note) against the measured
 147 GB/s copy peak.</p>
 <details open><summary>Per-scene results table</summary>
 <div class="tablewrap"><table><tr><th>scene</th><th>filled px</th><th>blobs</th><th>candidates</th><th>@njit ms</th><th>merge ms</th><th>ccl ms</th><th>ccl/merge</th><th>(min)</th><th>scan ms</th><th>flatten ms</th><th>ccl union ms</th><th>tax merge</th><th>tax ccl</th><th>vs @njit</th><th>GB/s (merge)</th><th>% peak</th></tr><tr><td>two squares 2800²</td><td>15,680,000</td><td>2</td><td>2</td><td>646</td><td>66</td><td>120</td><td>1.83×</td><td>1.71×</td><td>3.5</td><td>1.4</td><td>71</td><td>2.50×</td><td>4.58×</td><td>9.8×</td><td>33.9</td><td>23.1</td></tr><tr><td>two disks r=1400</td><td>12,314,954</td><td>2</td><td>500</td><td>387</td><td>94</td><td>75</td><td>0.80×</td><td>0.83×</td><td>1.5</td><td>2.1</td><td>34</td><td>4.14×</td><td>3.30×</td><td>5.2×</td><td>19.7</td><td>13.4</td></tr><tr><td>asymmetric 4000²+800²</td><td>16,640,000</td><td>2</td><td>2</td><td>670</td><td>59</td><td>90</td><td>1.52×</td><td>1.49×</td><td>2.0</td><td>1.6</td><td>41</td><td>1.88×</td><td>2.86×</td><td>11.3×</td><td>40.1</td><td>27.3</td></tr><tr><td>grid of 100 blobs</td><td>12,960,000</td><td>100</td><td>100</td><td>544</td><td>35</td><td>54</td><td>1.56×</td><td>1.48×</td><td>1.5</td><td>1.2</td><td>33</td><td>—</td><td>—</td><td>15.7×</td><td>53.3</td><td>36.3</td></tr><tr><td>random noise 4000²</td><td>4,802,736</td><td>755,577</td><td>1,154,024</td><td>634</td><td>30</td><td>31</td><td>1.05×</td><td>1.23×</td><td>2.5</td><td>2.5</td><td>8.9</td><td>—</td><td>—</td><td>21.4×</td><td>20.1</td><td>13.7</td></tr><tr><td>comb, 2000 teeth</td><td>4,831,992</td><td>1</td><td>2,000</td><td>355</td><td>84</td><td>81</td><td>0.97×</td><td>1.39×</td><td>1.1</td><td>57</td><td>2.7</td><td>—</td><td>—</td><td>4.4×</td><td>6.7</td><td>4.6</td></tr><tr><td>serpentine 256²</td><td>32,896</td><td>1</td><td>65</td><td>0.85</td><td>2.0</td><td>199</td><td>100.29×</td><td>98.05×</td><td>0.01</td><td>0.02</td><td>0.20</td><td>—</td><td>—</td><td>0.4×</td><td>1.7</td><td>1.2</td></tr></table></div></details>
+</div>
+
+
+<h2 class="domain-h">4. Runs, not pixels — the bandwidth floor</h2>
+
+<p class="note" style="max-width:900px">Chapters 1–5 all move PIXELS: a
+BFS frontier is a list of pixel indices, a union-find pass unions per
+pixel adjacency, the label map is one int32 per pixel. This stage asks
+what the same job costs when the unit is the <em>run</em> — a maximal
+red span inside one row. <code>input_blobs.png</code> has 81,000,000
+pixels, 13,451,960 of them red, and only <strong>539,207 runs</strong>:
+150× fewer items than red pixels, and every fact the job needs
+(connectivity, canonical labels, the spans to paint) is a fact about
+runs. Connectivity becomes a union-find over 539k items and the clock
+collapses onto the two ends that must touch pixels at all — one read
+and one write. Canonical labels are unchanged from ch05 (a blob's label
+is still its minimum linear index), so the same CPU oracle judges both,
+pixel for pixel.</p>
+
+<p class="note" style="max-width:900px"><strong>Two contracts, always
+reported together.</strong> The RGB image is 243 MB and the packed
+1-bit mask is 10.15 MB; at the measured read peak of
+167 GB/s, merely reading the RGB costs ~1.3 ms, so no
+algorithm recolors from RGB in under a millisecond on this hardware.
+The sub-millisecond numbers belong to the mask contract and say so.</p>
+
+<div class="tiles"><div class="tile"><div class="tile-v">40×</div><div class="tile-l">runs vs pixels, same image</div><div class="tile-src">ch06 · 53 → 1.3 ms</div></div><div class="tile"><div class="tile-v">0.70 ms</div><div class="tile-l">2,522 blobs labeled, 81,000,000 px</div><div class="tile-src">ch06 · discovery + canonical labels, packed input</div></div></div>
+
+<div class="card">
+<h2>Runtime per scene — ch05's pixels versus ch06's runs</h2>
+<p class="note">Log scale, same images, same session, interleaved
+rounds. ch05 runs its winning config on the headline image
+(<code>split_L8</code>) everywhere, which is not its per-scene best —
+read the non-PNG rows as indicative. Hover any dot.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s1)"></i>ch05 BFS + union-find over pixels</span><span><i class="chip" style="background:var(--s2)"></i>ch06 runs — RGB in, recolored in place</span><span><i class="chip" style="background:var(--s3)"></i>ch06 runs — packed 1-bit mask in</span><span><i class="chip" style="background:var(--s4)"></i>ch06 labeling only (nothing painted)</span></div>
+<svg viewBox="0 0 860 250" role="img" aria-label="Runtime per scene, ch05 versus ch06, log scale">
+<line x1="214.0" y1="4" x2="214.0" y2="216" class="grid"/>
+<text x="214.0" y="234" class="tick" text-anchor="middle">0.1</text>
+<line x1="430.9" y1="4" x2="430.9" y2="216" class="grid"/>
+<text x="430.9" y="234" class="tick" text-anchor="middle">1</text>
+<line x1="647.7" y1="4" x2="647.7" y2="216" class="grid"/>
+<text x="647.7" y="234" class="tick" text-anchor="middle">10</text>
+<text x="830" y="234" class="tick" text-anchor="end">ms (log)</text>
+<line x1="214" y1="18.0" x2="830" y2="18.0" class="rowline"/>
+<text x="204" y="22.0" class="rowlab" text-anchor="end">input_blobs</text>
+<circle cx="805.3" cy="8.2" r="5" class="dot s1" data-tip="input_blobs — ch05 best (split_L8): 53 ms"/>
+<circle cx="535.3" cy="14.8" r="5" class="dot s2" data-tip="input_blobs — ch06 rgb contract: 3.0 ms"/>
+<circle cx="459.0" cy="21.2" r="5" class="dot s3" data-tip="input_blobs — ch06 mask contract: 1.3 ms"/>
+<circle cx="397.5" cy="27.8" r="5" class="dot s4" data-tip="input_blobs — ch06 labeling only: 0.70 ms"/>
+<line x1="214" y1="54.0" x2="830" y2="54.0" class="rowline"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">input_blocks</text>
+<circle cx="472.1" cy="44.2" r="5" class="dot s1" data-tip="input_blocks — ch05 best (split_L8): 1.5 ms"/>
+<circle cx="362.0" cy="50.8" r="5" class="dot s2" data-tip="input_blocks — ch06 rgb contract: 0.48 ms"/>
+<circle cx="347.0" cy="57.2" r="5" class="dot s3" data-tip="input_blocks — ch06 mask contract: 0.41 ms"/>
+<circle cx="316.2" cy="63.8" r="5" class="dot s4" data-tip="input_blocks — ch06 labeling only: 0.30 ms"/>
+<line x1="214" y1="90.0" x2="830" y2="90.0" class="rowline"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">blob_grid_100</text>
+<circle cx="735.8" cy="80.2" r="5" class="dot s1" data-tip="blob_grid_100 — ch05 best (split_L8): 25 ms"/>
+<circle cx="408.0" cy="86.8" r="5" class="dot s2" data-tip="blob_grid_100 — ch06 rgb contract: 0.78 ms"/>
+<circle cx="385.0" cy="93.2" r="5" class="dot s3" data-tip="blob_grid_100 — ch06 mask contract: 0.61 ms"/>
+<circle cx="316.1" cy="99.8" r="5" class="dot s4" data-tip="blob_grid_100 — ch06 labeling only: 0.30 ms"/>
+<line x1="214" y1="126.0" x2="830" y2="126.0" class="rowline"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">random_4000</text>
+<circle cx="730.8" cy="116.2" r="5" class="dot s1" data-tip="random_4000 — ch05 best (split_L8): 24 ms"/>
+<circle cx="604.9" cy="122.8" r="5" class="dot s2" data-tip="random_4000 — ch06 rgb contract: 6.3 ms"/>
+<circle cx="598.6" cy="129.2" r="5" class="dot s3" data-tip="random_4000 — ch06 mask contract: 5.9 ms"/>
+<circle cx="521.5" cy="135.8" r="5" class="dot s4" data-tip="random_4000 — ch06 labeling only: 2.6 ms"/>
+<line x1="214" y1="162.0" x2="830" y2="162.0" class="rowline"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">disk_r2000</text>
+<circle cx="742.9" cy="152.2" r="5" class="dot s1" data-tip="disk_r2000 — ch05 best (split_L8): 27 ms"/>
+<circle cx="440.8" cy="158.8" r="5" class="dot s2" data-tip="disk_r2000 — ch06 rgb contract: 1.1 ms"/>
+<circle cx="423.2" cy="165.2" r="5" class="dot s3" data-tip="disk_r2000 — ch06 mask contract: 0.92 ms"/>
+<circle cx="295.9" cy="171.8" r="5" class="dot s4" data-tip="disk_r2000 — ch06 labeling only: 0.24 ms"/>
+<line x1="214" y1="198.0" x2="830" y2="198.0" class="rowline"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">serpentine_2048</text>
+<circle cx="706.6" cy="188.2" r="5" class="dot s1" data-tip="serpentine_2048 — ch05 best (split_L8): 19 ms"/>
+<circle cx="382.6" cy="194.8" r="5" class="dot s2" data-tip="serpentine_2048 — ch06 rgb contract: 0.60 ms"/>
+<circle cx="364.5" cy="201.2" r="5" class="dot s3" data-tip="serpentine_2048 — ch06 mask contract: 0.49 ms"/>
+<circle cx="320.2" cy="207.8" r="5" class="dot s4" data-tip="serpentine_2048 — ch06 labeling only: 0.31 ms"/>
+</svg>
+</div>
+
+<div class="card">
+<h2>Where the time goes — and how close the floor is</h2>
+<p class="note">The rgb contract, phase by phase. The dashed tick is the
+MEASURED machine floor for that scene: read the RGB once at
+167 GB/s plus write the red pixels once at
+169 GB/s. Two phases are the bar — <code>pack</code> (the
+only full-resolution read) and <code>paint</code> (the only write).
+Everything between them — count, scan, emit, merge, flatten, i.e. the
+entire connected-components problem — is the thin middle.</p>
+<div class="legend"><span><i class="chip" style="background:var(--s1)"></i>pack</span><span><i class="chip" style="background:var(--s2)"></i>count</span><span><i class="chip" style="background:var(--s3)"></i>scan</span><span><i class="chip" style="background:var(--s4)"></i>emit</span><span><i class="chip" style="background:var(--s5)"></i>merge</span><span><i class="chip" style="background:var(--s6)"></i>flatten</span><span><i class="chip" style="background:var(--s7)"></i>paint</span></div>
+<svg viewBox="0 0 860 250" role="img" aria-label="Per-phase time breakdown, rgb contract">
+<text x="204" y="22.0" class="rowlab" text-anchor="end">input_blobs</text>
+<rect x="214.0" y="9.0" width="151.4" height="18" class="dot s1" data-tip="input_blobs — pack: 1.7 ms (55%)"/>
+<rect x="365.4" y="9.0" width="6.8" height="18" class="dot s2" data-tip="input_blobs — count: 0.07 ms (2%)"/>
+<rect x="372.3" y="9.0" width="2.2" height="18" class="dot s3" data-tip="input_blobs — scan: 0.02 ms (1%)"/>
+<rect x="374.5" y="9.0" width="21.7" height="18" class="dot s4" data-tip="input_blobs — emit: 0.24 ms (8%)"/>
+<rect x="396.2" y="9.0" width="29.3" height="18" class="dot s5" data-tip="input_blobs — merge: 0.32 ms (11%)"/>
+<rect x="425.5" y="9.0" width="3.2" height="18" class="dot s6" data-tip="input_blobs — flatten: 0.03 ms (1%)"/>
+<rect x="428.6" y="9.0" width="59.2" height="18" class="dot s7" data-tip="input_blobs — paint: 0.65 ms (22%)"/>
+<line x1="368.7" y1="5.0" x2="368.7" y2="31.0" class="grid" stroke-dasharray="3,2" data-tip="input_blobs — machine floor (read RGB + write red px at measured peak): 1.7 ms"/>
+<text x="204" y="58.0" class="rowlab" text-anchor="end">input_blocks</text>
+<rect x="214.0" y="45.0" width="4.8" height="18" class="dot s1" data-tip="input_blocks — pack: 0.05 ms (10%)"/>
+<rect x="218.8" y="45.0" width="5.9" height="18" class="dot s2" data-tip="input_blocks — count: 0.06 ms (12%)"/>
+<rect x="224.6" y="45.0" width="5.1" height="18" class="dot s3" data-tip="input_blocks — scan: 0.06 ms (11%)"/>
+<rect x="229.8" y="45.0" width="7.7" height="18" class="dot s4" data-tip="input_blocks — emit: 0.08 ms (16%)"/>
+<rect x="237.4" y="45.0" width="9.9" height="18" class="dot s5" data-tip="input_blocks — merge: 0.11 ms (21%)"/>
+<rect x="247.3" y="45.0" width="3.5" height="18" class="dot s6" data-tip="input_blocks — flatten: 0.04 ms (7%)"/>
+<rect x="250.9" y="45.0" width="10.5" height="18" class="dot s7" data-tip="input_blocks — paint: 0.11 ms (22%)"/>
+<line x1="216.3" y1="41.0" x2="216.3" y2="67.0" class="grid" stroke-dasharray="3,2" data-tip="input_blocks — machine floor (read RGB + write red px at measured peak): 0.02 ms"/>
+<text x="204" y="94.0" class="rowlab" text-anchor="end">blob_grid_100</text>
+<rect x="214.0" y="81.0" width="33.0" height="18" class="dot s1" data-tip="blob_grid_100 — pack: 0.36 ms (47%)"/>
+<rect x="247.0" y="81.0" width="1.9" height="18" class="dot s2" data-tip="blob_grid_100 — count: 0.02 ms (3%)"/>
+<rect x="248.8" y="81.0" width="1.1" height="18" class="dot s3" data-tip="blob_grid_100 — scan: 0.01 ms (2%)"/>
+<rect x="249.9" y="81.0" width="3.2" height="18" class="dot s4" data-tip="blob_grid_100 — emit: 0.03 ms (4%)"/>
+<rect x="253.1" y="81.0" width="6.0" height="18" class="dot s5" data-tip="blob_grid_100 — merge: 0.07 ms (8%)"/>
+<rect x="259.1" y="81.0" width="0.7" height="18" class="dot s6" data-tip="blob_grid_100 — flatten: 0.01 ms (1%)"/>
+<rect x="259.7" y="81.0" width="25.0" height="18" class="dot s7" data-tip="blob_grid_100 — paint: 0.27 ms (35%)"/>
+<line x1="261.2" y1="77.0" x2="261.2" y2="103.0" class="grid" stroke-dasharray="3,2" data-tip="blob_grid_100 — machine floor (read RGB + write red px at measured peak): 0.52 ms"/>
+<text x="204" y="130.0" class="rowlab" text-anchor="end">random_4000</text>
+<rect x="214.0" y="117.0" width="39.7" height="18" class="dot s1" data-tip="random_4000 — pack: 0.44 ms (7%)"/>
+<rect x="253.7" y="117.0" width="2.1" height="18" class="dot s2" data-tip="random_4000 — count: 0.02 ms (0%)"/>
+<rect x="255.7" y="117.0" width="1.2" height="18" class="dot s3" data-tip="random_4000 — scan: 0.01 ms (0%)"/>
+<rect x="256.9" y="117.0" width="60.1" height="18" class="dot s4" data-tip="random_4000 — emit: 0.66 ms (11%)"/>
+<rect x="317.1" y="117.0" width="132.9" height="18" class="dot s5" data-tip="random_4000 — merge: 1.5 ms (23%)"/>
+<rect x="449.9" y="117.0" width="34.0" height="18" class="dot s6" data-tip="random_4000 — flatten: 0.37 ms (6%)"/>
+<rect x="483.9" y="117.0" width="300.5" height="18" class="dot s7" data-tip="random_4000 — paint: 3.3 ms (53%)"/>
+<line x1="248.0" y1="113.0" x2="248.0" y2="139.0" class="grid" stroke-dasharray="3,2" data-tip="random_4000 — machine floor (read RGB + write red px at measured peak): 0.37 ms"/>
+<text x="204" y="166.0" class="rowlab" text-anchor="end">disk_r2000</text>
+<rect x="214.0" y="153.0" width="32.8" height="18" class="dot s1" data-tip="disk_r2000 — pack: 0.36 ms (34%)"/>
+<rect x="246.8" y="153.0" width="2.0" height="18" class="dot s2" data-tip="disk_r2000 — count: 0.02 ms (2%)"/>
+<rect x="248.8" y="153.0" width="1.3" height="18" class="dot s3" data-tip="disk_r2000 — scan: 0.01 ms (1%)"/>
+<rect x="250.1" y="153.0" width="3.1" height="18" class="dot s4" data-tip="disk_r2000 — emit: 0.03 ms (3%)"/>
+<rect x="253.2" y="153.0" width="0.9" height="18" class="dot s5" data-tip="disk_r2000 — merge: 0.01 ms (1%)"/>
+<rect x="254.1" y="153.0" width="0.7" height="18" class="dot s6" data-tip="disk_r2000 — flatten: 0.01 ms (1%)"/>
+<rect x="254.8" y="153.0" width="55.9" height="18" class="dot s7" data-tip="disk_r2000 — paint: 0.61 ms (58%)"/>
+<line x1="263.3" y1="149.0" x2="263.3" y2="175.0" class="grid" stroke-dasharray="3,2" data-tip="disk_r2000 — machine floor (read RGB + write red px at measured peak): 0.54 ms"/>
+<text x="204" y="202.0" class="rowlab" text-anchor="end">serpentine_2048</text>
+<rect x="214.0" y="189.0" width="9.8" height="18" class="dot s1" data-tip="serpentine_2048 — pack: 0.11 ms (19%)"/>
+<rect x="223.8" y="189.0" width="0.7" height="18" class="dot s2" data-tip="serpentine_2048 — count: 0.01 ms (1%)"/>
+<rect x="224.5" y="189.0" width="5.8" height="18" class="dot s3" data-tip="serpentine_2048 — scan: 0.06 ms (11%)"/>
+<rect x="230.2" y="189.0" width="6.3" height="18" class="dot s4" data-tip="serpentine_2048 — emit: 0.07 ms (12%)"/>
+<rect x="236.6" y="189.0" width="6.7" height="18" class="dot s5" data-tip="serpentine_2048 — merge: 0.07 ms (13%)"/>
+<rect x="243.3" y="189.0" width="6.3" height="18" class="dot s6" data-tip="serpentine_2048 — flatten: 0.07 ms (12%)"/>
+<rect x="249.6" y="189.0" width="16.7" height="18" class="dot s7" data-tip="serpentine_2048 — paint: 0.18 ms (32%)"/>
+<line x1="224.3" y1="185.0" x2="224.3" y2="211.0" class="grid" stroke-dasharray="3,2" data-tip="serpentine_2048 — machine floor (read RGB + write red px at measured peak): 0.11 ms"/>
+<text x="830" y="234" class="tick" text-anchor="end">ms — dashed tick = measured read+write floor</text>
+</svg>
+</div>
+
+<div class="card">
+<h2>All numbers — the run-table stage</h2>
+<p class="note">'label only' is the pipeline minus the paint: every blob
+discovered and given its canonical label, nothing recolored. GB/s is the
+ch06 derived model (see the benchmark JSON's bandwidth_model note)
+against a measured 193 GB/s copy peak. 'floor ms' is
+read-RGB + write-red-pixels at the measured read/write peaks — the
+number no implementation of this contract can go below.</p>
+<details open><summary>Per-scene results table</summary>
+<div class="tablewrap"><table><tr><th>scene</th><th>px</th><th>red px</th><th>runs</th><th>blobs</th><th>mean run</th><th>ch05 ms</th><th>ch06 rgb</th><th>ch06 mask</th><th>label only</th><th>×rgb</th><th>×mask</th><th>rgb GB/s</th><th>floor ms</th></tr><tr><td>input_blobs</td><td>81,000,000</td><td>13,451,960</td><td>539,207</td><td>2,522</td><td>24.9</td><td>53</td><td>3.0</td><td>1.3</td><td>0.70</td><td>17.6×</td><td>39.5×</td><td>114</td><td>1.7</td></tr><tr><td>input_blocks</td><td>1,000,000</td><td>387,587</td><td>61,479</td><td>21,618</td><td>6.3</td><td>1.5</td><td>0.48</td><td>0.41</td><td>0.30</td><td>3.2×</td><td>3.8×</td><td>16</td><td>0.02</td></tr><tr><td>blob_grid_100</td><td>16,000,000</td><td>12,960,000</td><td>36,000</td><td>100</td><td>360.0</td><td>25</td><td>0.78</td><td>0.61</td><td>0.30</td><td>32.5×</td><td>41.4×</td><td>121</td><td>0.52</td></tr><tr><td>random_4000</td><td>16,000,000</td><td>4,802,736</td><td>3,361,514</td><td>755,577</td><td>1.4</td><td>24</td><td>6.3</td><td>5.9</td><td>2.6</td><td>3.8×</td><td>4.1×</td><td>40</td><td>0.37</td></tr><tr><td>disk_r2000</td><td>17,640,000</td><td>12,566,345</td><td>4,001</td><td>1</td><td>3140.8</td><td>27</td><td>1.1</td><td>0.92</td><td>0.24</td><td>24.7×</td><td>29.8×</td><td>88</td><td>0.54</td></tr><tr><td>serpentine_2048</td><td>4,194,304</td><td>2,098,176</td><td>2,048</td><td>1</td><td>1024.5</td><td>19</td><td>0.60</td><td>0.49</td><td>0.31</td><td>31.2×</td><td>37.8×</td><td>34</td><td>0.11</td></tr></table></div></details>
 </div>
 
 <div id="tooltip"></div>
