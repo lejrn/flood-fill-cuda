@@ -38,6 +38,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
 from . import engine
+from . import survey
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -249,7 +250,68 @@ async def scan(request: Request):
     )
 
 
-# Mounted LAST: routes registered above (/api/fill, /api/scan, /healthz)
-# win over this catch-all, and html=True serves static/index.html at "/"
-# with no separate redirect route needed.
+def _challenge_response(challenge):
+    png = survey.field_png()
+    return Response(
+        content=png, media_type="image/png",
+        headers={
+            "X-Challenge-Id": challenge["id"],
+            "X-Width": str(challenge["width"]),
+            "X-Height": str(challenge["height"]),
+            "X-Difficulty": challenge["difficulty"],
+            "Cache-Control": "no-store",
+        })
+
+
+@app.get("/api/challenge")
+async def get_challenge():
+    """DEEP FIELD: the current shared star field as a PNG (no truth in the
+    response). Generates one on first call."""
+    loop = asyncio.get_running_loop()
+    challenge = await loop.run_in_executor(_gpu_executor,
+                                           survey.ensure_challenge)
+    return _challenge_response(challenge)
+
+
+@app.post("/api/challenge/new")
+async def post_challenge_new(request: Request):
+    """Roll a fresh field for everyone; resets the leaderboard to it."""
+    difficulty = request.query_params.get("difficulty",
+                                          survey.DEFAULT_DIFFICULTY)
+    if difficulty not in survey.DIFFICULTIES:
+        return JSONResponse(
+            {"detail": f"difficulty must be one of "
+             f"{list(survey.DIFFICULTIES)}"}, status_code=400)
+    loop = asyncio.get_running_loop()
+    challenge = await loop.run_in_executor(
+        _gpu_executor, survey.new_challenge, difficulty)
+    return _challenge_response(challenge)
+
+
+@app.post("/api/guess")
+async def post_guess(request: Request):
+    """Score a guess against the current field's true count; returns the
+    reveal (truth, your error, your rank) and the updated board."""
+    try:
+        body = await request.json()
+        name = body.get("name", "")
+        guess = body["guess"]
+    except (ValueError, KeyError, TypeError):
+        return JSONResponse({"detail": "body must be JSON with a 'guess'"},
+                            status_code=400)
+    try:
+        result = survey.submit_guess(name, guess)
+    except (ValueError, TypeError) as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    return JSONResponse(result)
+
+
+@app.get("/api/leaderboard")
+async def get_leaderboard():
+    return JSONResponse(survey.leaderboard())
+
+
+# Mounted LAST: routes registered above (/api/fill, /api/scan, the survey
+# routes, /healthz) win over this catch-all, and html=True serves
+# static/index.html at "/" with no separate redirect route needed.
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
