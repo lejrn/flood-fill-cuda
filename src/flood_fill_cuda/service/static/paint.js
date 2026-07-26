@@ -1,0 +1,778 @@
+// Paint-and-fill frontend: thick-brush strokes -> POST /api/fill -> replay
+// the returned depth timeline as a spreading brightness wave -> fade away.
+// No build step, no dependencies.
+(() => {
+  "use strict";
+
+  const stage = document.getElementById("stage");
+  const canvas = document.getElementById("paint");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+  const BRUSH = 48;              // backing-store px; a thick blob-forming brush
+  // Covers the largest stamp's extent from its center (star/square corners
+  // reach further than BRUSH/2), plus a small buffer, so onStrokeEnd's crop
+  // never clips a stamp.
+  const BRUSH_PAD = Math.ceil(BRUSH * 0.65) + 4;
+  const BRUSH_STEP = 10;         // backing-store px between stamps along a drag
+  const PAINT_COLOR = "rgba(70, 74, 92, 0.94)";   // neutral "wet chalk" stroke
+  const MAX_BACKING_PIXELS = 3.5e6;
+  const MAX_LIVE_SHAPES = 24;
+  const STATS_LIFETIME_MS = 5000;   // results readout: shown, then just gone, no fade
+
+  // A single, muted ember-red for the frontier's thin leading edge --
+  // kept apart from the interior's dark ash gradient (see levelColor)
+  // so it always reads clearly without being neon-bright.
+  const FRONTIER_COLOR = [196, 62, 46];
+
+  let painting = false;
+  let lastX = 0, lastY = 0;
+  let bbox = null;
+  let liveShapes = [];
+  let currentShape = "circle";
+  let currentMode = "gpu";
+
+  // ---- canvas sizing -------------------------------------------------
+  // Backing-store resolution is CSS px * devicePixelRatio (capped at 1.5
+  // so a 3x phone doesn't triple the pixel count for no visual gain),
+  // then uniformly scaled down further if that would still exceed a
+  // sane pixel budget.
+  function sizeCanvas() {
+    const rect = stage.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    let w = Math.round(rect.width * dpr);
+    let h = Math.round(rect.height * dpr);
+    if (w * h > MAX_BACKING_PIXELS) {
+      const scale = Math.sqrt(MAX_BACKING_PIXELS / (w * h));
+      w = Math.max(1, Math.round(w * scale));
+      h = Math.max(1, Math.round(h * scale));
+    }
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = rect.width + "px";
+    canvas.style.height = rect.height + "px";
+    ctx.fillStyle = PAINT_COLOR;
+    ctx.strokeStyle = PAINT_COLOR;
+    ctx.lineCap = "round";
+  }
+  window.addEventListener("resize", () => {
+    // Resizing reallocates the backing store, which blanks it. Reset the
+    // shot counters with it so "drops fired" can never describe pixels
+    // that are no longer on the canvas.
+    sizeCanvas();
+    if (typeof resetShooting === "function" && currentShape === "shoot") {
+      resetShooting();
+    }
+  });
+  sizeCanvas();
+
+  // The one coordinate mapping used everywhere: CSS px -> backing-store
+  // px. Every place that needs a canvas-space point goes through this, so
+  // devicePixelRatio / downscaling never has more than one place to get
+  // wrong.
+  function toCanvasXY(e) {
+    const rect = canvas.getBoundingClientRect();
+    return [
+      (e.clientX - rect.left) * canvas.width / rect.width,
+      (e.clientY - rect.top) * canvas.height / rect.height,
+    ];
+  }
+
+  function growBBox(x, y) {
+    const p = BRUSH_PAD;
+    if (!bbox) {
+      bbox = { minX: x - p, minY: y - p, maxX: x + p, maxY: y + p };
+    } else {
+      bbox.minX = Math.min(bbox.minX, x - p);
+      bbox.minY = Math.min(bbox.minY, y - p);
+      bbox.maxX = Math.max(bbox.maxX, x + p);
+      bbox.maxY = Math.max(bbox.maxY, y + p);
+    }
+  }
+
+  function clearMain() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    bbox = null;
+  }
+
+  // ---- brush shapes ---------------------------------------------------
+  // Each stamp draws one dab centered at (x, y) in backing-store px, using
+  // the already-set fillStyle/strokeStyle. Dragging calls these repeatedly
+  // along the path (see strokeSegment), so consecutive dabs must overlap
+  // enough to stay one connected blob for the kernel.
+
+  function stampCircle(x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, BRUSH / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function stampSquare(x, y) {
+    const s = BRUSH * 0.86;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((Math.random() - 0.5) * 0.5);
+    ctx.fillRect(-s / 2, -s / 2, s, s);
+    ctx.restore();
+  }
+
+  function stampStar(x, y) {
+    const outer = BRUSH * 0.62;
+    const inner = outer * 0.42;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.random() * Math.PI * 2);
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const px = Math.cos(a) * r, py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // A cluster of short jittered strokes per dab, so a drag builds up a
+  // rough, hand-scratched hatch texture instead of a smooth fill.
+  function stampScratchy(x, y) {
+    const r = BRUSH / 2;
+    const prevWidth = ctx.lineWidth;
+    ctx.lineWidth = Math.max(3, BRUSH * 0.16);
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const len = r * (0.6 + Math.random() * 0.7);
+      const ox = (Math.random() * 2 - 1) * r * 0.35;
+      const oy = (Math.random() * 2 - 1) * r * 0.35;
+      const cx = x + ox, cy = y + oy;
+      ctx.beginPath();
+      ctx.moveTo(cx - Math.cos(a) * len / 2, cy - Math.sin(a) * len / 2);
+      ctx.lineTo(cx + Math.cos(a) * len / 2, cy + Math.sin(a) * len / 2);
+      ctx.stroke();
+    }
+    ctx.lineWidth = prevWidth;
+  }
+
+  const BRUSH_SHAPES = {
+    circle: stampCircle,
+    square: stampSquare,
+    star: stampStar,
+    scratchy: stampScratchy,
+  };
+
+  function stampBrush(x, y) {
+    BRUSH_SHAPES[currentShape](x, y);
+  }
+
+  // Dabs the current brush shape at fixed spacing along a segment, so
+  // fast drags don't leave gaps and every shape (not just round strokes)
+  // gets continuous coverage.
+  function strokeSegment(x0, y0, x1, y1) {
+    const dist = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.max(1, Math.ceil(dist / BRUSH_STEP));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      stampBrush(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+    }
+  }
+
+  const shapeButtons = document.querySelectorAll("#toolbar .brush-btn");
+  shapeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      shapeButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      setTool(btn.dataset.shape);
+    });
+  });
+
+  // [data-mode] matters: CLEAR shares the .mode-btn look but is not a
+  // mode, and without the attribute filter clicking it would set
+  // currentMode to undefined.
+  const modeButtons = document.querySelectorAll("#toolbar .mode-btn[data-mode]");
+  modeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      modeButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentMode = btn.dataset.mode;
+    });
+  });
+
+  // ---- painting --------------------------------------------------------
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    painting = true;
+    if (isShootTool()) { shootAt(e); return; }
+    bbox = null;
+    const [x, y] = toCanvasXY(e);
+    lastX = x; lastY = y;
+    stampBrush(x, y);
+    growBBox(x, y);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!painting) return;
+    if (isShootTool()) {
+      // hold and drag to keep spraying, throttled so a fast drag doesn't
+      // queue a hundred scans
+      if (performance.now() - lastShotAt >= SHOT_REPEAT_MS) shootAt(e);
+      return;
+    }
+    const [x, y] = toCanvasXY(e);
+    strokeSegment(lastX, lastY, x, y);
+    growBBox(x, y);
+    lastX = x; lastY = y;
+  });
+
+  canvas.addEventListener("pointerup", onStrokeEnd);
+  canvas.addEventListener("pointercancel", onStrokeEnd);
+
+  function onStrokeEnd(e) {
+    if (!painting) return;
+    painting = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    // A shot has already done its own work on release of the button; the
+    // splatter deliberately STAYS on the canvas so the next shot's drops
+    // can touch it.
+    if (isShootTool()) return;
+    if (!bbox) return;
+
+    // Where the pointer was released — becomes the fill's seed, in
+    // crop-local coordinates (below) once the bbox origin is known.
+    const [releaseX, releaseY] = toCanvasXY(e);
+
+    const bx = Math.max(0, Math.floor(bbox.minX));
+    const by = Math.max(0, Math.floor(bbox.minY));
+    const bw = Math.min(canvas.width, Math.ceil(bbox.maxX)) - bx;
+    const bh = Math.min(canvas.height, Math.ceil(bbox.maxY)) - by;
+    if (bw <= 0 || bh <= 0) { clearMain(); return; }
+
+    const shapeCanvas = document.createElement("canvas");
+    shapeCanvas.width = bw;
+    shapeCanvas.height = bh;
+    shapeCanvas.getContext("2d").drawImage(canvas, bx, by, bw, bh, 0, 0, bw, bh);
+
+    // Screen placement in CSS px, so the falling shape appears exactly
+    // where the stroke was painted regardless of backing-store scale.
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / canvas.width;
+    const scaleY = rect.height / canvas.height;
+    const screenX = rect.left + bx * scaleX;
+    const screenY = rect.top + by * scaleY;
+    const screenW = bw * scaleX;
+    const screenH = bh * scaleY;
+
+    const seedX = releaseX - bx;
+    const seedY = releaseY - by;
+
+    clearMain();   // user can paint the next blob immediately
+    spawnShape(shapeCanvas, screenX, screenY, screenW, screenH, currentMode, seedX, seedY);
+  }
+
+  // ---- server round trip -------------------------------------------
+  async function requestFill(shapeCanvas, mode, seedX, seedY) {
+    const blob = await new Promise((res) => shapeCanvas.toBlob(res, "image/png"));
+    const params = new URLSearchParams({ mode, seed_x: seedX, seed_y: seedY });
+    const resp = await fetch(`/api/fill?${params}`, { method: "POST", body: blob });
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error(`fill failed (${resp.status}): ${detail.detail || resp.statusText}`);
+    }
+    const buf = await resp.arrayBuffer();
+    const dv = new DataView(buf);
+    const width = dv.getUint32(4, true);
+    const height = dv.getUint32(8, true);
+    const levels = dv.getUint32(12, true);
+    const depth = new Uint16Array(buf, 16);
+    const stats = {
+      filled: parseInt(resp.headers.get("x-filled"), 10) || 0,
+      amplifiedFilled: parseInt(resp.headers.get("x-amplified-filled"), 10) || 0,
+      kernelMs: parseFloat(resp.headers.get("x-kernel-ms")) || 0,
+      mode: resp.headers.get("x-mode") || mode,
+    };
+    return { width, height, levels, depth, stats };
+  }
+
+  // ---- RUNS mode: ch06, seedless -------------------------------------
+  // A different job, so a different endpoint: /api/scan takes no seed and
+  // finds EVERY blob in the crop at once. The response carries a `sweep`
+  // field instead of `depth` — ch06 is not a BFS, so no pixel has a level;
+  // see app.py's wire-format note.
+  // amp=true asks for the upscaled timing run, which is what a small
+  // painted stroke needs to report a number that isn't launch-bound. The
+  // SHOOT tool passes false: a full canvas is already ~1.4 Mpx of real
+  // work, so its own measured time is the honest one.
+  async function requestScan(sourceCanvas, amp = true) {
+    const blob = await new Promise((res) => sourceCanvas.toBlob(res, "image/png"));
+    const resp = await fetch(`/api/scan?amp=${amp ? 1 : 0}`,
+                             { method: "POST", body: blob });
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error(`scan failed (${resp.status}): ${detail.detail || resp.statusText}`);
+    }
+    const buf = await resp.arrayBuffer();
+    const dv = new DataView(buf);
+    const width = dv.getUint32(4, true);
+    const height = dv.getUint32(8, true);
+    const steps = dv.getUint32(12, true);
+    const nBlobs = dv.getUint32(16, true);
+    const n = width * height;
+    const track = new Uint16Array(buf, 24, n);
+    const num = (h) => parseInt(resp.headers.get(h), 10) || 0;
+    return {
+      width, height, steps, nBlobs, track,
+      stats: {
+        mode: "runs",
+        filled: num("x-filled"),
+        runs: num("x-runs"),
+        nBlobs,
+        amplifiedFilled: num("x-amplified-filled"),
+        amplifiedRuns: num("x-amplified-runs"),
+        njitMs: parseFloat(resp.headers.get("x-njit-ms")) || 0,
+        // the GPU idles at ~700 MHz and won't spin up for a 1 ms kernel,
+        // so the first scan after a pause reads several times high. Say
+        // so instead of quietly showing the bad number.
+        cold: resp.headers.get("x-cold") === "1",
+        // with amp, the upscaled run is the honest at-scale number,
+        // exactly as the CPU/GPU modes report; without it, the canvas's
+        // own measured time already is
+        kernelMs: (amp
+          ? parseFloat(resp.headers.get("x-amplified-kernel-ms"))
+          : 0) || parseFloat(resp.headers.get("x-kernel-ms")) || 0,
+      },
+    };
+  }
+
+  // Bucket pixel indices by BFS level once, so the animation loop only
+  // ever touches pixels newly crossed this frame instead of rescanning
+  // the whole depth array every tick. Mirrors the depth-threshold replay
+  // in chapters/ch04_gpu_2blob_nblock/benchmarks/wavefront.py::render_timeline.
+  function bucketByLevel(depth, levels) {
+    const buckets = Array.from({ length: levels }, () => []);
+    for (let i = 0; i < depth.length; i++) {
+      const v = depth[i];
+      if (v > 0) buckets[v - 1].push(i);   // encoded v = depth+1
+    }
+    return buckets;
+  }
+
+  function hslToRgb(h, s, l) {
+    h = (((h % 360) + 360) % 360) / 360;
+    const k = (n) => (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+  }
+
+  // Interior resting color as a function of normalized BFS depth (0 at
+  // the seed, 1 at the outermost level): a dark, muted ash gradient --
+  // deliberately low-saturation and low-lightness (no neon, no hue
+  // sweep through blue/purple) so the thin frontier line is the only
+  // thing that reads as bright against it.
+  function levelColor(t) {
+    return hslToRgb(22, 0.30, 0.10 + 0.14 * t);
+  }
+
+  // durationMs is the engine's own reported compute time: the replay
+  // plays at the fill's actual real-world speed rather than a stylized
+  // pace, so a 32ms GPU fill visibly snaps in ~32ms and a slower CPU fill
+  // on the same blob visibly crawls for as long as it really took.
+  function animateFill(sctx, origImageData, depth, levels, durationMs) {
+    return new Promise((resolve) => {
+      const buckets = bucketByLevel(depth, levels);
+      const out = sctx.createImageData(origImageData.width, origImageData.height);
+      out.data.set(origImageData.data);
+
+      const duration = Math.max(durationMs, 1);
+      let start = null;
+      let prevLevel = -1;
+
+      function paintLevel(idx, color) {
+        const p = idx * 4;
+        out.data[p] = color[0];
+        out.data[p + 1] = color[1];
+        out.data[p + 2] = color[2];
+        // Preserve the original (possibly antialiased) alpha so stroke
+        // edges keep their softness instead of gaining a hard outline.
+        out.data[p + 3] = origImageData.data[p + 3];
+      }
+
+      function frame(ts) {
+        if (start === null) start = ts;
+        const elapsed = ts - start;
+        let t = Math.floor((elapsed / duration) * levels);
+        if (t > levels - 1) t = levels - 1;
+
+        // Each level settles to its final dark shade the instant it's
+        // reached -- no repainting, no brightness pulsing, just a calm
+        // one-way reveal.
+        for (let lvl = prevLevel + 1; lvl <= t; lvl++) {
+          const color = levelColor(levels > 1 ? lvl / (levels - 1) : 0);
+          for (const idx of buckets[lvl]) paintLevel(idx, color);
+        }
+        // The frontier: a single-level-wide reddish line gliding just
+        // ahead of the settled interior.
+        const frontierLvl = t + 1;
+        if (frontierLvl < levels) {
+          for (const idx of buckets[frontierLvl]) paintLevel(idx, FRONTIER_COLOR);
+        }
+        sctx.putImageData(out, 0, 0);
+        prevLevel = t;
+
+        if (elapsed < duration) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  // The scan bar's leading edge — cool where the fill's frontier is warm,
+  // so the two modes never read as the same animation.
+  const SCAN_EDGE = [96, 214, 224];
+
+  // Per-blob colour from its dense track id, spun by the golden angle so
+  // neighbouring ids never land on neighbouring hues.
+  function trackColor(id) {
+    return hslToRgb((id * 137.508) % 360, 0.55, 0.42);
+  }
+
+  // The RUNS reveal. Same one-way bucket walk as animateFill, but the
+  // buckets are SCAN ORDER, not time: ch06 processes every row at once,
+  // so this animates where the kernel looks, not when it got there. Each
+  // blob comes up in its own canonical-label colour, which is the actual
+  // output of the kernel — the labels, not a wave.
+  function animateScan(sctx, origImageData, s, durationMs) {
+    return new Promise((resolve) => {
+      const buckets = bucketByLevel(s.sweep, s.steps);
+      const out = sctx.createImageData(origImageData.width, origImageData.height);
+      out.data.set(origImageData.data);
+      const palette = new Map();
+      const colorOf = (id) => {
+        let c = palette.get(id);
+        if (!c) { c = trackColor(id); palette.set(id, c); }
+        return c;
+      };
+
+      const duration = Math.max(durationMs, 1);
+      let start = null, prevStep = -1;
+
+      function paintIdx(idx, color) {
+        const p = idx * 4;
+        out.data[p] = color[0];
+        out.data[p + 1] = color[1];
+        out.data[p + 2] = color[2];
+        out.data[p + 3] = origImageData.data[p + 3];
+      }
+
+      function frame(ts) {
+        if (start === null) start = ts;
+        const elapsed = ts - start;
+        let t = Math.floor((elapsed / duration) * s.steps);
+        if (t > s.steps - 1) t = s.steps - 1;
+        for (let k = prevStep + 1; k <= t; k++) {
+          for (const idx of buckets[k]) paintIdx(idx, colorOf(s.track[idx]));
+        }
+        const edge = t + 1;
+        if (edge < s.steps) {
+          for (const idx of buckets[edge]) paintIdx(idx, SCAN_EDGE);
+        }
+        sctx.putImageData(out, 0, 0);
+        prevStep = t;
+        if (elapsed < duration) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  // ---- SHOOT: splatter, then scan the WHOLE canvas -------------------
+  // A different interaction and a different unit of work. The brushes
+  // make one connected blob and ask "fill it from here"; a shot makes
+  // hundreds-to-thousands of separate drops and asks "how many blobs is
+  // this?" — which is the question ch06 exists to answer, seedlessly, in
+  // one launch. The canvas is NEVER cleared between shots, so drops pile
+  // up and start touching, and the blob count does something worth
+  // watching: it climbs, peaks, then COLLAPSES as separate drops fuse
+  // into continents. (Measured on a 1600x900 canvas: 10k drops -> 4,068
+  // blobs; 50k drops -> 1,670, with 48,330 merged away. The kernel time
+  // does not move — 0.7-0.9 ms across that whole range.)
+
+  const SHOT_RMIN = 1;              // backing-store px
+  const SHOT_RMAX = 5;
+  const SHOT_SPREAD = 0.13;         // std-dev as a fraction of the diagonal
+  const SHOT_SATELLITE = 0.18;      // fraction flung much wider
+  const SHOT_REPEAT_MS = 110;       // hold-to-spray cadence
+  const SHOT_REVEAL_MS = 420;       // replay length; the REAL ms is in the HUD
+
+  const hud = document.getElementById("shot-hud");
+  const hudEl = (id) => document.getElementById(id);
+  const shotCountSel = document.getElementById("shot-count");
+  const toolGroups = document.querySelectorAll("#toolbar .tool-group");
+
+  let shots = 0, dropsFired = 0;
+  let scanBusy = false, scanDirty = false, lastShotAt = 0;
+
+  function isShootTool() { return currentShape === "shoot"; }
+
+  function setTool(shape) {
+    currentShape = shape;
+    const shooting = shape === "shoot";
+    toolGroups.forEach((g) => { g.hidden = (g.dataset.for === "shoot") !== shooting; });
+    hud.hidden = !shooting;
+    canvas.style.cursor = shooting ? "crosshair" : "";
+  }
+
+  // One shot: `count` drops with a gaussian falloff around (cx, cy), plus
+  // a scattered minority flung wide so the pattern has stragglers to
+  // merge with later. Built as ONE Path2D and filled once — 20,000
+  // separate arc()+fill() calls would cost more than the GPU work does.
+  function fireShot(cx, cy, count) {
+    const diag = Math.hypot(canvas.width, canvas.height);
+    const sigma = diag * SHOT_SPREAD;
+    const path = new Path2D();
+    for (let i = 0; i < count; i++) {
+      const wide = Math.random() < SHOT_SATELLITE ? 3.2 : 1;
+      // Box-Muller, so the pattern is a real gaussian scatter
+      const u = Math.max(Math.random(), 1e-9);
+      const r = Math.sqrt(-2 * Math.log(u)) * sigma * wide;
+      const a = Math.random() * Math.PI * 2;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (x < -SHOT_RMAX || y < -SHOT_RMAX ||
+          x > canvas.width + SHOT_RMAX || y > canvas.height + SHOT_RMAX) continue;
+      const rad = SHOT_RMIN + Math.random() * (SHOT_RMAX - SHOT_RMIN);
+      path.moveTo(x + rad, y);
+      path.arc(x, y, rad, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = PAINT_COLOR;
+    ctx.fill(path);
+    shots += 1;
+    dropsFired += count;
+  }
+
+  function setHud(fields) {
+    for (const [id, v] of Object.entries(fields)) hudEl(id).textContent = v;
+  }
+
+  // Recolour the canvas in place, blob by blob, following the kernel's
+  // scan order. Unlike the brush modes this is NOT paced to the measured
+  // time: the real kernel is well under a millisecond, i.e. less than one
+  // frame, so pacing it honestly would mean showing nothing at all. It is
+  // a fixed-length slow-motion replay and the HUD prints the true number
+  // beside it.
+  // The scan bucket is derived, not received: it is a pure function of
+  // the pixel's column (see app.py's wire-format note), so the server
+  // sends `steps` and we do the rest rather than ship 2 bytes per pixel.
+  function bucketByColumn(track, width, height, steps) {
+    const buckets = Array.from({ length: Math.max(steps, 1) }, () => []);
+    for (let col = 0; col < width; col++) {
+      const b = buckets[Math.min(((col * steps) / width) | 0, steps - 1)];
+      for (let row = 0, i = col; row < height; row++, i += width) {
+        if (track[i]) b.push(i);
+      }
+    }
+    return buckets;
+  }
+
+  function revealScan(scan, imageData) {
+    return new Promise((resolve) => {
+      const buckets = bucketByColumn(scan.track, scan.width, scan.height,
+                                     scan.steps);
+      const out = ctx.createImageData(canvas.width, canvas.height);
+      out.data.set(imageData.data);
+      const palette = new Map();
+      const colorOf = (id) => {
+        let c = palette.get(id);
+        if (!c) { c = trackColor(id); palette.set(id, c); }
+        return c;
+      };
+      let start = null, prev = -1;
+      function frame(ts) {
+        if (start === null) start = ts;
+        const p = Math.min((ts - start) / SHOT_REVEAL_MS, 1);
+        const t = Math.min(Math.floor(p * scan.steps), scan.steps - 1);
+        for (let k = prev + 1; k <= t; k++) {
+          for (const idx of buckets[k]) {
+            const c = colorOf(scan.track[idx]);
+            const q = idx * 4;
+            out.data[q] = c[0]; out.data[q + 1] = c[1]; out.data[q + 2] = c[2];
+          }
+        }
+        ctx.putImageData(out, 0, 0);
+        prev = t;
+        if (p < 1) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  async function scanWholeCanvas() {
+    if (scanBusy) { scanDirty = true; return; }
+    scanBusy = true;
+    try {
+      do {
+        scanDirty = false;
+        const before = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const t0 = performance.now();
+        const scan = await requestScan(canvas, false);
+        const trip = performance.now() - t0;
+        const merged = Math.max(dropsFired - scan.nBlobs, 0);
+        const njit = scan.stats.njitMs;
+        setHud({
+          "hud-shots": shots.toLocaleString(),
+          "hud-drops": dropsFired.toLocaleString(),
+          "hud-blobs": scan.nBlobs.toLocaleString(),
+          "hud-merged": merged.toLocaleString(),
+          "hud-runs": scan.stats.runs.toLocaleString(),
+          "hud-px": scan.stats.filled.toLocaleString(),
+          "hud-kernel": `${scan.stats.kernelMs.toFixed(2)} ms` +
+                        (scan.stats.cold ? " (cold)" : ""),
+          "hud-njit": njit ? `${njit.toFixed(1)} ms` : "—",
+          "hud-trip": `${trip.toFixed(0)} ms`,
+        });
+        hudEl("hud-note").textContent = njit && scan.stats.kernelMs
+          ? `${(njit / scan.stats.kernelMs).toFixed(0)}× the CPU · reveal is a ` +
+            `${(SHOT_REVEAL_MS / scan.stats.kernelMs).toFixed(0)}× slow-motion replay`
+          : "";
+        await revealScan(scan, before);
+      } while (scanDirty);
+    } catch (err) {
+      hudEl("hud-note").textContent = String(err.message || err);
+      console.error(err);
+    } finally {
+      scanBusy = false;
+    }
+  }
+
+  function shootAt(e) {
+    const [x, y] = toCanvasXY(e);
+    fireShot(x, y, parseInt(shotCountSel.value, 10) || 1000);
+    lastShotAt = performance.now();
+    scanWholeCanvas();
+  }
+
+  function resetShooting() {
+    clearMain();
+    shots = 0; dropsFired = 0;
+    setHud({
+      "hud-shots": "0", "hud-drops": "0", "hud-blobs": "0", "hud-merged": "0",
+      "hud-runs": "0", "hud-px": "0", "hud-kernel": "—", "hud-njit": "—",
+      "hud-trip": "—",
+    });
+    hudEl("hud-note").textContent = "";
+  }
+
+  document.getElementById("shot-clear").addEventListener("click", resetShooting);
+
+  // ---- falling shapes ------------------------------------------------
+  function evictOldestIfNeeded() {
+    while (liveShapes.length > MAX_LIVE_SHAPES) {
+      liveShapes.shift().remove();
+    }
+  }
+
+  // The painted pixel count and the amplified (real GPU/CPU-scale) pixel
+  // count are shown side by side: the shape you see stays exactly the
+  // size you painted, but the numbers -- and the pacing below -- are
+  // honest at the scale where CPU vs GPU actually differs.
+  function showStatsLabel(wrap, stats, levels) {
+    const label = document.createElement("div");
+    label.className = "shape-stats";
+    // RUNS reports what ch06 actually counts — blobs and runs. There is
+    // no level count to show, because there are no levels.
+    label.textContent = stats.mode === "runs"
+      ? `RUNS · ${stats.nBlobs.toLocaleString()} blob` +
+        `${stats.nBlobs === 1 ? "" : "s"} · ` +
+        `${stats.filled.toLocaleString()} px → ` +
+        `${stats.runs.toLocaleString()} runs · ` +
+        `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
+        `${stats.kernelMs.toFixed(2)} ms${stats.cold ? " (cold clock)" : ""}`
+      : `${stats.mode.toUpperCase()} · ${stats.filled.toLocaleString()} px → ` +
+        `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
+        `${levels} levels · ${stats.kernelMs.toFixed(2)} ms`;
+    wrap.appendChild(label);
+    return label;
+  }
+
+  // The stats label and the blob fade independently: the label just
+  // disappears outright (no transition) after STATS_LIFETIME_MS, while
+  // only the blob (the inner canvas) gets the CSS fade.
+  function scheduleStatsRemoval(label) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        label.remove();
+        resolve();
+      }, STATS_LIFETIME_MS);
+    });
+  }
+
+  function startFadeOut(inner) {
+    return new Promise((resolve) => {
+      inner.addEventListener("animationend", () => resolve(), { once: true });
+      inner.classList.add("fading");
+    });
+  }
+
+  async function spawnShape(shapeCanvas, screenX, screenY, screenW, screenH, mode, seedX, seedY) {
+    const wrap = document.createElement("div");
+    wrap.className = "shape-wrap";
+    wrap.style.left = screenX + "px";
+    wrap.style.top = screenY + "px";
+    wrap.style.width = screenW + "px";
+    wrap.style.height = screenH + "px";
+
+    const inner = document.createElement("div");
+    inner.className = "shape-inner";
+    inner.appendChild(shapeCanvas);
+
+    wrap.appendChild(inner);
+    stage.appendChild(wrap);
+    liveShapes.push(wrap);
+    evictOldestIfNeeded();
+
+    const sctx = shapeCanvas.getContext("2d");
+    const origImageData = sctx.getImageData(0, 0, shapeCanvas.width, shapeCanvas.height);
+
+    let labelDone = Promise.resolve();
+    try {
+      if (mode === "runs") {
+        const scan = await requestScan(shapeCanvas);
+        const label = showStatsLabel(wrap, scan.stats, scan.steps);
+        labelDone = scheduleStatsRemoval(label);
+        if (scan.nBlobs > 0) {
+          await animateScan(sctx, origImageData, scan, scan.stats.kernelMs);
+        }
+      } else {
+        const { levels, depth, stats } =
+          await requestFill(shapeCanvas, mode, seedX, seedY);
+        // Shown the instant the fill computation's result is known, right
+        // above the blob, so the timing is legible exactly when it matters.
+        // Its own lifetime (STATS_LIFETIME_MS) runs independently of the
+        // blob's fade below.
+        const label = showStatsLabel(wrap, stats, levels);
+        labelDone = scheduleStatsRemoval(label);
+        if (levels > 0) {
+          await animateFill(sctx, origImageData, depth, levels, stats.kernelMs);
+        }
+      }
+    } catch (err) {
+      // Network hiccup or server error: let the shape fade as painted
+      // rather than stranding it on screen.
+      console.error(err);
+    }
+
+    // Shape stays fully still on screen throughout painting AND the fill
+    // animation above; only now does the blob start fading. wrap itself
+    // stays in the DOM until both the blob's fade and the label's own
+    // lifetime are done, so the label keeps its anchor even after the
+    // blob underneath it has faded away.
+    await Promise.all([startFadeOut(inner), labelDone]);
+    wrap.remove();
+    liveShapes = liveShapes.filter((s) => s !== wrap);
+  }
+
+  // Runs last, when every control the tool touches is initialised.
+  setTool(currentShape);
+})();

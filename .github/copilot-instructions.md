@@ -1,14 +1,19 @@
 
 # Terminal Python Copilot Instructions
-to run scripts in the terminal, use the following command:
+The project is a real installable package (`src/flood_fill_cuda/`) run via
+`uv`, not by script path. To run a chapter's module:
 ```bash
-poetry run python <path/from/pwd/script_file.py>
+uv run python -m flood_fill_cuda.chapters.<chapter_id>.<module_path>
 ```
-where `<script_file>` is the name of the Python module you want to run.
+e.g. `uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.benchmark`.
 
-No need to use `python3` or `python`, just use `poetry run python`.
+Bare `uv run pytest` from the repo root collects and runs every chapter's
+correctness suite. To run just one file:
+```bash
+uv run pytest src/flood_fill_cuda/chapters/<chapter_id>/test_correctness.py -v
+```
 
-No need to use `poetry run` if you are already in a poetry shell.
+No need to use `python3` or `python`, just use `uv run python`.
 
 No need to check "cd to the directory" in the terminal, as the command will automatically run in the correct directory.
 

@@ -6,6 +6,7 @@
 .cache/
 __pycache__/
 .cursor/
+.claude/
 # Poetry stuff
 poetry.lock
 
@@ -19,3 +20,7 @@ images/
 profiling/
 PyCuda/
 
+# runtime game state (DEEP FIELD leaderboard) — not a build artifact
+src/flood_fill_cuda/results/service/
+
+__pycache__/

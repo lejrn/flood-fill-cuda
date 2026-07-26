@@ -1,0 +1,1163 @@
+{
+  "device": "NVIDIA GeForce RTX 4060 Laptop GPU\u0000",
+  "sm_count": 24,
+  "tpb": 256,
+  "measured_peak_gb_s": 186.00966768195798,
+  "strides": [
+    0,
+    1,
+    4,
+    16,
+    64,
+    256
+  ],
+  "coop_max": {
+    "v1": 48,
+    "lat": 24,
+    "ccl": 48
+  },
+  "experiment": "seeding-density sweep: corner-rule v1 vs lattice-seeded v2 (corner + every red pixel at x%S==0 and y%S==0, with a parent-compression pass before the flatten) vs ccl_fill. Canonical labels/seeds are stride-invariant; only the level clock, union volume and phase profile move.",
+  "scenes": [
+    {
+      "scene": "two_sq_2800",
+      "note": "2 x 7.8M px equal squares (ch04-comparable)",
+      "width": 6000,
+      "height": 3200,
+      "configs": {
+        "v1": {
+          "ms": 55.70886001805775,
+          "ms_min": 49.34137599775568,
+          "ms_max": 76.27590699121356,
+          "ms_stdev": 10.679605898703368,
+          "phase_ms": {
+            "init": 0.292864,
+            "scan": 1.83808,
+            "fill": 53.142528,
+            "flatten": 1.555456
+          },
+          "union_thread_ms": 0.0,
+          "levels": 2800,
+          "candidates": 2,
+          "unions": 0,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "S0": {
+          "ms": 57.36184099805541,
+          "ms_min": 53.30647999653593,
+          "ms_max": 58.78892500186339,
+          "ms_stdev": 2.1842400040564156,
+          "phase_ms": {
+            "init": 0.246784,
+            "scan": 3.550208,
+            "fill": 52.027392,
+            "compress": 1.048576,
+            "flatten": 2.29376
+          },
+          "union_thread_ms": 0.0,
+          "levels": 2800,
+          "candidates": 2,
+          "unions": 0,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "S1": {
+          "ms": 90.26485000504181,
+          "ms_min": 89.19150501606055,
+          "ms_max": 108.77171999891289,
+          "ms_stdev": 8.27209448965772,
+          "phase_ms": {
+            "init": 0.251904,
+            "scan": 3.116032,
+            "fill": 85.553152,
+            "compress": 3.411968,
+            "flatten": 3.05664
+          },
+          "union_thread_ms": 493118.99681292515,
+          "levels": 1,
+          "candidates": 15680000,
+          "unions": 15679998,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "S4": {
+          "ms": 67.8470290149562,
+          "ms_min": 64.96325699845329,
+          "ms_max": 75.67176898010075,
+          "ms_stdev": 4.219866744261568,
+          "phase_ms": {
+            "init": 0.283648,
+            "scan": 4.072448,
+            "fill": 61.37856,
+            "compress": 1.353728,
+            "flatten": 2.620416
+          },
+          "union_thread_ms": 141010.68694285714,
+          "levels": 4,
+          "candidates": 980000,
+          "unions": 979998,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "S16": {
+          "ms": 49.318206001771614,
+          "ms_min": 44.055923994164914,
+          "ms_max": 51.23391200322658,
+          "ms_stdev": 3.038445984016386,
+          "phase_ms": {
+            "init": 0.28672,
+            "scan": 3.92704,
+            "fill": 42.730496,
+            "compress": 1.191936,
+            "flatten": 2.536448
+          },
+          "union_thread_ms": 40629.6255585034,
+          "levels": 16,
+          "candidates": 61252,
+          "unions": 61250,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "S64": {
+          "ms": 67.08627799525857,
+          "ms_min": 63.91268299194053,
+          "ms_max": 76.29222099785693,
+          "ms_stdev": 4.962202048724957,
+          "phase_ms": {
+            "init": 0.273408,
+            "scan": 4.24448,
+            "fill": 61.37344,
+            "compress": 1.145856,
+            "flatten": 2.260992
+          },
+          "union_thread_ms": 15083.240691156461,
+          "levels": 57,
+          "candidates": 3786,
+          "unions": 3784,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "S256": {
+          "ms": 64.70340897794813,
+          "ms_min": 57.83872300526127,
+          "ms_max": 72.36370601458475,
+          "ms_stdev": 6.225568506271678,
+          "phase_ms": {
+            "init": 0.27648,
+            "scan": 3.88608,
+            "fill": 57.264128,
+            "compress": 1.122304,
+            "flatten": 2.735104
+          },
+          "union_thread_ms": 1622.9449442176872,
+          "levels": 184,
+          "candidates": 244,
+          "unions": 242,
+          "filled": 15680000,
+          "n_blobs": 2
+        },
+        "ccl": {
+          "ms": 117.37939098384231,
+          "ms_min": 109.30322398780845,
+          "ms_max": 125.90967901633121,
+          "ms_stdev": 6.169969720660616,
+          "phase_ms": {
+            "init": 0.301056,
+            "union_merge": 70.096896,
+            "flatten_seed": 12.905472,
+            "fill": 35.510272
+          },
+          "union_thread_ms": 0.0,
+          "levels": 2800,
+          "candidates": 2,
+          "unions": 15679998,
+          "filled": 15680000,
+          "n_blobs": 2
+        }
+      },
+      "best_cfg": "S16",
+      "best_ms": 49.318206001771614,
+      "best_vs_v1": 1.129580017895553,
+      "best_vs_ccl": 2.380041783750727,
+      "crosscheck": "OK"
+    },
+    {
+      "scene": "two_disks_r1400",
+      "note": "2 x 6.2M px equal disks (ch04-comparable)",
+      "width": 3000,
+      "height": 6000,
+      "configs": {
+        "v1": {
+          "ms": 89.99840298201889,
+          "ms_min": 84.46622098563239,
+          "ms_max": 97.63418897637166,
+          "ms_stdev": 5.764869467474737,
+          "phase_ms": {
+            "init": 0.244736,
+            "scan": 1.472512,
+            "fill": 88.305664,
+            "flatten": 1.769472
+          },
+          "union_thread_ms": 59920.3244,
+          "levels": 2420,
+          "candidates": 500,
+          "unions": 498,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "S0": {
+          "ms": 107.8009209886659,
+          "ms_min": 98.89625202049501,
+          "ms_max": 127.17717498890124,
+          "ms_stdev": 11.48433987450219,
+          "phase_ms": {
+            "init": 0.228352,
+            "scan": 2.914304,
+            "fill": 103.171072,
+            "compress": 0.985088,
+            "flatten": 2.002944
+          },
+          "union_thread_ms": 52908.10187346939,
+          "levels": 2420,
+          "candidates": 500,
+          "unions": 498,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "S1": {
+          "ms": 69.73564001964405,
+          "ms_min": 68.14076899900101,
+          "ms_max": 71.88428900553845,
+          "ms_stdev": 1.6318573358987072,
+          "phase_ms": {
+            "init": 0.244736,
+            "scan": 2.722816,
+            "fill": 62.51008,
+            "compress": 2.6368,
+            "flatten": 2.622464
+          },
+          "union_thread_ms": 360886.1028537415,
+          "levels": 1,
+          "candidates": 12314954,
+          "unions": 12314952,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "S4": {
+          "ms": 54.96709799626842,
+          "ms_min": 53.786922013387084,
+          "ms_max": 58.50437699700706,
+          "ms_stdev": 2.0775817286657823,
+          "phase_ms": {
+            "init": 0.247808,
+            "scan": 3.551232,
+            "fill": 48.492544,
+            "compress": 1.222656,
+            "flatten": 2.29376
+          },
+          "union_thread_ms": 109351.12805510203,
+          "levels": 5,
+          "candidates": 770147,
+          "unions": 770145,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "S16": {
+          "ms": 40.692312992177904,
+          "ms_min": 38.263184018433094,
+          "ms_max": 42.66003202064894,
+          "ms_stdev": 1.7753210377803534,
+          "phase_ms": {
+            "init": 0.24064,
+            "scan": 3.182592,
+            "fill": 34.328576,
+            "compress": 1.02912,
+            "flatten": 2.113536
+          },
+          "union_thread_ms": 34245.37198843537,
+          "levels": 16,
+          "candidates": 48603,
+          "unions": 48601,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "S64": {
+          "ms": 53.31771698547527,
+          "ms_min": 53.029153001261875,
+          "ms_max": 56.576363975182176,
+          "ms_stdev": 1.4934575964773331,
+          "phase_ms": {
+            "init": 0.222208,
+            "scan": 3.074048,
+            "fill": 47.968256,
+            "compress": 1.072128,
+            "flatten": 2.19648
+          },
+          "union_thread_ms": 11536.729785034015,
+          "levels": 64,
+          "candidates": 3512,
+          "unions": 3510,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "S256": {
+          "ms": 49.95349101955071,
+          "ms_min": 48.39573099161498,
+          "ms_max": 51.99437102419324,
+          "ms_stdev": 1.7372031740464142,
+          "phase_ms": {
+            "init": 0.228352,
+            "scan": 3.376128,
+            "fill": 44.844032,
+            "compress": 1.052672,
+            "flatten": 1.932288
+          },
+          "union_thread_ms": 3220.3828653061228,
+          "levels": 244,
+          "candidates": 690,
+          "unions": 688,
+          "filled": 12314954,
+          "n_blobs": 2
+        },
+        "ccl": {
+          "ms": 63.19806998362765,
+          "ms_min": 59.34773801709525,
+          "ms_max": 65.54530799621716,
+          "ms_stdev": 2.3213783375775106,
+          "phase_ms": {
+            "init": 0.231424,
+            "union_merge": 30.613504,
+            "flatten_seed": 4.115456,
+            "fill": 29.786112
+          },
+          "union_thread_ms": 0.0,
+          "levels": 2801,
+          "candidates": 2,
+          "unions": 12314952,
+          "filled": 12314954,
+          "n_blobs": 2
+        }
+      },
+      "best_cfg": "S16",
+      "best_ms": 40.692312992177904,
+      "best_vs_v1": 2.2116806925995793,
+      "best_vs_ccl": 1.5530714608377243,
+      "crosscheck": "OK"
+    },
+    {
+      "scene": "asym_4000_800",
+      "note": "16M + 0.6M px (ch04-comparable)",
+      "width": 5200,
+      "height": 4400,
+      "configs": {
+        "v1": {
+          "ms": 61.15376198431477,
+          "ms_min": 57.671081012813374,
+          "ms_max": 62.92811900493689,
+          "ms_stdev": 2.3424150703501723,
+          "phase_ms": {
+            "init": 0.360448,
+            "scan": 2.015232,
+            "fill": 58.293248,
+            "flatten": 1.593344
+          },
+          "union_thread_ms": 0.0,
+          "levels": 4000,
+          "candidates": 2,
+          "unions": 0,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "S0": {
+          "ms": 63.00659102271311,
+          "ms_min": 60.017080017132685,
+          "ms_max": 66.61175499903038,
+          "ms_stdev": 2.595626786947668,
+          "phase_ms": {
+            "init": 0.323584,
+            "scan": 4.456448,
+            "fill": 56.577024,
+            "compress": 1.248256,
+            "flatten": 2.256896
+          },
+          "union_thread_ms": 0.0,
+          "levels": 4000,
+          "candidates": 2,
+          "unions": 0,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "S1": {
+          "ms": 97.44377201423049,
+          "ms_min": 92.19643799588084,
+          "ms_max": 99.1538510133978,
+          "ms_stdev": 2.7728790858156334,
+          "phase_ms": {
+            "init": 0.339968,
+            "scan": 3.625984,
+            "fill": 87.379968,
+            "compress": 3.66592,
+            "flatten": 3.43552
+          },
+          "union_thread_ms": 517987.20993401355,
+          "levels": 1,
+          "candidates": 16640000,
+          "unions": 16639998,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "S4": {
+          "ms": 72.4700010032393,
+          "ms_min": 68.86921799741685,
+          "ms_max": 76.16770401364192,
+          "ms_stdev": 3.0027526211107647,
+          "phase_ms": {
+            "init": 0.310272,
+            "scan": 4.415488,
+            "fill": 64.826368,
+            "compress": 1.514496,
+            "flatten": 2.878464
+          },
+          "union_thread_ms": 150689.20660204082,
+          "levels": 4,
+          "candidates": 1040000,
+          "unions": 1039998,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "S16": {
+          "ms": 54.12765700020827,
+          "ms_min": 47.79412900097668,
+          "ms_max": 57.70549699082039,
+          "ms_stdev": 3.795147298509711,
+          "phase_ms": {
+            "init": 0.318464,
+            "scan": 4.52096,
+            "fill": 44.926976,
+            "compress": 1.539072,
+            "flatten": 3.067904
+          },
+          "union_thread_ms": 41468.33433265307,
+          "levels": 16,
+          "candidates": 65002,
+          "unions": 65000,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "S64": {
+          "ms": 71.1884800111875,
+          "ms_min": 68.05206098943017,
+          "ms_max": 79.49974399525672,
+          "ms_stdev": 4.379729090818768,
+          "phase_ms": {
+            "init": 0.313344,
+            "scan": 4.253696,
+            "fill": 63.630336,
+            "compress": 1.390592,
+            "flatten": 2.828288
+          },
+          "union_thread_ms": 16198.924959863945,
+          "levels": 57,
+          "candidates": 4064,
+          "unions": 4062,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "S256": {
+          "ms": 63.00520000513643,
+          "ms_min": 61.60397801431827,
+          "ms_max": 66.11547101056203,
+          "ms_stdev": 2.1652017056067123,
+          "phase_ms": {
+            "init": 0.313344,
+            "scan": 4.5824,
+            "fill": 56.81664,
+            "compress": 1.338368,
+            "flatten": 2.7392
+          },
+          "union_thread_ms": 1798.4947027210885,
+          "levels": 249,
+          "candidates": 267,
+          "unions": 265,
+          "filled": 16640000,
+          "n_blobs": 2
+        },
+        "ccl": {
+          "ms": 91.39672201126814,
+          "ms_min": 85.88611200684682,
+          "ms_max": 101.08049199334346,
+          "ms_stdev": 6.48527400617542,
+          "phase_ms": {
+            "init": 0.314368,
+            "union_merge": 42.310656,
+            "flatten_seed": 7.146496,
+            "fill": 43.326464
+          },
+          "union_thread_ms": 0.0,
+          "levels": 4000,
+          "candidates": 2,
+          "unions": 16639998,
+          "filled": 16640000,
+          "n_blobs": 2
+        }
+      },
+      "best_cfg": "S16",
+      "best_ms": 54.12765700020827,
+      "best_vs_v1": 1.129806191021338,
+      "best_vs_ccl": 1.688540148909761,
+      "crosscheck": "OK"
+    },
+    {
+      "scene": "blob_grid_100",
+      "note": "100 x 130k px blobs \u2014 the N ch04's entry format could not hold",
+      "width": 4000,
+      "height": 4000,
+      "configs": {
+        "v1": {
+          "ms": 34.952479996718466,
+          "ms_min": 33.52802901645191,
+          "ms_max": 35.78121401369572,
+          "ms_stdev": 0.8369424272082977,
+          "phase_ms": {
+            "init": 0.19968,
+            "scan": 1.54624,
+            "fill": 31.827968,
+            "flatten": 1.231872
+          },
+          "union_thread_ms": 0.0,
+          "levels": 360,
+          "candidates": 100,
+          "unions": 0,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "S0": {
+          "ms": 36.72126997844316,
+          "ms_min": 33.17447201698087,
+          "ms_max": 37.40735200699419,
+          "ms_stdev": 1.7053524336545456,
+          "phase_ms": {
+            "init": 0.19456,
+            "scan": 3.0464,
+            "fill": 30.396416,
+            "compress": 0.886784,
+            "flatten": 1.667072
+          },
+          "union_thread_ms": 0.0,
+          "levels": 360,
+          "candidates": 100,
+          "unions": 0,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "S1": {
+          "ms": 77.23478900152259,
+          "ms_min": 72.27920601144433,
+          "ms_max": 77.73279401590116,
+          "ms_stdev": 2.284905716163929,
+          "phase_ms": {
+            "init": 0.191488,
+            "scan": 2.676736,
+            "fill": 69.36576,
+            "compress": 2.788352,
+            "flatten": 2.473984
+          },
+          "union_thread_ms": 419257.1331727891,
+          "levels": 1,
+          "candidates": 12960000,
+          "unions": 12959900,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "S4": {
+          "ms": 56.20983600965701,
+          "ms_min": 51.856973994290456,
+          "ms_max": 57.97276899102144,
+          "ms_stdev": 2.382529531353044,
+          "phase_ms": {
+            "init": 0.190464,
+            "scan": 3.45088,
+            "fill": 49.18784,
+            "compress": 1.071104,
+            "flatten": 2.136064
+          },
+          "union_thread_ms": 114806.16455986394,
+          "levels": 4,
+          "candidates": 810000,
+          "unions": 809900,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "S16": {
+          "ms": 40.04183001234196,
+          "ms_min": 38.192084000911564,
+          "ms_max": 42.89270599838346,
+          "ms_stdev": 1.8953479022444166,
+          "phase_ms": {
+            "init": 0.191488,
+            "scan": 3.313664,
+            "fill": 33.640448,
+            "compress": 0.99328,
+            "flatten": 2.332672
+          },
+          "union_thread_ms": 32406.249419727894,
+          "levels": 13,
+          "candidates": 48500,
+          "unions": 48400,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "S64": {
+          "ms": 50.17682700417936,
+          "ms_min": 48.042254988104105,
+          "ms_max": 55.41257199365646,
+          "ms_stdev": 2.945328224991496,
+          "phase_ms": {
+            "init": 0.200704,
+            "scan": 3.301376,
+            "fill": 44.900352,
+            "compress": 0.964608,
+            "flatten": 2.059264
+          },
+          "union_thread_ms": 6590.9322993197275,
+          "levels": 61,
+          "candidates": 3125,
+          "unions": 3025,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "S256": {
+          "ms": 40.66470600082539,
+          "ms_min": 37.678519991459325,
+          "ms_max": 44.45611301343888,
+          "ms_stdev": 2.433113488096345,
+          "phase_ms": {
+            "init": 0.191488,
+            "scan": 3.294208,
+            "fill": 33.998848,
+            "compress": 0.948224,
+            "flatten": 1.84832
+          },
+          "union_thread_ms": 286.67657278911565,
+          "levels": 253,
+          "candidates": 269,
+          "unions": 169,
+          "filled": 12960000,
+          "n_blobs": 100
+        },
+        "ccl": {
+          "ms": 59.05331298708916,
+          "ms_min": 52.92278400156647,
+          "ms_max": 62.553222000133246,
+          "ms_stdev": 3.9662453476386905,
+          "phase_ms": {
+            "init": 0.196608,
+            "union_merge": 35.704832,
+            "flatten_seed": 3.985408,
+            "fill": 20.315136
+          },
+          "union_thread_ms": 0.0,
+          "levels": 360,
+          "candidates": 100,
+          "unions": 12959900,
+          "filled": 12960000,
+          "n_blobs": 100
+        }
+      },
+      "best_cfg": "v1",
+      "best_ms": 34.952479996718466,
+      "best_vs_v1": 1.0,
+      "best_vs_ccl": 1.6895314150135674,
+      "crosscheck": "OK"
+    },
+    {
+      "scene": "random_4000",
+      "note": "sub-percolation noise: ~hundreds of thousands of tiny blobs",
+      "width": 4000,
+      "height": 4000,
+      "configs": {
+        "v1": {
+          "ms": 24.827916990034282,
+          "ms_min": 22.456934995716438,
+          "ms_max": 26.01890900405124,
+          "ms_stdev": 1.4086847790639678,
+          "phase_ms": {
+            "init": 0.228352,
+            "scan": 2.332672,
+            "fill": 20.08064,
+            "flatten": 2.096128
+          },
+          "union_thread_ms": 12132.564882993198,
+          "levels": 23,
+          "candidates": 1154024,
+          "unions": 398447,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "S0": {
+          "ms": 33.30647898837924,
+          "ms_min": 30.569316004402936,
+          "ms_max": 35.45259198290296,
+          "ms_stdev": 1.8485531011593983,
+          "phase_ms": {
+            "init": 0.21504,
+            "scan": 4.482048,
+            "fill": 25.141248,
+            "compress": 1.314816,
+            "flatten": 3.024896
+          },
+          "union_thread_ms": 7570.337075510204,
+          "levels": 23,
+          "candidates": 1154024,
+          "unions": 398447,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "S1": {
+          "ms": 33.8086890114937,
+          "ms_min": 31.283290998544544,
+          "ms_max": 35.81127797951922,
+          "ms_stdev": 1.7413535555459319,
+          "phase_ms": {
+            "init": 0.216064,
+            "scan": 3.253248,
+            "fill": 25.519104,
+            "compress": 2.243584,
+            "flatten": 3.403776
+          },
+          "union_thread_ms": 42445.7546340136,
+          "levels": 1,
+          "candidates": 4802736,
+          "unions": 4047159,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "S4": {
+          "ms": 37.92588197393343,
+          "ms_min": 35.249212000053376,
+          "ms_max": 38.844555005198345,
+          "ms_stdev": 1.3714133574467409,
+          "phase_ms": {
+            "init": 0.218112,
+            "scan": 4.770816,
+            "fill": 28.827648,
+            "compress": 1.499136,
+            "flatten": 3.44064
+          },
+          "union_thread_ms": 14473.8261,
+          "levels": 19,
+          "candidates": 1381695,
+          "unions": 626118,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "S16": {
+          "ms": 36.49847599444911,
+          "ms_min": 30.69989799405448,
+          "ms_max": 40.16851101187058,
+          "ms_stdev": 3.5324656238270356,
+          "phase_ms": {
+            "init": 0.214016,
+            "scan": 5.479424,
+            "fill": 26.663936,
+            "compress": 1.378304,
+            "flatten": 3.15904
+          },
+          "union_thread_ms": 8161.634378911564,
+          "levels": 23,
+          "candidates": 1168215,
+          "unions": 412638,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "S64": {
+          "ms": 34.58598698489368,
+          "ms_min": 33.26985501917079,
+          "ms_max": 37.84585700486787,
+          "ms_stdev": 1.9153288226881455,
+          "phase_ms": {
+            "init": 0.216064,
+            "scan": 4.424704,
+            "fill": 26.729472,
+            "compress": 1.32096,
+            "flatten": 3.407872
+          },
+          "union_thread_ms": 8193.49676122449,
+          "levels": 23,
+          "candidates": 1154906,
+          "unions": 399329,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "S256": {
+          "ms": 33.191592985531315,
+          "ms_min": 30.556515004718676,
+          "ms_max": 37.51287597697228,
+          "ms_stdev": 2.563589475411643,
+          "phase_ms": {
+            "init": 0.214016,
+            "scan": 4.819968,
+            "fill": 23.846912,
+            "compress": 1.369088,
+            "flatten": 3.154944
+          },
+          "union_thread_ms": 7661.89053537415,
+          "levels": 23,
+          "candidates": 1154064,
+          "unions": 398487,
+          "filled": 4802736,
+          "n_blobs": 755577
+        },
+        "ccl": {
+          "ms": 27.571091981371865,
+          "ms_min": 25.952625001082197,
+          "ms_max": 29.256812995299697,
+          "ms_stdev": 1.362415089501829,
+          "phase_ms": {
+            "init": 0.217088,
+            "union_merge": 7.845888,
+            "flatten_seed": 2.512896,
+            "fill": 17.714176
+          },
+          "union_thread_ms": 0.0,
+          "levels": 85,
+          "candidates": 755577,
+          "unions": 4047159,
+          "filled": 4802736,
+          "n_blobs": 755577
+        }
+      },
+      "best_cfg": "v1",
+      "best_ms": 24.827916990034282,
+      "best_vs_v1": 1.0,
+      "best_vs_ccl": 1.110487520658244,
+      "crosscheck": "OK"
+    },
+    {
+      "scene": "comb_2000",
+      "note": "ONE blob, 2000 candidates \u2014 the union-merge stress test",
+      "width": 3000,
+      "height": 4001,
+      "configs": {
+        "v1": {
+          "ms": 67.91854399489239,
+          "ms_min": 45.03997598658316,
+          "ms_max": 96.88240999821573,
+          "ms_stdev": 20.95414168426908,
+          "phase_ms": {
+            "init": 0.132096,
+            "scan": 1.056768,
+            "fill": 23.942144,
+            "flatten": 47.566848
+          },
+          "union_thread_ms": 19118.78382517007,
+          "levels": 2408,
+          "candidates": 2000,
+          "unions": 1999,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "S0": {
+          "ms": 25.906014983775094,
+          "ms_min": 23.312570003326982,
+          "ms_max": 30.842011998174712,
+          "ms_stdev": 3.2236594895433788,
+          "phase_ms": {
+            "init": 0.125952,
+            "scan": 2.080768,
+            "fill": 22.834176,
+            "compress": 0.700416,
+            "flatten": 1.360896
+          },
+          "union_thread_ms": 18156.95653945578,
+          "levels": 2408,
+          "candidates": 2000,
+          "unions": 1999,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "S1": {
+          "ms": 26.287166983820498,
+          "ms_min": 23.709141998551786,
+          "ms_max": 27.788282022811472,
+          "ms_stdev": 1.6510947744173707,
+          "phase_ms": {
+            "init": 0.130048,
+            "scan": 2.031616,
+            "fill": 21.388288,
+            "compress": 1.114112,
+            "flatten": 1.845248
+          },
+          "union_thread_ms": 26918.42218095238,
+          "levels": 1,
+          "candidates": 4831992,
+          "unions": 4831991,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "S4": {
+          "ms": 12.996522011235356,
+          "ms_min": 12.341913999989629,
+          "ms_max": 14.057701017009094,
+          "ms_stdev": 0.7525833074385774,
+          "phase_ms": {
+            "init": 0.140288,
+            "scan": 2.296832,
+            "fill": 8.167424,
+            "compress": 0.717824,
+            "flatten": 1.437696
+          },
+          "union_thread_ms": 339.5642163265306,
+          "levels": 1202,
+          "candidates": 3998,
+          "unions": 3997,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "S16": {
+          "ms": 27.757709991419688,
+          "ms_min": 22.68188598100096,
+          "ms_max": 30.087067978456616,
+          "ms_stdev": 2.976691818066397,
+          "phase_ms": {
+            "init": 0.140288,
+            "scan": 2.265088,
+            "fill": 23.22432,
+            "compress": 0.705536,
+            "flatten": 1.434624
+          },
+          "union_thread_ms": 20083.37704217687,
+          "levels": 2408,
+          "candidates": 2000,
+          "unions": 1999,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "S64": {
+          "ms": 24.440129986032844,
+          "ms_min": 23.385870008496568,
+          "ms_max": 28.816216014092788,
+          "ms_stdev": 2.140430542078865,
+          "phase_ms": {
+            "init": 0.140288,
+            "scan": 2.255872,
+            "fill": 20.03968,
+            "compress": 0.709632,
+            "flatten": 1.431552
+          },
+          "union_thread_ms": 14230.289134693878,
+          "levels": 2408,
+          "candidates": 2000,
+          "unions": 1999,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "S256": {
+          "ms": 26.567338005406782,
+          "ms_min": 23.211845982586965,
+          "ms_max": 28.566542983753607,
+          "ms_stdev": 1.9951491237424677,
+          "phase_ms": {
+            "init": 0.124928,
+            "scan": 2.223104,
+            "fill": 22.801408,
+            "compress": 0.695296,
+            "flatten": 1.352704
+          },
+          "union_thread_ms": 18341.613576190477,
+          "levels": 2408,
+          "candidates": 2000,
+          "unions": 1999,
+          "filled": 4831992,
+          "n_blobs": 1
+        },
+        "ccl": {
+          "ms": 85.08307300508022,
+          "ms_min": 76.80050900671631,
+          "ms_max": 89.6324239729438,
+          "ms_stdev": 5.713960969844889,
+          "phase_ms": {
+            "init": 0.132096,
+            "union_merge": 2.628608,
+            "flatten_seed": 2.476032,
+            "fill": 83.204096
+          },
+          "union_thread_ms": 0.0,
+          "levels": 8797,
+          "candidates": 1,
+          "unions": 4831991,
+          "filled": 4831992,
+          "n_blobs": 1
+        }
+      },
+      "best_cfg": "S4",
+      "best_ms": 12.996522011235356,
+      "best_vs_v1": 5.225901509355928,
+      "best_vs_ccl": 6.546603232120624,
+      "crosscheck": "OK"
+    },
+    {
+      "scene": "serpentine_256",
+      "note": "geodesic worst case: ~33k levels of barrier",
+      "width": 256,
+      "height": 256,
+      "configs": {
+        "v1": {
+          "ms": 1.8831180059351027,
+          "ms_min": 1.8425479938741773,
+          "ms_max": 1.8983689951710403,
+          "ms_stdev": 0.02532679626971677,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.009216,
+            "fill": 1.73568,
+            "flatten": 0.009216
+          },
+          "union_thread_ms": 1.5054380952380952,
+          "levels": 257,
+          "candidates": 65,
+          "unions": 64,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "S0": {
+          "ms": 1.722549000987783,
+          "ms_min": 1.6997969942167401,
+          "ms_max": 1.751604984747246,
+          "ms_stdev": 0.020930213288100172,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.01536,
+            "fill": 1.593344,
+            "compress": 0.006144,
+            "flatten": 0.008192
+          },
+          "union_thread_ms": 1.7237380952380952,
+          "levels": 257,
+          "candidates": 65,
+          "unions": 64,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "S1": {
+          "ms": 0.5309100088197738,
+          "ms_min": 0.5173730023670942,
+          "ms_max": 0.7144550036173314,
+          "ms_stdev": 0.08224865140166819,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.011264,
+            "fill": 0.249856,
+            "compress": 0.063488,
+            "flatten": 0.008192
+          },
+          "union_thread_ms": 418.90008843537413,
+          "levels": 1,
+          "candidates": 32896,
+          "unions": 32895,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "S4": {
+          "ms": 1.1072370107285678,
+          "ms_min": 1.0436149896122515,
+          "ms_max": 1.637233013752848,
+          "ms_stdev": 0.24441979702470668,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.018432,
+            "fill": 0.887808,
+            "compress": 0.011264,
+            "flatten": 0.008192
+          },
+          "union_thread_ms": 24.892778231292517,
+          "levels": 130,
+          "candidates": 4160,
+          "unions": 4159,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "S16": {
+          "ms": 1.7269369855057448,
+          "ms_min": 1.7212829843629152,
+          "ms_max": 1.7538859974592924,
+          "ms_stdev": 0.013461609481341508,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.016384,
+            "fill": 1.616896,
+            "compress": 0.008192,
+            "flatten": 0.008192
+          },
+          "union_thread_ms": 2.5498462585034014,
+          "levels": 257,
+          "candidates": 320,
+          "unions": 319,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "S64": {
+          "ms": 1.7791179998312145,
+          "ms_min": 1.7376269970554858,
+          "ms_max": 2.1296030026860535,
+          "ms_stdev": 0.15979703433927178,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.016384,
+            "fill": 1.68448,
+            "compress": 0.008192,
+            "flatten": 0.008192
+          },
+          "union_thread_ms": 2.7564904761904763,
+          "levels": 257,
+          "candidates": 80,
+          "unions": 79,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "S256": {
+          "ms": 1.736510981572792,
+          "ms_min": 1.7015199991874397,
+          "ms_max": 1.8372999911662191,
+          "ms_stdev": 0.055435711786544405,
+          "phase_ms": {
+            "init": 0.002048,
+            "scan": 0.016384,
+            "fill": 1.60768,
+            "compress": 0.008192,
+            "flatten": 0.008192
+          },
+          "union_thread_ms": 3.3965503401360544,
+          "levels": 257,
+          "candidates": 65,
+          "unions": 64,
+          "filled": 32896,
+          "n_blobs": 1
+        },
+        "ccl": {
+          "ms": 174.14359701797366,
+          "ms_min": 172.0194349763915,
+          "ms_max": 176.4005949953571,
+          "ms_stdev": 1.5513048475814284,
+          "phase_ms": {
+            "init": 0.002048,
+            "union_merge": 0.211968,
+            "flatten_seed": 0.113664,
+            "fill": 187.109376
+          },
+          "union_thread_ms": 0.0,
+          "levels": 32641,
+          "candidates": 1,
+          "unions": 32895,
+          "filled": 32896,
+          "n_blobs": 1
+        }
+      },
+      "best_cfg": "S1",
+      "best_ms": 0.5309100088197738,
+      "best_vs_v1": 3.5469627143050495,
+      "best_vs_ccl": 328.0096327532028,
+      "crosscheck": "OK"
+    }
+  ]
+}

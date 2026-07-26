@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Flood Fill — Paint</title>
+<link rel="stylesheet" href="/paint.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="paint"></canvas>
+</div>
+
+<div id="toolbar" role="group" aria-label="Paint controls">
+  <button class="brush-btn active" data-shape="circle" title="Circle" aria-label="Circle brush">●</button>
+  <button class="brush-btn" data-shape="star" title="Star" aria-label="Star brush">★</button>
+  <button class="brush-btn" data-shape="square" title="Square" aria-label="Square brush">■</button>
+  <button class="brush-btn" data-shape="scratchy" title="Scratchy" aria-label="Scratchy brush">✎</button>
+  <button class="brush-btn" data-shape="shoot" title="Shoot: splatter drops, ch06 finds every blob" aria-label="Shoot tool">✳</button>
+  <span class="toolbar-divider"></span>
+  <span class="tool-group" data-for="paint">
+    <button class="mode-btn" data-mode="cpu" title="Seeded flood fill on the CPU (ch01)" aria-label="CPU mode">CPU</button>
+    <button class="mode-btn active" data-mode="gpu" title="Seeded flood fill on the GPU (ch03)" aria-label="GPU mode">GPU</button>
+    <button class="mode-btn" data-mode="runs" title="Seedless: ch06 finds and recolours every blob at once" aria-label="RUNS mode">RUNS</button>
+  </span>
+  <span class="tool-group" data-for="shoot" hidden>
+    <label class="shot-label" for="shot-count">drops/shot</label>
+    <select id="shot-count" aria-label="Drops per shot">
+      <option value="200">200</option>
+      <option value="1000" selected>1,000</option>
+      <option value="5000">5,000</option>
+      <option value="20000">20,000</option>
+    </select>
+    <button class="mode-btn" id="shot-clear" title="Clear the canvas" aria-label="Clear canvas">CLEAR</button>
+  </span>
+</div>
+
+<div id="shot-hud" hidden aria-live="polite">
+  <div class="hud-row hud-head">ch06 · seedless · one launch</div>
+  <div class="hud-row"><span>shots fired</span><b id="hud-shots">0</b></div>
+  <div class="hud-row"><span>drops fired</span><b id="hud-drops">0</b></div>
+  <div class="hud-row hud-key"><span>blobs found</span><b id="hud-blobs">0</b></div>
+  <div class="hud-row"><span>merged away</span><b id="hud-merged">0</b></div>
+  <div class="hud-row"><span>runs</span><b id="hud-runs">0</b></div>
+  <div class="hud-row"><span>painted px</span><b id="hud-px">0</b></div>
+  <div class="hud-sep"></div>
+  <div class="hud-row hud-key"><span>GPU kernel</span><b id="hud-kernel">—</b></div>
+  <div class="hud-row"><span>CPU @njit</span><b id="hud-njit">—</b></div>
+  <div class="hud-row"><span>round trip</span><b id="hud-trip">—</b></div>
+  <div class="hud-note" id="hud-note"></div>
+</div>
+
+<div id="hint">Paint a thick blob, then let go — the GPU floods it, then it fades away.
+  &nbsp;·&nbsp; <b>RUNS</b> takes no seed: ch06 finds every blob itself.
+  &nbsp;·&nbsp; <a href="/skysurvey.html" style="color:inherit">✦ DEEP FIELD</a> — guess the star count, the GPU counts for real</div>
+
+<script src="/paint.js" defer></script>
+</body>
+</html>
