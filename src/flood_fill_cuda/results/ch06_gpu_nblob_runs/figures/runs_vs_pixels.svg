@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="182" viewBox="0 0 720 182" role="img" aria-label="Pixels versus runs">
+<title>Pixels versus runs</title>
+<text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#adbac7" text-anchor="start" font-weight="600">input_blobs.png — how many things must the algorithm handle?</text>
+<text x="156.0" y="49.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#7d8590" text-anchor="end" font-weight="400">all pixels</text>
+<rect x="168" y="34" width="456.0" height="21" rx="3" fill="#8b949e"/>
+<text x="633.0" y="49.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#adbac7" text-anchor="start" font-weight="400">81,000,000</text>
+<text x="156.0" y="83.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#7d8590" text-anchor="end" font-weight="400">red pixels</text>
+<rect x="168" y="68" width="75.7" height="21" rx="3" fill="#e2645a"/>
+<text x="252.7" y="83.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#adbac7" text-anchor="start" font-weight="400">13,451,960</text>
+<text x="156.0" y="117.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#7d8590" text-anchor="end" font-weight="400">runs  ← ch06 works here</text>
+<rect x="168" y="102" width="3.0" height="21" rx="3" fill="#2aa198"/>
+<text x="180.0" y="117.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#adbac7" text-anchor="start" font-weight="400">539,207</text>
+<text x="156.0" y="151.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#7d8590" text-anchor="end" font-weight="400">blobs</text>
+<rect x="168" y="136" width="2.0" height="21" rx="3" fill="#4c8fd6"/>
+<text x="179.0" y="151.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#adbac7" text-anchor="start" font-weight="400">2,522</text>
+<text x="0.0" y="176.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#7d8590" text-anchor="start" font-weight="400">13.4 million red pixels are only 539,207 runs — 25× fewer items, same information.</text>
+</svg>

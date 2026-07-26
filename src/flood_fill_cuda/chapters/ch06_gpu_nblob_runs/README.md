@@ -1,5 +1,7 @@
 # Chapter 6 — runs, not pixels (`ch06_gpu_nblob_runs/`)
 
+![the real input beside the kernel's output](../../results/ch06_gpu_nblob_runs/figures/before_after.gif)
+
 **Stop moving pixels.** Chapter 5 discovers, labels and fills every blob
 in `images/input/input_blobs.png` — 9000×9000, 13.45M red pixels, 2,522
 blobs — in **~58 ms**. This chapter asks what the same job costs if it is
@@ -288,6 +290,8 @@ recolor.py           host driver: RunRecolor (reusable buffers), recolor()
 test_correctness.py  109 tests — pixel-exact vs ch05's CPU oracle
 benchmarks/
   benchmark.py       head-to-head with ch05, clock spin-up, JSON + CSV
+  scaling.py         crops of the real image: where 1 ms and 0.5 ms fall
+  figures.py         the README's figures, rendered from the committed JSON
   visualize.py       the dashboard's section 4
 ```
 
@@ -296,5 +300,6 @@ Run:
 ```bash
 uv run pytest src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/
 uv run python -m flood_fill_cuda.chapters.ch06_gpu_nblob_runs.benchmarks.benchmark
+uv run python -m flood_fill_cuda.chapters.ch06_gpu_nblob_runs.benchmarks.figures
 uv run python -m flood_fill_cuda.dashboard
 ```

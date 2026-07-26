@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="300" viewBox="0 0 720 300" role="img" aria-label="Runtime versus image size">
+<title>Runtime versus image size</title>
+<text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#adbac7" text-anchor="start" font-weight="600">Runtime vs image size — where 1 ms and 0.5 ms actually fall</text>
+<line x1="52" y1="190.5" x2="702" y2="190.5" stroke="#8b949e" stroke-width="1" stroke-dasharray="5,4"/>
+<text x="702.0" y="185.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">1 ms</text>
+<line x1="52" y1="222.2" x2="702" y2="222.2" stroke="#8b949e" stroke-width="1" stroke-dasharray="5,4"/>
+<text x="702.0" y="217.2" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">0.5 ms</text>
+<text x="44.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">0</text>
+<text x="44.0" y="194.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">1</text>
+<text x="44.0" y="131.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">2</text>
+<text x="44.0" y="67.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">3</text>
+<text x="6.0" y="24.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400">ms</text>
+<text x="52.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">0</text>
+<text x="212.5" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">20</text>
+<text x="373.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">40</text>
+<text x="533.5" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">60</text>
+<text x="694.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">80</text>
+<text x="377.0" y="292.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#7d8590" text-anchor="middle" font-weight="400">megapixels</text>
+<polyline points="60.0,227.7 70.1,228.5 84.1,228.6 124.2,225.6 180.4,208.5 252.6,180.8 340.9,156.3 445.2,126.7 565.6,90.4 702.0,50.3" fill="none" stroke="#d99a2b" stroke-width="2.2"/>
+<circle cx="60.0" cy="227.7" r="3" fill="#d99a2b"/>
+<circle cx="70.1" cy="228.5" r="3" fill="#d99a2b"/>
+<circle cx="84.1" cy="228.6" r="3" fill="#d99a2b"/>
+<circle cx="124.2" cy="225.6" r="3" fill="#d99a2b"/>
+<circle cx="180.4" cy="208.5" r="3" fill="#d99a2b"/>
+<circle cx="252.6" cy="180.8" r="3" fill="#d99a2b"/>
+<circle cx="340.9" cy="156.3" r="3" fill="#d99a2b"/>
+<circle cx="445.2" cy="126.7" r="3" fill="#d99a2b"/>
+<circle cx="565.6" cy="90.4" r="3" fill="#d99a2b"/>
+<circle cx="702.0" cy="50.3" r="3" fill="#d99a2b"/>
+<text x="696.0" y="42.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#d99a2b" text-anchor="end" font-weight="600">rgb contract</text>
+<polyline points="60.0,231.8 70.1,232.5 84.1,230.9 124.2,229.7 180.4,224.9 252.6,212.2 340.9,202.4 445.2,191.5 565.6,173.2 702.0,155.7" fill="none" stroke="#2aa198" stroke-width="2.2"/>
+<circle cx="60.0" cy="231.8" r="3" fill="#2aa198"/>
+<circle cx="70.1" cy="232.5" r="3" fill="#2aa198"/>
+<circle cx="84.1" cy="230.9" r="3" fill="#2aa198"/>
+<circle cx="124.2" cy="229.7" r="3" fill="#2aa198"/>
+<circle cx="180.4" cy="224.9" r="3" fill="#2aa198"/>
+<circle cx="252.6" cy="212.2" r="3" fill="#2aa198"/>
+<circle cx="340.9" cy="202.4" r="3" fill="#2aa198"/>
+<circle cx="445.2" cy="191.5" r="3" fill="#2aa198"/>
+<circle cx="565.6" cy="173.2" r="3" fill="#2aa198"/>
+<circle cx="702.0" cy="155.7" r="3" fill="#2aa198"/>
+<text x="696.0" y="147.7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#2aa198" text-anchor="end" font-weight="600">packed mask</text>
+<polyline points="60.0,237.8 70.1,237.5 84.1,237.2 124.2,236.0 180.4,233.5 252.6,227.9 340.9,225.5 445.2,221.1 565.6,212.3 702.0,203.5" fill="none" stroke="#4c8fd6" stroke-width="2.2"/>
+<circle cx="60.0" cy="237.8" r="3" fill="#4c8fd6"/>
+<circle cx="70.1" cy="237.5" r="3" fill="#4c8fd6"/>
+<circle cx="84.1" cy="237.2" r="3" fill="#4c8fd6"/>
+<circle cx="124.2" cy="236.0" r="3" fill="#4c8fd6"/>
+<circle cx="180.4" cy="233.5" r="3" fill="#4c8fd6"/>
+<circle cx="252.6" cy="227.9" r="3" fill="#4c8fd6"/>
+<circle cx="340.9" cy="225.5" r="3" fill="#4c8fd6"/>
+<circle cx="445.2" cy="221.1" r="3" fill="#4c8fd6"/>
+<circle cx="565.6" cy="212.3" r="3" fill="#4c8fd6"/>
+<circle cx="702.0" cy="203.5" r="3" fill="#4c8fd6"/>
+<text x="696.0" y="195.5" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#4c8fd6" text-anchor="end" font-weight="600">labeling only</text>
+<text x="0.0" y="292.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#2aa198" text-anchor="start" font-weight="600">packed mask stays under 1 ms out to 50 Mpx</text>
+</svg>
