@@ -53,9 +53,6 @@ def _decode(content):
     assert magic == SCAN_MAGIC
     n = width * height
     off = SCAN_HEADER_SIZE
-    sweep = np.frombuffer(content, dtype="<u2", count=n,
-                          offset=off).reshape(height, width)
-    off += 2 * n
     track = np.frombuffer(content, dtype="<u2", count=n,
                           offset=off).reshape(height, width)
     off += 2 * n
@@ -64,7 +61,7 @@ def _decode(content):
     off += 8 * n_blobs
     assert off == len(content)
     return dict(width=width, height=height, steps=steps, flags=flags,
-                n_blobs=n_blobs, sweep=sweep, track=track, seeds=seeds)
+                n_blobs=n_blobs, track=track, seeds=seeds)
 
 
 def test_scan_two_blobs_matches_oracle(client):
@@ -94,9 +91,8 @@ def test_scan_two_blobs_matches_oracle(client):
     for x, y in d["seeds"]:
         assert mask[y, x]
 
-    # the sweep field covers exactly the painted pixels, and nothing else
-    np.testing.assert_array_equal(d["sweep"] > 0, mask)
-    assert 1 <= d["sweep"].max() <= d["steps"]
+    # the track map covers exactly the painted pixels, and nothing else
+    np.testing.assert_array_equal(d["track"] > 0, mask)
     assert int(r.headers["X-Filled"]) == int(mask.sum())
     assert float(r.headers["X-Kernel-Ms"]) > 0
     assert float(r.headers["X-Njit-Ms"]) > 0
@@ -120,19 +116,26 @@ def test_scan_empty_canvas_is_valid(client):
     assert d["seeds"].shape == (0, 2)
 
 
-def test_scan_sweep_is_left_to_right(client):
-    """The sweep is the kernel's row-major scan order, and the kernel
-    image is the canvas transposed — so the bucket a pixel lands in is a
-    function of its COLUMN only, and it increases to the right. This is
-    what makes the reveal a scan bar rather than an arbitrary shuffle."""
+def test_scan_payload_carries_no_derivable_sweep(client):
+    """v4 ships `steps` and the track map, and NOT a per-pixel scan
+    bucket — that is a pure function of the column, so the frontends
+    derive it. The payload must be exactly header + track + seeds; if a
+    2-byte-per-pixel field ever creeps back in, this catches it."""
     rgba = _two_blob_png()
-    d = _decode(client.post("/api/scan", content=_png(rgba)).content)
-    sweep, mask = d["sweep"], rgba[:, :, 3] >= 128
-    cols = np.nonzero(mask.any(axis=0))[0]
-    per_col = [np.unique(sweep[:, c][mask[:, c]]) for c in cols]
-    assert all(len(u) == 1 for u in per_col)          # one bucket per column
-    firsts = [int(u[0]) for u in per_col]
-    assert firsts == sorted(firsts)                   # and non-decreasing
+    r = client.post("/api/scan", content=_png(rgba))
+    d = _decode(r.content)                     # _decode asserts full consumption
+    n = d["width"] * d["height"]
+    assert len(r.content) == SCAN_HEADER_SIZE + 2 * n + 8 * d["n_blobs"]
+    assert d["steps"] >= 1
+
+    # and the rule the client applies is the one the server documents
+    from .engine import sweep_bucket
+    for col in (0, d["width"] // 2, d["width"] - 1):
+        b = sweep_bucket(col, d["width"], d["steps"])
+        assert 1 <= b <= d["steps"]
+    lo = sweep_bucket(0, d["width"], d["steps"])
+    hi = sweep_bucket(d["width"] - 1, d["width"], d["steps"])
+    assert lo < hi                              # left to right, not shuffled
 
 
 def test_scan_amp_reports_at_scale_timing(client):

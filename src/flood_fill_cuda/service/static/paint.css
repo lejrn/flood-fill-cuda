@@ -143,6 +143,104 @@ html, body {
   to   { opacity: 0; }
 }
 
+
+/* ---- SHOOT tool ---------------------------------------------------- */
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-group[hidden] { display: none; }
+
+.shot-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #8f8fa6;
+  text-transform: uppercase;
+}
+
+#shot-count {
+  height: 32px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cfcfe0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#shot-count:focus-visible,
+.brush-btn:focus-visible,
+.mode-btn:focus-visible { outline: 2px solid #4c6ef5; outline-offset: 2px; }
+
+/* The readout sits out of the way of the canvas and never intercepts a
+   shot -- pointer-events:none matters here, this thing overlaps the
+   shooting surface. */
+#shot-hud {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  min-width: 190px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(18, 18, 26, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  color: #cfcfe0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+#shot-hud[hidden] { display: none; }
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  line-height: 1.85;
+}
+.hud-row b { font-weight: 700; }
+.hud-head {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7f7f96;
+  justify-content: flex-start;
+  margin-bottom: 4px;
+}
+.hud-key b { color: #ffb27a; }
+.hud-sep {
+  height: 1px;
+  margin: 7px 0;
+  background: rgba(255, 255, 255, 0.12);
+}
+.hud-note {
+  margin-top: 7px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #7f7f96;
+}
+
+@media (prefers-color-scheme: light) {
+  .shot-label { color: #6a6a78; }
+  #shot-count {
+    color: #46465a;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.12);
+  }
+  #shot-hud {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #24242c;
+  }
+  .hud-head, .hud-note { color: #6a6a78; }
+  .hud-key b { color: #c25a12; }
+  .hud-sep { background: rgba(0, 0, 0, 0.12); }
+}
+
 @media (prefers-color-scheme: light) {
   html, body { background: #f3f3f6; color: #24242c; }
   #hint { color: #6a6a78; }

@@ -235,8 +235,6 @@ def run_fill(mask_hw, mode="gpu", seed_x=None, seed_y=None):
 @dataclass
 class ScanOutcome:
     """One seedless discovery pass over the whole canvas (ch06)."""
-    sweep_u16: np.ndarray   # (height, width) uint16, 0=background else
-                             # 1..steps — SCAN ORDER, not a timeline
     track_u16: np.ndarray   # (height, width) uint16, 0=background else 1..N
     seeds: np.ndarray       # (n_blobs, 2) int32 (x, y), row i = track i+1
     width: int
@@ -324,25 +322,26 @@ def _host_run_count(mask_hw):
     return int((np.diff(m, axis=0, prepend=0) == 1).sum())
 
 
-def _sweep_field(label_xy, width, height, steps):
-    """Per-pixel sweep bucket, 0 = background, else 1..steps.
+def sweep_bucket(col, width, steps):
+    """The reveal's scan-order bucket for a canvas column, 1..steps.
 
-    HONEST LABEL: this is the order the kernel SCANS in, not an order it
-    happens in. ch05's depth map was a real BFS timeline — level 3 truly
-    came after level 2. ch06 has no temporal structure at all: every row
-    is counted, emitted and merged at once, and the whole thing is over
-    in about a millisecond. So the reveal animates the one ordering the
-    algorithm does have — its row-major scan — and nothing here should be
-    read as "this pixel was found later than that one".
+    THE definition, and deliberately NOT transmitted: it is a pure
+    function of the column, so shipping it per pixel would have been
+    2.88 MB of derivable data on every shot (it was, until the SHOOT tool
+    made the round trip matter). The server owns the rule and sends
+    `steps`; both frontends derive the rest.
 
-    The kernel image is the mask transposed, so a kernel row is a canvas
-    COLUMN: the sweep runs left to right across the picture.
+    HONEST LABEL: this is the order the kernel SCANS in, not an order in
+    which things happen. ch05's depth map was a real BFS timeline — level
+    3 truly came after level 2. ch06 has no temporal structure at all:
+    every row is counted, emitted and merged at once and the whole scan
+    is over in about a millisecond. The reveal animates the one ordering
+    the algorithm really has — its row-major scan — and nothing here
+    should be read as "this pixel was found later than that one". The
+    kernel image is the mask transposed, so a kernel row is a canvas
+    COLUMN and the sweep runs left to right.
     """
-    lit = (label_xy >= 0).T                     # -> (height, width)
-    col = np.arange(width, dtype=np.int64)
-    bucket = (col * steps) // max(width, 1) + 1   # 1..steps, per column
-    field = np.where(lit, bucket[None, :], 0)
-    return np.ascontiguousarray(field.astype('<u2'))
+    return (col * steps) // max(width, 1) + 1
 
 
 def _run_ch06(mask_hw):
@@ -407,7 +406,6 @@ def discover(mask_hw, amplify=False):
 
     track_xy, seeds = _dense_tracks(label_xy, height)
     steps = max(1, min(SWEEP_STEPS, width))
-    sweep_u16 = _sweep_field(label_xy, width, height, steps)
     track_u16 = np.ascontiguousarray(track_xy.T.astype('<u2'))
 
     amplified_filled = amplified_runs = 0
@@ -422,7 +420,7 @@ def discover(mask_hw, amplify=False):
             amplified_runs = int(big_counters[N_RUNS])
 
     return ScanOutcome(
-        sweep_u16=sweep_u16, track_u16=track_u16, seeds=seeds,
+        track_u16=track_u16, seeds=seeds,
         width=width, height=height, steps=steps,
         n_blobs=int(counters[N_BLOBS]),
         filled=int((label_xy >= 0).sum()),

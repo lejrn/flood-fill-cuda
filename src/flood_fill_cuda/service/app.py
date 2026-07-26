@@ -46,17 +46,23 @@ MAGIC = 0x46494C4C
 HEADER_FMT = "<IIII"   # magic, width, height, levels
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
-# /api/scan wire format v3 (ch06): header, then sweep uint16[w*h], then
-# track uint16[w*h] (dense label ids, 0=background), then n_blobs pairs of
-# uint32 (x, y) — the GPU-chosen canonical seeds, row i belongs to track
-# i+1.
+# /api/scan wire format v4 (ch06): header, then track uint16[w*h] (dense
+# label ids, 0=background), then n_blobs pairs of uint32 (x, y) — the
+# GPU-chosen canonical seeds, row i belongs to track i+1.
+#
+# The header's `steps` is the reveal's bucket count. The per-pixel scan
+# bucket is NOT sent: it is a pure function of the column,
+#     bucket(col) = col * steps // width + 1,  lit iff track[i] != 0
+# (engine.sweep_bucket is the definition), so both frontends derive it.
+# v3 did ship it, at 2 bytes per pixel — 2.88 MB per scan of data the
+# client could compute, which stopped being free the moment the SHOOT
+# tool started scanning the whole canvas on every click.
 #
 # Two v2 fields are GONE because ch06 cannot produce them, and inventing
 # them would be a lie the rest of this repo doesn't tell:
-#   depth  -> sweep. ch06 is not a BFS, so no pixel has a "level". The
-#             sweep field is the order the kernel SCANS in (row-major,
-#             which is left-to-right on the canvas), used to drive the
-#             reveal. It is a spatial ordering, not a timeline.
+#   depth  -> gone (see `steps` above). ch06 is not a BFS, so no pixel
+#             has a "level". The reveal instead follows the order the
+#             kernel SCANS in — a spatial ordering, not a timeline.
 #   prov   -> dropped. Provisional labels were a ch05 seed_merge artifact
 #             (colliding waves before the union settled). ch06 merges runs
 #             in one data-independent pass; there is no intermediate state
@@ -94,7 +100,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# compresslevel=1, not the default 9. These payloads are megabytes of
+# mostly-zeros, which is the case where level 9 spends enormous time for
+# almost nothing: measured on one 1600x900 scan, 5.76 MB compresses in
+# 677 ms at level 9 and 24 ms at level 1, for 436 KB against 682 KB. At
+# level 9 the compression alone was ~85% of a shot's round trip while
+# the GPU kernel it was shipping took 0.78 ms.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=1)
 
 
 @app.get("/healthz")
@@ -245,8 +257,7 @@ async def scan(request: Request):
                          outcome.height, outcome.steps, outcome.n_blobs,
                          flags)
     seeds_bytes = outcome.seeds.astype("<u4").tobytes()
-    payload = (header + outcome.sweep_u16.tobytes()
-               + outcome.track_u16.tobytes() + seeds_bytes)
+    payload = header + outcome.track_u16.tobytes() + seeds_bytes
     phase = ",".join(f"{k}:{v:.3f}" for k, v in outcome.phase_ms.items())
     headers = {
         "X-Filled": str(outcome.filled),

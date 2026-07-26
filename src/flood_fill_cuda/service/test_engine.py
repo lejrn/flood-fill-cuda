@@ -300,23 +300,28 @@ def test_discover_run_and_union_counts_are_structural():
     assert 0 < out.n_runs < out.filled
 
 
-def test_discover_sweep_is_scan_order_not_a_timeline():
-    """The sweep field must be a pure function of the canvas COLUMN (the
-    kernel's row-major axis is the mask's transpose), covering exactly
-    the painted pixels."""
+def test_discover_track_covers_exactly_the_painted_pixels():
     mask = _three_blob_mask()
     out = engine.discover(mask)
-    np.testing.assert_array_equal(out.sweep_u16 > 0, mask)
-    for col in np.nonzero(mask.any(axis=0))[0]:
-        assert len(np.unique(out.sweep_u16[:, col][mask[:, col]])) == 1
-    assert 1 <= out.sweep_u16.max() <= out.steps
+    np.testing.assert_array_equal(out.track_u16 > 0, mask)
+    assert out.track_u16.max() == out.n_blobs
+
+
+def test_sweep_bucket_is_monotone_in_the_column():
+    """The reveal's scan order is a pure function of the column — that is
+    why it is derived on the client rather than shipped per pixel. It
+    must stay in 1..steps and never go backwards."""
+    width, steps = 1600, engine.SWEEP_STEPS
+    buckets = [engine.sweep_bucket(c, width, steps) for c in range(width)]
+    assert buckets[0] == 1 and max(buckets) <= steps
+    assert all(b <= a for a, b in zip(buckets[1:], buckets[:-1]))
 
 
 def test_discover_empty_canvas_is_valid():
     out = engine.discover(np.zeros((48, 48), dtype=bool))
     assert (out.n_blobs, out.n_runs, out.filled) == (0, 0, 0)
     assert out.seeds.shape == (0, 2)
-    assert (out.sweep_u16 == 0).all() and (out.track_u16 == 0).all()
+    assert (out.track_u16 == 0).all()
 
 
 def test_discover_amplify_reports_at_scale():
@@ -327,7 +332,7 @@ def test_discover_amplify_reports_at_scale():
     assert amped.amplified_filled > amped.filled * 10
     assert amped.amplified_kernel_ms > 0
     # the returned maps are the real-size scan either way
-    assert amped.sweep_u16.shape == plain.sweep_u16.shape
+    assert amped.track_u16.shape == plain.track_u16.shape
     assert amped.n_blobs == plain.n_blobs
 
 
@@ -338,7 +343,6 @@ def test_discover_is_deterministic_and_reuses_buffers():
     a = engine.discover(mask)
     b = engine.discover(mask)
     np.testing.assert_array_equal(a.track_u16, b.track_u16)
-    np.testing.assert_array_equal(a.sweep_u16, b.sweep_u16)
     np.testing.assert_array_equal(a.seeds, b.seeds)
     assert (a.n_blobs, a.n_runs, a.unions) == (b.n_blobs, b.n_runs, b.unions)
 

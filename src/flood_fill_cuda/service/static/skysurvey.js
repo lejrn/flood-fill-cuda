@@ -111,11 +111,17 @@
   // merged at once and the whole scan is over in about a millisecond, so
   // the reveal animates the one ordering the algorithm really has — its
   // row-major sweep, which is left-to-right on the canvas.
-  function bucketBySweep(sweep, steps) {
+  //
+  // Derived from the column rather than received: the bucket is a pure
+  // function of x (see app.py's wire-format note), so the server sends
+  // only `steps`.
+  function bucketByColumn(track, width, height, steps) {
     const buckets = Array.from({ length: Math.max(steps, 1) }, () => []);
-    for (let i = 0; i < sweep.length; i++) {
-      const v = sweep[i];
-      if (v > 0) buckets[v - 1].push(i);
+    for (let col = 0; col < width; col++) {
+      const b = buckets[Math.min(((col * steps) / width) | 0, steps - 1)];
+      for (let row = 0, i = col; row < height; row++, i += width) {
+        if (track[i]) b.push(i);
+      }
     }
     return buckets;
   }
@@ -130,16 +136,14 @@
     const steps = dv.getUint32(12, true);
     const nBlobs = dv.getUint32(16, true);
     const n = width * height;
-    let off = 24;
-    const sweep = new Uint16Array(buf, off, n); off += 2 * n;
-    const track = new Uint16Array(buf, off, n);
-    return { width, height, steps, nBlobs, sweep, track,
+    const track = new Uint16Array(buf, 24, n);
+    return { width, height, steps, nBlobs, track,
              kernelMs: parseFloat(resp.headers.get("x-kernel-ms")) || 0 };
   }
 
   function revealAnimation(s, trueCount) {
     return new Promise((resolve) => {
-      const buckets = bucketBySweep(s.sweep, s.steps);
+      const buckets = bucketByColumn(s.track, s.width, s.height, s.steps);
       const out = xctx.createImageData(s.width, s.height);
       const palette = new Map();
       const colorOf = (id) => {

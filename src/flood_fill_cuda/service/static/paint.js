@@ -54,7 +54,15 @@
     ctx.strokeStyle = PAINT_COLOR;
     ctx.lineCap = "round";
   }
-  window.addEventListener("resize", sizeCanvas);
+  window.addEventListener("resize", () => {
+    // Resizing reallocates the backing store, which blanks it. Reset the
+    // shot counters with it so "drops fired" can never describe pixels
+    // that are no longer on the canvas.
+    sizeCanvas();
+    if (typeof resetShooting === "function" && currentShape === "shoot") {
+      resetShooting();
+    }
+  });
   sizeCanvas();
 
   // The one coordinate mapping used everywhere: CSS px -> backing-store
@@ -173,11 +181,14 @@
     btn.addEventListener("click", () => {
       shapeButtons.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      currentShape = btn.dataset.shape;
+      setTool(btn.dataset.shape);
     });
   });
 
-  const modeButtons = document.querySelectorAll("#toolbar .mode-btn");
+  // [data-mode] matters: CLEAR shares the .mode-btn look but is not a
+  // mode, and without the attribute filter clicking it would set
+  // currentMode to undefined.
+  const modeButtons = document.querySelectorAll("#toolbar .mode-btn[data-mode]");
   modeButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       modeButtons.forEach((b) => b.classList.remove("active"));
@@ -192,6 +203,7 @@
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     painting = true;
+    if (isShootTool()) { shootAt(e); return; }
     bbox = null;
     const [x, y] = toCanvasXY(e);
     lastX = x; lastY = y;
@@ -201,6 +213,12 @@
 
   canvas.addEventListener("pointermove", (e) => {
     if (!painting) return;
+    if (isShootTool()) {
+      // hold and drag to keep spraying, throttled so a fast drag doesn't
+      // queue a hundred scans
+      if (performance.now() - lastShotAt >= SHOT_REPEAT_MS) shootAt(e);
+      return;
+    }
     const [x, y] = toCanvasXY(e);
     strokeSegment(lastX, lastY, x, y);
     growBBox(x, y);
@@ -214,6 +232,10 @@
     if (!painting) return;
     painting = false;
     try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    // A shot has already done its own work on release of the button; the
+    // splatter deliberately STAYS on the canvas so the next shot's drops
+    // can touch it.
+    if (isShootTool()) return;
     if (!bbox) return;
 
     // Where the pointer was released — becomes the fill's seed, in
@@ -277,9 +299,14 @@
   // finds EVERY blob in the crop at once. The response carries a `sweep`
   // field instead of `depth` — ch06 is not a BFS, so no pixel has a level;
   // see app.py's wire-format note.
-  async function requestScan(shapeCanvas) {
-    const blob = await new Promise((res) => shapeCanvas.toBlob(res, "image/png"));
-    const resp = await fetch("/api/scan?amp=1", { method: "POST", body: blob });
+  // amp=true asks for the upscaled timing run, which is what a small
+  // painted stroke needs to report a number that isn't launch-bound. The
+  // SHOOT tool passes false: a full canvas is already ~1.4 Mpx of real
+  // work, so its own measured time is the honest one.
+  async function requestScan(sourceCanvas, amp = true) {
+    const blob = await new Promise((res) => sourceCanvas.toBlob(res, "image/png"));
+    const resp = await fetch(`/api/scan?amp=${amp ? 1 : 0}`,
+                             { method: "POST", body: blob });
     if (!resp.ok) {
       const detail = await resp.json().catch(() => ({}));
       throw new Error(`scan failed (${resp.status}): ${detail.detail || resp.statusText}`);
@@ -291,12 +318,10 @@
     const steps = dv.getUint32(12, true);
     const nBlobs = dv.getUint32(16, true);
     const n = width * height;
-    let off = 24;
-    const sweep = new Uint16Array(buf, off, n); off += 2 * n;
-    const track = new Uint16Array(buf, off, n);
+    const track = new Uint16Array(buf, 24, n);
     const num = (h) => parseInt(resp.headers.get(h), 10) || 0;
     return {
-      width, height, steps, nBlobs, sweep, track,
+      width, height, steps, nBlobs, track,
       stats: {
         mode: "runs",
         filled: num("x-filled"),
@@ -304,14 +329,17 @@
         nBlobs,
         amplifiedFilled: num("x-amplified-filled"),
         amplifiedRuns: num("x-amplified-runs"),
+        njitMs: parseFloat(resp.headers.get("x-njit-ms")) || 0,
         // the GPU idles at ~700 MHz and won't spin up for a 1 ms kernel,
         // so the first scan after a pause reads several times high. Say
         // so instead of quietly showing the bad number.
         cold: resp.headers.get("x-cold") === "1",
-        // the amplified run is the honest at-scale number, exactly as the
-        // CPU/GPU modes report; fall back to the real one if it's absent
-        kernelMs: parseFloat(resp.headers.get("x-amplified-kernel-ms"))
-                  || parseFloat(resp.headers.get("x-kernel-ms")) || 0,
+        // with amp, the upscaled run is the honest at-scale number,
+        // exactly as the CPU/GPU modes report; without it, the canvas's
+        // own measured time already is
+        kernelMs: (amp
+          ? parseFloat(resp.headers.get("x-amplified-kernel-ms"))
+          : 0) || parseFloat(resp.headers.get("x-kernel-ms")) || 0,
       },
     };
   }
@@ -458,6 +486,186 @@
     });
   }
 
+  // ---- SHOOT: splatter, then scan the WHOLE canvas -------------------
+  // A different interaction and a different unit of work. The brushes
+  // make one connected blob and ask "fill it from here"; a shot makes
+  // hundreds-to-thousands of separate drops and asks "how many blobs is
+  // this?" — which is the question ch06 exists to answer, seedlessly, in
+  // one launch. The canvas is NEVER cleared between shots, so drops pile
+  // up and start touching, and the blob count does something worth
+  // watching: it climbs, peaks, then COLLAPSES as separate drops fuse
+  // into continents. (Measured on a 1600x900 canvas: 10k drops -> 4,068
+  // blobs; 50k drops -> 1,670, with 48,330 merged away. The kernel time
+  // does not move — 0.7-0.9 ms across that whole range.)
+
+  const SHOT_RMIN = 1;              // backing-store px
+  const SHOT_RMAX = 5;
+  const SHOT_SPREAD = 0.13;         // std-dev as a fraction of the diagonal
+  const SHOT_SATELLITE = 0.18;      // fraction flung much wider
+  const SHOT_REPEAT_MS = 110;       // hold-to-spray cadence
+  const SHOT_REVEAL_MS = 420;       // replay length; the REAL ms is in the HUD
+
+  const hud = document.getElementById("shot-hud");
+  const hudEl = (id) => document.getElementById(id);
+  const shotCountSel = document.getElementById("shot-count");
+  const toolGroups = document.querySelectorAll("#toolbar .tool-group");
+
+  let shots = 0, dropsFired = 0;
+  let scanBusy = false, scanDirty = false, lastShotAt = 0;
+
+  function isShootTool() { return currentShape === "shoot"; }
+
+  function setTool(shape) {
+    currentShape = shape;
+    const shooting = shape === "shoot";
+    toolGroups.forEach((g) => { g.hidden = (g.dataset.for === "shoot") !== shooting; });
+    hud.hidden = !shooting;
+    canvas.style.cursor = shooting ? "crosshair" : "";
+  }
+
+  // One shot: `count` drops with a gaussian falloff around (cx, cy), plus
+  // a scattered minority flung wide so the pattern has stragglers to
+  // merge with later. Built as ONE Path2D and filled once — 20,000
+  // separate arc()+fill() calls would cost more than the GPU work does.
+  function fireShot(cx, cy, count) {
+    const diag = Math.hypot(canvas.width, canvas.height);
+    const sigma = diag * SHOT_SPREAD;
+    const path = new Path2D();
+    for (let i = 0; i < count; i++) {
+      const wide = Math.random() < SHOT_SATELLITE ? 3.2 : 1;
+      // Box-Muller, so the pattern is a real gaussian scatter
+      const u = Math.max(Math.random(), 1e-9);
+      const r = Math.sqrt(-2 * Math.log(u)) * sigma * wide;
+      const a = Math.random() * Math.PI * 2;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (x < -SHOT_RMAX || y < -SHOT_RMAX ||
+          x > canvas.width + SHOT_RMAX || y > canvas.height + SHOT_RMAX) continue;
+      const rad = SHOT_RMIN + Math.random() * (SHOT_RMAX - SHOT_RMIN);
+      path.moveTo(x + rad, y);
+      path.arc(x, y, rad, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = PAINT_COLOR;
+    ctx.fill(path);
+    shots += 1;
+    dropsFired += count;
+  }
+
+  function setHud(fields) {
+    for (const [id, v] of Object.entries(fields)) hudEl(id).textContent = v;
+  }
+
+  // Recolour the canvas in place, blob by blob, following the kernel's
+  // scan order. Unlike the brush modes this is NOT paced to the measured
+  // time: the real kernel is well under a millisecond, i.e. less than one
+  // frame, so pacing it honestly would mean showing nothing at all. It is
+  // a fixed-length slow-motion replay and the HUD prints the true number
+  // beside it.
+  // The scan bucket is derived, not received: it is a pure function of
+  // the pixel's column (see app.py's wire-format note), so the server
+  // sends `steps` and we do the rest rather than ship 2 bytes per pixel.
+  function bucketByColumn(track, width, height, steps) {
+    const buckets = Array.from({ length: Math.max(steps, 1) }, () => []);
+    for (let col = 0; col < width; col++) {
+      const b = buckets[Math.min(((col * steps) / width) | 0, steps - 1)];
+      for (let row = 0, i = col; row < height; row++, i += width) {
+        if (track[i]) b.push(i);
+      }
+    }
+    return buckets;
+  }
+
+  function revealScan(scan, imageData) {
+    return new Promise((resolve) => {
+      const buckets = bucketByColumn(scan.track, scan.width, scan.height,
+                                     scan.steps);
+      const out = ctx.createImageData(canvas.width, canvas.height);
+      out.data.set(imageData.data);
+      const palette = new Map();
+      const colorOf = (id) => {
+        let c = palette.get(id);
+        if (!c) { c = trackColor(id); palette.set(id, c); }
+        return c;
+      };
+      let start = null, prev = -1;
+      function frame(ts) {
+        if (start === null) start = ts;
+        const p = Math.min((ts - start) / SHOT_REVEAL_MS, 1);
+        const t = Math.min(Math.floor(p * scan.steps), scan.steps - 1);
+        for (let k = prev + 1; k <= t; k++) {
+          for (const idx of buckets[k]) {
+            const c = colorOf(scan.track[idx]);
+            const q = idx * 4;
+            out.data[q] = c[0]; out.data[q + 1] = c[1]; out.data[q + 2] = c[2];
+          }
+        }
+        ctx.putImageData(out, 0, 0);
+        prev = t;
+        if (p < 1) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  async function scanWholeCanvas() {
+    if (scanBusy) { scanDirty = true; return; }
+    scanBusy = true;
+    try {
+      do {
+        scanDirty = false;
+        const before = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const t0 = performance.now();
+        const scan = await requestScan(canvas, false);
+        const trip = performance.now() - t0;
+        const merged = Math.max(dropsFired - scan.nBlobs, 0);
+        const njit = scan.stats.njitMs;
+        setHud({
+          "hud-shots": shots.toLocaleString(),
+          "hud-drops": dropsFired.toLocaleString(),
+          "hud-blobs": scan.nBlobs.toLocaleString(),
+          "hud-merged": merged.toLocaleString(),
+          "hud-runs": scan.stats.runs.toLocaleString(),
+          "hud-px": scan.stats.filled.toLocaleString(),
+          "hud-kernel": `${scan.stats.kernelMs.toFixed(2)} ms` +
+                        (scan.stats.cold ? " (cold)" : ""),
+          "hud-njit": njit ? `${njit.toFixed(1)} ms` : "—",
+          "hud-trip": `${trip.toFixed(0)} ms`,
+        });
+        hudEl("hud-note").textContent = njit && scan.stats.kernelMs
+          ? `${(njit / scan.stats.kernelMs).toFixed(0)}× the CPU · reveal is a ` +
+            `${(SHOT_REVEAL_MS / scan.stats.kernelMs).toFixed(0)}× slow-motion replay`
+          : "";
+        await revealScan(scan, before);
+      } while (scanDirty);
+    } catch (err) {
+      hudEl("hud-note").textContent = String(err.message || err);
+      console.error(err);
+    } finally {
+      scanBusy = false;
+    }
+  }
+
+  function shootAt(e) {
+    const [x, y] = toCanvasXY(e);
+    fireShot(x, y, parseInt(shotCountSel.value, 10) || 1000);
+    lastShotAt = performance.now();
+    scanWholeCanvas();
+  }
+
+  function resetShooting() {
+    clearMain();
+    shots = 0; dropsFired = 0;
+    setHud({
+      "hud-shots": "0", "hud-drops": "0", "hud-blobs": "0", "hud-merged": "0",
+      "hud-runs": "0", "hud-px": "0", "hud-kernel": "—", "hud-njit": "—",
+      "hud-trip": "—",
+    });
+    hudEl("hud-note").textContent = "";
+  }
+
+  document.getElementById("shot-clear").addEventListener("click", resetShooting);
+
   // ---- falling shapes ------------------------------------------------
   function evictOldestIfNeeded() {
     while (liveShapes.length > MAX_LIVE_SHAPES) {
@@ -564,4 +772,7 @@
     wrap.remove();
     liveShapes = liveShapes.filter((s) => s !== wrap);
   }
+
+  // Runs last, when every control the tool touches is initialised.
+  setTool(currentShape);
 })();

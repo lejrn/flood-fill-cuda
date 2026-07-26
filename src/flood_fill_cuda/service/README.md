@@ -156,6 +156,50 @@ the exact mistake a human eye makes. Astronomy source extraction
 (SExtractor is literally threshold → connected-component labelling →
 measure) turned into a party game.
 
+## SHOOT — the splatter tool
+
+Pick the **✳** tool on the paint page. Click to fire a shot: a shotgun
+scatter of hundreds-to-thousands of small drops at the cursor, with a
+minority flung wide. Hold and drag to keep spraying. Pick drops/shot from
+the toolbar (200 … 20,000); **CLEAR** wipes the canvas and the counters.
+
+The canvas is deliberately **never cleared between shots**, so drops pile
+up and start touching — and the blob count does something worth watching.
+Measured on a 1600×900 canvas:
+
+| drops fired | painted px | blobs found | merged away | runs | GPU kernel | @njit |
+|---|---|---|---|---|---|---|
+| 500 | 14k | 311 | 189 | 2.8k | 0.68 ms | 3.9 ms |
+| 5,000 | 137k | 2,761 | 2,239 | 25k | 0.86 ms | 9.6 ms |
+| 10,000 | 258k | 4,068 | 5,932 | 44k | 0.68 ms | 20.9 ms |
+| 20,000 | 499k | 4,630 | 15,370 | 74k | 0.88 ms | 22.1 ms |
+| 50,000 | 893k | **1,670** | 48,330 | 92k | 0.77 ms | 36.4 ms |
+
+Two things the tool exists to show. **The kernel time does not move** —
+0.7–0.9 ms whether you fire 500 drops or 50,000; only the CPU reference
+climbs, so the speedup grows from 5.8× to 47×. And the blob count
+**peaks around 20k drops and then collapses** to 1,670 at 50k: that is
+percolation, live — separate drops fusing into continents faster than new
+ones can land.
+
+Each shot re-scans the WHOLE canvas through `/api/scan?amp=0` (a full
+canvas is ~1.4 Mpx of real work, so it needs no amplification to report
+an honest number) and recolours it in place, blob by blob, following the
+kernel's scan order. The reveal is a fixed-length slow-motion replay and
+says so: the real kernel finishes in well under one frame, so pacing it
+truthfully would mean showing nothing at all. The HUD prints the true
+kernel time next to the round trip, which is the more interesting pair —
+the GPU is around 1% of the wall clock, and everything else is PNG
+decode, numpy glue and transfer.
+
+**On that round trip:** it was 806 ms per shot at 20k drops until two
+fixes landed, neither of them in a kernel. `GZipMiddleware` defaults to
+`compresslevel=9`, which spent **677 ms** compressing 5.76 MB of
+mostly-zeros (level 1: 24 ms, for 682 KB against 436 KB). And the wire
+format was shipping a per-pixel scan-order field that is a pure function
+of the column — 2.88 MB per shot of data the client can compute in a
+loop. Both fixed; 20k drops is now ~120 ms end to end.
+
 ## Phase 2 — public via Cloudflare Tunnel
 
 No code changes; run the service locally (above), then in a second
