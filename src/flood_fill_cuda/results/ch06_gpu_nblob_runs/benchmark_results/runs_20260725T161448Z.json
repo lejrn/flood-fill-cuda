@@ -1,0 +1,430 @@
+{
+  "device": "NVIDIA GeForce RTX 4060 Laptop GPU\u0000",
+  "sm_count": 24,
+  "rounds": 9,
+  "spin_seconds": 8.0,
+  "idle_clocks": {
+    "sm_mhz": 1470,
+    "max_sm_mhz": 3105,
+    "power_w": 11.75,
+    "temp_c": 56
+  },
+  "measured_peak_gb_s": 186.3164960538943,
+  "measured_read_gb_s": 212.6066575106672,
+  "measured_write_gb_s": 216.82712822519287,
+  "phase_blocks": {
+    "count": 256,
+    "emit": 512,
+    "merge": 512,
+    "flatten": 512,
+    "paint": 1024
+  },
+  "pack_row_blocks": 64,
+  "ch05_config": "split_L8",
+  "bandwidth_model": "ch06 model_bytes counts the traffic each phase must move by construction, not by counter sampling \u2014 the pipeline has no data-dependent probe loops. pack: n*3 read + n/8 write. count: n/8 read. emit: n/8 read + runs*12 write. merge: runs*(12 read + union RMW 8 each). flatten: runs*8. paint: runs*12 read + red_px*3 write. The dominant terms are exactly two: the full-resolution read (n*3 in the rgb contract, n/8 in the mask contract) and the paint write (red_px*3). Derived lower-bound model as in every prior chapter; 32 B sectors inflate, L2 deflates; compare only against the measured copy peak.",
+  "experiment": "run-table connected components vs ch05's BFS/union-find over pixels, on the same images, with the RGB and packed-mask contracts reported separately and the measured read/write peaks alongside. Timed only after a clock spin-up.",
+  "scenes": [
+    {
+      "scene": "input_blobs",
+      "note": "external PNG, 9000x9000",
+      "width": 9000,
+      "height": 9000,
+      "n_pixels": 81000000,
+      "red_px": 13451960,
+      "n_runs": 539207,
+      "n_blobs": 2522,
+      "union_attempts": 681039,
+      "mean_run_px": 24.94767315706213,
+      "run_capacity": 566167,
+      "clocks_during_run": {
+        "sm_mhz": 1620,
+        "max_sm_mhz": 3105,
+        "power_w": 39.32,
+        "temp_c": 67
+      },
+      "ch06": {
+        "rgb": {
+          "median_ms": 2.9573121070861816,
+          "min_ms": 2.8917760848999023,
+          "max_ms": 3.0617599487304688,
+          "phase_ms": {
+            "pack": 1.6741119623184204,
+            "count": 0.053247999399900436,
+            "scan": 0.023552000522613525,
+            "emit": 0.22220799326896667,
+            "merge": 0.3092480003833771,
+            "flatten": 0.03276799991726875,
+            "paint": 0.6410239934921265
+          },
+          "label_only_ms": 2.315135955810547,
+          "model_bytes": 345061128,
+          "model_gb_s": 116.68065983741779,
+          "speedup_vs_ch05": 19.785756419642926
+        },
+        "mask": {
+          "median_ms": 1.4551039934158325,
+          "min_ms": 1.299456000328064,
+          "max_ms": 1.572864055633545,
+          "phase_ms": {
+            "count": 0.1157120019197464,
+            "scan": 0.05427199974656105,
+            "emit": 0.26419198513031006,
+            "merge": 0.31539198756217957,
+            "flatten": 0.03379200026392937,
+            "paint": 0.6440960168838501
+          },
+          "label_only_ms": 0.7833599746227264,
+          "model_bytes": 91936128,
+          "model_gb_s": 63.18182646463739,
+          "speedup_vs_ch05": 40.21201046277845
+        }
+      },
+      "ch05": {
+        "config": "split_L8",
+        "median_ms": 58.51265700766817,
+        "min_ms": 54.037653986597434,
+        "n_blobs": 2522
+      },
+      "floor_ms": {
+        "rgb_read": 1.1429557420505887,
+        "mask_read": 0.04762315591877453,
+        "paint_write": 0.1861200686940201
+      }
+    },
+    {
+      "scene": "input_blocks",
+      "note": "external PNG, 1000x1000",
+      "width": 1000,
+      "height": 1000,
+      "n_pixels": 1000000,
+      "red_px": 387587,
+      "n_runs": 61479,
+      "n_blobs": 21618,
+      "union_attempts": 39861,
+      "mean_run_px": 6.304380357520454,
+      "run_capacity": 64552,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 23.58,
+        "temp_c": 67
+      },
+      "ch06": {
+        "rgb": {
+          "median_ms": 0.4575679898262024,
+          "min_ms": 0.41657599806785583,
+          "max_ms": 0.66457599401474,
+          "phase_ms": {
+            "pack": 0.05734400078654289,
+            "count": 0.04198399931192398,
+            "scan": 0.05119999870657921,
+            "emit": 0.06758400052785873,
+            "merge": 0.09830400347709656,
+            "flatten": 0.03276799991726875,
+            "paint": 0.10956799983978271
+          },
+          "label_only_ms": 0.3491840027272701,
+          "model_bytes": 7807641,
+          "model_gb_s": 17.063346155323426,
+          "speedup_vs_ch05": 2.9675174301600866
+        },
+        "mask": {
+          "median_ms": 0.4084480106830597,
+          "min_ms": 0.3768320083618164,
+          "max_ms": 0.5703679919242859,
+          "phase_ms": {
+            "count": 0.04287999868392944,
+            "scan": 0.050175998359918594,
+            "emit": 0.0655359998345375,
+            "merge": 0.10239999741315842,
+            "flatten": 0.023552000522613525,
+            "paint": 0.11776000261306763
+          },
+          "label_only_ms": 0.2845439948141575,
+          "model_bytes": 4682641,
+          "model_gb_s": 11.464472533895027,
+          "speedup_vs_ch05": 3.3243912316326654
+        }
+      },
+      "ch05": {
+        "config": "split_L8",
+        "median_ms": 1.3578409852925688,
+        "min_ms": 1.2776939838659018,
+        "n_blobs": 21618
+      },
+      "floor_ms": {
+        "rgb_read": 0.014110564716673935,
+        "mask_read": 0.0005879401965280806,
+        "paint_write": 0.00536261772001323
+      }
+    },
+    {
+      "scene": "blob_grid_100",
+      "note": "100 x 130k px solid squares \u2014 few, long runs",
+      "width": 4000,
+      "height": 4000,
+      "n_pixels": 16000000,
+      "red_px": 12960000,
+      "n_runs": 36000,
+      "n_blobs": 100,
+      "union_attempts": 35900,
+      "mean_run_px": 360.0,
+      "run_capacity": 37800,
+      "clocks_during_run": {
+        "sm_mhz": 1695,
+        "max_sm_mhz": 3105,
+        "power_w": 39.84,
+        "temp_c": 69
+      },
+      "ch06": {
+        "rgb": {
+          "median_ms": 0.7995839715003967,
+          "min_ms": 0.7639039754867554,
+          "max_ms": 1.1212799549102783,
+          "phase_ms": {
+            "pack": 0.38707199692726135,
+            "count": 0.014336000196635723,
+            "scan": 0.013311999849975109,
+            "emit": 0.035840000957250595,
+            "merge": 0.06963200122117996,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.2754560112953186
+          },
+          "label_only_ms": 0.5273599992506206,
+          "model_bytes": 94895200,
+          "model_gb_s": 118.68071820140646,
+          "speedup_vs_ch05": 33.51120326496792
+        },
+        "mask": {
+          "median_ms": 0.6154239773750305,
+          "min_ms": 0.5447679758071899,
+          "max_ms": 0.6748160123825073,
+          "phase_ms": {
+            "count": 0.03276799991726875,
+            "scan": 0.05222399905323982,
+            "emit": 0.0870399996638298,
+            "merge": 0.08908800035715103,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.3235839903354645
+          },
+          "label_only_ms": 0.26828799908980727,
+          "model_bytes": 44895200,
+          "model_gb_s": 72.95003387988166,
+          "speedup_vs_ch05": 43.53912421587631
+        }
+      },
+      "ch05": {
+        "config": "split_L8",
+        "median_ms": 26.79502099636011,
+        "min_ms": 25.475140020716935,
+        "n_blobs": 100
+      },
+      "floor_ms": {
+        "rgb_read": 0.22576903546678295,
+        "mask_read": 0.00940704314444929,
+        "paint_write": 0.1793133558436466
+      }
+    },
+    {
+      "scene": "random_4000",
+      "note": "sub-percolation noise \u2014 the run table's worst case",
+      "width": 4000,
+      "height": 4000,
+      "n_pixels": 16000000,
+      "red_px": 4802736,
+      "n_runs": 3361514,
+      "n_blobs": 755577,
+      "union_attempts": 2722104,
+      "mean_run_px": 1.4287419299756003,
+      "run_capacity": 3529589,
+      "clocks_during_run": {
+        "sm_mhz": 1770,
+        "max_sm_mhz": 3105,
+        "power_w": 39.99,
+        "temp_c": 70
+      },
+      "ch06": {
+        "rgb": {
+          "median_ms": 6.32422399520874,
+          "min_ms": 6.209536075592041,
+          "max_ms": 6.610943794250488,
+          "phase_ms": {
+            "pack": 0.4249599874019623,
+            "count": 0.016383999958634377,
+            "scan": 0.013311999849975109,
+            "emit": 0.652288019657135,
+            "merge": 1.4755840301513672,
+            "flatten": 0.374783992767334,
+            "paint": 3.3423359394073486
+          },
+          "label_only_ms": 2.957312029786408,
+          "model_bytes": 251537712,
+          "model_gb_s": 39.77368799564438,
+          "speedup_vs_ch05": 3.874108824819617
+        },
+        "mask": {
+          "median_ms": 6.180863857269287,
+          "min_ms": 5.906303882598877,
+          "max_ms": 6.28326416015625,
+          "phase_ms": {
+            "count": 0.03686400130391121,
+            "scan": 0.04198399931192398,
+            "emit": 0.7331839799880981,
+            "merge": 1.5360000133514404,
+            "flatten": 0.3758080005645752,
+            "paint": 3.471359968185425
+          },
+          "label_only_ms": 2.723839994519949,
+          "model_bytes": 201537712,
+          "model_gb_s": 32.60672240223709,
+          "speedup_vs_ch05": 3.9639656455398145
+        }
+      },
+      "ch05": {
+        "config": "split_L8",
+        "median_ms": 24.500731989974156,
+        "min_ms": 22.481116990093142,
+        "n_blobs": 755577
+      },
+      "floor_ms": {
+        "rgb_read": 0.22576903546678295,
+        "mask_read": 0.00940704314444929,
+        "paint_write": 0.06645020905795462
+      }
+    },
+    {
+      "scene": "disk_r2000",
+      "note": "one 12.6M px disk \u2014 the geodesic monster that cost ch03 its levels",
+      "width": 4200,
+      "height": 4200,
+      "n_pixels": 17640000,
+      "red_px": 12566345,
+      "n_runs": 4001,
+      "n_blobs": 1,
+      "union_attempts": 4000,
+      "mean_run_px": 3140.801049737566,
+      "run_capacity": 8192,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 36.35,
+        "temp_c": 69
+      },
+      "ch06": {
+        "rgb": {
+          "median_ms": 1.1673599481582642,
+          "min_ms": 1.0536960363388062,
+          "max_ms": 1.376255989074707,
+          "phase_ms": {
+            "pack": 0.359391987323761,
+            "count": 0.016383999958634377,
+            "scan": 0.015359999611973763,
+            "emit": 0.03379200026392937,
+            "merge": 0.11059200018644333,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.6144000291824341
+          },
+          "label_only_ms": 0.5426879874430597,
+          "model_bytes": 97458083,
+          "model_gb_s": 83.48588895289662,
+          "speedup_vs_ch05": 22.644026844415446
+        },
+        "mask": {
+          "median_ms": 0.9963520169258118,
+          "min_ms": 0.881663978099823,
+          "max_ms": 1.0280959606170654,
+          "phase_ms": {
+            "count": 0.04095999896526337,
+            "scan": 0.053247999399900436,
+            "emit": 0.09011200070381165,
+            "merge": 0.08191999793052673,
+            "flatten": 0.03788800165057182,
+            "paint": 0.6656000018119812
+          },
+          "label_only_ms": 0.304127998650074,
+          "model_bytes": 42333083,
+          "model_gb_s": 42.488078792289045,
+          "speedup_vs_ch05": 26.530512865072474
+        }
+      },
+      "ch05": {
+        "config": "split_L8",
+        "median_ms": 26.433730003191158,
+        "min_ms": 26.40890097245574,
+        "n_blobs": 1
+      },
+      "floor_ms": {
+        "rgb_read": 0.2489103616021282,
+        "mask_read": 0.010371265066755342,
+        "paint_write": 0.17386678183943127
+      }
+    },
+    {
+      "scene": "serpentine_2048",
+      "note": "one 2M px snake \u2014 32,641 BFS levels for ch03, one merge pass here",
+      "width": 2048,
+      "height": 2048,
+      "n_pixels": 4194304,
+      "red_px": 2098176,
+      "n_runs": 2048,
+      "n_blobs": 1,
+      "union_attempts": 2047,
+      "mean_run_px": 1024.5,
+      "run_capacity": 8192,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 19.98,
+        "temp_c": 66
+      },
+      "ch06": {
+        "rgb": {
+          "median_ms": 0.4986880123615265,
+          "min_ms": 0.474016010761261,
+          "max_ms": 0.9400320053100586,
+          "phase_ms": {
+            "pack": 0.0982080027461052,
+            "count": 0.008191999979317188,
+            "scan": 0.030719999223947525,
+            "emit": 0.06348799914121628,
+            "merge": 0.06451199948787689,
+            "flatten": 0.05632000043988228,
+            "paint": 0.18534399569034576
+          },
+          "label_only_ms": 0.32144000101834536,
+          "model_bytes": 20564984,
+          "model_gb_s": 41.23817595417013,
+          "speedup_vs_ch05": 37.67913308922496
+        },
+        "mask": {
+          "median_ms": 0.4710400104522705,
+          "min_ms": 0.4280320107936859,
+          "max_ms": 0.5785599946975708,
+          "phase_ms": {
+            "count": 0.03993599861860275,
+            "scan": 0.05222399905323982,
+            "emit": 0.06451199948787689,
+            "merge": 0.06963200122117996,
+            "flatten": 0.060416001826524734,
+            "paint": 0.17612800002098083
+          },
+          "label_only_ms": 0.28672000020742416,
+          "model_bytes": 7457784,
+          "model_gb_s": 15.832591360634918,
+          "speedup_vs_ch05": 39.89073448289375
+        }
+      },
+      "ch05": {
+        "config": "split_L8",
+        "median_ms": 18.79013198777102,
+        "min_ms": 18.60795999527909,
+        "n_blobs": 1
+      },
+      "floor_ms": {
+        "rgb_read": 0.05918399803340435,
+        "mask_read": 0.0024659999180585146,
+        "paint_write": 0.029030168187546224
+      }
+    }
+  ]
+}
