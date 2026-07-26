@@ -23,6 +23,15 @@ thresholding `depth <= t`, the same trick
 [`ch04/benchmarks/wavefront.py`](../chapters/ch04_gpu_2blob_nblock/benchmarks/wavefront.py)
 uses to render its GIFs.
 
+A third mode, **RUNS**, is a different job on a different kernel. It takes
+no seed at all: the stroke goes to `/api/scan`, and **ch06** finds and
+recolours *every* blob in it at once, each in its own canonical-label
+colour. There is no wavefront to replay — ch06 is not a BFS and no pixel
+has a level — so the reveal is a left-to-right scan bar following the
+kernel's own row-major scan order, and the readout reports what ch06
+actually counts: blobs and runs. See the `/api/scan` notes below for why
+the wire format changed with it.
+
 ## Run (Phase 1 — local)
 
 ```bash
@@ -82,18 +91,45 @@ returned depth array exactly); `X-Amplified-Filled`, `X-Kernel-Ms`, and
 module docstring for why the response mixes real-size depth data with
 amplified-scale timing.
 
-`POST /api/scan?prov=0|1` — SKYWATCH's endpoint: seedless multi-blob
-discovery over the WHOLE canvas via ch05's `seed_merge` cooperative
-kernel (no seeds, no mode — that is the point). Body: RGBA PNG, alpha
-≥ 128 is "painted"; an empty canvas is valid (`n_blobs=0`). Response
-format v2 (`app.py` docstring has the layout): a 24-byte header
-(`magic "SCAN", width, height, levels, n_blobs, flags`), then `depth`
-uint16[w·h], `track` uint16[w·h] (dense per-blob label ids in canonical
-order, 0 = background), `n_blobs` uint32 (x, y) pairs — the GPU-chosen
-canonical seeds — and, iff `prov=1`, the provisional-label map for the
-merge replay. Headers: `X-Kernel-Ms`, `X-Total-Ms`, `X-Njit-Ms` (the
-@njit seedless reference, run concurrently on the CPU pool — the honest
-race bar), `X-Filled`, `X-Candidates`, `X-Unions`, `X-Phase-Ms`.
+`POST /api/scan?amp=0|1` — the seedless endpoint, backing both DEEP
+FIELD and the paint page's RUNS mode: multi-blob discovery over the
+WHOLE canvas via **ch06's run-table connected components** (no seeds, no
+mode — that is the point). Body: RGBA PNG, alpha ≥ 128 is "painted"; an
+empty canvas is valid (`n_blobs=0`). Response format v3 (`app.py`'s
+docstring has the layout): a 24-byte header (`magic "SCAN", width,
+height, steps, n_blobs, flags`), then `sweep` uint16[w·h], `track`
+uint16[w·h] (dense per-blob label ids in canonical order, 0 =
+background), then `n_blobs` uint32 (x, y) pairs — the GPU-chosen
+canonical seeds.
+
+`?amp=1` additionally times the same shape upscaled ~250×, so a small
+painted stroke can report a kernel time that isn't dominated by six
+launch overheads; it adds `X-Amplified-Filled`, `X-Amplified-Runs` and
+`X-Amplified-Kernel-Ms` and sets bit 0 of `flags`. The payload itself is
+always the real-size scan.
+
+Headers: `X-Kernel-Ms`, `X-Total-Ms`, `X-Njit-Ms` (the @njit seedless
+reference, run concurrently on the CPU pool — the honest race bar),
+`X-Filled`, `X-Runs`, `X-Unions`, `X-Phase-Ms`, `X-Cold`.
+
+**What changed when ch06 replaced ch05 here (v2 → v3):** `depth` became
+`sweep`, and `prov` is gone. ch06 is not a BFS, so no pixel has a level
+and there is no provisional-label stage to replay — the run merge is one
+data-independent pass. `sweep` is the order the kernel *scans* in
+(row-major, which is left-to-right on the canvas), used to drive the
+reveal; it is a spatial ordering, not a timeline, and the code says so
+in both places it appears. Canonical labels, `track` ids and `seeds` are
+bit-for-bit what ch05 produced — the same CPU oracle still judges them
+in `test_scan.py`, which is exactly why the swap was safe.
+
+`X-Cold: 1` marks the first launch after an idle GPU. This laptop drops
+to ~700 MHz of 3105 and will not spin up for a millisecond kernel, so
+that first scan reads several times high (measured through this
+endpoint: 10.1 ms against 2.1 ms back-to-back for the same amplified
+run). Chapter 6 hit the same effect on the bench and solved it there by
+spinning the clock up before timing; a web service cannot honestly burn
+the GPU to flatter its own number, so it reports the condition instead
+and the UI prints "(cold clock)".
 
 `GET /healthz` → `{"status", "warm", "device"}`.
 
@@ -112,27 +148,13 @@ persists to `results/service/state/survey_state.json`.
 
 `http://127.0.0.1:8000/skysurvey.html` — a shared, generated star field
 (varied sizes, some touching). Estimate the count, press SURVEY: the
-real ch05 discovery wavefront sweeps the frame, every star lights in its
+real ch06 scan sweeps the frame, every star lights in its
 own colour, a counter spins up to the true number, and your guess climbs
 a persistent leaderboard of names. The honest twist: stars that touch
 merge into one component, so the true count is below the number placed —
 the exact mistake a human eye makes. Astronomy source extraction
 (SExtractor is literally threshold → connected-component labelling →
 measure) turned into a party game.
-
-## SKYWATCH — the game
-
-`http://127.0.0.1:8000/skywatch.html` — an air-defense scope on the
-real kernels. Paint the raid yourself (brushes, eraser, or the RAID
-generator), hit SCAN: one cooperative launch discovers, labels and
-fills every contact — lock-on boxes, track priorities, crosshairs on
-the GPU-chosen canonical seeds, the in-kernel phase bar, then an ENGAGE
-phase (destroy tracks in priority order against the clock). The race
-panel replays GPU vs @njit at their true measured durations from that
-very scan — and honestly reports when a sparse scope is too little work
-for 48 cooperative blocks and the CPU wins. The "merge replay" toggle
-requests provisional labels and shows colliding waves snap to canonical
-ids — the atomicMin union-find, live on your own painting.
 
 ## Phase 2 — public via Cloudflare Tunnel
 

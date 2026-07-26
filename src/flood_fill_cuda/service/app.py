@@ -46,13 +46,24 @@ MAGIC = 0x46494C4C
 HEADER_FMT = "<IIII"   # magic, width, height, levels
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
-# /api/scan wire format v2 (SKYWATCH): header, then depth uint16[w*h],
-# then track uint16[w*h] (dense label ids, 0=background), then n_blobs
-# pairs of uint32 (x, y) — the GPU-chosen canonical seeds, row i belongs
-# to track i+1 — then, iff the prov flag bit is set, prov uint16[w*h].
+# /api/scan wire format v3 (ch06): header, then sweep uint16[w*h], then
+# track uint16[w*h] (dense label ids, 0=background), then n_blobs pairs of
+# uint32 (x, y) — the GPU-chosen canonical seeds, row i belongs to track
+# i+1.
+#
+# Two v2 fields are GONE because ch06 cannot produce them, and inventing
+# them would be a lie the rest of this repo doesn't tell:
+#   depth  -> sweep. ch06 is not a BFS, so no pixel has a "level". The
+#             sweep field is the order the kernel SCANS in (row-major,
+#             which is left-to-right on the canvas), used to drive the
+#             reveal. It is a spatial ordering, not a timeline.
+#   prov   -> dropped. Provisional labels were a ch05 seed_merge artifact
+#             (colliding waves before the union settled). ch06 merges runs
+#             in one data-independent pass; there is no intermediate state
+#             to show. Its only consumer was SKYWATCH, now removed.
 SCAN_MAGIC = 0x5343414E   # "SCAN"
-SCAN_HEADER_FMT = "<IIIIII"   # magic, width, height, levels, n_blobs, flags
-SCAN_FLAG_PROV = 1
+SCAN_HEADER_FMT = "<IIIIII"   # magic, width, height, steps, n_blobs, flags
+SCAN_FLAG_AMPLIFIED = 1       # an amplified-scale timing run was included
 
 MAX_BODY_BYTES = 25 * 1024 * 1024   # PNG upload cap; engine.MAX_PIXELS is
                                      # the real (much tighter) size guard
@@ -180,13 +191,17 @@ async def fill(request: Request):
 
 @app.post("/api/scan")
 async def scan(request: Request):
-    """SKYWATCH: seedless discovery over the WHOLE canvas. No seeds, no
-    mode — the GPU finds every blob (ch05 seed_merge), and the njit
-    seedless reference runs concurrently on the CPU pool for the race
-    bar. An empty canvas is valid (n_blobs=0)."""
+    """Seedless discovery over the WHOLE canvas. No seeds, no mode — the
+    GPU finds every blob (ch06's run-table connected components), and the
+    njit seedless reference runs concurrently on the CPU pool for the race
+    bar. An empty canvas is valid (n_blobs=0).
+
+    ?amp=1 additionally times the same shape upscaled ~250x, so a small
+    painted stroke can report a kernel time that isn't dominated by six
+    launch overheads — the paint page's RUNS mode asks for this."""
     global _inflight
 
-    want_prov = request.query_params.get("prov", "0") == "1"
+    want_amp = request.query_params.get("amp", "0") == "1"
 
     body = await request.body()
     if not body:
@@ -211,7 +226,7 @@ async def scan(request: Request):
     try:
         loop = asyncio.get_running_loop()
         gpu_task = loop.run_in_executor(_gpu_executor, engine.discover,
-                                        mask, want_prov)
+                                        mask, want_amp)
         njit_task = loop.run_in_executor(_cpu_executor,
                                          engine.njit_reference_ms, mask)
         outcome = await gpu_task
@@ -225,29 +240,34 @@ async def scan(request: Request):
     finally:
         _inflight -= 1
 
-    flags = SCAN_FLAG_PROV if outcome.prov_u16 is not None else 0
+    flags = SCAN_FLAG_AMPLIFIED if outcome.amplified_filled else 0
     header = struct.pack(SCAN_HEADER_FMT, SCAN_MAGIC, outcome.width,
-                         outcome.height, outcome.levels, outcome.n_blobs,
+                         outcome.height, outcome.steps, outcome.n_blobs,
                          flags)
     seeds_bytes = outcome.seeds.astype("<u4").tobytes()
-    payload = (header + outcome.depth_u16.tobytes()
+    payload = (header + outcome.sweep_u16.tobytes()
                + outcome.track_u16.tobytes() + seeds_bytes)
-    if outcome.prov_u16 is not None:
-        payload += outcome.prov_u16.tobytes()
     phase = ",".join(f"{k}:{v:.3f}" for k, v in outcome.phase_ms.items())
-    return Response(
-        content=payload,
-        media_type="application/octet-stream",
-        headers={
-            "X-Filled": str(outcome.filled),
-            "X-Candidates": str(outcome.candidates),
-            "X-Unions": str(outcome.unions),
-            "X-Kernel-Ms": f"{outcome.kernel_ms:.3f}",
-            "X-Total-Ms": f"{outcome.total_ms:.3f}",
-            "X-Njit-Ms": f"{njit_ms:.3f}",
-            "X-Phase-Ms": phase,
-        },
-    )
+    headers = {
+        "X-Filled": str(outcome.filled),
+        "X-Runs": str(outcome.n_runs),
+        "X-Unions": str(outcome.unions),
+        "X-Kernel-Ms": f"{outcome.kernel_ms:.3f}",
+        "X-Total-Ms": f"{outcome.total_ms:.3f}",
+        "X-Njit-Ms": f"{njit_ms:.3f}",
+        "X-Phase-Ms": phase,
+        # 1 = first launch after an idle GPU, so X-Kernel-Ms is an
+        # over-estimate (this laptop drops to ~700 MHz of 3105 and does
+        # not spin up for millisecond kernels). Reported rather than
+        # papered over with a keep-warm loop.
+        "X-Cold": "1" if outcome.cold else "0",
+    }
+    if outcome.amplified_filled:
+        headers["X-Amplified-Filled"] = str(outcome.amplified_filled)
+        headers["X-Amplified-Runs"] = str(outcome.amplified_runs)
+        headers["X-Amplified-Kernel-Ms"] = f"{outcome.amplified_kernel_ms:.3f}"
+    return Response(content=payload,
+                    media_type="application/octet-stream", headers=headers)
 
 
 def _challenge_response(challenge):
