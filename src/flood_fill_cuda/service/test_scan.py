@@ -173,3 +173,57 @@ def test_scan_reports_a_cold_clock(client):
     client.post("/api/scan", content=png)
     warm = client.post("/api/scan", content=png)
     assert warm.headers["X-Cold"] == "0"
+
+
+# --------------------------------------------------------------- frontends
+# The scan wire format is consumed by two hand-written JS files with no test
+# runner of their own, and that gap has already cost one real bug: when the
+# per-pixel scan-order field was dropped from the format, only one of the two
+# reveal paths was updated. The other threw on every stroke, the exception was
+# swallowed by a catch, and RUNS mode silently left the painted shape grey.
+# These are cheap static guards against exactly that class of drift.
+
+_FRONTENDS = ("paint.js", "skysurvey.js")
+
+
+def _frontend(name):
+    import pathlib
+    return (pathlib.Path(__file__).parent / "static" / name).read_text()
+
+
+@pytest.mark.parametrize("name", _FRONTENDS)
+def test_frontend_reads_no_removed_wire_field(name):
+    """No property access to a field /api/scan does not send. `sweep` and
+    `prov` were both real fields once; a leftover `scan.sweep` reads as
+    undefined and takes the whole reveal down with it."""
+    import re
+    src = _frontend(name)
+    stale = re.findall(r"\.(?:sweep|prov)\b", src)
+    assert not stale, f"{name} still reads a removed wire field: {stale}"
+
+
+@pytest.mark.parametrize("name", _FRONTENDS)
+def test_frontend_decodes_the_current_header(name):
+    """Both frontends must read the track array at the header's end. If
+    SCAN_HEADER_FMT ever grows or shrinks, this fails instead of silently
+    decoding garbage into a pixel map."""
+    src = _frontend(name)
+    assert f"new Uint16Array(buf, {SCAN_HEADER_SIZE}, n)" in src, (
+        f"{name} does not read track at offset {SCAN_HEADER_SIZE} "
+        f"(the current header size)")
+
+
+def test_frontends_share_one_bucket_derivation():
+    """The scan bucket is derived, not sent, so exactly one function per
+    frontend may derive it — the duplication is what let the two reveals
+    drift apart in the first place."""
+    for name in _FRONTENDS:
+        src = _frontend(name)
+        assert src.count("function bucketByColumn") == 1, name
+        # ...and paint.js must hand the result around rather than
+        # recomputing it per animation
+        if name == "paint.js":
+            assert src.count("bucketByColumn(") == 2, (
+                "paint.js should define bucketByColumn once and call it "
+                "once (in requestScan); each extra call site is a chance "
+                "for one reveal to drift from the other")

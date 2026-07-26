@@ -296,9 +296,10 @@
 
   // ---- RUNS mode: ch06, seedless -------------------------------------
   // A different job, so a different endpoint: /api/scan takes no seed and
-  // finds EVERY blob in the crop at once. The response carries a `sweep`
-  // field instead of `depth` — ch06 is not a BFS, so no pixel has a level;
-  // see app.py's wire-format note.
+  // finds EVERY blob in the crop at once. There is no `depth` field in the
+  // response — ch06 is not a BFS, so no pixel has a level. The reveal
+  // order is derived from the column instead (see bucketByColumn and
+  // app.py's wire-format note).
   // amp=true asks for the upscaled timing run, which is what a small
   // painted stroke needs to report a number that isn't launch-bound. The
   // SHOOT tool passes false: a full canvas is already ~1.4 Mpx of real
@@ -322,6 +323,12 @@
     const num = (h) => parseInt(resp.headers.get(h), 10) || 0;
     return {
       width, height, steps, nBlobs, track,
+      // Bucketed HERE, once, and handed to whichever reveal wants it.
+      // Both reveals used to derive this themselves, and when the wire
+      // format dropped its per-pixel scan-order field only one of the two
+      // was updated — RUNS mode then threw on every stroke and the shape
+      // just faded away un-recoloured. One producer, no drift.
+      buckets: bucketByColumn(track, width, height, steps),
       stats: {
         mode: "runs",
         filled: num("x-filled"),
@@ -444,7 +451,7 @@
   // output of the kernel — the labels, not a wave.
   function animateScan(sctx, origImageData, s, durationMs) {
     return new Promise((resolve) => {
-      const buckets = bucketByLevel(s.sweep, s.steps);
+      const buckets = s.buckets;
       const out = sctx.createImageData(origImageData.width, origImageData.height);
       out.data.set(origImageData.data);
       const palette = new Map();
@@ -577,8 +584,7 @@
 
   function revealScan(scan, imageData) {
     return new Promise((resolve) => {
-      const buckets = bucketByColumn(scan.track, scan.width, scan.height,
-                                     scan.steps);
+      const buckets = scan.buckets;
       const out = ctx.createImageData(canvas.width, canvas.height);
       out.data.set(imageData.data);
       const palette = new Map();
