@@ -46,6 +46,35 @@ flowchart LR
 | **5** | Who finds the seeds? | Seedless discovery: candidate waves + atomicMin union-find | **755,577 blobs in 24.8 ms**, one launch, zero seeds |
 | **6** | Why move pixels at all? | Runs, not pixels — run-table connected components | **58 ms → 1.46 ms** on the 81 Mpx image |
 
+<p align="center">
+  <img src="src/flood_fill_cuda/results/ch05_gpu_nblob_nblock/wavefront/input_blobs_final.gif" width="460" alt="chapter 5 filling all 2,522 blobs at once">
+</p>
+
+*Chapter 5 filling `input_blobs.png` — all 2,522 blobs discovered and
+flooding at once, each in its own colour, from a single launch with no
+seeds given. This is a replay of the recorded depth map (5 MB, 75
+frames). Chapter 6 has no such picture, and that is the point: it is not
+a BFS, so there is no wavefront to record.*
+
+### Every stage on the same image
+
+![every stage on input_blobs.png, from pure Python to ch06](src/flood_fill_cuda/results/ch06_gpu_nblob_runs/figures/chain.svg)
+
+`input_blobs.png` is the one picture every stage was asked to do, so the
+whole chain is directly comparable — **16,551× end to end**.
+
+Two things the chart is careful about:
+
+- **ch01–ch04 look slow here on purpose.** They are seeded single- or
+  two-blob kernels, so a 2,522-blob image costs them one launch *per
+  blob*. That is measured, not estimated, and it is what using that
+  stage would really cost. It is also why ch02 and ch03 sit *above*
+  ch01 — more blocks per launch does not help when the launch itself is
+  the unit being repeated 2,522 times.
+- **The ch06 bars come from a different session** than the rest (±8%
+  clock spread on this laptop). The smallest gap on the chart is 35×,
+  so it cannot change a conclusion.
+
 ---
 
 ## Chapter 6 — the current best
@@ -161,7 +190,6 @@ Both retroactively explain five chapters of "timing noise":
 uv sync
 uv run pytest                              # 723 tests, all chapters
 uv run python -m flood_fill_cuda.dashboard # whole-project dashboard
-uv run python -m flood_fill_cuda.service   # the web app, on :8000
 ```
 
 One chapter's benchmark + its dashboard section:
@@ -185,36 +213,6 @@ uv run python -m flood_fill_cuda.overview.build
 
 ---
 
-## The web app
-
-`uv run python -m flood_fill_cuda.service` → http://127.0.0.1:8000/
-
-**`/` — paint page.** Paint a blob, let go, watch it fill.
-
-| tool | what it does | kernel |
-|---|---|---|
-| CPU / GPU | seeded flood fill from where you released | ch01 / ch03 |
-| RUNS | no seed — finds and recolors *every* blob at once | ch06 |
-| ✳ SHOOT | fire hundreds to 50,000 drops; scans the whole canvas | ch06 |
-
-**SHOOT** is the clearest demo of chapter 6. The canvas never clears, so
-drops pile up and start touching:
-
-| drops fired | blobs found | merged away | GPU | CPU |
-|---|---|---|---|---|
-| 500 | 311 | 189 | 0.68 ms | 3.9 ms |
-| 10,000 | 4,068 | 5,932 | 0.68 ms | 20.9 ms |
-| 50,000 | **1,670** | 48,330 | 0.77 ms | 36.4 ms |
-
-Two things to watch: the **GPU time never moves** across a 100× range of
-input, and the blob count **peaks then collapses** — percolation, live.
-
-**`/skysurvey.html` — DEEP FIELD.** Guess the star count; the real kernel
-counts for you. Stars that touch merge into one blob, so the true count
-is below the number placed — the exact mistake a human eye makes.
-
----
-
 ## Layout
 
 ```
@@ -222,7 +220,7 @@ src/flood_fill_cuda/
   chapters/    the numbered narrative: ch00_cpu_baseline .. ch06_gpu_nblob_runs
   shared/      scene generators, CPU oracles, bandwidth model, plot core
   dashboard/   assembles every chapter's section into one page
-  service/     the web app (paint · RUNS · SHOOT · DEEP FIELD)
+  service/     interactive demo app (not part of the benchmark chain)
   overview/    the one-page grand table
   experiments/ live side-tracks (triton/, scan_multi_blob/)
   results/     generated JSON/CSV/HTML + wavefront renders, one folder per chapter
