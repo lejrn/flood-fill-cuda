@@ -1,12 +1,15 @@
 """Static figures for the READMEs — rendered, never hand-drawn.
 
-Four files into results/ch06_gpu_nblob_runs/figures/:
+Five files into results/ch06_gpu_nblob_runs/figures/:
 
     before_after.gif   a crop of the REAL input_blobs.png beside what the
                        kernel actually returns for it
     runs_vs_pixels.svg the chapter's one idea, to scale
     speedup.svg        ch05 vs ch06 per scene, log axis
     scaling.svg        runtime vs image size, with the 1 ms / 0.5 ms lines
+    chain.svg          EVERY stage on that one image, pure Python -> ch06,
+                       read from the overview grand table (a different
+                       session, which the caption says out loud)
 
 Everything comes from the committed benchmark JSON and the real image, so
 a figure can never drift from the numbers the text quotes: re-run this
@@ -39,6 +42,7 @@ from ....shared import results_paths
 FIG_DIR = results_paths.results_dir("ch06_gpu_nblob_runs", "figures")
 RESULTS_DIR = results_paths.results_dir("ch06_gpu_nblob_runs",
                                         "benchmark_results")
+OVERVIEW_DIR = results_paths.results_dir("overview", "benchmark_results")
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                           *[".."] * 5))
 INPUT_PNG = os.path.join(_REPO_ROOT, "images", "input", "input_blobs.png")
@@ -56,8 +60,8 @@ FONT = ("-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,"
 MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
 
 
-def _newest(pattern):
-    hits = sorted(glob.glob(os.path.join(RESULTS_DIR, pattern)))
+def _newest(pattern, folder=None):
+    hits = sorted(glob.glob(os.path.join(folder or RESULTS_DIR, pattern)))
     return json.load(open(hits[-1])) if hits else None
 
 
@@ -280,6 +284,96 @@ def scaling(sc):
     return _svg(W, H, "\n".join(body), "Runtime versus image size")
 
 
+# -------------------------------------------------------------- the chain
+
+# Best variant per stage on the png_blobs row of the grand table. ch01-ch04
+# are single/two-blob kernels, so "doing this job" means one call per blob
+# (per pair for ch04) — measured, not estimated, and the reason they land
+# in seconds. That IS what using that stage would cost.
+CHAIN = [
+    ("pure Python BFS", "pure_python", "CPU"),
+    ("@njit CCL + fill", "njit", "CPU"),
+    ("ch01 · 1 block", "ch01_ring", "ring"),
+    ("ch02 · 2 blocks", "ch02_dirsplit", "dirsplit"),
+    ("ch03 · N blocks", "ch03_conn8", "conn8"),
+    ("ch04 · 2 blobs", "ch04_multi", "multisource"),
+    ("ch05 · N blobs", "ch05_split_L8", "split_L8"),
+]
+
+
+def chain(overview, runs):
+    """Every stage of the project on ONE image — the user's own
+    input_blobs.png — from pure Python to ch06.
+
+    Two honesty notes live in the caption, not just here: ch01-ch04 are
+    seeded single/two-blob kernels, so a 2,522-blob picture costs them
+    one launch per blob; and the ch06 bar comes from a different session
+    than the rest (±8% clock spread on this laptop), which cannot touch
+    a conclusion whose smallest gap is 35×.
+    """
+    import math
+    row = next(r for r in overview["rows"] if r["row"] == "png_blobs")
+    scene = next(s for s in runs["scenes"] if s["scene"] == "input_blobs")
+
+    bars = []
+    for label, key, variant in CHAIN:
+        cell = row["cells"].get(key)
+        ms = cell.get("ms") if isinstance(cell, dict) else cell
+        if ms:
+            bars.append((label, variant, float(ms), C_CH05 if "ch" in key
+                         else RULE))
+    bars.append(("ch06 · N runs", "rgb in",
+                 scene["ch06"]["rgb"]["median_ms"], C_RGB))
+    bars.append(("ch06 · N runs", "packed mask in",
+                 scene["ch06"]["mask"]["median_ms"], C_MASK))
+
+    slowest = bars[0][2]
+    lo = 1.0
+    hi = 10 ** math.ceil(math.log10(slowest))
+    W, row_h, lab_w, pad_r = 720, 30, 132, 96
+    H = len(bars) * row_h + 92
+    span = W - lab_w - pad_r
+
+    def x_of(v):
+        return lab_w + (math.log10(max(v, lo)) - math.log10(lo)) / (
+            math.log10(hi) - math.log10(lo)) * span
+
+    body = [_text(0, 16, "The whole chain on one image — "
+                         "input_blobs.png, 81 Mpx, 2,522 blobs", 13,
+                  INK_STRONG, weight="600")]
+    t = lo
+    while t <= hi:
+        x = x_of(t)
+        body.append(f'<line x1="{x:.1f}" y1="28" x2="{x:.1f}" '
+                    f'y2="{len(bars) * row_h + 32}" stroke="{RULE}" '
+                    f'stroke-width="1" stroke-opacity="0.22"/>')
+        lab = f"{t:g}" if t < 1000 else f"{t / 1000:g}s"
+        body.append(_text(x, len(bars) * row_h + 48, lab, 10, INK,
+                          anchor="middle", mono=True))
+        t *= 10
+    body.append(_text(lab_w + span / 2, len(bars) * row_h + 64,
+                      "milliseconds (log)", 10.5, INK, anchor="middle"))
+
+    for i, (label, variant, ms, colour) in enumerate(bars):
+        y = 32 + i * row_h
+        body.append(_text(lab_w - 10, y + 15, label, 11.5, INK, anchor="end"))
+        bw = max(2.0, x_of(ms) - lab_w)
+        body.append(f'<rect x="{lab_w}" y="{y + 3}" width="{bw:.1f}" '
+                    f'height="16" rx="2.5" fill="{colour}"/>')
+        txt = f"{ms:,.0f} ms" if ms >= 100 else f"{ms:.2f} ms"
+        body.append(_text(lab_w + bw + 8, y + 16, txt, 10.5, INK_STRONG,
+                          mono=True))
+        body.append(_text(W - 4, y + 16, variant, 10, INK, anchor="end"))
+    fastest = bars[-1][2]
+    body.append(_text(0, H - 8, f"pure Python → ch06: "
+                                f"{slowest / fastest:,.0f}× on the same "
+                                f"picture. ch01–ch04 are seeded "
+                                f"single/two-blob kernels — a 2,522-blob "
+                                f"image costs them one launch per blob.",
+                      11, INK))
+    return _svg(W, H, "\n".join(body), "Every stage on input_blobs.png")
+
+
 def main():
     runs = _newest("runs_*.json")
     sc = _newest("scaling_*.json")
@@ -287,10 +381,18 @@ def main():
         print("missing benchmark JSON — run benchmark.py and scaling.py first")
         return 1
 
+    figs = [("runs_vs_pixels.svg", runs_vs_pixels(runs)[0]),
+            ("speedup.svg", speedup(runs)),
+            ("scaling.svg", scaling(sc))]
+    overview = _newest("overview_*.json", OVERVIEW_DIR)
+    if overview is not None:
+        figs.append(("chain.svg", chain(overview, runs)))
+    else:
+        print("no overview JSON — chain.svg skipped "
+              "(run flood_fill_cuda.overview.bench)")
+
     written = []
-    for name, svg in (("runs_vs_pixels.svg", runs_vs_pixels(runs)[0]),
-                      ("speedup.svg", speedup(runs)),
-                      ("scaling.svg", scaling(sc))):
+    for name, svg in figs:
         path = os.path.join(FIG_DIR, name)
         with open(path, "w") as f:
             f.write(svg)
