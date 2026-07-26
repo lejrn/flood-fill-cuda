@@ -92,6 +92,7 @@ uv run python -m flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.visua
 uv run python -m flood_fill_cuda.dashboard
 
 # Paint-and-fill web service: paint a blob, the GPU floods it live
+#   (+ DEEP FIELD, the star-count game, on ch06's seedless kernel)
 uv run python -m flood_fill_cuda.service
 ```
 
@@ -102,7 +103,7 @@ src/flood_fill_cuda/
   shared/         scene generators, CPU oracles, bandwidth model, shared HTML/plot core — used across chapters
   chapters/       the numbered narrative: ch00_cpu_baseline .. ch06_gpu_nblob_runs
   dashboard/      assembles every chapter's renderer into one whole-project dashboard page
-  service/        interactive web app — paint a blob, ch03's kernel floods it, browser animates + it falls
+  service/        interactive web app — paint a blob, ch03 floods it or ch06 recolours every blob; browser animates + it falls
   experiments/    live side-tracks outside the numbered chain (triton/, scan_multi_blob/)
   tutorials/      standalone Numba/CUDA learning scripts
   results/        generated benchmark JSON/CSV/HTML and wavefront renders, one folder per chapter (+ dashboard/)

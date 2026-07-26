@@ -249,3 +249,107 @@ def test_deterministic_across_runs():
 
 def test_warmup_runs_without_error():
     engine.warmup()
+
+
+# ---------------------------------------------------------------- ch06
+# engine.discover is the seedless half of the service, and since ch06
+# replaced ch05 underneath it the load-bearing claim is that NOTHING
+# observable moved: the same canonical labels, the same seeds, the same
+# blob count as the CPU oracle. Only `depth` went away, because ch06 has
+# no BFS to have levels of.
+
+def _three_blob_mask():
+    mask = np.zeros((120, 160), dtype=bool)
+    mask[10:40, 10:50] = True                       # square
+    mask[60:110, 20:60] = True                      # taller square
+    yy, xx = np.mgrid[0:120, 0:160]
+    mask[((yy - 55) ** 2 + (xx - 120) ** 2) < 30 ** 2] = True   # disc
+    return mask
+
+
+def test_discover_matches_cpu_oracle():
+    from ..chapters.ch05_gpu_nblob_nblock.cpu_oracle import cpu_label_components
+    mask = _three_blob_mask()
+    out = engine.discover(mask)
+    img = engine._build_image(mask)
+    label, n = cpu_label_components(img)
+
+    assert out.n_blobs == n == 3
+    assert out.filled == int(mask.sum())
+    # dense track ids must be the oracle's components, renumbered in
+    # canonical order — the exact map ch05 produced before the swap
+    roots = np.unique(label[label >= 0])
+    expect = np.zeros(label.shape, dtype=np.int64)
+    m = label >= 0
+    expect[m] = np.searchsorted(roots, label[m]) + 1
+    np.testing.assert_array_equal(out.track_u16, expect.T)
+    # one canonical seed per blob, and each is a painted pixel
+    height = img.shape[1]
+    np.testing.assert_array_equal(
+        out.seeds, np.stack([roots // height, roots % height], axis=1))
+    for x, y in out.seeds:
+        assert mask[y, x]
+
+
+def test_discover_run_and_union_counts_are_structural():
+    mask = _three_blob_mask()
+    out = engine.discover(mask)
+    # every successful link retires exactly one root
+    assert out.unions == out.n_runs - out.n_blobs
+    # runs are strictly cheaper than the pixels they describe
+    assert 0 < out.n_runs < out.filled
+
+
+def test_discover_sweep_is_scan_order_not_a_timeline():
+    """The sweep field must be a pure function of the canvas COLUMN (the
+    kernel's row-major axis is the mask's transpose), covering exactly
+    the painted pixels."""
+    mask = _three_blob_mask()
+    out = engine.discover(mask)
+    np.testing.assert_array_equal(out.sweep_u16 > 0, mask)
+    for col in np.nonzero(mask.any(axis=0))[0]:
+        assert len(np.unique(out.sweep_u16[:, col][mask[:, col]])) == 1
+    assert 1 <= out.sweep_u16.max() <= out.steps
+
+
+def test_discover_empty_canvas_is_valid():
+    out = engine.discover(np.zeros((48, 48), dtype=bool))
+    assert (out.n_blobs, out.n_runs, out.filled) == (0, 0, 0)
+    assert out.seeds.shape == (0, 2)
+    assert (out.sweep_u16 == 0).all() and (out.track_u16 == 0).all()
+
+
+def test_discover_amplify_reports_at_scale():
+    mask = _three_blob_mask()
+    plain = engine.discover(mask, amplify=False)
+    amped = engine.discover(mask, amplify=True)
+    assert plain.amplified_filled == 0
+    assert amped.amplified_filled > amped.filled * 10
+    assert amped.amplified_kernel_ms > 0
+    # the returned maps are the real-size scan either way
+    assert amped.sweep_u16.shape == plain.sweep_u16.shape
+    assert amped.n_blobs == plain.n_blobs
+
+
+def test_discover_is_deterministic_and_reuses_buffers():
+    """ch06's engine cache keeps buffers between calls; repeated scans of
+    the same canvas must still give identical answers."""
+    mask = _three_blob_mask()
+    a = engine.discover(mask)
+    b = engine.discover(mask)
+    np.testing.assert_array_equal(a.track_u16, b.track_u16)
+    np.testing.assert_array_equal(a.sweep_u16, b.sweep_u16)
+    np.testing.assert_array_equal(a.seeds, b.seeds)
+    assert (a.n_blobs, a.n_runs, a.unions) == (b.n_blobs, b.n_runs, b.unions)
+
+
+def test_discover_survives_thin_strokes():
+    """A one-pixel-wide scribble is the run table's worst case (every run
+    length 1) and the case ch06's default capacity heuristic under-sizes —
+    the host pre-count is what keeps it from tripping."""
+    mask = np.zeros((200, 200), dtype=bool)
+    for i in range(0, 200, 2):
+        mask[i, :] = True                 # 100 disjoint horizontal lines
+    out = engine.discover(mask)
+    assert out.n_blobs == 100
+    assert out.filled == int(mask.sum())

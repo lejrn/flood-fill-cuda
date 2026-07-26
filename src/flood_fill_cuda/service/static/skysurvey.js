@@ -1,5 +1,5 @@
 // DEEP FIELD: a shared star field, you estimate the count, then the REAL
-// ch05 kernel surveys it — the discovery wavefront sweeps the frame, every
+// ch06 kernel surveys it — a scan bar sweeps the frame, every
 // star lights in its own color, a counter spins up to the true number, and
 // the closest guess climbs the leaderboard. No build step, no deps.
 (() => {
@@ -106,10 +106,15 @@
   }
   const hue = (id) => (id * GOLDEN) % 360;
 
-  function bucketByLevel(depth, levels) {
-    const buckets = Array.from({ length: Math.max(levels, 1) }, () => []);
-    for (let i = 0; i < depth.length; i++) {
-      const v = depth[i];
+  // Bucket pixels by the kernel's SCAN ORDER, not by time: ch06 has no
+  // BFS levels, because it has no BFS. Every row is counted, emitted and
+  // merged at once and the whole scan is over in about a millisecond, so
+  // the reveal animates the one ordering the algorithm really has — its
+  // row-major sweep, which is left-to-right on the canvas.
+  function bucketBySweep(sweep, steps) {
+    const buckets = Array.from({ length: Math.max(steps, 1) }, () => []);
+    for (let i = 0; i < sweep.length; i++) {
+      const v = sweep[i];
       if (v > 0) buckets[v - 1].push(i);
     }
     return buckets;
@@ -122,19 +127,19 @@
     const dv = new DataView(buf);
     const width = dv.getUint32(4, true);
     const height = dv.getUint32(8, true);
-    const levels = dv.getUint32(12, true);
+    const steps = dv.getUint32(12, true);
     const nBlobs = dv.getUint32(16, true);
     const n = width * height;
     let off = 24;
-    const depth = new Uint16Array(buf, off, n); off += 2 * n;
+    const sweep = new Uint16Array(buf, off, n); off += 2 * n;
     const track = new Uint16Array(buf, off, n);
-    return { width, height, levels, nBlobs, depth, track,
+    return { width, height, steps, nBlobs, sweep, track,
              kernelMs: parseFloat(resp.headers.get("x-kernel-ms")) || 0 };
   }
 
   function revealAnimation(s, trueCount) {
     return new Promise((resolve) => {
-      const buckets = bucketByLevel(s.depth, s.levels);
+      const buckets = bucketBySweep(s.sweep, s.steps);
       const out = xctx.createImageData(s.width, s.height);
       const palette = new Map();
       const colorOf = (id) => {
@@ -149,7 +154,7 @@
       function frame(ts) {
         if (start === null) start = ts;
         const p = Math.min((ts - start) / REVEAL_MS, 1);
-        const t = Math.min(Math.floor(p * s.levels), s.levels - 1);
+        const t = Math.min(Math.floor(p * s.steps), s.steps - 1);
         for (let lvl = prevLevel + 1; lvl <= t; lvl++) {
           for (const i of buckets[lvl]) {
             const id = s.track[i];

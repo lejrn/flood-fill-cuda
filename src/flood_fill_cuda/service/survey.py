@@ -5,7 +5,7 @@ player guesses — plus a persistent leaderboard of names and guesses.
 
 The field is generated from a seed (so the server can regenerate the
 exact bytes any player scans), but the TRUTH is never the generator's
-bookkeeping: it is `engine.discover(...).n_blobs`, the real ch05 kernel
+bookkeeping: it is `engine.discover(...).n_blobs`, the real ch06 kernel
 run on the field. That matters because stars that TOUCH merge into one
 component, so the honest answer differs from "stars placed" — which is
 exactly the counting mistake a human eye makes, and the whole game.

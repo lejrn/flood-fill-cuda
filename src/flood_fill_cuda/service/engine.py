@@ -1,5 +1,13 @@
-"""GPU/CPU engine wrapper around ch03's single-seed flood fill and its ch01
-CPU oracle, for the paint service.
+"""GPU/CPU engine wrapper for the paint service.
+
+Two jobs, two kernels:
+
+- `run_fill` — ch03's single-seed cooperative flood fill and its ch01 CPU
+  oracle. Seeded, one blob, returns a real BFS depth map. This is what the
+  paint page's CPU/GPU toggle compares.
+- `discover` — ch06's run-table connected components. Seedless, every blob
+  at once, no depth map because there is no BFS. Backs /api/scan (DEEP
+  FIELD, and the paint page's RUNS mode).
 
 Three things a plain call to `ch03.flood_fill.flood_fill` doesn't give a web
 handler for free, all handled here:
@@ -51,9 +59,10 @@ import numpy as np
 
 from ..chapters.ch01_gpu_1blob_1block.cpu_oracle import cpu_flood_fill
 from ..chapters.ch03_gpu_1blob_nblock.flood_fill import flood_fill
-from ..chapters.ch05_gpu_nblob_nblock.flood_fill import (
-    flood_fill as seedless_fill)
 from ..chapters.ch05_gpu_nblob_nblock.cpu_oracle import cpu_fill_canonical
+from ..chapters.ch06_gpu_nblob_runs.recolor import RunRecolor
+from ..chapters.ch06_gpu_nblob_runs.kernels import (
+    N_RUNS, N_BLOBS, UNION_DONE, RUN_OVERFLOW)
 
 MAX_PIXELS = 4_000_000       # generous headroom over any realistic stroke bbox
 THREADS_PER_BLOCK = 256
@@ -61,6 +70,11 @@ CONNECTIVITY = 4              # diamond wavefronts — the more legible animatio
 DEPTH_CLAMP = 65535           # uint16 ceiling; only a >65k-level stroke clips
 MAX_TRACKS = 65_535           # dense track ids are uint16; 0 = background
 MODES = ("cpu", "gpu")
+
+# Sweep buckets for the /api/scan reveal. NOT a timeline — see
+# `_sweep_field`. Enough steps to look continuous, few enough that the
+# browser's per-bucket index lists stay cheap to build.
+SWEEP_STEPS = 240
 
 AMPLIFY_FACTOR = 250          # target pixel-count multiplier for the timing run
 # Separate, higher ceiling than MAX_PIXELS (which guards the *input* upload)
@@ -220,21 +234,27 @@ def run_fill(mask_hw, mode="gpu", seed_x=None, seed_y=None):
 
 @dataclass
 class ScanOutcome:
-    """One seedless discovery pass over the whole canvas (ch05)."""
-    depth_u16: np.ndarray   # (height, width) uint16, 0=unfilled else level+1
+    """One seedless discovery pass over the whole canvas (ch06)."""
+    sweep_u16: np.ndarray   # (height, width) uint16, 0=background else
+                             # 1..steps — SCAN ORDER, not a timeline
     track_u16: np.ndarray   # (height, width) uint16, 0=background else 1..N
-    prov_u16: np.ndarray    # same encoding over provisional labels, or None
     seeds: np.ndarray       # (n_blobs, 2) int32 (x, y), row i = track i+1
     width: int
     height: int
-    levels: int
+    steps: int
     n_blobs: int
     filled: int
-    candidates: int
+    n_runs: int
     unions: int
     kernel_ms: float
     total_ms: float
     phase_ms: dict
+    amplified_filled: int   # 0 when no amplified run was asked for
+    amplified_runs: int
+    amplified_kernel_ms: float
+    cold: bool              # first launch after an idle GPU — the clock
+                             # had not spun up, so kernel_ms is an
+                             # over-estimate. See COLD_AFTER_S.
 
 
 def _dense_tracks(label_xy, height):
@@ -256,14 +276,123 @@ def _dense_tracks(label_xy, height):
     return track_xy, seeds
 
 
-def discover(mask_hw, prov=False):
-    """Seedless multi-blob discovery on the whole canvas: ch05's
-    seed_merge kernel finds every blob, picks its canonical seed and
-    labels it, in one cooperative launch. An empty mask is VALID
-    (n_blobs=0) — that is the ch05 contract.
+# ch06 keeps its buffers between calls by design (see its RunRecolor
+# docstring: the benchmark measures the steady state of a pipeline, which
+# is what a real caller pays). DEEP FIELD rescans the same-sized field
+# over and over, so caching one engine per canvas size turns every scan
+# after the first into pure kernel time. Only ever touched from the
+# single-threaded GPU executor, so it needs no lock.
+_ch06_engines = {}
+_CH06_CACHE_MAX = 4
 
-    Instrumented (bare=False): the outcome carries the in-kernel phase
-    wall times and the union counters the game's HUD shows.
+# Seconds of GPU idleness after which the next launch is reported COLD.
+# Chapter 6's measurement lesson, arriving in production: this GPU drops
+# to ~700 MHz (of 3105) when nothing is running and does not climb for
+# kernels that finish in a millisecond. Measured through this very
+# endpoint, the first scan after a pause reads 37 ms for the same
+# amplified run that reads 1.1 ms back-to-back. Rather than hide that
+# behind a keep-warm spin loop — burning the GPU to flatter a number —
+# the outcome carries a `cold` flag and the UI says so.
+COLD_AFTER_S = 5.0
+_last_gpu_call = 0.0
+
+
+def _ch06_engine(width, height, n_runs_hint):
+    key = (width, height)
+    engine = _ch06_engines.get(key)
+    if engine is not None and engine.run_capacity >= n_runs_hint:
+        return engine
+    if len(_ch06_engines) >= _CH06_CACHE_MAX and key not in _ch06_engines:
+        _ch06_engines.pop(next(iter(_ch06_engines)))
+    engine = RunRecolor(width, height,
+                        run_capacity=max(8192, int(n_runs_hint * 1.25)))
+    _ch06_engines[key] = engine
+    return engine
+
+
+def _host_run_count(mask_hw):
+    """Runs the ch06 table will need, counted on the host with numpy.
+
+    ch06 sizes its run table from a heuristic (one slot per 16 px) and
+    trips a tripwire if a scene is finer-grained than that — which a
+    painted canvas of thin strokes easily is. Counting first turns a
+    would-be 500 into a correctly-sized buffer. Runs lie along the
+    kernel's contiguous axis, which is the mask's COLUMN direction (the
+    kernel image is the mask transposed).
+    """
+    m = mask_hw.astype(np.int8)
+    return int((np.diff(m, axis=0, prepend=0) == 1).sum())
+
+
+def _sweep_field(label_xy, width, height, steps):
+    """Per-pixel sweep bucket, 0 = background, else 1..steps.
+
+    HONEST LABEL: this is the order the kernel SCANS in, not an order it
+    happens in. ch05's depth map was a real BFS timeline — level 3 truly
+    came after level 2. ch06 has no temporal structure at all: every row
+    is counted, emitted and merged at once, and the whole thing is over
+    in about a millisecond. So the reveal animates the one ordering the
+    algorithm does have — its row-major scan — and nothing here should be
+    read as "this pixel was found later than that one".
+
+    The kernel image is the mask transposed, so a kernel row is a canvas
+    COLUMN: the sweep runs left to right across the picture.
+    """
+    lit = (label_xy >= 0).T                     # -> (height, width)
+    col = np.arange(width, dtype=np.int64)
+    bucket = (col * steps) // max(width, 1) + 1   # 1..steps, per column
+    field = np.where(lit, bucket[None, :], 0)
+    return np.ascontiguousarray(field.astype('<u2'))
+
+
+def _run_ch06(mask_hw):
+    """One ch06 pass over a mask. Returns (label_xy, counters, kernel_ms,
+    total_ms, phase_ms)."""
+    from numba import cuda
+    global _last_gpu_call
+    cold = (time.perf_counter() - _last_gpu_call) > COLD_AFTER_S
+    height, width = mask_hw.shape
+    img = _build_image(mask_hw)
+    engine = _ch06_engine(width, height, _host_run_count(mask_hw))
+
+    t0 = time.perf_counter()
+    dev = cuda.to_device(img)
+    names, events = engine.run(dev, contract="rgb")
+    cuda.synchronize()
+    kernel_ms = cuda.event_elapsed_time(events[0], events[-1])
+    counters = engine.counters.copy_to_host()
+    if counters[RUN_OVERFLOW]:
+        raise RuntimeError(
+            f"ch06 run table overflowed ({counters[N_RUNS]} runs) — the "
+            f"host pre-count under-estimated it")
+    label_dev = cuda.to_device(np.full((width, height), -1, dtype=np.int32))
+    engine.emit_label_map(label_dev)
+    cuda.synchronize()
+    label_xy = label_dev.copy_to_host()
+    total_ms = (time.perf_counter() - t0) * 1000.0
+    phase_ms = {n: cuda.event_elapsed_time(events[i], events[i + 1])
+                for i, n in enumerate(names)}
+    _last_gpu_call = time.perf_counter()
+    return label_xy, counters, kernel_ms, total_ms, phase_ms, cold
+
+
+def discover(mask_hw, amplify=False):
+    """Seedless multi-blob discovery over the whole canvas — ch06.
+
+    No seeds, no mode: the GPU decomposes the canvas into runs, unions
+    the ones that touch, and hands back one canonical label per blob.
+    An empty mask is VALID (n_blobs=0), the same contract ch05 set.
+
+    What changed from ch05 (which this replaced): there is no `depth`
+    map and no `levels`, because there is no BFS. The reveal field is a
+    scan-order sweep instead — see `_sweep_field`. Canonical labels are
+    unchanged, so `track` ids and `seeds` mean exactly what they did.
+
+    amplify: also run the same shape upscaled ~AMPLIFY_FACTOR x, purely
+    to report an honest kernel time at a scale that isn't launch-bound.
+    A painted stroke is ~100k px, where ch06's six launches dominate; the
+    paint page's RUNS mode asks for this so its number is comparable with
+    the CPU/GPU modes, which have always reported the amplified run.
     """
     if mask_hw.ndim != 2 or mask_hw.dtype != bool:
         raise ValueError("mask must be a 2-D boolean array")
@@ -273,39 +402,38 @@ def discover(mask_hw, prov=False):
             f"canvas is {width}x{height} ({width * height} px), over the "
             f"{MAX_PIXELS} px cap")
 
-    img = _build_image(mask_hw)
-    # split_L8 — the tuning chapter's own recipe. Long thin strokes are
-    # the "snake" case: corner-rule seeding runs thousands of BFS levels
-    # on them, while the S8 lattice collapses the level count and the
-    # split build keeps all 48 cooperative blocks. Canonical labels are
-    # provably identical to v1's (stride/build-invariant).
-    r = seedless_fill(img, variant="seed_merge", lattice=8, build="split",
-                      threads_per_block=THREADS_PER_BLOCK, bare=False)
+    label_xy, counters, kernel_ms, total_ms, phase_ms, cold = \
+        _run_ch06(mask_hw)
 
-    track_xy, seeds = _dense_tracks(r.label, height)
-    depth_hw = r.depth.T
-    depth_u16 = np.ascontiguousarray(
-        np.where(depth_hw < 0, 0,
-                 np.minimum(depth_hw + 1, DEPTH_CLAMP)).astype('<u2'))
+    track_xy, seeds = _dense_tracks(label_xy, height)
+    steps = max(1, min(SWEEP_STEPS, width))
+    sweep_u16 = _sweep_field(label_xy, width, height, steps)
     track_u16 = np.ascontiguousarray(track_xy.T.astype('<u2'))
 
-    prov_u16 = None
-    if prov and r.prov_label is not None:
-        proots = np.unique(r.prov_label[r.prov_label >= 0])
-        pmask = r.prov_label >= 0
-        prov_xy = np.zeros(r.prov_label.shape, dtype=np.int64)
-        prov_xy[pmask] = (np.searchsorted(proots, r.prov_label[pmask])
-                          % MAX_TRACKS) + 1
-        prov_u16 = np.ascontiguousarray(prov_xy.T.astype('<u2'))
+    amplified_filled = amplified_runs = 0
+    amplified_kernel_ms = 0.0
+    if amplify:
+        big_mask, scale = _amplify_mask(mask_hw, AMPLIFY_FACTOR,
+                                        MAX_AMPLIFIED_PIXELS)
+        if scale > 1.0:
+            (_lbl, big_counters, amplified_kernel_ms,
+             _t, _p, _c) = _run_ch06(big_mask)
+            amplified_filled = int(big_mask.sum())
+            amplified_runs = int(big_counters[N_RUNS])
 
     return ScanOutcome(
-        depth_u16=depth_u16, track_u16=track_u16, prov_u16=prov_u16,
-        seeds=seeds, width=width, height=height,
-        levels=int(r.levels), n_blobs=int(r.n_blobs),
-        filled=int(r.filled), candidates=int(r.candidates),
-        unions=int(r.union_done),
-        kernel_ms=float(r.kernel_ms), total_ms=float(r.total_ms),
-        phase_ms=dict(r.phase_ms or {}),
+        sweep_u16=sweep_u16, track_u16=track_u16, seeds=seeds,
+        width=width, height=height, steps=steps,
+        n_blobs=int(counters[N_BLOBS]),
+        filled=int((label_xy >= 0).sum()),
+        n_runs=int(counters[N_RUNS]),
+        unions=int(counters[UNION_DONE]),
+        kernel_ms=float(kernel_ms), total_ms=float(total_ms),
+        phase_ms=phase_ms,
+        amplified_filled=amplified_filled,
+        amplified_runs=amplified_runs,
+        amplified_kernel_ms=float(amplified_kernel_ms),
+        cold=bool(cold),
     )
 
 
@@ -327,5 +455,5 @@ def warmup():
     tiny[4, 4] = True
     run_fill(tiny, mode="gpu")
     run_fill(tiny, mode="cpu")
-    discover(tiny, prov=True)
+    discover(tiny, amplify=True)
     njit_reference_ms(tiny)

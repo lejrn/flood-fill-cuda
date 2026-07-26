@@ -272,6 +272,50 @@
     return { width, height, levels, depth, stats };
   }
 
+  // ---- RUNS mode: ch06, seedless -------------------------------------
+  // A different job, so a different endpoint: /api/scan takes no seed and
+  // finds EVERY blob in the crop at once. The response carries a `sweep`
+  // field instead of `depth` — ch06 is not a BFS, so no pixel has a level;
+  // see app.py's wire-format note.
+  async function requestScan(shapeCanvas) {
+    const blob = await new Promise((res) => shapeCanvas.toBlob(res, "image/png"));
+    const resp = await fetch("/api/scan?amp=1", { method: "POST", body: blob });
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error(`scan failed (${resp.status}): ${detail.detail || resp.statusText}`);
+    }
+    const buf = await resp.arrayBuffer();
+    const dv = new DataView(buf);
+    const width = dv.getUint32(4, true);
+    const height = dv.getUint32(8, true);
+    const steps = dv.getUint32(12, true);
+    const nBlobs = dv.getUint32(16, true);
+    const n = width * height;
+    let off = 24;
+    const sweep = new Uint16Array(buf, off, n); off += 2 * n;
+    const track = new Uint16Array(buf, off, n);
+    const num = (h) => parseInt(resp.headers.get(h), 10) || 0;
+    return {
+      width, height, steps, nBlobs, sweep, track,
+      stats: {
+        mode: "runs",
+        filled: num("x-filled"),
+        runs: num("x-runs"),
+        nBlobs,
+        amplifiedFilled: num("x-amplified-filled"),
+        amplifiedRuns: num("x-amplified-runs"),
+        // the GPU idles at ~700 MHz and won't spin up for a 1 ms kernel,
+        // so the first scan after a pause reads several times high. Say
+        // so instead of quietly showing the bad number.
+        cold: resp.headers.get("x-cold") === "1",
+        // the amplified run is the honest at-scale number, exactly as the
+        // CPU/GPU modes report; fall back to the real one if it's absent
+        kernelMs: parseFloat(resp.headers.get("x-amplified-kernel-ms"))
+                  || parseFloat(resp.headers.get("x-kernel-ms")) || 0,
+      },
+    };
+  }
+
   // Bucket pixel indices by BFS level once, so the animation loop only
   // ever touches pixels newly crossed this frame instead of rescanning
   // the whole depth array every tick. Mirrors the depth-threshold replay
@@ -355,6 +399,65 @@
     });
   }
 
+  // The scan bar's leading edge — cool where the fill's frontier is warm,
+  // so the two modes never read as the same animation.
+  const SCAN_EDGE = [96, 214, 224];
+
+  // Per-blob colour from its dense track id, spun by the golden angle so
+  // neighbouring ids never land on neighbouring hues.
+  function trackColor(id) {
+    return hslToRgb((id * 137.508) % 360, 0.55, 0.42);
+  }
+
+  // The RUNS reveal. Same one-way bucket walk as animateFill, but the
+  // buckets are SCAN ORDER, not time: ch06 processes every row at once,
+  // so this animates where the kernel looks, not when it got there. Each
+  // blob comes up in its own canonical-label colour, which is the actual
+  // output of the kernel — the labels, not a wave.
+  function animateScan(sctx, origImageData, s, durationMs) {
+    return new Promise((resolve) => {
+      const buckets = bucketByLevel(s.sweep, s.steps);
+      const out = sctx.createImageData(origImageData.width, origImageData.height);
+      out.data.set(origImageData.data);
+      const palette = new Map();
+      const colorOf = (id) => {
+        let c = palette.get(id);
+        if (!c) { c = trackColor(id); palette.set(id, c); }
+        return c;
+      };
+
+      const duration = Math.max(durationMs, 1);
+      let start = null, prevStep = -1;
+
+      function paintIdx(idx, color) {
+        const p = idx * 4;
+        out.data[p] = color[0];
+        out.data[p + 1] = color[1];
+        out.data[p + 2] = color[2];
+        out.data[p + 3] = origImageData.data[p + 3];
+      }
+
+      function frame(ts) {
+        if (start === null) start = ts;
+        const elapsed = ts - start;
+        let t = Math.floor((elapsed / duration) * s.steps);
+        if (t > s.steps - 1) t = s.steps - 1;
+        for (let k = prevStep + 1; k <= t; k++) {
+          for (const idx of buckets[k]) paintIdx(idx, colorOf(s.track[idx]));
+        }
+        const edge = t + 1;
+        if (edge < s.steps) {
+          for (const idx of buckets[edge]) paintIdx(idx, SCAN_EDGE);
+        }
+        sctx.putImageData(out, 0, 0);
+        prevStep = t;
+        if (elapsed < duration) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
   // ---- falling shapes ------------------------------------------------
   function evictOldestIfNeeded() {
     while (liveShapes.length > MAX_LIVE_SHAPES) {
@@ -369,10 +472,18 @@
   function showStatsLabel(wrap, stats, levels) {
     const label = document.createElement("div");
     label.className = "shape-stats";
-    label.textContent =
-      `${stats.mode.toUpperCase()} · ${stats.filled.toLocaleString()} px → ` +
-      `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
-      `${levels} levels · ${stats.kernelMs.toFixed(2)} ms`;
+    // RUNS reports what ch06 actually counts — blobs and runs. There is
+    // no level count to show, because there are no levels.
+    label.textContent = stats.mode === "runs"
+      ? `RUNS · ${stats.nBlobs.toLocaleString()} blob` +
+        `${stats.nBlobs === 1 ? "" : "s"} · ` +
+        `${stats.filled.toLocaleString()} px → ` +
+        `${stats.runs.toLocaleString()} runs · ` +
+        `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
+        `${stats.kernelMs.toFixed(2)} ms${stats.cold ? " (cold clock)" : ""}`
+      : `${stats.mode.toUpperCase()} · ${stats.filled.toLocaleString()} px → ` +
+        `${stats.amplifiedFilled.toLocaleString()} px @ scale · ` +
+        `${levels} levels · ${stats.kernelMs.toFixed(2)} ms`;
     wrap.appendChild(label);
     return label;
   }
@@ -418,15 +529,25 @@
 
     let labelDone = Promise.resolve();
     try {
-      const { levels, depth, stats } = await requestFill(shapeCanvas, mode, seedX, seedY);
-      // Shown the instant the fill computation's result is known, right
-      // above the blob, so the timing is legible exactly when it matters.
-      // Its own lifetime (STATS_LIFETIME_MS) runs independently of the
-      // blob's fade below.
-      const label = showStatsLabel(wrap, stats, levels);
-      labelDone = scheduleStatsRemoval(label);
-      if (levels > 0) {
-        await animateFill(sctx, origImageData, depth, levels, stats.kernelMs);
+      if (mode === "runs") {
+        const scan = await requestScan(shapeCanvas);
+        const label = showStatsLabel(wrap, scan.stats, scan.steps);
+        labelDone = scheduleStatsRemoval(label);
+        if (scan.nBlobs > 0) {
+          await animateScan(sctx, origImageData, scan, scan.stats.kernelMs);
+        }
+      } else {
+        const { levels, depth, stats } =
+          await requestFill(shapeCanvas, mode, seedX, seedY);
+        // Shown the instant the fill computation's result is known, right
+        // above the blob, so the timing is legible exactly when it matters.
+        // Its own lifetime (STATS_LIFETIME_MS) runs independently of the
+        // blob's fade below.
+        const label = showStatsLabel(wrap, stats, levels);
+        labelDone = scheduleStatsRemoval(label);
+        if (levels > 0) {
+          await animateFill(sctx, origImageData, depth, levels, stats.kernelMs);
+        }
       }
     } catch (err) {
       // Network hiccup or server error: let the shape fade as painted

@@ -17,13 +17,14 @@
   <button class="brush-btn" data-shape="square" title="Square" aria-label="Square brush">■</button>
   <button class="brush-btn" data-shape="scratchy" title="Scratchy" aria-label="Scratchy brush">✎</button>
   <span class="toolbar-divider"></span>
-  <button class="mode-btn" data-mode="cpu" title="Fill on the CPU" aria-label="CPU mode">CPU</button>
-  <button class="mode-btn active" data-mode="gpu" title="Fill on the GPU" aria-label="GPU mode">GPU</button>
+  <button class="mode-btn" data-mode="cpu" title="Seeded flood fill on the CPU (ch01)" aria-label="CPU mode">CPU</button>
+  <button class="mode-btn active" data-mode="gpu" title="Seeded flood fill on the GPU (ch03)" aria-label="GPU mode">GPU</button>
+  <button class="mode-btn" data-mode="runs" title="Seedless: ch06 finds and recolours every blob at once" aria-label="RUNS mode">RUNS</button>
 </div>
 
 <div id="hint">Paint a thick blob, then let go — the GPU floods it, then it fades away.
-  &nbsp;·&nbsp; <a href="/skysurvey.html" style="color:inherit">✦ DEEP FIELD</a> — guess the star count, the GPU counts for real
-  &nbsp;·&nbsp; <a href="/skywatch.html" style="color:inherit">▶ SKYWATCH</a> — the air-defense demo</div>
+  &nbsp;·&nbsp; <b>RUNS</b> takes no seed: ch06 finds every blob itself.
+  &nbsp;·&nbsp; <a href="/skysurvey.html" style="color:inherit">✦ DEEP FIELD</a> — guess the star count, the GPU counts for real</div>
 
 <script src="/paint.js" defer></script>
 </body>
