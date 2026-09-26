@@ -59,6 +59,14 @@ def is_vertical() -> bool:
     return os.environ.get("VIDEO_LAYOUT", "").lower() == "vertical"
 
 
+# In 9:16 (rendered with `-r 1080,1920`) Manim keeps frame_width at 14.22, so a
+# unit is only 76 px instead of 135 and everything shrinks. Make the frame 8
+# units wide instead: same pixels per unit as landscape, just a taller canvas.
+if is_vertical():
+    config.frame_width = 8.0
+    config.frame_height = 8.0 * 16 / 9
+
+
 def voice() -> str:
     return os.environ.get("VOICE", "kokoro")
 
@@ -100,7 +108,9 @@ def caption(text: str, size: int = 28) -> Text:
 
 
 def fmt_ms(ms: float) -> str:
-    """24083 -> '24.1 s', 1346 -> '1,346 ms', 1.46 -> '1.46 ms'."""
+    """24083 -> '24.1 s', 1346 -> '1,346 ms', 1.46 -> '1.46 ms', 0 -> '0 ms'."""
+    if ms == 0:
+        return "0 ms"
     if ms >= 10_000:
         return f"{ms / 1000:.1f} s"
     if ms >= 100:
@@ -124,9 +134,15 @@ class Stopwatch(VGroup):
     def set_ms(self, ms: float, color: str | None = None) -> "Stopwatch":
         new = label(fmt_ms(ms), size=self.size, color=color or self.value.color, mono=True)
         new.move_to(self.value)
-        self.remove(self.value)
+        old = self.value
+        self.remove(old)
         self.value = new
         self.add(new)
+        # Cairo snapshots the mobject family when a play starts, so a Text
+        # swapped inside an updater is still drawn. Blank the old glyphs
+        # (the same trick DecimalNumber.set_value uses).
+        for m in old.get_family():
+            m.points[:] = 0
         return self
 
 
@@ -144,18 +160,20 @@ class FrameSequence(Group):
         paths = sorted(folder.glob("frame_*.png"))
         if not paths:
             raise FileNotFoundError(f"run assets/extract_gifs.py first: {folder}")
-        self.frames = []
-        for p in paths:
-            im = ImageMobject(str(p)).set_height(height)
-            if pixelated:
-                im.set_resampling_algorithm(RESAMPLING_ALGORITHMS["nearest"])
-            self.frames.append(im)
+        # Frame store. These are never added to the scene: the Cairo renderer
+        # snapshots the mobject family when a play/wait starts, so swapping
+        # submobjects leaves the old frame drawn on top. Instead one
+        # ImageMobject stays in the scene and its pixel_array is swapped.
+        self.frames = [ImageMobject(str(p)) for p in paths]
+        self.image = ImageMobject(self.frames[0].pixel_array.copy()).set_height(height)
+        if pixelated:
+            self.image.set_resampling_algorithm(RESAMPLING_ALGORITHMS["nearest"])
         self.meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         self.idx = 0
         self.t = 0.0
         self.fps = 0.0
         self.hold_last = True
-        self.add(self.frames[0])
+        self.add(self.image)
 
     def n(self) -> int:
         return len(self.frames)
@@ -165,10 +183,14 @@ class FrameSequence(Group):
 
     def show(self, idx: int) -> "FrameSequence":
         idx = max(0, min(idx, self.n() - 1))
-        if idx != self.idx or not self.submobjects:
-            anchor = self.submobjects[0].get_center() if self.submobjects else self.frames[0].get_center()
-            self.remove(*self.submobjects)
-            self.add(self.frames[idx].move_to(anchor))
+        if idx != self.idx:
+            src = self.frames[idx].pixel_array
+            arr = src.copy()
+            img = self.image
+            img.orig_alpha_pixel_array = src[:, :, 3].copy()
+            if img.stroke_opacity < 1:  # keep a fade in progress
+                arr[:, :, 3] = (img.orig_alpha_pixel_array * img.stroke_opacity).astype(arr.dtype)
+            img.pixel_array = arr
             self.idx = idx
         return self
 
