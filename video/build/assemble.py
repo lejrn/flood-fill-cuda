@@ -52,7 +52,9 @@ def media_dir(layout: str) -> Path:
 def render(layout: str, voice: str, quality: str) -> None:
     env = dict(os.environ, VOICE=voice, VIDEO_LAYOUT=layout)
     for stem, cls, _ in BEATS:
-        cmd = [str(PY), "-m", "manim", "render", f"-q{quality}", "--fps", "30",
+        # --disable_caching: a cached play skips update_mobjects(0), so end
+        # states can differ from an uncached render. Always render fresh.
+        cmd = [str(PY), "-m", "manim", "render", f"-q{quality}", "--fps", "30", "--disable_caching",
                "--media_dir", str(media_dir(layout))]
         if layout == "vertical":
             cmd += ["-r", "1080,1920"]
