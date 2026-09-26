@@ -133,8 +133,9 @@ class Runs(BeatScene):
 
     # ------------------------------------------------------------ phase 3
     def phase_chart(self) -> None:
-        x0 = -4.0
-        full_w = 7.3
+        vertical = self.L["vertical"]
+        # portrait: shorter bars, same text size; `25× fewer` goes under the chart
+        x0, full_w = (-1.4, 2.4) if vertical else (-4.0, 7.3)
         bar_h = 0.6
         ys = [1.8, 0.6, -0.6, -1.8]
         total = ROWS[0][1]
@@ -159,8 +160,11 @@ class Runs(BeatScene):
         # `25× fewer` beside the runs row
         runs_bar, _, runs_num = rows[2]
         fewer = label("25× fewer", size=56, color=TEAL, mono=True)
-        fewer.next_to(runs_num, RIGHT, buff=0.55)
-        fewer.set_y(runs_bar.get_y())
+        if vertical:
+            fewer.next_to(VGroup(*[m for r in rows for m in r]), DOWN, buff=0.7)
+        else:
+            fewer.next_to(runs_num, RIGHT, buff=0.55)
+            fewer.set_y(runs_bar.get_y())
 
         # No-op in landscape (the chart already sits inside the margins);
         # scales the whole chart down in a vertical frame.
@@ -181,7 +185,9 @@ class Runs(BeatScene):
 
     # ------------------------------------------------------------ phase 4
     def pipeline_strip(self) -> VGroup:
-        bw, bh, gap = 1.22, 0.5, 0.42
+        vertical = self.L["vertical"]
+        # portrait: tighter boxes, no arrows, so the words stay legible
+        bw, bh, gap = (0.95, 0.5, 0.14) if vertical else (1.22, 0.5, 0.42)
         boxes = VGroup(*[
             RoundedRectangle(
                 corner_radius=0.1, width=bw, height=bh,
@@ -194,7 +200,7 @@ class Runs(BeatScene):
         # centred by its own bounding box, so "merge" would otherwise sit
         # higher than "scan"). Ligatures are off so "fl" in "flatten" is
         # two glyphs and spaces count as glyphs: one glyph per character.
-        words = label(" ".join(PHASES), size=20, color=INK_SOFT, disable_ligatures=True)
+        words = label(" ".join(PHASES), size=16 if vertical else 20, color=INK_SOFT, disable_ligatures=True)
         k = 0
         for box, name in zip(boxes, PHASES):
             words[k:k + len(name)].set_x(box.get_x())
@@ -202,7 +208,7 @@ class Runs(BeatScene):
         words.set_y(boxes.get_y())
 
         arrows = VGroup()
-        for a, b in zip(boxes[:-1], boxes[1:]):
+        for a, b in [] if vertical else zip(boxes[:-1], boxes[1:]):
             arrows.add(Arrow(
                 a.get_right(), b.get_left(), buff=0.06,
                 stroke_width=2, tip_length=0.14, color=GREY,

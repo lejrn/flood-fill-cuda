@@ -28,9 +28,11 @@ class Twist(BeatScene):
 
         # ---- panel A: the real image -------------------------------------
         image = ImageMobject(str(ASSETS / "ch05_input_blobs" / "frame_000.png"))
-        image.set_height(3.6 if vertical else 5.0)
+        image.set_height(4.4 if vertical else 5.0)
         if vertical:
-            image.move_to(self.L["top"] + DOWN * (image.height / 2))
+            # the stack (image, two bars, caption, counter) is ~10.4 tall;
+            # start 1.8 below the top edge so it sits centred in the 14.2 frame
+            image.move_to(self.L["top"] + DOWN * (image.height / 2 + 1.8))
         else:
             image.move_to(np.array([-3.8, 0.0, 0.0]))
 
