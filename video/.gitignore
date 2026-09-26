@@ -1,0 +1,14 @@
+# secrets
+.env
+
+# local environment and model cache
+.venv/
+.hf-cache/
+
+# render outputs and caches
+media/
+out/
+__pycache__/
+*.wav
+*.mp3
+*.mp4
