@@ -6,7 +6,8 @@ Rules every scene follows:
   same scene renders in 16:9 and 9:16 (`VIDEO_LAYOUT=vertical`)
 - end `construct()` with `self.finish()`, which pads the scene to the
   narration length of that beat (`out/<voice>/timing.json`, `VOICE=kokoro`
-  by default) and attaches the beat's wav for previews
+  by default) plus the inter-beat gap, then fades out. Audio is muxed by
+  `build/assemble.py`, never inside a scene
 - no LaTeX: use `Text`, never `MathTex`/`Tex`
 - colours only from this module
 """
@@ -193,32 +194,31 @@ class BeatScene(Scene):
     def setup(self) -> None:
         self.camera.background_color = BG
         self.L = layout()
-        self._elapsed = 0.0
-        # Attach the beat's narration at t=0 so single-scene previews have sound.
-        wav = beat_wav(self.beat)
-        if wav is not None:
-            self.add_sound(str(wav))
+        # No add_sound here: Manim muxes with shortest=1 and would cut the
+        # padded tail. build/assemble.py lays the narration over the concat.
 
-    # Track how long the scene has run so finish() can pad to the narration.
-    def play(self, *args, **kwargs):
-        rt = kwargs.get("run_time")
-        if rt is None:
-            rt = max((getattr(a, "run_time", 1.0) for a in args if hasattr(a, "run_time")), default=1.0)
-        self._elapsed += rt
-        return super().play(*args, **kwargs)
-
-    def wait(self, duration: float = 1.0, **kwargs):
-        self._elapsed += duration
-        return super().wait(duration, **kwargs)
+    def elapsed(self) -> float:
+        """Seconds of scene rendered so far (the renderer's own clock)."""
+        return float(self.renderer.time)
 
     def target_seconds(self) -> float:
         return beat_seconds(self.beat)
 
-    def finish(self, tail: float = 0.4) -> None:
-        """Pad to the narration length (+tail)."""
-        remaining = self.target_seconds() + tail - self._elapsed
+    def finish(self, tail: float = 0.4, fade: float = 0.3) -> None:
+        """Pad to the narration length (+tail), fading everything out at the end.
+
+        Scene length = beat_seconds + tail, which is exactly the slot the
+        assembly step gives this beat (narration + inter-beat gap).
+        """
+        from manim import FadeOut
+
+        total = self.target_seconds() + tail
+        remaining = total - fade - self.elapsed()
         if remaining > 0:
             self.wait(remaining)
+        mobs = list(self.mobjects)
+        if mobs and fade > 0:
+            self.play(FadeOut(Group(*mobs)), run_time=fade)
 
 
 def pixel_grid(n: int, cell: float, stroke: float = 1.0, color: str = GRID) -> VGroup:
