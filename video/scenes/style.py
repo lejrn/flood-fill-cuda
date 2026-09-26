@@ -108,15 +108,13 @@ def caption(text: str, size: int = 28) -> Text:
 
 
 def fmt_ms(ms: float) -> str:
-    """24083 -> '24.1 s', 1346 -> '1,346 ms', 1.46 -> '1.46 ms', 0 -> '0 ms'."""
+    """24083 -> '24.1 s', 1346 -> '1,346 ms', 58.51 -> '58.51 ms', 1.46 -> '1.46 ms', 0 -> '0 ms'."""
     if ms == 0:
         return "0 ms"
     if ms >= 10_000:
         return f"{ms / 1000:.1f} s"
     if ms >= 100:
         return f"{ms:,.0f} ms"
-    if ms >= 10:
-        return f"{ms:.1f} ms"
     return f"{ms:.2f} ms"
 
 
