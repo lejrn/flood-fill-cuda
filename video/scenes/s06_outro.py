@@ -26,8 +26,9 @@ ROWS = [
 ]
 TICKS = [(1, "1 ms"), (10, "10"), (100, "100"), (1000, "1 s"), (10000, "10 s")]
 
-X0 = -3.6       # x of 1 ms
-K = 1.7         # units per decade: x(ms) = X0 + K * log10(ms)
+# x of 1 ms, and units per decade: x(ms) = X0 + K * log10(ms).
+# Portrait keeps the text size and shortens the decades instead.
+X0, K = (-1.4, 0.65) if is_vertical() else (-3.6, 1.7)
 PITCH = 0.55    # row pitch
 BAR_H = 0.32
 Y_TOP = 2.75    # centre of the first row
@@ -74,8 +75,7 @@ class Outro(BeatScene):
         big = label("16,000×", size=48, color=TEAL, mono=True)
         body = VGroup(axes, rows)
         if self.L["vertical"]:
-            # portrait: chart across the top, the number centred under it
-            body.scale_to_fit_width(max_w).move_to(self.L["top"], aligned_edge=UP)
+            # portrait: narrow decades (see X0, K), the number centred under it
             big.next_to(body, DOWN, buff=0.5)
             shrink = 0.6
         else:
