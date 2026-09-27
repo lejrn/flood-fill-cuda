@@ -10,7 +10,7 @@ encoder noise averages out and a moved or missing element does not: mean
 below 1.5 (preview-quality speckle images reach 0.95) and fewer than
 0.05% of averaged pixels above 16 levels.
 `--intra` also checks the last frames of every clip for a jump (a bad
-`snap()`); the outro fades out, so its jump is expected.
+`snap()`); clips that end on a fade (intro, outro) are skipped there.
 
 Usage (from video/):
     uv run build/seam_check.py [--layout landscape] [--quality 1080p30] [--intra]
@@ -27,11 +27,12 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from assemble import BEATS, newest_render, duration  # noqa: E402
+from assemble import clip_list, duration  # noqa: E402
 
 VIDEO = Path(__file__).resolve().parents[1]
 MEAN_MAX, FRAC_MAX, LEVELS = 1.5, 0.0005, 16
 BOX = 4
+FADES_OUT = {"s_intro", "s08_outro"}     # these clips end on a fade, so their tails jump
 
 
 def frames_at_edges(path: Path, n_tail: int = 1) -> tuple:
@@ -76,13 +77,13 @@ def main() -> int:
     out = VIDEO / "media" / "review" / "seams"
     out.mkdir(parents=True, exist_ok=True)
     clips = []
-    for stem, cls, beat in BEATS:
+    for stem, cls, beats in clip_list():
         folder = VIDEO / "media" / args.layout / "videos" / stem
         pattern = f"{args.quality}/{cls}.mp4" if args.quality else f"*/{cls}.mp4"
         hits = sorted(folder.glob(pattern), key=lambda p: p.stat().st_mtime)
         if not hits:
             raise SystemExit(f"no render for {stem}/{cls}")
-        clips.append((beat, hits[-1]))
+        clips.append((stem, hits[-1]))
 
     n_tail = 12 if args.intra else 1
     edges = [frames_at_edges(p, n_tail) for _, p in clips]
@@ -97,7 +98,9 @@ def main() -> int:
         print(f"{clips[i][0]:14s} -> {clips[i + 1][0]:14s} raw {raw:6.3f}  box {mean:6.3f}  "
               f">{LEVELS}: {frac * 100:6.3f}%  {verdict}")
     if args.intra:
-        for (beat, _), (_, tail) in zip(clips[:-1], edges[:-1]):
+        for (beat, _), (_, tail) in zip(clips, edges):
+            if beat in FADES_OUT:
+                continue
             jumps = [diff_stats(tail[j], tail[j + 1])[1] for j in range(len(tail) - 1)]
             worst = max(jumps) if jumps else 0.0
             flag = "" if worst < MEAN_MAX else "  JUMP"

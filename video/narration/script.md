@@ -6,13 +6,29 @@ CPU). Middle, the blob of the current chapter, with every finished chapter
 swept up into a strip. Right, the GPU: which SMs, blocks, threads and
 memory each chapter uses.
 
-Target: 90-100 s. English voice. Every number below is on screen and
+Target: about 2 minutes. English voice, Kokoro `am_onyx` (deep male). Every number below is on screen and
 comes from a committed benchmark JSON via `scenes/panes/data.py`
 (`uv run python scenes/panes/data.py` prints the whole matrix).
 
 Each beat is one TTS call and one Manim scene (`scenes/sNN_*.py`). The
 `## beat` headings are parsed by the TTS scripts: the first fenced block
 under each heading is the spoken text.
+
+## beat intro_problem
+
+```text
+A defence camera watches a clear sky for drones and missiles. It has to find them in every frame, in real time: thirty frames a second, one frame every thirty-three milliseconds. A motion filter strips the sky away and leaves white blobs on black. Those blobs still have to be labelled.
+```
+
+On screen: simulated footage (`assets/make_drone_frames.py`), then its motion mask beside it, then the frame budget line: 30 fps, 33 ms per frame.
+
+## beat intro_budget
+
+```text
+Labelling one eighty-one megapixel frame on the CPU takes twenty-four seconds; by then the camera has moved on by seven hundred frames. Even compiled, one point three seconds. On the GPU the same frame takes one and a half milliseconds: real time, with room to spare. This is how we got there.
+```
+
+On screen: the CPU panel stuck on frame 1 with a stopwatch running towards 24,083 ms; the GPU panel labelling every frame at 1.46 ms; three bars against the 33 ms budget (pure Python 24,083, @njit 1,346, GPU 1.46).
 
 ## beat 00_cpu
 

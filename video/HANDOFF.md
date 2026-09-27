@@ -1,8 +1,10 @@
 # Handoff: the three-pane explainer video
 
-Status on 2026-09-27: the cut is nine Manim clips, about 96 s, in
-`video/` on branch `video-explainer`. Three panes stay on screen for the
-whole video and accumulate: the benchmark matrix on the left (17 shapes,
+Status on 2026-09-28: the cut is ten Manim clips, about 129 s, in
+`video/` on branch `video-explainer`, narrated by Kokoro's deep male
+voice `am_onyx`. A 30 s intro states the problem (a defence camera must
+label every drone in every frame at 30 fps; simulated footage, motion
+mask, CPU vs GPU). Then three panes stay on screen and accumulate: the benchmark matrix on the left (17 shapes,
 one column per chapter, every column keeps its ms, a cell glows when the
 GPU beats the CPU), the
 chapter's blob in the middle (finished chapters sweep up into a strip),
@@ -15,7 +17,7 @@ each chapter uses). Landscape only. See `scenes/BRIEF.md` for the spec.
 |---|---|---|---|
 | Animation engine | Manim Community | 0.19.1 | 3Blue1Brown look, deterministic frames, no browser |
 | Environment | uv | Python 3.10 in `.venv` | one `uv sync` reproduces it |
-| Narration | Kokoro (`kokoro` + `misaki`) | 0.9.4 | free, local, `af_heart` voice |
+| Narration | Kokoro (`kokoro` + `misaki`) | 0.9.4 | free, local; `am_onyx` (deep male, 89 Hz median), `narration/pick_voice.py` ranks voices by pitch |
 | Muxing / concat | ffmpeg static via `imageio-ffmpeg` | 7.0.2 | symlinked into `.venv/bin/ffmpeg` |
 | Frame extraction, review sheets | Pillow, PyAV | | GIF frames in, review frames out |
 | Text shaping | ManimPango + pycairo | built from source | needs `libcairo2-dev libpango1.0-dev` once |
@@ -29,6 +31,7 @@ video/
     script.md                   the 9 beats; each ```text block is one TTS call
     common.py                   parses script.md, writes timing.json
     tts_kokoro.py               -> out/kokoro/<beat>.wav + timing.json (CPU, memory-mapped model)
+    pick_voice.py               one sentence in several voices, median pitch per voice
     tts_elevenlabs.py           alternative voice, needs ELEVENLABS_API_KEY in .env
   scenes/
     style.py                    palette, BeatScene (whole-frame finish), FrameSequence, helpers
@@ -40,9 +43,11 @@ video/
     panes/middle_strip.py       strip, big image, captions, the runs row
     panes/right_gpu.py          GpuPane
     snapshot.py                 STAGE=k [LIVE=1] -> one PNG with `-s`
+    s_intro.py                  the problem: four footage panels, two beats in one clip
     s00_cpu.py .. s08_outro.py  one thin scene per stage
     BRIEF.md                    the spec
   assets/extract_gifs.py        parent-repo GIFs -> assets/<name>/frame_NNN.png (gitignored output)
+  assets/make_drone_frames.py   simulated sky footage, motion mask, ch06-labelled frames (root venv)
   build/
     assemble.py                 render, concat, narration at measured clip starts, mux; --check
     review.py                   frames at given times + a contact sheet
@@ -59,7 +64,9 @@ video/
    flood_fill_cuda.overview.bench_ch06` (the ch06 column on the 17
    overview rows, `results/overview/benchmark_results/ch06_overview_*.json`).
    Both outputs are committed.
-2. `uv run assets/extract_gifs.py` unpacks the GIFs into `assets/`.
+2. `uv run assets/extract_gifs.py` unpacks the GIFs into `assets/`;
+   `../.venv/bin/python assets/make_drone_frames.py` (root venv, GPU)
+   renders the intro footage.
 3. `uv run python scenes/panes/data.py` and `uv run build/audit_numbers.py`
    print and check every number the video shows.
 4. `uv run narration/tts_kokoro.py` renders each beat to a wav, trims edge
@@ -77,6 +84,7 @@ video/
 cd /home/lrn/Repos/flood-fill-cuda/video
 uv sync
 uv run assets/extract_gifs.py
+../.venv/bin/python assets/make_drone_frames.py   # intro footage (root venv, GPU)
 uv run python scenes/panes/data.py            # the matrix as text
 uv run build/audit_numbers.py                 # numbers vs JSON
 uv run narration/tts_kokoro.py                # voice + timing
@@ -132,6 +140,8 @@ a moved element does not) and reports the largest jump inside every hold.
 - ch01-ch04 on N-blob rows are estimates (`est: true`, one launch per
   blob); they are dashed and never glow.
 - 16,000x is 24,083 / 1.455 = 16,551, floored to two figures.
+- The intro's frame budget is 1000 / 30 = 33.3 ms, shown as 33 ms; "81 Mpx"
+  is the real image's 81,000,000 pixels from the ch06 runs JSON.
 
 ## 8. Open items
 

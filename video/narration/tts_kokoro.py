@@ -1,7 +1,7 @@
 """Render every beat of script.md with Kokoro (local, free) into out/kokoro/.
 
 Usage (from video/):
-    uv run narration/tts_kokoro.py [--voice af_heart] [--gap 0.6]
+    uv run narration/tts_kokoro.py [--voice am_onyx] [--gap 0.6]
 
 Writes one wav per beat, a joined narration.wav with `gap` seconds of
 silence between beats, and timing.json for the assembly step.
@@ -41,9 +41,9 @@ def trim_edges(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voice", default="af_heart")
+    ap.add_argument("--voice", default="am_onyx", help="deep male; af_heart was the first cut")
     ap.add_argument("--gap", type=float, default=0.4, help="silence between beats, seconds")
-    ap.add_argument("--speed", type=float, default=1.15, help="Kokoro reads slowly at 1.0")
+    ap.add_argument("--speed", type=float, default=1.1, help="Kokoro reads slowly at 1.0")
     args = ap.parse_args()
 
     # This laptop has 6 GB of RAM. Loading the 327 MB checkpoint the normal

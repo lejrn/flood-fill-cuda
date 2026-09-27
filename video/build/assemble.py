@@ -36,6 +36,8 @@ FFMPEG = VIDEO / ".venv" / "bin" / "ffmpeg"
 
 # (scene file stem, class name, beat name) in narrative order.
 BEATS = [
+    ("s_intro", "Intro", "intro_problem"),
+    ("s_intro", "Intro", "intro_budget"),
     ("s00_cpu", "Cpu", "00_cpu"),
     ("s01_one_block", "OneBlock", "01_one_block"),
     ("s02_two_blocks", "TwoBlocks", "02_two_blocks"),
@@ -48,6 +50,18 @@ BEATS = [
 ]
 
 SR = 48_000
+GAP = 0.4          # seconds between beats inside a clip (style.BeatScene.finish tail)
+
+
+def clip_list() -> list:
+    """[(stem, cls, [beats])]: consecutive BEATS entries of one scene share a clip."""
+    clips = []
+    for stem, cls, beat in BEATS:
+        if clips and clips[-1][0] == stem and clips[-1][1] == cls:
+            clips[-1][2].append(beat)
+        else:
+            clips.append((stem, cls, [beat]))
+    return clips
 
 
 def media_dir(layout: str) -> Path:
@@ -56,7 +70,7 @@ def media_dir(layout: str) -> Path:
 
 def render(layout: str, voice: str, quality: str, only: list[str] | None = None) -> None:
     env = dict(os.environ, VOICE=voice, VIDEO_LAYOUT=layout)
-    for stem, cls, _ in BEATS:
+    for stem, cls, _ in clip_list():
         if only and stem not in only:
             continue
         # --disable_caching: a cached play skips update_mobjects(0), so end
@@ -116,7 +130,8 @@ def main() -> None:
             print("rendered", args.only)
             return
 
-    clips = [newest_render(args.layout, stem, cls) for stem, cls, _ in BEATS]
+    groups = clip_list()
+    clips = [newest_render(args.layout, stem, cls) for stem, cls, _ in groups]
     durs = [duration(p) for p in clips]
     starts = np.concatenate([[0.0], np.cumsum(durs)[:-1]])
     total = float(sum(durs))
@@ -124,16 +139,21 @@ def main() -> None:
     beat_len = {}
     if timing.exists():
         beat_len = {r["beat"]: float(r["seconds"]) for r in json.loads(timing.read_text())["beats"]}
-    for (stem, _, beat), d, t0 in zip(BEATS, durs, starts):
-        want = beat_len.get(beat)
+    beat_starts = {}
+    for (stem, _, beats), d, t0 in zip(groups, durs, starts):
+        off = 0.0
+        for beat in beats:
+            beat_starts[beat] = t0 + off
+            off += beat_len.get(beat, 0.0) + GAP
         note = ""
-        if want is not None:
-            slot = want + 0.4
-            note = f"  beat {want:5.2f} + 0.4 = {slot:5.2f}" + ("  OVERRUN" if d > slot + 0.05 else "")
-        print(f"{beat:20s} start {t0:6.2f}  len {d:5.2f}{note}")
+        if all(b in beat_len for b in beats):
+            slot = sum(beat_len[b] + GAP for b in beats)
+            note = f"  beats {slot - GAP * len(beats):5.2f} + gaps = {slot:5.2f}" + \
+                   ("  OVERRUN" if d > slot + 0.05 else "")
+        print(f"{stem:16s} start {t0:6.2f}  len {d:5.2f}{note}   [{', '.join(beats)}]")
     print(f"total {total:.2f} s")
-    if not 60.0 <= total <= 120.0:
-        msg = f"total {total:.1f} s is outside the 60-120 s target"
+    if not 60.0 <= total <= 150.0:
+        msg = f"total {total:.1f} s is outside the 60-150 s target"
         if args.strict:
             raise SystemExit(msg)
         print("warning:", msg)
@@ -161,7 +181,8 @@ def main() -> None:
         print(f"->  {final}  ({duration(final):.2f} s, no audio)")
         return
     track = np.zeros(int(np.ceil(total * SR)) + SR, dtype=np.float32)
-    for (_, _, beat), t0 in zip(BEATS, starts):
+    for _, _, beat in BEATS:
+        t0 = beat_starts[beat]
         wav = OUT / args.voice / f"{beat}.wav"
         if not wav.exists():
             raise SystemExit(f"missing narration {wav}; run narration/tts_{args.voice}.py")
