@@ -106,7 +106,10 @@ def main() -> int:
         ("blobs", sc["n_blobs"], h.n_blobs, lambda x: f"{x:,}"),
         ("red px", sc["red_px"], h.red_px, lambda x: f"{x:,}"),
         ("runs", sc["n_runs"], h.n_runs, lambda x: f"{x:,}"),
+        ("pixels", sc["n_pixels"], h.n_pixels, lambda x: f"{x:,}"),
     ]
+    print(f"  frame budget  {1000 / 30:14.1f} ms at 30 fps -> shown '33 ms'; "
+          f"{sc['n_pixels'] / 1e6:.0f} Mpx per frame")
     for name, raw, got, fmt in checks:
         ok = abs(float(raw) - float(got)) < 1e-9
         bad += 0 if ok else 1

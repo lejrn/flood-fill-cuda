@@ -118,13 +118,17 @@ class Replay(Group):
     disk when shown: the machine has little RAM and a 900 px set held as
     97 image mobjects is half a gigabyte."""
 
-    def __init__(self, name: str, box, fit_wh=(4.1, 4.1), dy: float = 0.0):
+    def __init__(self, name: str, box, fit_wh=(4.1, 4.1), dy: float = 0.0,
+                 center=None, loop: bool = False):
         super().__init__()
         folder = ASSETS / name
         self.paths = sorted(folder.glob("frame_*.png"))
         if not self.paths:
             raise FileNotFoundError(f"run assets/extract_gifs.py first: {folder}")
         self.image = big_image(box, self.paths[0], fit_wh, dy)
+        if center is not None:
+            self.image.move_to(center)
+        self.loop = loop
         self.idx, self.t, self.fps = 0, 0.0, 0.0
         self.add(self.image)
 
@@ -142,7 +146,7 @@ class Replay(Group):
             return np.array(im.convert("RGBA"))
 
     def show(self, idx: int) -> "Replay":
-        idx = max(0, min(idx, self.n() - 1))
+        idx = idx % self.n() if self.loop else max(0, min(idx, self.n() - 1))
         if idx != self.idx:
             src = self.frame(idx)
             arr = src.copy()
@@ -167,7 +171,16 @@ class Replay(Group):
 
     def stop(self) -> "Replay":
         self.remove_updater(self._tick)
-        self.show(self.n() - 1)
+        if not self.loop:
+            self.show(self.n() - 1)
+        return self
+
+    def sync_to(self, other: "Replay") -> "Replay":
+        """Start ticking in lockstep with `other` (same fps, same frame)."""
+        self.fps = other.fps
+        self.t = other.t
+        self.show(int(self.t * self.fps))
+        self.add_updater(self._tick)
         return self
 
 

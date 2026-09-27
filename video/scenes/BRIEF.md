@@ -7,9 +7,23 @@ with one class (`Cpu`, `OneBlock`, `TwoBlocks`, `NBlocks`, `Conn8`,
 declared in `scenes/panes/config.py` (`STAGES`); the narration text and
 per-beat timing live in `narration/script.md` and `out/kokoro/timing.json`.
 
+## The intro (`scenes/s_intro.py`, beats `intro_problem` + `intro_budget`)
+
+Before the three panes: the problem. Four 16:9 panels stream the same
+simulated footage (`assets/make_drone_frames.py`: a clear sky with five
+quadcopters and a missile, 240 frames at 30 fps; the motion mask by
+background subtraction; the mask labelled by the real ch06 kernel).
+Top-left the camera, top-right the motion filter, then the frame budget
+line (30 fps, 33 ms per frame). Second beat: bottom-left the CPU still
+on frame 1 (the bare mask, a stopwatch counting real time), bottom-right
+the GPU labelling every frame, then the verdict line: budget 33 ms, pure
+Python 24,083 ms, @njit 1,346 ms, GPU 1.46 ms. Fades to black; stage 0
+fades in from black. One clip, two beats: `build/assemble.py` places the
+second wav at the first beat's length + 0.4 s inside the clip.
+
 ## The picture (all stages)
 
-Three panes for the whole video, landscape 1920x1080 at 30 fps:
+After the intro, three panes for the rest of the video, landscape 1920x1080 at 30 fps:
 
 - **Left, the benchmark matrix.** Rows are the 17 scenes of the overview
   benchmark, in JSON order (three squares, three disks, two snakes, two

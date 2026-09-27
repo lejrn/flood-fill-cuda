@@ -157,6 +157,7 @@ class Headline:
     n_blobs: int
     red_px: int
     n_runs: int
+    n_pixels: int
     sources: dict
 
     @property
@@ -252,7 +253,7 @@ def headline() -> Headline:
         ch06_mask_ms=float(scene["ch06"]["mask"]["median_ms"]),
         ch06_rgb_ms=float(scene["ch06"]["rgb"]["median_ms"]),
         n_blobs=int(scene["n_blobs"]), red_px=int(scene["red_px"]),
-        n_runs=int(scene["n_runs"]),
+        n_runs=int(scene["n_runs"]), n_pixels=int(scene["n_pixels"]),
         sources={"pure_ms": f"{b.source_overview}:png_blobs.pure_python",
                  "njit_ms": f"{b.source_overview}:png_blobs.njit",
                  "ch05_ms": f"{runs_path.name}:input_blobs.ch05",

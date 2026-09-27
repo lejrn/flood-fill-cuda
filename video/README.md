@@ -1,10 +1,12 @@
 # flood-fill-cuda explainer video
 
-Three panes for the whole video: the benchmark matrix (17 shapes, one
+A 30 s intro states the problem (a defence camera labelling drones in
+every frame, real time vs 24 s per frame), then three panes for the rest of
+the video: the benchmark matrix (17 shapes, one
 column per chapter, a shape glows when the GPU beats the CPU), the
 chapter's blob (finished chapters sweep up into a strip), and the GPU
 schematic (SMs, blocks, threads, memory per chapter). Manim scenes, local
-Kokoro narration, ffmpeg assembly. About 96 s, 1920x1080.
+Kokoro narration (deep male voice), ffmpeg assembly. About 129 s, 1920x1080.
 
 - `scenes/BRIEF.md`: what is on screen and the rules.
 - `HANDOFF.md`: stack, pipeline, commands, gotchas, open items.
