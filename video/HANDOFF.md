@@ -2,9 +2,11 @@
 
 Status on 2026-09-28: the cut is ten Manim clips, about 129 s, in
 `video/` on branch `video-explainer`, narrated by Kokoro's deep male
-voice `am_onyx`. A 30 s intro states the problem (a defence camera must
-label every drone in every frame at 30 fps; simulated footage, motion
-mask, CPU vs GPU). Then three panes stay on screen and accumulate: the benchmark matrix on the left (17 shapes,
+voice `am_onyx` by default; `build/variants.py` renders one full cut per
+male voice into `out/final_landscape_kokoro_<voice>.mp4` for choosing by
+ear. A 30 s intro states the problem (a defence camera must label every
+drone in every frame at 30 fps; real drone-show footage, motion mask,
+CPU vs GPU). Then three panes stay on screen and accumulate: the benchmark matrix on the left (17 shapes,
 one column per chapter, every column keeps its ms, a cell glows when the
 GPU beats the CPU), the
 chapter's blob in the middle (finished chapters sweep up into a strip),
@@ -47,10 +49,13 @@ video/
     s00_cpu.py .. s08_outro.py  one thin scene per stage
     BRIEF.md                    the spec
   assets/extract_gifs.py        parent-repo GIFs -> assets/<name>/frame_NNN.png (gitignored output)
-  assets/make_drone_frames.py   simulated sky footage, motion mask, ch06-labelled frames (root venv)
+  assets/make_drone_frames.py   intro footage: camera, motion mask, ch06-labelled frames (root venv);
+                                --source for real footage (median background), else a simulation
+  assets/source/                downloaded footage (gitignored): drones_short.mp4 = Short p2cDTfSIwqs
   build/
     assemble.py                 render, concat, narration at measured clip starts, mux; --check
     review.py                   frames at given times + a contact sheet
+    variants.py                 one full cut per Kokoro male voice
     seam_check.py               cut-to-cut and hold checks
     audit_numbers.py            every printed number vs the JSON, independently
   out/, media/                  narration, renders, review frames (gitignored)
@@ -64,9 +69,13 @@ video/
    flood_fill_cuda.overview.bench_ch06` (the ch06 column on the 17
    overview rows, `results/overview/benchmark_results/ch06_overview_*.json`).
    Both outputs are committed.
-2. `uv run assets/extract_gifs.py` unpacks the GIFs into `assets/`;
-   `../.venv/bin/python assets/make_drone_frames.py` (root venv, GPU)
-   renders the intro footage.
+2. `uv run assets/extract_gifs.py` unpacks the GIFs into `assets/`.
+   `.venv/bin/yt-dlp -f "bv*[height<=1080]" -o "assets/source/drones_short.%(ext)s"
+   https://www.youtube.com/shorts/p2cDTfSIwqs` fetches the footage (video
+   stream only; rename to `drones_short.mp4`), then
+   `../.venv/bin/python assets/make_drone_frames.py --source assets/source/drones_short.mp4 --start 1020 --frames 240`
+   (root venv, GPU) renders the three intro sets. The window was picked by
+   phase correlation: 34-41 s is the only 8 s where the camera holds still.
 3. `uv run python scenes/panes/data.py` and `uv run build/audit_numbers.py`
    print and check every number the video shows.
 4. `uv run narration/tts_kokoro.py` renders each beat to a wav, trims edge
@@ -84,7 +93,8 @@ video/
 cd /home/lrn/Repos/flood-fill-cuda/video
 uv sync
 uv run assets/extract_gifs.py
-../.venv/bin/python assets/make_drone_frames.py   # intro footage (root venv, GPU)
+../.venv/bin/python assets/make_drone_frames.py --source assets/source/drones_short.mp4 --start 1020 --frames 240   # intro footage (root venv, GPU)
+uv run build/variants.py [voice ...]         # one full cut per male voice
 uv run python scenes/panes/data.py            # the matrix as text
 uv run build/audit_numbers.py                 # numbers vs JSON
 uv run narration/tts_kokoro.py                # voice + timing

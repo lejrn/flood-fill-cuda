@@ -17,10 +17,10 @@ under each heading is the spoken text.
 ## beat intro_problem
 
 ```text
-A defence camera watches a clear sky for drones and missiles. It has to find them in every frame, in real time: thirty frames a second, one frame every thirty-three milliseconds. A motion filter strips the sky away and leaves white blobs on black. Those blobs still have to be labelled.
+A defence camera watches a clear sky for drones and missiles. It has to find them in every frame, in real time: thirty frames a second, one frame every thirty-three milliseconds. A filter strips the sky away and leaves white blobs on black. Those blobs still have to be labelled.
 ```
 
-On screen: simulated footage (`assets/make_drone_frames.py`), then its motion mask beside it, then the frame budget line: 30 fps, 33 ms per frame.
+On screen: drone-show footage (`assets/make_drone_frames.py --source ...`), then its filter output beside it, then the frame budget line: 30 fps, 33 ms per frame.
 
 ## beat intro_budget
 

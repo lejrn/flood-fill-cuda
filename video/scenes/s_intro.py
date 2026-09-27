@@ -5,8 +5,9 @@ assembly places both wavs inside this clip). A defence camera watches a
 clear sky; every frame must be labelled in real time. Four panels stream
 the same simulated footage (`assets/make_drone_frames.py`): the camera,
 the motion mask, the CPU labelling one frame while its stopwatch runs,
-and the GPU labelling every frame. The clip fades to black; stage 0 then
-fades the three panes in from black.
+and the GPU labelling every frame. The panels are vertical because the
+footage is a vertical Short. The clip fades to black; stage 0 then fades
+the three panes in from black.
 """
 from __future__ import annotations
 
@@ -19,11 +20,13 @@ from scenes.panes.middle_strip import load_image
 from scenes.stage import EPS, Replay, fr
 from scenes.style import ASSETS, BG, GRID, INK, INK_SOFT, RED_PX, TEAL, BeatScene, Stopwatch, beat_seconds, label
 
-PW, PH = 5.2, 5.2 * 9 / 16
-COL_X = (-3.15, 3.15)
-ROW_Y = (1.95, -1.35)
+# four vertical (9:16) panels in a row: the footage is a vertical Short
+PW = 2.9
+PH = PW * 16 / 9
+COL_X = (-5.1, -1.7, 1.7, 5.1)
+ROW_Y = 0.62
 FPS_CAMERA = 30
-CAP_FONT, TITLE_FONT, LINE_FONT = 18, 24, 20
+CAP_FONT, TITLE_FONT, LINE_FONT = 16, 24, 20
 
 
 class Intro(BeatScene):
@@ -41,18 +44,23 @@ class Intro(BeatScene):
             self.wait(n / fps - EPS, frozen_frame=False)
 
     # ---- pieces
-    def panel(self, name: str, col: int, row: int, loop: bool = True) -> Replay:
-        centre = np.array([COL_X[col], ROW_Y[row], 0.0])
+    def panel(self, name: str, col: int, loop: bool = True) -> Replay:
+        centre = np.array([COL_X[col], ROW_Y, 0.0])
         box = Box(centre[0] - PW / 2, centre[0] + PW / 2, centre[1] - PH / 2, centre[1] + PH / 2)
         return Replay(name, box, fit_wh=(PW, PH), center=centre, loop=loop)
 
-    def frame_box(self, col: int, row: int) -> Rectangle:
+    def frame_box(self, col: int) -> Rectangle:
         return Rectangle(width=PW + 0.04, height=PH + 0.04, stroke_width=1.5, stroke_color=GRID,
-                         fill_opacity=0).move_to([COL_X[col], ROW_Y[row], 0])
+                         fill_opacity=0).move_to([COL_X[col], ROW_Y, 0])
 
-    def caption(self, text: str, col: int, row: int, color=INK_SOFT):
-        return label(text, size=CAP_FONT, color=color).move_to(
-            [COL_X[col], ROW_Y[row] - PH / 2 - 0.22, 0])
+    def caption(self, line1: str, line2: str, col: int, color=INK_SOFT) -> VGroup:
+        y = ROW_Y - PH / 2 - 0.2
+        g = VGroup(label(line1, size=CAP_FONT, color=color).move_to([COL_X[col], y, 0]),
+                   label(line2, size=CAP_FONT - 3, color=INK_SOFT).move_to([COL_X[col], y - 0.24, 0]))
+        for m in g:
+            if m.width > PW:
+                m.scale_to_fit_width(PW)
+        return g
 
     def construct(self) -> None:
         h = data.headline()
@@ -63,34 +71,34 @@ class Intro(BeatScene):
                       size=TITLE_FONT, color=INK).move_to([0, 3.6, 0])
 
         # ---- phase A: camera, then the motion mask, then the frame budget
-        sky = self.panel("drones_sky", 0, 0)
-        self.play(FadeIn(title), FadeIn(self.frame_box(0, 0)), FadeIn(sky),
-                  FadeIn(self.caption("camera · a clear sky, drones and a missile", 0, 0)),
+        sky = self.panel("drones_sky", 0)
+        self.play(FadeIn(title), FadeIn(self.frame_box(0)), FadeIn(sky),
+                  FadeIn(self.caption("camera", f"a drone show, {FPS_CAMERA} fps", 0)),
                   run_time=fr(9))
         sky.start(FPS_CAMERA)
 
         self.until(3.6)
-        mask = self.panel("drones_mask", 1, 0)
+        mask = self.panel("drones_mask", 1)
         mask.sync_to(sky)
-        self.play(FadeIn(self.frame_box(1, 0)), FadeIn(mask),
-                  FadeIn(self.caption("motion filter · only the pixels that changed", 1, 0)),
+        self.play(FadeIn(self.frame_box(1)), FadeIn(mask),
+                  FadeIn(self.caption("filter", "the sky stripped away, blobs left", 1)),
                   run_time=fr(9))
 
         self.until(8.0)
         budget = label(f"{FPS_CAMERA} frames per second → one frame every {ms_frame:.0f} ms",
-                       size=LINE_FONT, color=INK, mono=True).move_to([0, -3.35, 0])
+                       size=LINE_FONT, color=INK, mono=True).move_to([0, -3.05, 0])
         self.play(FadeIn(budget, shift=np.array([0, 0.15, 0])), run_time=fr(6))
 
         # ---- phase B: the CPU stuck on one frame, the GPU on every frame
         self.until(t_b)
         # the CPU has not finished frame 1: its output is still the bare mask
         cpu_img = load_image(ASSETS / "drones_mask" / "frame_000.png")
-        cpu_img.scale(min(PW / cpu_img.width, PH / cpu_img.height)).move_to([COL_X[0], ROW_Y[1], 0])
+        cpu_img.scale(min(PW / cpu_img.width, PH / cpu_img.height)).move_to([COL_X[2], ROW_Y, 0])
         mpx = h.n_pixels / 1e6
-        cpu_cap = self.caption(f"CPU · still labelling frame 1 ({mpx:.0f} Mpx)", 0, 1, color=RED_PX)
-        sw = Stopwatch("frame 1, so far", 0.0, size=34, color=RED_PX)
-        sw.move_to([COL_X[0], ROW_Y[1], 0])
-        backdrop = RoundedRectangle(corner_radius=0.12, width=3.2, height=1.25, stroke_width=0,
+        cpu_cap = self.caption("CPU · frame 1, still labelling", f"{mpx:.0f} Mpx per frame", 2, color=RED_PX)
+        sw = Stopwatch("frame 1, so far", 0.0, size=30, color=RED_PX)
+        sw.move_to([COL_X[2], ROW_Y, 0])
+        backdrop = RoundedRectangle(corner_radius=0.12, width=2.6, height=1.15, stroke_width=0,
                                     fill_color=BG, fill_opacity=0.96).move_to(sw)
         clock = ValueTracker(0.0)
 
@@ -99,18 +107,18 @@ class Intro(BeatScene):
             if data.fmt_ms(ms) != m.value.text:
                 m.set_ms(ms, RED_PX)
 
-        self.play(FadeIn(self.frame_box(0, 1)), FadeIn(cpu_img), FadeIn(cpu_cap), run_time=fr(9))
+        self.play(FadeIn(self.frame_box(2)), FadeIn(cpu_img), FadeIn(cpu_cap), run_time=fr(9))
         self.play(FadeIn(backdrop), FadeIn(sw), run_time=fr(4))
         sw.add_updater(on_clock)
         clock.add_updater(lambda m, dt: m.increment_value(dt))
         self.add(clock)
 
         self.until(t_b + 2.0)
-        gpu = self.panel("drones_labels", 1, 1)
+        gpu = self.panel("drones_labels", 3)
         gpu.sync_to(sky)
-        gpu_cap = self.caption(f"GPU · every frame · {data.fmt_ms(h.ch06_mask_ms)} per frame", 1, 1,
+        gpu_cap = self.caption("GPU · every frame", f"{data.fmt_ms(h.ch06_mask_ms)} per frame", 3,
                                color=TEAL)
-        self.play(FadeIn(self.frame_box(1, 1)), FadeIn(gpu), FadeIn(gpu_cap), run_time=fr(9))
+        self.play(FadeIn(self.frame_box(3)), FadeIn(gpu), FadeIn(gpu_cap), run_time=fr(9))
 
         self.until(t_b + 5.0)
         verdict = VGroup(
@@ -118,7 +126,7 @@ class Intro(BeatScene):
             label(f"pure Python {data.fmt_ms(h.pure_ms)}", size=LINE_FONT, color=RED_PX, mono=True),
             label(f"@njit {data.fmt_ms(h.njit_ms)}", size=LINE_FONT, color=RED_PX, mono=True),
             label(f"GPU {data.fmt_ms(h.ch06_mask_ms)}", size=LINE_FONT, color=TEAL, mono=True),
-        ).arrange(direction=np.array([1, 0, 0]), buff=0.55).move_to([0, -3.72, 0])
+        ).arrange(direction=np.array([1, 0, 0]), buff=0.55).move_to([0, -3.5, 0])
         self.play(FadeIn(verdict, lag_ratio=0.2), run_time=fr(9))
 
         # let the clocks run to the end of the narration, then fade out
