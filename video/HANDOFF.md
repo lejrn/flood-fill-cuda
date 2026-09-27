@@ -3,7 +3,8 @@
 Status on 2026-09-27: the cut is nine Manim clips, about 96 s, in
 `video/` on branch `video-explainer`. Three panes stay on screen for the
 whole video and accumulate: the benchmark matrix on the left (17 shapes,
-one column per chapter, a cell glows when the GPU beats the CPU), the
+one column per chapter, every column keeps its ms, a cell glows when the
+GPU beats the CPU), the
 chapter's blob in the middle (finished chapters sweep up into a strip),
 and the GPU schematic on the right (which SMs, blocks, threads and memory
 each chapter uses). Landscape only. See `scenes/BRIEF.md` for the spec.

@@ -2,9 +2,9 @@
 
 Rows are the 17 overview scenes, columns the stages. A cell glows when the
 chapter's fastest measured variant beats the CPU @njit time on that row;
-estimated cells are dashed and never glow; n/a cells are hollow. The CPU
-column always prints its ms; a stage column prints ms only while it is
-the current one, then keeps just its glow.
+estimated cells are dashed and never glow; n/a cells are hollow. Every
+revealed column keeps its ms printed (measured cells only), so the pane
+reads as a growing table.
 """
 from __future__ import annotations
 
@@ -114,7 +114,8 @@ class MatrixPane:
         return self.box.at(self.col_x(j), self.row_y(r))
 
     def shows_numbers(self, j: int) -> bool:
-        return j == 0 or j == self.current
+        """Numbers stay on screen in every revealed column."""
+        return True
 
     # ---- builders (pure: same input, same mobjects)
     def _static(self) -> VGroup:
