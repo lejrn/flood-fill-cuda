@@ -1,12 +1,12 @@
-# flood-fill-video
+# flood-fill-cuda explainer video
 
-A 30-60 second explainer for the parent project, rendered entirely
-with free, project-local tools.
+Three panes for the whole video: the benchmark matrix (17 shapes, one
+column per chapter, a shape glows when the GPU beats the CPU), the
+chapter's blob (finished chapters sweep up into a strip), and the GPU
+schematic (SMs, blocks, threads, memory per chapter). Manim scenes, local
+Kokoro narration, ffmpeg assembly. About 96 s, 1920x1080.
 
-- `scenes/` Manim scenes, one file per beat
-- `narration/` script text and generated voice tracks
-- `assets/` frame sequences extracted from the parent repo's wavefront GIFs
-- `build/` assembly scripts (ffmpeg concat, 16:9 and 9:16 layouts)
-
-Setup: `uv sync`. System headers needed once for ManimPango:
-`libcairo2-dev libpango1.0-dev`.
+- `scenes/BRIEF.md`: what is on screen and the rules.
+- `HANDOFF.md`: stack, pipeline, commands, gotchas, open items.
+- Every number comes from a committed benchmark JSON via
+  `scenes/panes/data.py`; `build/audit_numbers.py` checks them.

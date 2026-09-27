@@ -1,147 +1,149 @@
-# Handoff: tools and frameworks for the flood-fill explainer video
+# Handoff: the three-pane explainer video
 
-Status on 2026-09-26: two finished cuts exist, both 58.3 s, both with the
-Kokoro voice. `out/final_landscape_kokoro.mp4` (1920x1080) and
-`out/final_vertical_kokoro.mp4` (1080x1920). Everything that made them
-is on branch `video-explainer`, folder `video/`. Nothing is installed
-outside that folder except two apt header packages (see Setup).
+Status on 2026-09-27: the cut is nine Manim clips, about 96 s, in
+`video/` on branch `video-explainer`. Three panes stay on screen for the
+whole video and accumulate: the benchmark matrix on the left (17 shapes,
+one column per chapter, a cell glows when the GPU beats the CPU), the
+chapter's blob in the middle (finished chapters sweep up into a strip),
+and the GPU schematic on the right (which SMs, blocks, threads and memory
+each chapter uses). Landscape only. See `scenes/BRIEF.md` for the spec.
 
 ## 1. The stack
 
-| Role | Tool | Version | Cost / license | Why this one |
-|---|---|---|---|---|
-| Animation engine | Manim Community | 0.19.1 | MIT, free | 3Blue1Brown look, Python, deterministic frames, no browser needed |
-| Environment | uv | project venv, Python 3.10 | free | One `uv sync` reproduces it; user preference over conda |
-| Narration | Kokoro (`kokoro` + `misaki`) | 0.9.4 | Apache-2.0, runs locally on the RTX 4060 | Free, no quota, good English voice (`af_heart`) |
-| Narration (alt) | ElevenLabs Python SDK | 2.69 | free tier, needs API key | Higher quality; not run yet, key missing |
-| Muxing / concat | ffmpeg static via `imageio-ffmpeg` | 7.0.2 | free | No system install; symlinked into `.venv/bin/ffmpeg` |
-| Frame extraction | Pillow | 12.x | free | Unpacks the parent repo's wavefront GIFs into PNG sequences |
-| Text shaping | ManimPango + pycairo | built from source | free | Needs `libcairo2-dev libpango1.0-dev` once |
-
-Installed but unused: Remotion agent skills (`.claude/skills/remotion-*`)
-for a possible captions pass. Evaluated and dropped: HyperFrames (HTML
-video, would have split the look), Excalimate (hand-drawn style clashes
-with Manim), micromamba (user prefers uv), Whisper (no human voice to
-transcribe).
+| Role | Tool | Version | Why this one |
+|---|---|---|---|
+| Animation engine | Manim Community | 0.19.1 | 3Blue1Brown look, deterministic frames, no browser |
+| Environment | uv | Python 3.10 in `.venv` | one `uv sync` reproduces it |
+| Narration | Kokoro (`kokoro` + `misaki`) | 0.9.4 | free, local, `af_heart` voice |
+| Muxing / concat | ffmpeg static via `imageio-ffmpeg` | 7.0.2 | symlinked into `.venv/bin/ffmpeg` |
+| Frame extraction, review sheets | Pillow, PyAV | | GIF frames in, review frames out |
+| Text shaping | ManimPango + pycairo | built from source | needs `libcairo2-dev libpango1.0-dev` once |
 
 ## 2. Folder layout
 
 ```
 video/
-  pyproject.toml, uv.lock     dependencies, incl. the spaCy model Kokoro needs
+  pyproject.toml, uv.lock       dependencies
   narration/
-    script.md                 the 7 beats; each ```text block is one TTS call
-    common.py                 parses script.md, writes timing.json
-    tts_kokoro.py             -> out/kokoro/<beat>.wav + narration.wav + timing.json
-    tts_elevenlabs.py         -> out/elevenlabs/..., reads ELEVENLABS_API_KEY from .env
+    script.md                   the 9 beats; each ```text block is one TTS call
+    common.py                   parses script.md, writes timing.json
+    tts_kokoro.py               -> out/kokoro/<beat>.wav + timing.json (CPU, memory-mapped model)
+    tts_elevenlabs.py           alternative voice, needs ELEVENLABS_API_KEY in .env
   scenes/
-    style.py                  palette, BeatScene, Stopwatch, FrameSequence, helpers
-    BRIEF.md                  the spec every scene was built from (numbers, layout rules)
-    s00_hook.py .. s06_outro.py   one Manim scene per beat
-  assets/
-    extract_gifs.py           GIF -> assets/<name>/frame_NNN.png + meta.json (gitignored output)
+    style.py                    palette, BeatScene (whole-frame finish), FrameSequence, helpers
+    stage.py                    fr(), Replay, State, build_state(), StageScene
+    panes/geometry.py           the three pane boxes
+    panes/config.py             STAGES: beat, tag, replay set, captions, GpuSpec per stage
+    panes/data.py               benchmark JSON -> matrix rows, headline numbers; CLI audit
+    panes/left_matrix.py        MatrixPane
+    panes/middle_strip.py       strip, big image, captions, the runs row
+    panes/right_gpu.py          GpuPane
+    snapshot.py                 STAGE=k [LIVE=1] -> one PNG with `-s`
+    s00_cpu.py .. s08_outro.py  one thin scene per stage
+    BRIEF.md                    the spec
+  assets/extract_gifs.py        parent-repo GIFs -> assets/<name>/frame_NNN.png (gitignored output)
   build/
-    assemble.py               render all, concat, lay narration by measured clip starts
-  out/                        narration tracks and final mp4s (gitignored)
-  media/                      Manim renders and review frames (gitignored)
-  .env                        ELEVENLABS_API_KEY=... (gitignored, user-owned)
+    assemble.py                 render, concat, narration at measured clip starts, mux; --check
+    review.py                   frames at given times + a contact sheet
+    seam_check.py               cut-to-cut and hold checks
+    audit_numbers.py            every printed number vs the JSON, independently
+  out/, media/                  narration, renders, review frames (gitignored)
 ```
 
 ## 3. The pipeline
 
-1. `narration/script.md` holds the spoken text per beat. Editing a
-   sentence means re-running the TTS script; scenes then pad themselves
-   to the new length automatically.
-2. `narration/tts_kokoro.py` renders each beat to its own wav, trims
-   edge silence, and writes `timing.json` (seconds per beat, 0.4 s gap).
-3. Each scene subclasses `BeatScene`, reads its beat length from
-   `timing.json` (`VOICE` env var picks the folder), animates, then
-   `self.finish()` pads to beat + 0.4 s and fades out.
-4. `build/assemble.py --render` renders the seven scenes at 1080p30
-   with `--disable_caching`, concatenates them (re-encode, libx264 crf 18),
-   measures each clip, places every beat wav at its clip's real start,
-   and muxes AAC audio. `--layout vertical` renders 1080x1920.
+1. Parent repo, once: `uv run python -m
+   flood_fill_cuda.chapters.ch01_gpu_1blob_1block.benchmarks.wavefront`
+   (the CPU-walk and one-block GIFs) and `uv run python -m
+   flood_fill_cuda.overview.bench_ch06` (the ch06 column on the 17
+   overview rows, `results/overview/benchmark_results/ch06_overview_*.json`).
+   Both outputs are committed.
+2. `uv run assets/extract_gifs.py` unpacks the GIFs into `assets/`.
+3. `uv run python scenes/panes/data.py` and `uv run build/audit_numbers.py`
+   print and check every number the video shows.
+4. `uv run narration/tts_kokoro.py` renders each beat to a wav, trims edge
+   silence, and writes `timing.json`. Scenes read their beat length from
+   it (`VOICE=kokoro`) and fall back to `Stage.target_s` when the beat is
+   missing.
+5. `uv run build/assemble.py --render --check`: renders the nine scenes at
+   1080p30 with `--disable_caching`, concatenates them, places every beat's
+   wav at its clip's measured start, muxes AAC, prints each clip against
+   its beat, warns outside 60-120 s, and runs the seam check.
 
 ## 4. Commands
 
 ```bash
 cd /home/lrn/Repos/flood-fill-cuda/video
-uv sync                                        # environment
-uv run assets/extract_gifs.py                  # frames from the parent repo's GIFs
-uv run narration/tts_kokoro.py                 # voice + timing
-uv run build/assemble.py --render              # 16:9 final
-uv run build/assemble.py --render --layout vertical
-uv run build/assemble.py --voice elevenlabs    # re-mux only, after tts_elevenlabs.py
-uv run build/assemble.py --music track.mp3 --music-gain 0.12
+uv sync
+uv run assets/extract_gifs.py
+uv run python scenes/panes/data.py            # the matrix as text
+uv run build/audit_numbers.py                 # numbers vs JSON
+uv run narration/tts_kokoro.py                # voice + timing
+uv run build/assemble.py --render --check     # full 16:9 cut -> out/final_landscape_kokoro.mp4
+uv run build/assemble.py --render --only s03_n_blocks   # one clip
+uv run build/assemble.py --no-audio --check   # silent cut from existing renders
+uv run build/review.py s03_n_blocks NBlocks --times 0,0.3,0.6,1,1.5,2.6,5,end
+STAGE=4 LIVE=1 VOICE=kokoro .venv/bin/python -m manim render -s -qh --disable_caching --media_dir media/landscape scenes/snapshot.py Snapshot
+VOICE=kokoro .venv/bin/python -m manim render -ql --disable_caching --media_dir media/landscape scenes/s03_n_blocks.py NBlocks
 ```
 
-Single scene preview at low quality:
+## 5. How a stage works (the state contract)
 
-```bash
-VOICE=kokoro uv run python -m manim render -ql scenes/s02_gpu_waves.py GpuWaves
-```
+Clips are rendered separately and concatenated, yet the panes persist.
+`build_state(k)` is a pure function of the stage index and the JSON: it
+draws the picture "after stage k-1". Scene k adds it in `setup()`, so its
+first frame is exactly the previous clip's last frame; it animates its
+transition (sweep, new replay, GPU config, matrix column), runs its
+stage, then `snap()`s: everything is removed, `build_state(k+1)` is
+added, and the clip holds on it to `beat + 0.4 s`. `build/seam_check.py`
+compares each cut on 4x4 box-averaged frames (encoder noise averages out,
+a moved element does not) and reports the largest jump inside every hold.
 
-## 5. Setup from scratch
+## 6. Gotchas (all handled, keep them handled)
 
-- `sudo apt install libcairo2-dev libpango1.0-dev` (ManimPango and
-  pycairo have no Linux wheels). gcc, make and Python headers were
-  already present.
-- `uv sync` installs everything else, including torch (CUDA build) for
-  Kokoro and the spaCy `en_core_web_sm` wheel pinned in `pyproject.toml`.
-- The Kokoro model downloads on first run into `video/.hf-cache/`
-  (`HF_HOME` is set by the script).
-- Run Python scripts with the venv on `PATH` or via `uv run`: misaki
-  shells out to `python`, and the bare pyenv shim has no global version.
+- Play frames are counted with `np.arange` (rounds up); frozen waits with
+  `int()` (rounds down). `fr(n) = n/15 - 1e-6` for plays, `n/15 + 1e-6`
+  for frozen holds, so 15 fps previews and the 30 fps render agree.
+- The Cairo renderer snapshots the mobject family when a play starts:
+  never swap submobjects, swap one image's `pixel_array` (`Replay`) and
+  never change text in place (fade out, fade in). Removed-mid-play
+  mobjects keep being drawn.
+- `--disable_caching` always: a cached play skips `update_mobjects(0)`.
+- One resampling algorithm for a picture's whole life (replay frame,
+  still, thumbnail), or the snap pops.
+- Add order is fixed (matrix, GPU, tags, caption, strip, big image last):
+  Cairo redraws the family from the first moving mobject onward.
+- `Replay` reads frames from disk on demand; holding 97 image mobjects
+  of a 900 px set is half a gigabyte and got a render OOM-killed on this
+  6 GB laptop.
+- The ch06 column file is named `ch06_overview_*.json` on purpose:
+  `overview/build.py` and ch06's `figures.py` glob `overview_*.json`.
+- zsh expands a word starting with `=`; do not `echo =====`.
 
-## 6. Conventions the scenes follow
+## 7. Numbers worth knowing
 
-- Colours only from `style.py`: red is "unfilled pixel / slow number",
-  teal is "the final answer", grey is idle.
-- `Text` only (no LaTeX installed). Numbers in `DejaVu Sans Mono`.
-- Two panels per scene, side by side in landscape, stacked in portrait
-  (`is_vertical()`); portrait uses an 8-unit-wide frame so text keeps its
-  pixel size.
-- Every number on screen comes from `scenes/BRIEF.md`, which quotes the
-  parent repo's READMEs and benchmark JSON. Estimates carry a `~`.
-- Scenes do not call `add_sound`; audio is laid in assembly only.
+- Every number is from a committed JSON through `scenes/panes/data.py`;
+  `build/audit_numbers.py` is the independent check.
+- The matrix's ch06 cell on the real image is 1.55 ms (the 2026-09-27
+  overview column session); the headline says 1.46 ms (ch06's own
+  2026-07-25 session, the one the READMEs quote). Both are on screen with
+  their meaning; they are 7% apart.
+- ch01-ch04 on N-blob rows are estimates (`est: true`, one launch per
+  blob); they are dashed and never glow.
+- 16,000x is 24,083 / 1.455 = 16,551, floored to two figures.
 
-## 7. Gotchas that cost time (all fixed, keep them fixed)
+## 8. Open items
 
-- Manim muxes scene audio with `shortest=1`, so an in-scene `add_sound`
-  truncates the padded tail. Assembly muxes instead.
-- The Cairo renderer snapshots the mobject family when a play or wait
-  starts. Anything removed mid-play keeps being drawn. `FrameSequence`
-  therefore swaps one image's `pixel_array` in place, and
-  `Stopwatch.set_ms` blanks the old glyphs.
-- Cached partial renders skip `update_mobjects(0)`, so end states can
-  differ between cached and fresh renders. Always `--disable_caching`.
-- The renderer clock advances by whole frames; scene lengths can be a
-  frame off. Assembly measures real clip lengths, so nothing drifts.
-- Under `-r 1080,1920` Manim keeps `frame_width` at 14.22 and everything
-  shrinks; `style.py` sets it to 8 when `VIDEO_LAYOUT=vertical`.
-- Two concurrent Manim renders into the same media folder can corrupt
-  partial files. Render sequentially.
-- zsh does not word-split unquoted variables; use `${=var}` or
-  `${pair%%:*}` patterns in shell loops.
-
-## 8. Numbers worth double-checking before publishing
-
-- The parent README's "150x fewer runs" is runs vs all pixels; vs red
-  pixels it is 25x (13,451,960 / 539,207). The video says 25x.
-- ch05 baseline: 58.51 ms (same session as ch06) vs 51.03 ms (overview
-  session). The video uses 58.51 everywhere.
-- ch01 to ch04 bars on the real image are estimates (`est: true` in the
-  overview JSON). The video marks them `~`.
-- "0.64 ms" for the five middle kernels is the README's figure; the
-  per-phase table sums to 0.63.
-
-## 9. Open items
-
-1. ElevenLabs voice: add `video/.env`, run `tts_elevenlabs.py`, re-assemble
-   with `--voice elevenlabs`, compare with Kokoro.
-2. Optional background music via `--music`.
-3. Reviewer feedback on pace (Kokoro at speed 1.15) and on the noisy
-   8-block replay in beat 02 (a cleaner alternative is
-   `assets/ch03_disk`).
-4. Captions pass, if wanted, with the installed Remotion skills or a
-   Manim subtitle layer driven by `timing.json`.
+1. Narration: `narration/tts_kokoro.py` needs about 1.5 GB of free RAM
+   for the PyTorch CUDA build even on the CPU. With two Jupyter kernels
+   and VS Code open this laptop had 0.5-1.2 GB free and the process was
+   OOM-killed. Close the kernels (or anything else large), run
+   `uv run narration/tts_kokoro.py`, then `uv run build/assemble.py --check`.
+   A lighter option is a CPU-only torch environment (`uv venv .venv-tts`,
+   `uv pip install --python .venv-tts/bin/python torch --index-url
+   https://download.pytorch.org/whl/cpu kokoro soundfile numpy <en_core_web_sm wheel>`),
+   then `CUDA_VISIBLE_DEVICES= .venv-tts/bin/python narration/tts_kokoro.py`.
+2. Vertical 9:16 cut: the panes are box-relative; a stacked
+   `pane_geometry` is the missing piece.
+3. Adding the ch06 column to the README grand table (`overview/build.py`).
+4. ElevenLabs voice, background music (`--music`), captions.
