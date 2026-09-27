@@ -2,7 +2,7 @@
 .env
 
 # local environment and model cache
-.venv/
+.venv*/
 .hf-cache/
 
 # render outputs and caches (assets/*/ are frames unpacked from the parent repo's GIFs)
