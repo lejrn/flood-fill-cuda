@@ -19,9 +19,9 @@ Three panes for the whole video, landscape 1920x1080 at 30 fps:
   glows blue (teal for ch06) when it beats the CPU, brighter for a bigger
   win; grey when slower (red tint below 0.1x); dashed when the number is
   an estimate (one launch per blob on N-blob rows; never glows); hollow
-  when the chapter cannot run the row. The current column prints its ms
-  in a 4-character form (`1.3s`, `269`, `12.7`, `0.87`); older columns
-  keep only their glow.
+  when the chapter cannot run the row. Every revealed column prints its
+  ms in a 4-character form (`1.3s`, `269`, `12.7`, `0.87`) and keeps it
+  for the rest of the video; estimated and n/a cells print nothing.
 - **Middle, the blob.** The current stage's replay, big. Every finished
   stage is a thumbnail in the strip at the top, with a two-line tag.
   A stage begins by sweeping the previous blob up into the next slot.

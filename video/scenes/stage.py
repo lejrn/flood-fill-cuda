@@ -276,8 +276,6 @@ class StageScene(BeatScene):
         gpu_changes = cfg.gpu is not pcfg.gpu
         if gpu_changes:
             outs.append(FadeOut(prev.right.dynamic))
-        if cfg.col is not None and (k - 1) != 0:
-            outs.append(FadeOut(prev.left.nums[k - 1]))
         self.play(
             prev.middle.big_image.animate.scale_to_fit_width(THUMB_W).move_to(slot_center(box, k - 1)),
             FadeIn(tag(box, k - 1, pcfg.tag)),
