@@ -46,11 +46,26 @@ def main() -> None:
     ap.add_argument("--speed", type=float, default=1.15, help="Kokoro reads slowly at 1.0")
     args = ap.parse_args()
 
+    # This laptop has 6 GB of RAM. Loading the 327 MB checkpoint the normal
+    # way peaks at 1.4 GB and gets the process OOM-killed when other work
+    # is open, so the checkpoint is memory-mapped (file-backed pages the
+    # kernel can drop) and torch stays single-threaded. The CPU is fast
+    # enough: the whole script runs in about a minute.
+    import torch
+
+    _torch_load = torch.load
+
+    def _mmap_load(*a, **k):
+        k.setdefault("mmap", True)
+        return _torch_load(*a, **k)
+
+    torch.load = _mmap_load
+    torch.set_num_threads(1)
     from kokoro import KPipeline
 
     out = HERE.parent / "out" / "kokoro"
     out.mkdir(parents=True, exist_ok=True)
-    pipe = KPipeline(lang_code="a")
+    pipe = KPipeline(lang_code="a", device="cpu")
 
     durations: dict[str, float] = {}
     joined: list[np.ndarray] = []
