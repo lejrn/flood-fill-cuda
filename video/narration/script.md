@@ -1,83 +1,87 @@
 # Narration script
 
-Concept: "What moves?" Three acts around one question, the unit of work.
-One pixel (CPU), pixels in parallel (ch01-ch03), blobs in parallel
-(ch04-ch05), runs (ch06).
+Concept: three panes for the whole video. Left, the benchmark matrix
+(17 shapes, one column per chapter, a shape glows when the GPU beats the
+CPU). Middle, the blob of the current chapter, with every finished chapter
+swept up into a strip. Right, the GPU: which SMs, blocks, threads and
+memory each chapter uses.
 
-Target: 45-55 s. English voice. Every number below is quoted from the
-parent repo's READMEs and committed benchmark JSON. Session used for
-the ch05 vs ch06 pair is `runs_20260725T161448Z.json` (58.51 ms vs
-1.46 ms). "16,000x" is 24,083 ms / 1.455 ms.
+Target: 90-100 s. English voice. Every number below is on screen and
+comes from a committed benchmark JSON via `scenes/panes/data.py`
+(`uv run python scenes/panes/data.py` prints the whole matrix).
 
-Each beat is one TTS call, so the assembly step knows where every beat
-starts and ends. The `## beat` headings are parsed by the TTS scripts:
-the first fenced block under each heading is the spoken text.
+Each beat is one TTS call and one Manim scene (`scenes/sNN_*.py`). The
+`## beat` headings are parsed by the TTS scripts: the first fenced block
+under each heading is the spoken text.
 
-## beat 00_hook
-
-```text
-Eighty-one million pixels. Two and a half thousand red blobs. How long to paint them all?
-```
-
-On screen: crop of `input_blobs.png`, a stopwatch appears at 0.
-Visual: `results/ch06_gpu_nblob_runs/figures/before_after.gif` (left half).
-
-## beat 01_cpu
+## beat 00_cpu
 
 ```text
-A CPU walks them one pixel at a time. Pure Python: twenty-four seconds. Numba: one point three.
+A CPU fills a blob one pixel at a time. Pure Python: twenty-four seconds for the real image. Numba: one point three. On the left, the CPU time for seventeen shapes. Every chapter now gets a column, and a shape glows when the GPU wins.
 ```
 
-On screen: 12x12 grid, one cell lights per tick. Stopwatch: 24,083 ms, then 1,346 ms.
-Visual: Manim.
+On screen: the 256² square filled in CPU visit order (grey), the CPU box on the right, the CPU column of the matrix.
 
-## beat 02_gpu_waves
+## beat 01_one_block
 
 ```text
-A GPU floods in waves, the whole frontier at once. One block is one of twenty-four SMs, four percent. All of them: twenty times the CPU.
+Chapter one. One block of two hundred fifty-six threads floods the whole frontier at once, its queue in shared memory, a spill tier behind it. One block is one of twenty-four SMs: four percent of the GPU. It beats the CPU only on the biggest shapes.
 ```
 
-On screen: diamond wave (4-conn BFS) filling a square, one full ring per tick.
-Beside it, 24 SM tiles: 1 lit (4%), then 2, then all 24. Caption: "64 Mpx in 100 ms".
-Visual: Manim + `ch03/wavefront/square256_b8_t32.gif`.
+On screen: the same square, one blue block. SM 0 lit, 8 warps x 32 lanes, ring of 8,192 slots, spill tier. Column "1 block": five glows.
 
-## beat 03_twist
+## beat 02_two_blocks
 
 ```text
-But on the real image, it lost to the CPU. Every blob was its own launch. Two and a half thousand launches.
+Chapter two. Two blocks on two SMs share one global queue, with a grid-wide barrier twice per level. Twice as fast as one block on big blobs. The small shapes still belong to the CPU.
 ```
 
-On screen: back to the real image. Stopwatch jumps to 2,181 ms in red, beside CPU 1,346 ms.
-Caption: "one blob = one launch, x 2,522".
-Visual: Manim.
+On screen: blue and green interleaved. SM 0 and 1 lit, one queue in global memory.
 
-## beat 04_blobs_together
+## beat 03_n_blocks
 
 ```text
-So the label rides inside the queue, and every blob floods in one launch. Colliding waves merge in flight. Seven hundred fifty-five thousand blobs, no seeds, twenty-five milliseconds.
+Chapter three. Any number of blocks. Every block takes the next pixels from the same queue, and the hue shows who filled what: ownership speckles. Eight blocks here, forty-eight in the benchmark.
 ```
 
-On screen: two waves racing down a U, colliding at the bridge, the seam erased.
-Then all 2,522 blobs flooding at once.
-Visual: `ch05/wavefront/u192_merge_prov.gif` then `u192_merge_final.gif`, then `input_blobs_final.gif`.
+On screen: eight hues, eight SMs, one warp of 32 lanes per block, the 4-neighbour stencil.
 
-## beat 05_runs
+## beat 04_conn8
 
 ```text
-Then: why move pixels at all? A red span in a row is one run. Thirteen million pixels, five hundred thousand runs. Twenty-five times fewer. Fifty-eight milliseconds becomes one and a half.
+Eight neighbours instead of four. The wave becomes a square and needs half the levels, so half the barriers. On the big disk, eleven times the CPU.
 ```
 
-On screen: one pixel row, red spans collapse into single segments.
-Four bars: 81,000,000 / 13,451,960 / 539,207 / 2,522.
-Stopwatch: 58.51 ms, then 1.46 ms. Small caption: "1.46 ms packed mask, 2.96 ms from RGB".
-Visual: Manim, data from `runs_vs_pixels.svg`.
+On screen: the square wave; the 8-neighbour stencil; column "8-conn", disk 4000 at 24.1 ms vs 269 ms.
 
-## beat 06_outro
+## beat 05_two_blobs
+
+```text
+Chapter four. Two blobs in one launch: the label rides inside the queue entry. But on the real image every blob was still its own launch, two and a half thousand launches, and the GPU lost.
+```
+
+On screen: two blobs, blue and green families; the queue box carries label chips; the estimated (dashed) cells on the N-blob rows.
+
+## beat 06_n_blobs
+
+```text
+Chapter five. No seeds given. Candidate waves start everywhere and colliding waves merge in flight. Two and a half thousand blobs, one launch, fifty-eight milliseconds. Now the real image glows too.
+```
+
+On screen: two waves racing down a U, the seam erased; then all 2,522 blobs of the real image. 48 x 256 cooperative grid, union-find in global memory.
+
+## beat 07_runs
+
+```text
+Chapter six. Why move pixels at all? A red span in a row is one run: twenty-five times fewer things to touch. Seven plain launches, no barrier. Fifty-eight milliseconds becomes one and a half.
+```
+
+On screen: a pixel row collapses into runs, the recoloured real image; the kernel strip pack to paint; column "runs" in teal.
+
+## beat 08_outro
 
 ```text
 Twenty-four seconds to one and a half milliseconds. Sixteen thousand times. Not a smarter algorithm. A better representation.
 ```
 
-On screen: log-scale bar chart, bars appear one by one, pure Python down to ch06.
-End card: before/after crop, title, repo name.
-Visual: Manim, data from `chain.svg`. ch01-ch04 bars marked with "~" (estimated in the overview JSON).
+On screen: the full strip and the full matrix; centre lines 24,083 ms → 1.46 ms, 16,000×, flood-fill-cuda.
