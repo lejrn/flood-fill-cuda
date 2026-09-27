@@ -5,6 +5,8 @@ Usage (from video/):
     uv run build/assemble.py                     # assemble from existing renders
     uv run build/assemble.py --layout vertical --render
     uv run build/assemble.py --voice elevenlabs
+    uv run build/assemble.py --render --only s03_n_blocks   # one clip
+    uv run build/assemble.py --no-audio --check              # silent cut + seam check
 
 Output: out/final_<layout>_<voice>.mp4
 
@@ -16,6 +18,7 @@ locked to the picture even if a scene is a frame short or long.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -33,13 +36,15 @@ FFMPEG = VIDEO / ".venv" / "bin" / "ffmpeg"
 
 # (scene file stem, class name, beat name) in narrative order.
 BEATS = [
-    ("s00_hook", "Hook", "00_hook"),
-    ("s01_cpu", "Cpu", "01_cpu"),
-    ("s02_gpu_waves", "GpuWaves", "02_gpu_waves"),
-    ("s03_twist", "Twist", "03_twist"),
-    ("s04_blobs_together", "BlobsTogether", "04_blobs_together"),
-    ("s05_runs", "Runs", "05_runs"),
-    ("s06_outro", "Outro", "06_outro"),
+    ("s00_cpu", "Cpu", "00_cpu"),
+    ("s01_one_block", "OneBlock", "01_one_block"),
+    ("s02_two_blocks", "TwoBlocks", "02_two_blocks"),
+    ("s03_n_blocks", "NBlocks", "03_n_blocks"),
+    ("s04_conn8", "Conn8", "04_conn8"),
+    ("s05_two_blobs", "TwoBlobs", "05_two_blobs"),
+    ("s06_n_blobs", "NBlobs", "06_n_blobs"),
+    ("s07_runs", "Runs", "07_runs"),
+    ("s08_outro", "Outro", "08_outro"),
 ]
 
 SR = 48_000
@@ -49,9 +54,11 @@ def media_dir(layout: str) -> Path:
     return VIDEO / "media" / layout
 
 
-def render(layout: str, voice: str, quality: str) -> None:
+def render(layout: str, voice: str, quality: str, only: list[str] | None = None) -> None:
     env = dict(os.environ, VOICE=voice, VIDEO_LAYOUT=layout)
     for stem, cls, _ in BEATS:
+        if only and stem not in only:
+            continue
         # --disable_caching: a cached play skips update_mobjects(0), so end
         # states can differ from an uncached render. Always render fresh.
         cmd = [str(PY), "-m", "manim", "render", f"-q{quality}", "--fps", "30", "--disable_caching",
@@ -97,18 +104,42 @@ def main() -> None:
     ap.add_argument("--quality", default="h", help="manim quality letter: l, m, h, k")
     ap.add_argument("--music", type=Path, default=None, help="optional background track, mixed at --music-gain")
     ap.add_argument("--music-gain", type=float, default=0.12)
+    ap.add_argument("--only", nargs="*", default=None, help="render only these scene stems")
+    ap.add_argument("--no-audio", action="store_true", help="video-only cut, no narration needed")
+    ap.add_argument("--check", action="store_true", help="run build/seam_check.py on the clips")
+    ap.add_argument("--strict", action="store_true", help="fail outside the 60-120 s target")
     args = ap.parse_args()
 
     if args.render:
-        render(args.layout, args.voice, args.quality)
+        render(args.layout, args.voice, args.quality, args.only)
+        if args.only:
+            print("rendered", args.only)
+            return
 
     clips = [newest_render(args.layout, stem, cls) for stem, cls, _ in BEATS]
     durs = [duration(p) for p in clips]
     starts = np.concatenate([[0.0], np.cumsum(durs)[:-1]])
     total = float(sum(durs))
+    timing = OUT / args.voice / "timing.json"
+    beat_len = {}
+    if timing.exists():
+        beat_len = {r["beat"]: float(r["seconds"]) for r in json.loads(timing.read_text())["beats"]}
     for (stem, _, beat), d, t0 in zip(BEATS, durs, starts):
-        print(f"{beat:20s} start {t0:6.2f}  len {d:5.2f}")
+        want = beat_len.get(beat)
+        note = ""
+        if want is not None:
+            slot = want + 0.4
+            note = f"  beat {want:5.2f} + 0.4 = {slot:5.2f}" + ("  OVERRUN" if d > slot + 0.05 else "")
+        print(f"{beat:20s} start {t0:6.2f}  len {d:5.2f}{note}")
     print(f"total {total:.2f} s")
+    if not 60.0 <= total <= 120.0:
+        msg = f"total {total:.1f} s is outside the 60-120 s target"
+        if args.strict:
+            raise SystemExit(msg)
+        print("warning:", msg)
+    if args.check:
+        subprocess.run([str(PY), str(VIDEO / "build" / "seam_check.py"), "--layout", args.layout,
+                        "--intra"], check=True)
 
     OUT.mkdir(exist_ok=True)
     work = OUT / f"work_{args.layout}_{args.voice}"
@@ -123,6 +154,12 @@ def main() -> None:
                     "-an", str(video_only)], check=True)
 
     # 2. narration laid at each scene's measured start
+    if args.no_audio:
+        final = OUT / f"final_{args.layout}_silent.mp4"
+        subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-i", str(video_only), "-c:v", "copy",
+                        "-movflags", "+faststart", str(final)], check=True)
+        print(f"->  {final}  ({duration(final):.2f} s, no audio)")
+        return
     track = np.zeros(int(np.ceil(total * SR)) + SR, dtype=np.float32)
     for (_, _, beat), t0 in zip(BEATS, starts):
         wav = OUT / args.voice / f"{beat}.wav"

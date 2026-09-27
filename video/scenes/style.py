@@ -224,18 +224,25 @@ class BeatScene(Scene):
     def target_seconds(self) -> float:
         return beat_seconds(self.beat)
 
-    def finish(self, tail: float = 0.4, fade: float = 0.3) -> None:
+    def finish(self, tail: float = 0.4, fade: float = 0.3, frozen: bool = True) -> None:
         """Pad to the narration length (+tail), fading everything out at the end.
 
         Scene length = beat_seconds + tail, which is exactly the slot the
-        assembly step gives this beat (narration + inter-beat gap).
+        assembly step gives this beat (narration + inter-beat gap). The pad
+        is a whole number of frames: a frozen wait renders int(d * fps)
+        frames, a live one ceil(d * fps), so the epsilon leans each the
+        right way and -ql (15 fps) and --fps 30 agree to the frame.
         """
         from manim import FadeOut
 
+        fps = config.frame_rate
         total = self.target_seconds() + tail
-        remaining = total - fade - self.elapsed()
-        if remaining > 0:
-            self.wait(remaining)
+        n = round((total - fade - self.elapsed()) * fps)
+        if n > 0:
+            if frozen:
+                self.wait(n / fps + 1e-6, frozen_frame=True)
+            else:
+                self.wait(n / fps - 1e-6, frozen_frame=False)
         mobs = list(self.mobjects)
         if mobs and fade > 0:
             self.play(FadeOut(Group(*mobs)), run_time=fade)
