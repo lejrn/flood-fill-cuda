@@ -91,7 +91,7 @@ class Intro(BeatScene):
         sw = Stopwatch("frame 1, so far", 0.0, size=34, color=RED_PX)
         sw.move_to([COL_X[0], ROW_Y[1], 0])
         backdrop = RoundedRectangle(corner_radius=0.12, width=3.2, height=1.25, stroke_width=0,
-                                    fill_color=BG, fill_opacity=0.82).move_to(sw)
+                                    fill_color=BG, fill_opacity=0.96).move_to(sw)
         clock = ValueTracker(0.0)
 
         def on_clock(m):
