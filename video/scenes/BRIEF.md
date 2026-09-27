@@ -9,15 +9,19 @@ per-beat timing live in `narration/script.md` and `out/kokoro/timing.json`.
 
 ## The intro (`scenes/s_intro.py`, beats `intro_problem` + `intro_budget`)
 
-Before the three panes: the problem. Four 16:9 panels stream the same
-simulated footage (`assets/make_drone_frames.py`: a clear sky with five
-quadcopters and a missile, 240 frames at 30 fps; the motion mask by
-background subtraction; the mask labelled by the real ch06 kernel).
-Top-left the camera, top-right the motion filter, then the frame budget
-line (30 fps, 33 ms per frame). Second beat: bottom-left the CPU still
-on frame 1 (the bare mask, a stopwatch counting real time), bottom-right
-the GPU labelling every frame, then the verdict line: budget 33 ms, pure
-Python 24,083 ms, @njit 1,346 ms, GPU 1.46 ms. Fades to black; stage 0
+Before the three panes: the problem. Four vertical (9:16) panels in a
+row stream the same footage: a drone light show (YouTube Short
+`p2cDTfSIwqs`, downloaded with yt-dlp into `assets/source/`, frames
+1020-1260, the steadiest 8 s of the clip by phase correlation), its
+motion mask (per-pixel temporal median background, threshold 40, 3x3
+opening), and the mask labelled by the real ch06 kernel
+(`assets/make_drone_frames.py --source ...`; without `--source` it
+renders a simulated sky with drones and a missile instead). Left to
+right: the camera, the motion filter, then the frame budget line (30
+fps, 33 ms per frame). Second beat: the CPU still on frame 1 (the bare
+mask, a stopwatch counting real time), the GPU labelling every frame,
+then the verdict line: budget 33 ms, pure Python 24,083 ms, @njit 1,346
+ms, GPU 1.46 ms. Fades to black; stage 0
 fades in from black. One clip, two beats: `build/assemble.py` places the
 second wav at the first beat's length + 0.4 s inside the clip.
 

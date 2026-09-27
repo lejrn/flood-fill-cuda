@@ -44,6 +44,7 @@ def main() -> None:
     ap.add_argument("--voice", default="am_onyx", help="deep male; af_heart was the first cut")
     ap.add_argument("--gap", type=float, default=0.4, help="silence between beats, seconds")
     ap.add_argument("--speed", type=float, default=1.1, help="Kokoro reads slowly at 1.0")
+    ap.add_argument("--out", default="kokoro", help="folder under out/ (the VOICE the scenes read)")
     args = ap.parse_args()
 
     # This laptop has 6 GB of RAM. Loading the 327 MB checkpoint the normal
@@ -63,7 +64,7 @@ def main() -> None:
     torch.set_num_threads(1)
     from kokoro import KPipeline
 
-    out = HERE.parent / "out" / "kokoro"
+    out = HERE.parent / "out" / args.out
     out.mkdir(parents=True, exist_ok=True)
     pipe = KPipeline(lang_code="a", device="cpu")
 
