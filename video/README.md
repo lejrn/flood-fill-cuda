@@ -6,7 +6,7 @@ the video: the benchmark matrix (17 shapes, one
 column per chapter, a shape glows when the GPU beats the CPU), the
 chapter's blob (finished chapters sweep up into a strip), and the GPU
 schematic (SMs, blocks, threads, memory per chapter). Manim scenes, local
-Kokoro narration (deep male voice), ffmpeg assembly. About 129 s, 1920x1080.
+Kokoro narration (male voice `am_adam`), ffmpeg assembly. About 129 s, 1920x1080.
 
 - `scenes/BRIEF.md`: what is on screen and the rules.
 - `HANDOFF.md`: stack, pipeline, commands, gotchas, open items.

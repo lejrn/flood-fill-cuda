@@ -1,7 +1,7 @@
 """Render every beat of script.md with Kokoro (local, free) into out/kokoro/.
 
 Usage (from video/):
-    uv run narration/tts_kokoro.py [--voice am_onyx] [--gap 0.6]
+    uv run narration/tts_kokoro.py [--voice am_adam] [--gap 0.6]
 
 Writes one wav per beat, a joined narration.wav with `gap` seconds of
 silence between beats, and timing.json for the assembly step.
@@ -41,7 +41,7 @@ def trim_edges(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voice", default="am_onyx", help="deep male; af_heart was the first cut")
+    ap.add_argument("--voice", default="am_adam", help="the chosen male voice; am_onyx is deeper, af_heart was the first cut")
     ap.add_argument("--gap", type=float, default=0.4, help="silence between beats, seconds")
     ap.add_argument("--speed", type=float, default=1.1, help="Kokoro reads slowly at 1.0")
     ap.add_argument("--out", default="kokoro", help="folder under out/ (the VOICE the scenes read)")

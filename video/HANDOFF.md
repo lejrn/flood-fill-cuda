@@ -2,9 +2,8 @@
 
 Status on 2026-09-28: the cut is ten Manim clips, about 129 s, in
 `video/` on branch `video-explainer`, narrated by Kokoro's deep male
-voice `am_onyx` by default; `build/variants.py` renders one full cut per
-male voice into `out/final_landscape_kokoro_<voice>.mp4` for choosing by
-ear. A 30 s intro states the problem (a defence camera must label every
+voice `am_adam` by default (chosen by ear on 2026-09-28 from the 13 cuts
+`build/variants.py` renders into `out/final_landscape_kokoro_<voice>.mp4`). A 30 s intro states the problem (a defence camera must label every
 drone in every frame at 30 fps; real drone-show footage, motion mask,
 CPU vs GPU). Then three panes stay on screen and accumulate: the benchmark matrix on the left (17 shapes,
 one column per chapter, every column keeps its ms, a cell glows when the
@@ -19,7 +18,7 @@ each chapter uses). Landscape only. See `scenes/BRIEF.md` for the spec.
 |---|---|---|---|
 | Animation engine | Manim Community | 0.19.1 | 3Blue1Brown look, deterministic frames, no browser |
 | Environment | uv | Python 3.10 in `.venv` | one `uv sync` reproduces it |
-| Narration | Kokoro (`kokoro` + `misaki`) | 0.9.4 | free, local; `am_onyx` (deep male, 89 Hz median), `narration/pick_voice.py` ranks voices by pitch |
+| Narration | Kokoro (`kokoro` + `misaki`) | 0.9.4 | free, local; `am_adam` (male, 121 Hz median; `am_onyx` is the deepest at 89 Hz), `narration/pick_voice.py` ranks voices by pitch |
 | Muxing / concat | ffmpeg static via `imageio-ffmpeg` | 7.0.2 | symlinked into `.venv/bin/ffmpeg` |
 | Frame extraction, review sheets | Pillow, PyAV | | GIF frames in, review frames out |
 | Text shaping | ManimPango + pycairo | built from source | needs `libcairo2-dev libpango1.0-dev` once |
@@ -152,6 +151,16 @@ a moved element does not) and reports the largest jump inside every hold.
 - 16,000x is 24,083 / 1.455 = 16,551, floored to two figures.
 - The intro's frame budget is 1000 / 30 = 33.3 ms, shown as 33 ms; "81 Mpx"
   is the real image's 81,000,000 pixels from the ch06 runs JSON.
+- Intro footage pipeline, per 576 x 1024 frame with 570-1,210 blobs
+  (`assets/make_drone_frames.py` prints these and writes
+  `assets/drones_labels/timing.json`; medians, host numpy unless noted):
+  top-hat filter 4.3 ms, ch06 kernel 1.3 ms (GPU, CUDA events), label
+  map to host 0.7 ms, blob prep (dense labels, area and bbox filters,
+  centroids) 10 ms, tracking 5.9 ms (p90 17 ms), painting 2 ms. The
+  tracker started at 72 ms: sorting the full blobs x tracks distance
+  matrix; gating the candidates, vectorising the greedy rounds and
+  computing the distances as a float32 matrix product brought it to 6 ms.
+  None of the host stages is optimised; on the GPU each would be sub-ms.
 
 ## 8. Open items
 

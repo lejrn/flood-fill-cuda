@@ -6,7 +6,8 @@ CPU). Middle, the blob of the current chapter, with every finished chapter
 swept up into a strip. Right, the GPU: which SMs, blocks, threads and
 memory each chapter uses.
 
-Target: about 2 minutes. English voice, Kokoro `am_onyx` (deep male). Every number below is on screen and
+Target: about 2 minutes. English voice, Kokoro `am_adam` (male; chosen by ear from
+`build/variants.py`, which renders one cut per male voice). Every number below is on screen and
 comes from a committed benchmark JSON via `scenes/panes/data.py`
 (`uv run python scenes/panes/data.py` prints the whole matrix).
 
