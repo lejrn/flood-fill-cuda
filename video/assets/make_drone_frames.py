@@ -43,6 +43,7 @@ import argparse
 import json
 import math
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -157,54 +158,70 @@ TRACK_PALETTE = np.array([
 
 
 class Tracker:
-    """Centroid tracker: each track predicts its next position with its
-    last velocity (a constant-velocity model, the simplest Kalman-style
-    prediction), blobs are matched to predictions by nearest distance
-    within GATE (greedy, closest pairs first)."""
+    """Centroid tracker, all state in arrays: each track predicts its next
+    position with its last velocity (a constant-velocity model, the
+    simplest Kalman-style prediction); blobs are matched to predictions
+    by nearest distance within GATE, closest pairs first; unmatched tracks
+    coast for up to MISS_LIMIT frames; unmatched blobs open new tracks."""
 
     def __init__(self):
-        self.tracks = {}          # id -> (centroid xy, velocity xy, misses)
+        self.ids = np.zeros(0, dtype=np.int64)
+        self.pos = np.zeros((0, 2))
+        self.vel = np.zeros((0, 2))
+        self.miss = np.zeros(0, dtype=np.int64)
         self.next_id = 0
 
     def update(self, centroids: np.ndarray) -> np.ndarray:
         """centroids (n, 2) for this frame's blobs -> track id per blob."""
-        n = len(centroids)
+        n, m = len(centroids), len(self.ids)
         ids = np.full(n, -1, dtype=np.int64)
-        if self.tracks and n:
-            tids = list(self.tracks.keys())
-            prev = np.array([self.tracks[t][0] + self.tracks[t][1] for t in tids])   # predicted
-            d = np.sqrt(((centroids[:, None, :] - prev[None, :, :]) ** 2).sum(axis=2))
-            order = np.argsort(d, axis=None)
-            used_b, used_t = set(), set()
-            for flat in order:
-                b, t = divmod(int(flat), len(tids))
-                if d[b, t] > GATE:
+        hit = np.full(m, -1, dtype=np.int64)                 # blob index per matched track
+        if m and n:
+            pred = self.pos + self.vel
+            # squared distances as |a|^2 + |b|^2 - 2 a.b in float32: a BLAS matrix
+            # product instead of a broadcast over (blobs, tracks, 2) float64
+            # temporaries (that broadcast alone cost 27 ms a frame at 1,000 x 1,500)
+            a = centroids.astype(np.float32)
+            b = pred.astype(np.float32)
+            d2 = (a * a).sum(axis=1)[:, None] + (b * b).sum(axis=1)[None, :] - 2.0 * (a @ b.T)
+            # only pairs inside the gate are candidates: a few per blob instead of
+            # the whole blobs x tracks matrix (sorting that matrix cost 70 ms a frame)
+            cb, ct = np.nonzero(d2 <= GATE * GATE)
+            order = np.argsort(d2[cb, ct], kind="stable")
+            cb, ct = cb[order], ct[order]                     # candidate pairs, closest first
+            # greedy closest-first assignment, vectorised: in each round a pair is
+            # accepted when it is both its blob's and its track's closest remaining
+            # candidate; accepted blobs and tracks drop out and the round repeats
+            while len(cb):
+                _, fb = np.unique(cb, return_index=True)
+                _, ft = np.unique(ct, return_index=True)
+                take = np.intersect1d(fb, ft)
+                if len(take) == 0:
                     break
-                if b in used_b or t in used_t:
-                    continue
-                ids[b] = tids[t]
-                used_b.add(b)
-                used_t.add(t)
-        for b in range(n):
-            if ids[b] < 0:
-                ids[b] = self.next_id
-                self.next_id += 1
-        matched = set(int(i) for i in ids)
-        for t in list(self.tracks.keys()):
-            if t not in matched:
-                c, v, miss = self.tracks[t]
-                if miss + 1 > MISS_LIMIT:
-                    del self.tracks[t]
-                else:
-                    self.tracks[t] = (c + v, v, miss + 1)             # coast along the prediction
-        for b in range(n):
-            t = int(ids[b])
-            if t in self.tracks:
-                c, v, _ = self.tracks[t]
-                v = 0.6 * (centroids[b] - c) + 0.4 * v                # smoothed velocity
-            else:
-                v = np.zeros(2)
-            self.tracks[t] = (centroids[b], v, 0)
+                ids[cb[take]] = self.ids[ct[take]]
+                hit[ct[take]] = cb[take]
+                keep = ~(np.isin(cb, cb[take]) | np.isin(ct, ct[take]))
+                cb, ct = cb[keep], ct[keep]
+        # matched tracks: new position, smoothed velocity; unmatched: coast
+        got = hit >= 0
+        pos, vel, miss = self.pos.copy(), self.vel.copy(), self.miss.copy()
+        if got.any():
+            c = centroids[hit[got]]
+            vel[got] = 0.6 * (c - pos[got]) + 0.4 * vel[got]
+            pos[got] = c
+            miss[got] = 0
+        pos[~got] += vel[~got]
+        miss[~got] += 1
+        alive = miss <= MISS_LIMIT
+        # unmatched blobs open new tracks
+        new = ids < 0
+        k = int(new.sum())
+        ids[new] = np.arange(self.next_id, self.next_id + k)
+        self.next_id += k
+        self.ids = np.concatenate([self.ids[alive], ids[new]])
+        self.pos = np.concatenate([pos[alive], centroids[new]])
+        self.vel = np.concatenate([vel[alive], np.zeros((k, 2))])
+        self.miss = np.concatenate([miss[alive], np.zeros(k, dtype=np.int64)])
         return ids
 
 
@@ -363,11 +380,13 @@ def main() -> int:
     engine = None
     tracker = Tracker()
     blobs, size = [], None
+    timing = {"filter": [], "kernel": [], "label_map": [], "blob_prep": [], "track": [], "paint": []}
     for f, (arr, bg_gray) in enumerate(gen):
         h, w = arr.shape[:2]
         if engine is None:
             engine = RunRecolor(w, h, run_capacity=max(65536, w * h // 8))
             size = [w, h]
+        t0 = time.perf_counter()
         if args.source and args.filter == "tophat":
             mask = (gray_of(arr) - bg_gray) > thresh                    # brighter than surroundings
         else:
@@ -375,7 +394,12 @@ def main() -> int:
         # the repo's images are (width, height, 3), indexed [x, y], red on white
         img = np.full((w, h, 3), 255, dtype=np.uint8)
         img[mask.T] = (255, 0, 0)
+        t1 = time.perf_counter()
         r = recolor(img, contract="rgb", engine=engine, emit_seeds=False, emit_label=True, copy_img=False)
+        t2 = time.perf_counter()
+        timing["filter"].append((t1 - t0) * 1000)
+        timing["kernel"].append(r.kernel_ms)                            # CUDA events, GPU only
+        timing["label_map"].append(r.label_ms + r.d2h_ms)               # label map to the host
         label_hw = np.ascontiguousarray(r.label.T)                      # (H, W), -1 off-blob
         # the kernel's labels are canonical run indices (sparse); make them dense 0..n-1
         on = label_hw >= 0
@@ -405,11 +429,19 @@ def main() -> int:
                 label_hw[on] = inv
                 n_blobs = len(uniq)
         # the kernel's labels are canonical per frame; the tracker makes them persistent
-        ids = tracker.update(blob_centroids(label_hw, n_blobs))
+        cents = blob_centroids(label_hw, n_blobs)
+        t3 = time.perf_counter()
+        ids = tracker.update(cents)
+        t4 = time.perf_counter()
+        painted = paint_tracks(label_hw, ids)
+        t5 = time.perf_counter()
+        timing["blob_prep"].append((t3 - t2) * 1000)
+        timing["track"].append((t4 - t3) * 1000)
+        timing["paint"].append((t5 - t4) * 1000)
         blobs.append(n_blobs)
         Image.fromarray(arr).save(folders["sky"] / f"frame_{f:03d}.png")
         Image.fromarray((mask * 255).astype(np.uint8)).convert("RGB").save(folders["mask"] / f"frame_{f:03d}.png")
-        Image.fromarray(paint_tracks(label_hw, ids)).save(folders["labels"] / f"frame_{f:03d}.png")
+        Image.fromarray(painted).save(folders["labels"] / f"frame_{f:03d}.png")
     n = len(blobs)
     for k, p in folders.items():
         meta = {"source": source, "frames": n, "size": size,
@@ -421,6 +453,14 @@ def main() -> int:
         (p / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"{n} frames x 3 sets, {size[0]}x{size[1]}; blobs per frame {min(blobs)}..{max(blobs)}; "
           f"{tracker.next_id} tracks; source: {source}")
+    print("per-frame ms (median / p90), host numpy unless noted:")
+    for k, v in timing.items():
+        a = np.array(v[1:]) if len(v) > 1 else np.array(v)             # drop the first frame (JIT, allocation)
+        note = " [GPU, CUDA events]" if k == "kernel" else ""
+        print(f"  {k:10s} {np.median(a):7.2f} / {np.percentile(a, 90):7.2f}{note}")
+    (folders["labels"] / "timing.json").write_text(json.dumps(
+        {k: {"median_ms": float(np.median(v[1:])), "p90_ms": float(np.percentile(v[1:], 90))}
+         for k, v in timing.items() if len(v) > 1}, indent=2), encoding="utf-8")
     return 0
 
 

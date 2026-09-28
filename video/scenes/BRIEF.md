@@ -13,8 +13,11 @@ Before the three panes: the problem. Four vertical (9:16) panels in a
 row stream the same footage: a drone light show (YouTube Short
 `p2cDTfSIwqs`, downloaded with yt-dlp into `assets/source/`, frames
 1020-1260, the steadiest 8 s of the clip by phase correlation), its
-motion mask (per-pixel temporal median background, threshold 40, 3x3
-opening), and the mask labelled by the real ch06 kernel
+filter output (a white top-hat: gray minus its 9x9 opening, threshold
+60, blobs under 4 px or wider than 26 px dropped; the camera moves the
+whole time, so no background model holds), and the blobs labelled by the
+real ch06 kernel and coloured by a centroid tracker with velocity
+prediction so a drone keeps its colour across frames
 (`assets/make_drone_frames.py --source ...`; without `--source` it
 renders a simulated sky with drones and a missile instead). Left to
 right: the camera, the motion filter, then the frame budget line (30
