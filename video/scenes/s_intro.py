@@ -11,8 +11,10 @@ the three panes in from black.
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
-from manim import FadeIn, Rectangle, RoundedRectangle, ValueTracker, VGroup, config
+from manim import Dot, FadeIn, Line, Rectangle, RoundedRectangle, ValueTracker, VGroup, VMobject, config
 
 from scenes.panes import data
 from scenes.panes.geometry import Box
@@ -27,6 +29,81 @@ COL_X = (-5.1, -1.7, 1.7, 5.1)
 ROW_Y = 0.62
 FPS_CAMERA = 30
 CAP_FONT, TITLE_FONT, LINE_FONT = 16, 24, 20
+COUNT_EVERY = 10          # frames between counter updates (3 Hz reads; 30 Hz dribbles)
+SPARK_WINDOW = 90         # frames shown in the moving graph (3 s)
+
+
+class LiveText(VGroup):
+    """A mono line whose text is swapped from an updater. The Cairo renderer
+    snapshots the family when a play starts, so the replaced glyphs are
+    blanked instead of removed (the Stopwatch trick)."""
+
+    def __init__(self, text: str, size: int, color: str, anchor: np.ndarray):
+        super().__init__()
+        self.size, self.color_, self.anchor = size, color, anchor
+        self.value = label(text, size=size, color=color, mono=True).move_to(anchor, aligned_edge=np.array([-1, 0, 0]))
+        self.add(self.value)
+
+    def set(self, text: str) -> None:
+        if text == self.value.text:
+            return
+        new = label(text, size=self.size, color=self.color_, mono=True)
+        new.move_to(self.anchor, aligned_edge=np.array([-1, 0, 0]))
+        old = self.value
+        self.remove(old)
+        self.value = new
+        self.add(new)
+        for m in old.get_family():
+            m.points[:] = 0
+
+
+class BlobCounter(VGroup):
+    """Counter + sparkline of the blobs the kernel found, driven by a Replay's
+    frame index: the number updates every COUNT_EVERY frames, the graph
+    scrolls every frame over the last SPARK_WINDOW frames."""
+
+    def __init__(self, replay: Replay, counts: list, centre: np.ndarray, width: float):
+        super().__init__()
+        self.replay, self.counts = replay, np.array(counts, dtype=float)
+        # the graph spans the clip's own range (rounded to hundreds), not 0..max,
+        # so the swing between frames is readable
+        self.lo = float(np.floor(self.counts.min() * 0.9 / 100) * 100)
+        self.hi = float(np.ceil(self.counts.max() * 1.05 / 100) * 100)
+        x0, x1 = centre[0] - width / 2 + 0.42, centre[0] + width / 2 - 0.12
+        self.x0, self.x1 = x0, x1
+        self.y0, self.y1 = centre[1] - 0.38, centre[1] + 0.08
+        self.backdrop = RoundedRectangle(corner_radius=0.08, width=width, height=1.02, stroke_width=0,
+                                         fill_color=BG, fill_opacity=0.82).move_to(centre + np.array([0, -0.04, 0]))
+        self.text = LiveText(self.fmt(0), 14, TEAL, np.array([centre[0] - width / 2 + 0.12, centre[1] + 0.32, 0]))
+        self.base = Line([x0, self.y0, 0], [x1, self.y0, 0], stroke_width=1, color=GRID)
+        self.top_line = Line([x0, self.y1, 0], [x1, self.y1, 0], stroke_width=1, color=GRID)
+        ticks = VGroup(label(f"{int(self.hi):,}", size=9, color=INK_SOFT).move_to([x0 - 0.05, self.y1, 0], aligned_edge=np.array([1, 0, 0])),
+                       label(f"{int(self.lo):,}", size=9, color=INK_SOFT).move_to([x0 - 0.05, self.y0, 0], aligned_edge=np.array([1, 0, 0])))
+        self.line = VMobject(stroke_color=TEAL, stroke_width=2)
+        self.dot = Dot(radius=0.035, color=TEAL)
+        self.add(self.backdrop, self.base, self.top_line, ticks, self.line, self.dot, self.text)
+        self.draw(0)
+        self.add_updater(lambda m, dt: m.draw(self.replay.t * self.replay.fps))
+
+    def fmt(self, i: int) -> str:
+        return f"{int(self.counts[i]):,} blobs in this frame"
+
+    def draw(self, i: int) -> None:
+        """`i` is the cumulative frame count; the footage loops, so the window
+        indexes the counts cyclically and keeps scrolling through the wrap."""
+        n = len(self.counts)
+        i = int(i)
+        cur = i % n
+        self.text.set(self.fmt(cur - cur % COUNT_EVERY))
+        lo = max(0, i - SPARK_WINDOW + 1)
+        idx = np.arange(lo, i + 1)
+        xs = self.x1 - (i - idx) * (self.x1 - self.x0) / (SPARK_WINDOW - 1)
+        ys = self.y0 + (self.y1 - self.y0) * (self.counts[idx % n] - self.lo) / (self.hi - self.lo)
+        pts = [np.array([x, y, 0.0]) for x, y in zip(xs, ys)]
+        if len(pts) == 1:
+            pts = pts * 2
+        self.line.set_points_as_corners(pts)
+        self.dot.move_to(pts[-1])
 
 
 class Intro(BeatScene):
@@ -119,6 +196,11 @@ class Intro(BeatScene):
         gpu_cap = self.caption("GPU · every frame", f"{data.fmt_ms(h.ch06_mask_ms)} per frame", 3,
                                color=TEAL)
         self.play(FadeIn(self.frame_box(3)), FadeIn(gpu), FadeIn(gpu_cap), run_time=fr(9))
+        # the kernel's blob count per frame, from the frame set's metadata
+        meta = json.loads((ASSETS / "drones_labels" / "meta.json").read_text(encoding="utf-8"))
+        counter = BlobCounter(gpu, meta["blobs_per_frame"],
+                              np.array([COL_X[3], ROW_Y - PH / 2 + 0.62, 0.0]), PW - 0.16)
+        self.play(FadeIn(counter), run_time=fr(6))
 
         self.until(t_b + 5.0)
         verdict = VGroup(
@@ -133,6 +215,7 @@ class Intro(BeatScene):
         self.until(self.target_seconds() + 0.4 - 0.5)
         sw.remove_updater(on_clock)
         clock.clear_updaters()
+        counter.clear_updaters()
         for r in (sky, mask, gpu):
             r.stop()
         self.finish(tail=0.4, fade=0.5, frozen=False)

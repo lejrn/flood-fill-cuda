@@ -22,8 +22,11 @@ prediction so a drone keeps its colour across frames
 renders a simulated sky with drones and a missile instead). Left to
 right: the camera, the motion filter, then the frame budget line (30
 fps, 33 ms per frame). Second beat: the CPU still on frame 1 (the bare
-mask, a stopwatch counting real time), the GPU labelling every frame,
-then the verdict line: budget 33 ms, pure Python 24,083 ms, @njit 1,346
+mask, a stopwatch counting real time), the GPU labelling every frame
+with a live blob counter (the kernel's count per frame from the frame
+set's `meta.json`, updated every 10 frames so it can be read) over a
+sparkline of the last 3 s scaled to the clip's own range, then the
+verdict line: budget 33 ms, pure Python 24,083 ms, @njit 1,346
 ms, GPU 1.46 ms. Fades to black; stage 0
 fades in from black. One clip, two beats: `build/assemble.py` places the
 second wav at the first beat's length + 0.4 s inside the clip.
