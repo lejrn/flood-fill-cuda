@@ -379,7 +379,7 @@ def main() -> int:
             old.unlink()
     engine = None
     tracker = Tracker()
-    blobs, size = [], None
+    blobs, tracks_alive, size = [], [], None
     timing = {"filter": [], "kernel": [], "label_map": [], "blob_prep": [], "track": [], "paint": []}
     for f, (arr, bg_gray) in enumerate(gen):
         h, w = arr.shape[:2]
@@ -439,6 +439,7 @@ def main() -> int:
         timing["track"].append((t4 - t3) * 1000)
         timing["paint"].append((t5 - t4) * 1000)
         blobs.append(n_blobs)
+        tracks_alive.append(int((tracker.miss == 0).sum()))          # tracks matched in this frame
         Image.fromarray(arr).save(folders["sky"] / f"frame_{f:03d}.png")
         Image.fromarray((mask * 255).astype(np.uint8)).convert("RGB").save(folders["mask"] / f"frame_{f:03d}.png")
         Image.fromarray(painted).save(folders["labels"] / f"frame_{f:03d}.png")
@@ -448,6 +449,8 @@ def main() -> int:
                 "delay_ms": round(1000 / args.fps), "kind": k, "thresh": thresh}
         if k == "labels":
             meta["blobs_min"], meta["blobs_max"] = min(blobs), max(blobs)
+            meta["blobs_per_frame"] = blobs                  # what the kernel counted, per frame
+            meta["tracks_per_frame"] = tracks_alive          # tracks matched in each frame
             meta["tracks"] = tracker.next_id
             meta["tracking"] = f"centroid + constant velocity, gate {GATE} px, miss limit {MISS_LIMIT}"
         (p / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
