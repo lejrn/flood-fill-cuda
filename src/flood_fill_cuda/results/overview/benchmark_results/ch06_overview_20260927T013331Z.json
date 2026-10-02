@@ -1,0 +1,1028 @@
+{
+  "schema": "ch06_overview_column",
+  "device": "NVIDIA GeForce RTX 4060 Laptop GPU\u0000",
+  "sm_count": 24,
+  "tpb": 256,
+  "grid": [
+    2048,
+    256
+  ],
+  "phase_blocks": {
+    "count": 256,
+    "emit": 512,
+    "merge": 512,
+    "flatten": 512,
+    "paint": 1024
+  },
+  "pack_row_blocks": 64,
+  "rounds": 9,
+  "spin_seconds": 8.0,
+  "idle_clocks": {
+    "sm_mhz": 1470,
+    "max_sm_mhz": 3105,
+    "power_w": 11.96,
+    "temp_c": 54
+  },
+  "overview_source": "overview_20260724T234423Z.json",
+  "columns": [
+    {
+      "key": "ch06_rgb",
+      "group": "ch06 \u00b7 runs",
+      "label": "rgb (incl. pack)"
+    },
+    {
+      "key": "ch06_mask",
+      "group": "ch06 \u00b7 runs",
+      "label": "packed mask"
+    }
+  ],
+  "experiment": "ch06 run-table recolor on the grand table's 17 rows, both contracts, timed with the ch06 chapter's protocol (8 s clock spin, 9 interleaved rounds, CUDA events, kernel-only). A separate session from overview_*.json: compare against its njit / pure cells knowing the clocks differ; the SM clock during each row is recorded. filled = painted pixels counted on the host after the last round; crosscheck also requires zero red pixels left, n_blobs == 1 / 2 on one- / two-blob rows and == the overview's n_blobs on N-blob rows, and filled == the overview's filled for the row.",
+  "rows": [
+    {
+      "row": "sq_256",
+      "family": "square",
+      "note": "256\u00b2, 128\u00b2 blob, center seed",
+      "width": 256,
+      "height": 256,
+      "kind": "one",
+      "red_px": 16384,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.4607999920845032,
+          "ms_min": 0.37785598635673523,
+          "ms_max": 0.9164800047874451,
+          "filled": 16384,
+          "phase_ms": {
+            "pack": 0.04198399931192398,
+            "count": 0.04608000069856644,
+            "scan": 0.043007999658584595,
+            "emit": 0.05939200147986412,
+            "merge": 0.06348799914121628,
+            "flatten": 0.07577600330114365,
+            "paint": 0.08601599931716919
+          },
+          "label_only_ms": 0.32972800359129906,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.3491840064525604,
+          "ms_min": 0.09216000139713287,
+          "ms_max": 0.8478720188140869,
+          "filled": 16384,
+          "phase_ms": {
+            "count": 0.03993599861860275,
+            "scan": 0.05734400078654289,
+            "emit": 0.06143999844789505,
+            "merge": 0.06143999844789505,
+            "flatten": 0.05632000043988228,
+            "paint": 0.07884799689054489
+          },
+          "label_only_ms": 0.276479996740818,
+          "skip": null
+        }
+      },
+      "n_runs": 128,
+      "n_blobs": 1,
+      "union_attempts": 127,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 16384,
+      "clocks_during_run": {
+        "sm_mhz": 900,
+        "max_sm_mhz": 3105,
+        "power_w": 9.24,
+        "temp_c": 59
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "sq_1024",
+      "family": "square",
+      "note": "1024\u00b2, 512\u00b2 blob",
+      "width": 1024,
+      "height": 1024,
+      "kind": "one",
+      "red_px": 262144,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.45772799849510193,
+          "ms_min": 0.42291200160980225,
+          "ms_max": 0.6123520135879517,
+          "filled": 262144,
+          "phase_ms": {
+            "pack": 0.05939200147986412,
+            "count": 0.04915200173854828,
+            "scan": 0.04915200173854828,
+            "emit": 0.062463998794555664,
+            "merge": 0.058368001133203506,
+            "flatten": 0.055296000093221664,
+            "paint": 0.12800000607967377
+          },
+          "label_only_ms": 0.3338240049779415,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.3900800049304962,
+          "ms_min": 0.3768320083618164,
+          "ms_max": 0.4904960095882416,
+          "filled": 262144,
+          "phase_ms": {
+            "count": 0.03481600061058998,
+            "scan": 0.048128001391887665,
+            "emit": 0.06143999844789505,
+            "merge": 0.05734400078654289,
+            "flatten": 0.055296000093221664,
+            "paint": 0.12697599828243256
+          },
+          "label_only_ms": 0.25702400133013725,
+          "skip": null
+        }
+      },
+      "n_runs": 512,
+      "n_blobs": 1,
+      "union_attempts": 511,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 262144,
+      "clocks_during_run": {
+        "sm_mhz": 1410,
+        "max_sm_mhz": 3105,
+        "power_w": 12.73,
+        "temp_c": 61
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "sq_4000",
+      "family": "square",
+      "note": "4000\u00b2, 2000\u00b2 blob (4M px)",
+      "width": 4000,
+      "height": 4000,
+      "kind": "one",
+      "red_px": 4000000,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.7936000227928162,
+          "ms_min": 0.6666240096092224,
+          "ms_max": 1.0782719850540161,
+          "filled": 4000000,
+          "phase_ms": {
+            "pack": 0.37068799138069153,
+            "count": 0.014336000196635723,
+            "scan": 0.013311999849975109,
+            "emit": 0.027648000046610832,
+            "merge": 0.009216000325977802,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.2908160090446472
+          },
+          "label_only_ms": 0.44236799189820886,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.6625279784202576,
+          "ms_min": 0.5785599946975708,
+          "ms_max": 0.7464960217475891,
+          "filled": 4000000,
+          "phase_ms": {
+            "count": 0.027648000046610832,
+            "scan": 0.058368001133203506,
+            "emit": 0.07168000191450119,
+            "merge": 0.05846399813890457,
+            "flatten": 0.07065600156784058,
+            "paint": 0.3235839903354645
+          },
+          "label_only_ms": 0.2868160028010607,
+          "skip": null
+        }
+      },
+      "n_runs": 2000,
+      "n_blobs": 1,
+      "union_attempts": 1999,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 4000000,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 26.47,
+        "temp_c": 65
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "disk_256",
+      "family": "disk",
+      "note": "r=120 disk",
+      "width": 256,
+      "height": 256,
+      "kind": "one",
+      "red_px": 45225,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.4249599874019623,
+          "ms_min": 0.40038400888442993,
+          "ms_max": 0.5939199924468994,
+          "filled": 45225,
+          "phase_ms": {
+            "pack": 0.04095999896526337,
+            "count": 0.04915200173854828,
+            "scan": 0.05222399905323982,
+            "emit": 0.060416001826524734,
+            "merge": 0.060416001826524734,
+            "flatten": 0.055296000093221664,
+            "paint": 0.10444799810647964
+          },
+          "label_only_ms": 0.3184640035033226,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.37990400195121765,
+          "ms_min": 0.3553279936313629,
+          "ms_max": 0.4270080029964447,
+          "filled": 45225,
+          "phase_ms": {
+            "count": 0.03891199827194214,
+            "scan": 0.050175998359918594,
+            "emit": 0.05734400078654289,
+            "merge": 0.05939200147986412,
+            "flatten": 0.055296000093221664,
+            "paint": 0.10444799810647964
+          },
+          "label_only_ms": 0.2611199989914894,
+          "skip": null
+        }
+      },
+      "n_runs": 241,
+      "n_blobs": 1,
+      "union_attempts": 240,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 45225,
+      "clocks_during_run": {
+        "sm_mhz": 900,
+        "max_sm_mhz": 3105,
+        "power_w": 9.17,
+        "temp_c": 62
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "disk_1024",
+      "family": "disk",
+      "note": "r=480 disk",
+      "width": 1024,
+      "height": 1024,
+      "kind": "one",
+      "red_px": 723749,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.502784013748169,
+          "ms_min": 0.4935680031776428,
+          "ms_max": 0.7434239983558655,
+          "filled": 723749,
+          "phase_ms": {
+            "pack": 0.055296000093221664,
+            "count": 0.04608000069856644,
+            "scan": 0.050175998359918594,
+            "emit": 0.05734400078654289,
+            "merge": 0.06985600292682648,
+            "flatten": 0.06348799914121628,
+            "paint": 0.17497600615024567
+          },
+          "label_only_ms": 0.34224000200629234,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.4556800127029419,
+          "ms_min": 0.43827199935913086,
+          "ms_max": 0.5058559775352478,
+          "filled": 723749,
+          "phase_ms": {
+            "count": 0.04915200173854828,
+            "scan": 0.04710400104522705,
+            "emit": 0.05734400078654289,
+            "merge": 0.062463998794555664,
+            "flatten": 0.06163199990987778,
+            "paint": 0.1802240014076233
+          },
+          "label_only_ms": 0.27769600227475166,
+          "skip": null
+        }
+      },
+      "n_runs": 961,
+      "n_blobs": 1,
+      "union_attempts": 960,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 723749,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 16.99,
+        "temp_c": 64
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "disk_4000",
+      "family": "disk",
+      "note": "r=1900 disk (11.3M px)",
+      "width": 4000,
+      "height": 4000,
+      "kind": "one",
+      "red_px": 11340981,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 1.1683839559555054,
+          "ms_min": 0.9685440063476562,
+          "ms_max": 1.3689600229263306,
+          "filled": 11340981,
+          "phase_ms": {
+            "pack": 0.3461120128631592,
+            "count": 0.014336000196635723,
+            "scan": 0.01228800043463707,
+            "emit": 0.028672000393271446,
+            "merge": 0.1884160041809082,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.562175989151001
+          },
+          "label_only_ms": 0.5969920181669295,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.9817919731140137,
+          "ms_min": 0.8579840064048767,
+          "ms_max": 1.0864640474319458,
+          "filled": 11340981,
+          "phase_ms": {
+            "count": 0.06860800087451935,
+            "scan": 0.06656000018119812,
+            "emit": 0.08191999793052673,
+            "merge": 0.2017280012369156,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.5631999969482422
+          },
+          "label_only_ms": 0.42598400032147765,
+          "skip": null
+        }
+      },
+      "n_runs": 3801,
+      "n_blobs": 1,
+      "union_attempts": 3800,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 11340981,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 35.0,
+        "temp_c": 69
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "serp_128",
+      "family": "serpentine",
+      "note": "1-px snake, ~8k levels",
+      "width": 128,
+      "height": 128,
+      "kind": "one",
+      "red_px": 8256,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.4986880123615265,
+          "ms_min": 0.41471999883651733,
+          "ms_max": 1.0721280574798584,
+          "filled": 8256,
+          "phase_ms": {
+            "pack": 0.07168000191450119,
+            "count": 0.04915200173854828,
+            "scan": 0.05427199974656105,
+            "emit": 0.07475200295448303,
+            "merge": 0.08089599758386612,
+            "flatten": 0.08499199897050858,
+            "paint": 0.06758400052785873
+          },
+          "label_only_ms": 0.41574400290846825,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.38707199692726135,
+          "ms_min": 0.3317759931087494,
+          "ms_max": 0.5150719881057739,
+          "filled": 8256,
+          "phase_ms": {
+            "count": 0.048128001391887665,
+            "scan": 0.06143999844789505,
+            "emit": 0.0727040022611618,
+            "merge": 0.06348799914121628,
+            "flatten": 0.06963200122117996,
+            "paint": 0.06451199948787689
+          },
+          "label_only_ms": 0.31539200246334076,
+          "skip": null
+        }
+      },
+      "n_runs": 128,
+      "n_blobs": 1,
+      "union_attempts": 127,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 8256,
+      "clocks_during_run": {
+        "sm_mhz": 1470,
+        "max_sm_mhz": 3105,
+        "power_w": 11.24,
+        "temp_c": 65
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "serp_256",
+      "family": "serpentine",
+      "note": "1-px snake, ~33k levels",
+      "width": 256,
+      "height": 256,
+      "kind": "one",
+      "red_px": 32896,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.42188799381256104,
+          "ms_min": 0.3665919899940491,
+          "ms_max": 1.077247977256775,
+          "filled": 32896,
+          "phase_ms": {
+            "pack": 0.04198399931192398,
+            "count": 0.04915200173854828,
+            "scan": 0.05427199974656105,
+            "emit": 0.062463998794555664,
+            "merge": 0.05939200147986412,
+            "flatten": 0.060416001826524734,
+            "paint": 0.09932799637317657
+          },
+          "label_only_ms": 0.32768000289797783,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.3819519877433777,
+          "ms_min": 0.34406399726867676,
+          "ms_max": 0.7577599883079529,
+          "filled": 32896,
+          "phase_ms": {
+            "count": 0.03686400130391121,
+            "scan": 0.053247999399900436,
+            "emit": 0.07372800260782242,
+            "merge": 0.07372800260782242,
+            "flatten": 0.062463998794555664,
+            "paint": 0.09216000139713287
+          },
+          "label_only_ms": 0.30003200471401215,
+          "skip": null
+        }
+      },
+      "n_runs": 256,
+      "n_blobs": 1,
+      "union_attempts": 255,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 32896,
+      "clocks_during_run": {
+        "sm_mhz": 780,
+        "max_sm_mhz": 3105,
+        "power_w": 8.68,
+        "temp_c": 63
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "comb_24",
+      "family": "comb",
+      "note": "24 teeth, 96\u00d764",
+      "width": 96,
+      "height": 64,
+      "kind": "one",
+      "red_px": 1818,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.4607999920845032,
+          "ms_min": 0.3840000033378601,
+          "ms_max": 0.839680016040802,
+          "filled": 1818,
+          "phase_ms": {
+            "pack": 0.04710400104522705,
+            "count": 0.04505600035190582,
+            "scan": 0.053247999399900436,
+            "emit": 0.07680000364780426,
+            "merge": 0.06656000018119812,
+            "flatten": 0.048128001391887665,
+            "paint": 0.09625600278377533
+          },
+          "label_only_ms": 0.33689600601792336,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.3676159977912903,
+          "ms_min": 0.3420160114765167,
+          "ms_max": 0.9379839897155762,
+          "filled": 1818,
+          "phase_ms": {
+            "count": 0.03993599861860275,
+            "scan": 0.048128001391887665,
+            "emit": 0.06758400052785873,
+            "merge": 0.0655359998345375,
+            "flatten": 0.04505600035190582,
+            "paint": 0.09216000139713287
+          },
+          "label_only_ms": 0.2662400007247925,
+          "skip": null
+        }
+      },
+      "n_runs": 1542,
+      "n_blobs": 1,
+      "union_attempts": 1541,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 1818,
+      "clocks_during_run": {
+        "sm_mhz": 990,
+        "max_sm_mhz": 3105,
+        "power_w": 9.19,
+        "temp_c": 63
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "comb_2000",
+      "family": "comb",
+      "note": "2000 teeth, 3000\u00d74001 (4.8M px)",
+      "width": 3000,
+      "height": 4001,
+      "kind": "one",
+      "red_px": 4831992,
+      "run_capacity": 5040008,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 7.789567947387695,
+          "ms_min": 7.4260478019714355,
+          "ms_max": 8.076288223266602,
+          "filled": 4831992,
+          "phase_ms": {
+            "pack": 0.32256001234054565,
+            "count": 0.01228800043463707,
+            "scan": 0.010239999741315842,
+            "emit": 1.2851200103759766,
+            "merge": 0.8407040238380432,
+            "flatten": 0.23756800591945648,
+            "paint": 5.038080215454102
+          },
+          "label_only_ms": 2.708480052649975,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 7.323488235473633,
+          "ms_min": 7.252992153167725,
+          "ms_max": 7.59603214263916,
+          "filled": 4831992,
+          "phase_ms": {
+            "count": 0.08073599636554718,
+            "scan": 0.08396799862384796,
+            "emit": 1.3250559568405151,
+            "merge": 0.8427519798278809,
+            "flatten": 0.2385919988155365,
+            "paint": 4.70527982711792
+          },
+          "label_only_ms": 2.5711039304733276,
+          "skip": null
+        }
+      },
+      "n_runs": 4800008,
+      "n_blobs": 1,
+      "union_attempts": 4800007,
+      "still_red": 0,
+      "expected_blobs": 1,
+      "overview_filled": 4831992,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 22.78,
+        "temp_c": 70
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "two_sq_300",
+      "family": "two squares",
+      "note": "2 \u00d7 300\u00b2 squares, 700\u00d7400",
+      "width": 700,
+      "height": 400,
+      "kind": "two",
+      "red_px": 180000,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.8663039803504944,
+          "ms_min": 0.45977601408958435,
+          "ms_max": 1.3670400381088257,
+          "filled": 180000,
+          "phase_ms": {
+            "pack": 0.10035199671983719,
+            "count": 0.1013759970664978,
+            "scan": 0.10956799983978271,
+            "emit": 0.1228799968957901,
+            "merge": 0.11673600226640701,
+            "flatten": 0.07577600330114365,
+            "paint": 0.18534399569034576
+          },
+          "label_only_ms": 0.6266879960894585,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.749567985534668,
+          "ms_min": 0.40857601165771484,
+          "ms_max": 0.9134079813957214,
+          "filled": 180000,
+          "phase_ms": {
+            "count": 0.06864000111818314,
+            "scan": 0.10956799983978271,
+            "emit": 0.12595200538635254,
+            "merge": 0.12390399724245071,
+            "flatten": 0.11468800157308578,
+            "paint": 0.18227200210094452
+          },
+          "label_only_ms": 0.5427520051598549,
+          "skip": null
+        }
+      },
+      "n_runs": 600,
+      "n_blobs": 2,
+      "union_attempts": 598,
+      "still_red": 0,
+      "expected_blobs": 2,
+      "overview_filled": 180000,
+      "clocks_during_run": {
+        "sm_mhz": 1215,
+        "max_sm_mhz": 3105,
+        "power_w": 11.38,
+        "temp_c": 63
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "two_sq_2800",
+      "family": "two squares",
+      "note": "2 \u00d7 7.8M px squares, 6000\u00d73200",
+      "width": 6000,
+      "height": 3200,
+      "kind": "two",
+      "red_px": 15680000,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 1.2165119647979736,
+          "ms_min": 1.1786240339279175,
+          "ms_max": 1.3782399892807007,
+          "filled": 15680000,
+          "phase_ms": {
+            "pack": 0.39423999190330505,
+            "count": 0.01945599913597107,
+            "scan": 0.01740800030529499,
+            "emit": 0.03993599861860275,
+            "merge": 0.013311999849975109,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.6963199973106384
+          },
+          "label_only_ms": 0.49151998991146684,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 1.011680006980896,
+          "ms_min": 0.9758399724960327,
+          "ms_max": 1.0250240564346313,
+          "filled": 15680000,
+          "phase_ms": {
+            "count": 0.018432000651955605,
+            "scan": 0.023615999147295952,
+            "emit": 0.08083199709653854,
+            "merge": 0.04505600035190582,
+            "flatten": 0.053247999399900436,
+            "paint": 0.7434239983558655
+          },
+          "label_only_ms": 0.22118399664759636,
+          "skip": null
+        }
+      },
+      "n_runs": 5600,
+      "n_blobs": 2,
+      "union_attempts": 5598,
+      "still_red": 0,
+      "expected_blobs": 2,
+      "overview_filled": 15680000,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 39.8,
+        "temp_c": 68
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "asym_4000_800",
+      "family": "asymmetric",
+      "note": "16M + 0.6M px pair, 5200\u00d74400",
+      "width": 5200,
+      "height": 4400,
+      "kind": "two",
+      "red_px": 16640000,
+      "run_capacity": 8192,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 1.240064024925232,
+          "ms_min": 1.120255947113037,
+          "ms_max": 1.4039039611816406,
+          "filled": 16640000,
+          "phase_ms": {
+            "pack": 0.4986880123615265,
+            "count": 0.01740800030529499,
+            "scan": 0.01740800030529499,
+            "emit": 0.04095999896526337,
+            "merge": 0.08601599931716919,
+            "flatten": 0.0071680000983178616,
+            "paint": 0.5662720203399658
+          },
+          "label_only_ms": 0.6676480113528669,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.9512959718704224,
+          "ms_min": 0.8580480217933655,
+          "ms_max": 1.7674239873886108,
+          "filled": 16640000,
+          "phase_ms": {
+            "count": 0.05206400156021118,
+            "scan": 0.050175998359918594,
+            "emit": 0.09728000313043594,
+            "merge": 0.08499199897050858,
+            "flatten": 0.05427199974656105,
+            "paint": 0.6195200085639954
+          },
+          "label_only_ms": 0.33878400176763535,
+          "skip": null
+        }
+      },
+      "n_runs": 4800,
+      "n_blobs": 2,
+      "union_attempts": 4798,
+      "still_red": 0,
+      "expected_blobs": 2,
+      "overview_filled": 16640000,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 39.89,
+        "temp_c": 67
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "random_1000",
+      "family": "random noise",
+      "note": "density 0.3, ~thousands of blobs",
+      "width": 1000,
+      "height": 1000,
+      "kind": "n",
+      "red_px": 299991,
+      "run_capacity": 220658,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.652288019657135,
+          "ms_min": 0.5927680134773254,
+          "ms_max": 0.899071991443634,
+          "filled": 299991,
+          "phase_ms": {
+            "pack": 0.06451199948787689,
+            "count": 0.04214400053024292,
+            "scan": 0.03891199827194214,
+            "emit": 0.10547199845314026,
+            "merge": 0.14643199741840363,
+            "flatten": 0.03891199827194214,
+            "paint": 0.2181120067834854
+          },
+          "label_only_ms": 0.436383992433548,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.5888000130653381,
+          "ms_min": 0.5683199763298035,
+          "ms_max": 0.6410239934921265,
+          "filled": 299991,
+          "phase_ms": {
+            "count": 0.04108799993991852,
+            "scan": 0.04608000069856644,
+            "emit": 0.09625600278377533,
+            "merge": 0.15052799880504608,
+            "flatten": 0.03891199827194214,
+            "paint": 0.2170879989862442
+          },
+          "label_only_ms": 0.3728640004992485,
+          "skip": null
+        }
+      },
+      "n_runs": 210151,
+      "n_blobs": 47655,
+      "union_attempts": 169737,
+      "still_red": 0,
+      "expected_blobs": 47655,
+      "overview_filled": 299991,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 34.92,
+        "temp_c": 71
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "random_4000",
+      "family": "random noise",
+      "note": "density 0.3, ~755k blobs",
+      "width": 4000,
+      "height": 4000,
+      "kind": "n",
+      "red_px": 4802736,
+      "run_capacity": 3529589,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 7.026688098907471,
+          "ms_min": 6.773759841918945,
+          "ms_max": 7.993216037750244,
+          "filled": 4802736,
+          "phase_ms": {
+            "pack": 0.4986880123615265,
+            "count": 0.015359999611973763,
+            "scan": 0.013311999849975109,
+            "emit": 0.711679995059967,
+            "merge": 1.698815941810608,
+            "flatten": 0.31539198756217957,
+            "paint": 3.6904959678649902
+          },
+          "label_only_ms": 3.25324793625623,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 7.008255958557129,
+          "ms_min": 6.52780818939209,
+          "ms_max": 7.8888959884643555,
+          "filled": 4802736,
+          "phase_ms": {
+            "count": 0.16896000504493713,
+            "scan": 0.16889600455760956,
+            "emit": 0.7772160172462463,
+            "merge": 1.7070080041885376,
+            "flatten": 0.317440003156662,
+            "paint": 3.8236160278320312
+          },
+          "label_only_ms": 3.1395200341939926,
+          "skip": null
+        }
+      },
+      "n_runs": 3361514,
+      "n_blobs": 755577,
+      "union_attempts": 2722104,
+      "still_red": 0,
+      "expected_blobs": 755577,
+      "overview_filled": 4802736,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 42.73,
+        "temp_c": 72
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "png_blobs",
+      "family": "external PNG",
+      "note": "external PNG, 9000\u00b2, ~2.5k blobs (13.5M red px)",
+      "width": 9000,
+      "height": 9000,
+      "kind": "n",
+      "red_px": 13451960,
+      "run_capacity": 566167,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 3.058687925338745,
+          "ms_min": 2.9388480186462402,
+          "ms_max": 3.7119998931884766,
+          "filled": 13451960,
+          "phase_ms": {
+            "pack": 1.703935980796814,
+            "count": 0.05222399905323982,
+            "scan": 0.023552000522613525,
+            "emit": 0.22220799326896667,
+            "merge": 0.30822399258613586,
+            "flatten": 0.03276799991726875,
+            "paint": 0.6481919884681702
+          },
+          "label_only_ms": 2.3429119661450386,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 1.551360011100769,
+          "ms_min": 1.4520319700241089,
+          "ms_max": 3.1293439865112305,
+          "filled": 13451960,
+          "phase_ms": {
+            "count": 0.15852800011634827,
+            "scan": 0.07680000364780426,
+            "emit": 0.3092480003833771,
+            "merge": 0.30822399258613586,
+            "flatten": 0.03174399957060814,
+            "paint": 0.6451200246810913
+          },
+          "label_only_ms": 0.8845439963042736,
+          "skip": null
+        }
+      },
+      "n_runs": 539207,
+      "n_blobs": 2522,
+      "union_attempts": 681039,
+      "still_red": 0,
+      "expected_blobs": 2522,
+      "overview_filled": 13451960,
+      "clocks_during_run": {
+        "sm_mhz": 1920,
+        "max_sm_mhz": 3105,
+        "power_w": 26.19,
+        "temp_c": 72
+      },
+      "crosscheck": "OK"
+    },
+    {
+      "row": "png_blocks",
+      "family": "external PNG",
+      "note": "external PNG, 1000\u00b2, ~21.6k blocks",
+      "width": 1000,
+      "height": 1000,
+      "kind": "n",
+      "red_px": 387587,
+      "run_capacity": 64552,
+      "cells": {
+        "ch06_rgb": {
+          "ms": 0.48230400681495667,
+          "ms_min": 0.40959998965263367,
+          "ms_max": 0.7239360213279724,
+          "filled": 387587,
+          "phase_ms": {
+            "pack": 0.07065600156784058,
+            "count": 0.04198399931192398,
+            "scan": 0.04915200173854828,
+            "emit": 0.07168000191450119,
+            "merge": 0.10547199845314026,
+            "flatten": 0.02457600086927414,
+            "paint": 0.131071999669075
+          },
+          "label_only_ms": 0.3635200038552284,
+          "skip": null
+        },
+        "ch06_mask": {
+          "ms": 0.4904640018939972,
+          "ms_min": 0.38288000226020813,
+          "ms_max": 0.6256639957427979,
+          "filled": 387587,
+          "phase_ms": {
+            "count": 0.04198399931192398,
+            "scan": 0.053247999399900436,
+            "emit": 0.06963200122117996,
+            "merge": 0.10547199845314026,
+            "flatten": 0.04915200173854828,
+            "paint": 0.11468800157308578
+          },
+          "label_only_ms": 0.3194880001246929,
+          "skip": null
+        }
+      },
+      "n_runs": 61479,
+      "n_blobs": 21618,
+      "union_attempts": 39861,
+      "still_red": 0,
+      "expected_blobs": 21618,
+      "overview_filled": 387587,
+      "clocks_during_run": {
+        "sm_mhz": 2070,
+        "max_sm_mhz": 3105,
+        "power_w": 24.39,
+        "temp_c": 69
+      },
+      "crosscheck": "OK"
+    }
+  ]
+}
