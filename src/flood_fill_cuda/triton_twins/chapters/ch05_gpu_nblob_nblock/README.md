@@ -12,6 +12,7 @@ costs.
 | `kernels.py` | the `@triton.jit` twins; phases are shared helpers |
 | `flood_fill.py` | host driver: `flood_fill`, `max_blocks`, `discovery_only`, plus `compiled_kernel` / `kernel_info` / `regs_per_thread` |
 | `test_correctness.py` | the Numba suite's GPU tests, same names, plus `test_cross_backend_*` |
+| `compare.py` | Numba vs Triton timings on the chapter's benchmark, seeding, tuning and PNG experiments |
 
 Reused unchanged from the Numba chapter (imported, never copied): scenes,
 CPU oracles, `SeedDiscoveryResult`, `model_bytes_ch05`, `MODEL_NOTE`,
@@ -26,18 +27,22 @@ slot constants.
 | `ccl_fill_bare_kernel` | `ccl_fill_kernel[INSTR=False]` |
 | `seed_merge_kernel` | `seed_merge_kernel[INSTR=True]` |
 | `seed_merge_bare_kernel` | `seed_merge_kernel[INSTR=False]` |
+| `seed_merge_lat_kernel` | `seed_merge_lat_kernel[INSTR=True]` |
+| `seed_merge_lat_bare_kernel` | `seed_merge_lat_kernel[INSTR=False]` |
+| `seed_merge_lat_r128_kernel` (`max_registers=128`) | `seed_merge_lat_kernel[INSTR=True]` launched with `maxnreg=128` |
+| `seed_merge_lat_core_kernel` (split build) | `seed_merge_lat_core_kernel` |
+| `lat_compress_kernel` (split build, plain) | `lat_compress_kernel` |
+| `lat_finish_kernel` (split build, plain) | `lat_finish_kernel` |
 | `seed_scan_kernel` (benchmark phase) | `seed_scan_kernel` |
 | `ccl_kernel` (benchmark phase) | `ccl_kernel` |
 
 `INSTR=False` compiles the instrumentation out (counters, owner and
 prov_label stores, phase stamps, level trace, block_stats, the closing
-seed_merge barrier); those pointer arguments are passed as `None`.
-
-Not twinned yet: the lattice family (`seed_merge_lat_kernel` and its bare,
-`r128` and `split` builds, `lat_compress_kernel`, `lat_finish_kernel`).
-The driver already validates `lattice` / `interior` / `build` with the
-Numba messages, and the lattice tests skip until those kernels are
-registered in `flood_fill._KERNELS`.
+seed_merge barrier); those pointer arguments are passed as `None`. The
+lattice twin reuses seed_merge's fill and flatten helpers and adds a
+lattice scan (P1) and a compress pass plus barrier (between fill and
+flatten); the split build's two plain kernels are those compress and
+flatten helpers with no barrier, on the Numba driver's `_PLAIN_GRID`.
 
 ## Mapping
 
@@ -55,11 +60,18 @@ registered in `flood_fill._KERNELS`.
 | per-thread `my_*` registers, exit `atomic.add` per thread | per-lane register vectors, one reduction + one atomic per program at exit | exact | totals identical (tested against Numba) |
 | `%clock64` around each in-flight `_union`, summed per thread | `%clock64` around the program's lockstep union, added on each colliding lane | emulated | per-thread meaning kept: a colliding lane is busy for the whole lockstep union |
 | `smid.cu` (`%smid`, `%globaltimer`) | inline PTX (`read_smid`, `read_globaltimer`) | exact | |
+| `lat_stride > 0 and x % lat_stride == 0 and ...` (short-circuit) | `hit = red & (lat_stride > 0) & (x % max(lat_stride, 1) == 0) & ...` | exact | lanes evaluate every operand, so the modulo never divides by 0 |
+| `_is_interior` (8 probes, early `return False`) | 8 probes, each masked by the lanes still interior | exact | a failed probe masks the later ones off: the early return's loads |
+| `if not is_cand:` corner probes | 4 probes masked by `red & ~cand` | exact | |
+| COMPRESS: `if parent[i] != i: parent[i] = _find(parent, i)` + `grid.sync()` | `_compress` helper (masked `_find`, masked store) + `_sync` | close | lockstep `_find` (row above); same barrier, in both twins |
+| `cuda.jit(max_registers=128)(py_func)` | same `@triton.jit` body, `maxnreg=128` launch option | close | Triton honours the cap but its register counts are its own (table below) |
+| split: core, then `lat_compress_kernel[_PLAIN_GRID]`, `lat_finish_kernel[_PLAIN_GRID]` | core, then two plain launches of 256 programs x 256 lanes | exact | stream order is the compress-before-flatten barrier on both backends |
+| `cuda.event(timing=True)` around the cleanup kernels | `cp.cuda.Event()` + `cp.cuda.get_elapsed_time` | exact | same three record points, phase keys `compress` / `flatten` |
 | `cuda.const.array_like` DX8/DY8/PDX/PDY | `tl.constexpr` tuples under `tl.static_range` | exact | same probe order E SE S SW W NW N NE |
 | `cuda.const.array_like(PALETTE_HOST)` | 18-byte device array, cached | close | |
 | `tid == 0` / `threadIdx.x == 0` stores | `if pid == 0:` scalar stores / per-program stores | exact | |
 | device arrays from `cuda.to_device(host)` / `device_array` | `cp.asarray(host)` / `cp.empty` | exact | same host arrays uploaded in the same alloc bracket |
-| one `[1, 32]` warm-up launch per kernel | one 1-program launch per (kernel, bare, tpb) | close | `num_warps` is compile-time; every runtime int is `do_not_specialize`, so no scene size recompiles (tested) |
+| one `[1, 32]` warm-up launch per kernel | one 1-program launch per (kernel, bare, tpb) | close | `num_warps` is compile-time; every runtime int (sizes, `lat_stride`, `lat_interior`) is `do_not_specialize`, so no scene size or stride recompiles (tested) |
 | `regs_per_thread(dispatcher)` | `regs_per_thread(compiled)`, `kernel_info(...)` | close | a Triton kernel has one compiled object per block size |
 
 ## Deviations
@@ -68,15 +80,32 @@ registered in `flood_fill._KERNELS`.
   multiple of 32; the twin raises `ValueError` naming the power-of-2 rule.
 - Two Triton-only buffers per launch: the grid barrier counter (int64,
   zeroed in the alloc bracket) and the palette.
-- `blocks=None` resolves to the twin's own capacity. At tpb 256 on the
-  RTX 4060 Laptop (24 SMs):
+- `blocks=None` resolves to the twin's own capacity. On the RTX 4060
+  Laptop (24 SMs), registers / co-resident grid:
 
-  | kernel | Numba regs / blocks | Triton regs / programs |
-  |---|---|---|
-  | seed_merge | 114 / 48 | 116 / 48 |
-  | seed_merge bare | 64 / 96 | 76 / 72 |
-  | ccl_fill | 113 / 48 | 80 / 72 |
-  | ccl_fill bare | 66 / 72 | 46 / 120 |
+  | kernel | Numba @256 | Triton @256 | Numba @128 | Triton @128 |
+  |---|---|---|---|---|
+  | seed_merge | 114 / 48 | 116 / 48 | 114 / 96 | 96 (6 spills) / 120 |
+  | seed_merge bare | 64 / 96 | 76 / 72 | 64 / 192 | 76 / 144 |
+  | ccl_fill | 113 / 48 | 80 / 72 | 113 / 96 | 64 / 192 |
+  | ccl_fill bare | 66 / 72 | 46 / 120 | 66 / 168 | 48 / 240 |
+  | lattice fused | 129 / 24 | 116 / 48 | 129 / 72 | 96 (6 spills) / 120 |
+  | lattice fused bare | 64 / 96 | 76 / 72 | 64 / 192 | 76 / 144 |
+  | lattice r128 | 122 / 48 | 118 / 48 | 122 / 96 | 123 / 96 |
+  | lattice split core | 114 / 48 | 116 / 48 | 114 / 96 | 96 (6 spills) / 120 |
+
+  The split cleanup kernels: Numba 30 / 33 registers, Triton 18 / 22.
+
+- The chapter's register story does not carry over. Numba's fused
+  lattice kernel needs 129 registers, one over the line that allows two
+  256-thread blocks per SM, so it runs 24 cooperative blocks, and r128 /
+  split exist to win back 48. Triton compiles the same fused body to 116
+  registers, so all three builds already run 48 programs at tpb 256; r128
+  changes nothing there, and at tpb 128 the cap even raises Triton's count
+  (96 with spills becomes 123 without, 120 programs become 96). The
+  builds are still separate compiles with their own measured capacity,
+  and all three give bit-identical output (tested against each other and
+  against Numba).
 
 - Schedule-dependent outputs differ between backends as they differ
   between Numba runs: queue order, `owner`, `prov_label` at equidistant
@@ -109,6 +138,18 @@ grid union_merge 9.9 ms to 4.3 ms) without changing any lane's chase.
 These are development measurements; the comparison script is the
 reference.
 
+Single runs on the full-size benchmark scenes at tpb 256 (development
+measurements, Triton kernel time / Numba kernel time): seed_merge takes
+0.8-1.1x on five of the seven scenes, 1.65x on two_disks (500 colliding
+waves) and
+1.95x on the 33 k px serpentine (3.6 ms vs 1.8 ms, barrier-bound). The
+lattice twin on Numba's 24-program grid takes 1.0-1.5x at strides 64
+and 256. At strides 1 and 4 on solid blobs nearly every wave collides,
+so the fill is mostly lockstep unions: 2.6-4.4x (two_sq S1: 282 ms vs
+81 ms). On sparse or thin scenes the same strides run at 0.6-1.3x
+(random noise, the comb). ccl_fill on solid blobs is the worst case
+(two_sq: 723 ms vs 96 ms), almost all of it in union_merge.
+
 ## Run
 
 Tests (needs the GPU; the Numba suite runs separately):
@@ -120,5 +161,30 @@ Tests (needs the GPU; the Numba suite runs separately):
 images and asserts exact equality of img, visited, depth, label, n_blobs,
 seeds, filled, levels, the level trace and the deterministic counters
 (candidates, union_done, processed, peak_level, peak_occupancy, seed_merge
-cas_attempts, ccl_fill union_attempts), and with pinned blocks and tpb
-also `processed_per_block` and `thread_util_pct`.
+family cas_attempts, ccl_fill union_attempts), and with pinned blocks and
+tpb also `processed_per_block` and `thread_util_pct`. It covers both
+variants, both bare twins, every lattice build (fused, bare, r128, split)
+at strides 0, 1, 5, 8, 16 and 32 with and without the interior rule, and
+the discovery-only phase kernels. With `lattice=1` (no interior) even
+`prov_label` is deterministic, and is compared exactly.
+
+Comparison (writes `results/triton_twins/ch05_gpu_nblob_nblock/compare_<UTC>.json`;
+never commit it):
+
+    .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock.compare
+    .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock.compare --quick
+
+| experiment | mirrors | cases (default) |
+|---|---|---|
+| `benchmark` | `benchmark.py`: merge, ccl, both bare twins, the scan / cclp probes, all 7 scenes, each pinned to min(Numba, Triton) capacity | 42 |
+| `benchmark_blocks_none` | the same launches at `blocks=None` for the runners whose capacity differs (ccl, merge_bare, ccl_bare) | 18 |
+| `seeding` | `seeding.py`: strides 0, 1, 4, 16, 64, 256, fused build, pinned (Numba's 24-block grid) | 36 |
+| `tuning` | `tuning.py`: fused L8 / I8, r128 and split L1 / L8, `blocks=None` | 36 |
+| `png` | `png_inputs.py`: v1, ccl and the tuning subset on both input PNGs | 16 |
+
+Caps, recorded in the JSON's `meta.caps`: 6 of tuning.py's 53 configs;
+`asym_4000_800` (the largest scene) only in `benchmark`;
+`input_blobs.png` cropped to its top-left 4500 x 4500 quadrant. The
+default run is about 16 minutes of GPU time (5 repeats) and peaks at
+about 2 GB of host RAM. `--quick` runs every experiment on tiny scenes
+with one repeat and writes nothing. `--experiments a,b` runs a subset.

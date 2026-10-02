@@ -27,6 +27,10 @@ its docstring for what the chapter does. What differs is the launch:
 - blocks=None launches max_coresident_programs of the compiled twin (the
   counterpart of Numba's max_cooperative_grid_blocks): its own register
   count, so its own number, recorded in result.blocks.
+- build="r128" launches the fused lattice twin with maxnreg=128 (Numba's
+  max_registers=128); build="split" launches the cooperative core, then
+  lat_compress_kernel and lat_finish_kernel on _PLAIN_GRID (256 programs
+  of 256 lanes), timed with CuPy CUDA events where Numba uses cuda.event.
 """
 
 import os
@@ -57,7 +61,9 @@ from flood_fill_cuda.triton_twins.runtime import (
 )
 
 from .kernels import (
-    ccl_fill_kernel, ccl_kernel, seed_merge_kernel, seed_scan_kernel,
+    ccl_fill_kernel, ccl_kernel, lat_compress_kernel, lat_finish_kernel,
+    seed_merge_kernel, seed_merge_lat_core_kernel, seed_merge_lat_kernel,
+    seed_scan_kernel,
 )
 
 __all__ = [
@@ -79,12 +85,19 @@ class _KernelSpec:
     options: dict = field(default_factory=dict)
 
 
-# (kernel_key, bare) -> twin. Keys are the Numba driver's _KERNELS keys;
-# the lattice twins ("seed_merge_lat", "seed_merge_lat_r128",
-# "seed_merge_lat_core") register here too.
+# (kernel_key, bare) -> twin. Keys are the Numba driver's _KERNELS keys.
+# r128 is the fused lattice body with maxnreg=128, as Numba compiles the
+# same py_func with max_registers=128.
 _KERNELS = {
     ("seed_merge", False): _KernelSpec(seed_merge_kernel, {"INSTR": True}),
     ("seed_merge", True): _KernelSpec(seed_merge_kernel, {"INSTR": False}),
+    ("seed_merge_lat", False): _KernelSpec(seed_merge_lat_kernel,
+                                           {"INSTR": True}),
+    ("seed_merge_lat", True): _KernelSpec(seed_merge_lat_kernel,
+                                          {"INSTR": False}),
+    ("seed_merge_lat_r128", False): _KernelSpec(
+        seed_merge_lat_kernel, {"INSTR": True}, options={"maxnreg": 128}),
+    ("seed_merge_lat_core", False): _KernelSpec(seed_merge_lat_core_kernel),
     ("ccl_fill", False): _KernelSpec(ccl_fill_kernel, {"INSTR": True}),
     ("ccl_fill", True): _KernelSpec(ccl_fill_kernel, {"INSTR": False}),
 }
@@ -97,10 +110,11 @@ _PHASE_KERNELS = {
 
 # kernel_key -> fn(bufs, threads_per_block): extra launches a warm-up must
 # compile besides the cooperative kernel (the split build's two plain
-# cleanup kernels).
+# cleanup kernels, registered below _launch_plain).
 _EXTRA_WARMUPS = {}
 
-# (kernel_key, bare, tpb) -> CompiledKernel; ("phase", variant, tpb) too
+# (kernel_key, bare, tpb) -> CompiledKernel; ("phase", variant, tpb) and
+# ("plain", name) (the split build's cleanup kernels) too
 _compiled = {}
 _coop_cache = {}
 _palette_dev = None
@@ -141,6 +155,35 @@ def _launch(spec, grid, args, tpb):
         **spec.options)
 
 
+def _launch_plain(fn, args, grid=_PLAIN_GRID[0]):
+    """A split-build cleanup kernel on the Numba driver's _PLAIN_GRID:
+    (256 blocks, 256 threads) -> 256 programs of 256 lanes, no
+    cooperative launch (no barrier inside)."""
+    tpb = _PLAIN_GRID[1]
+    return fn[(grid,)](*args, BLOCK=tpb, num_warps=tpb // 32, num_stages=1)
+
+
+def _split_cleanup_args(bufs):
+    n = int(bufs["parent"].shape[0])
+    return ((t(bufs["parent"]), n),
+            (t(bufs["img"]), t(bufs["parent"]), t(bufs["label"]),
+             t(bufs["prov"]), t(_palette()), n))
+
+
+def _warm_split_cleanup(bufs, threads_per_block):
+    """The Numba warm-up's lat_compress / lat_finish [1, 32] launches: one
+    program each at the real _PLAIN_GRID block size (num_warps is
+    compile-time), after the core's warm-up launch on the same stream."""
+    compress_args, finish_args = _split_cleanup_args(bufs)
+    _compiled[("plain", "lat_compress")] = _launch_plain(
+        lat_compress_kernel, compress_args, grid=1)
+    _compiled[("plain", "lat_finish")] = _launch_plain(
+        lat_finish_kernel, finish_args, grid=1)
+
+
+_EXTRA_WARMUPS["seed_merge_lat_core"] = _warm_split_cleanup
+
+
 def _device_buffers(img_host, variant, instrumented, launch_blocks,
                     trace_capacity):
     width, height = img_host.shape[0], img_host.shape[1]
@@ -179,21 +222,30 @@ def _ptr(bufs, name):
 
 
 # Pointer arguments per kernel_key, in the Numba instrumented kernel's
-# order (prov_label only where the Numba kernel has it)
+# order (prov_label only where the Numba kernel has it: the split core
+# has none, lat_finish_kernel writes it)
+_SEED_MERGE_POINTERS = ("img", "visited", "depth", "owner", "parent",
+                        "label", "prov", "queue", "q_state", "counters",
+                        "stats", "trace", "phase")
 _POINTERS = {
     "ccl_fill": ("img", "visited", "depth", "owner", "parent", "label",
                  "queue", "q_state", "counters", "stats", "trace", "phase"),
-    "seed_merge": ("img", "visited", "depth", "owner", "parent", "label",
-                   "prov", "queue", "q_state", "counters", "stats", "trace",
-                   "phase"),
+    "seed_merge": _SEED_MERGE_POINTERS,
+    "seed_merge_lat": _SEED_MERGE_POINTERS,
+    "seed_merge_lat_r128": _SEED_MERGE_POINTERS,
+    "seed_merge_lat_core": ("img", "visited", "depth", "owner", "parent",
+                            "label", "queue", "q_state", "counters", "stats",
+                            "trace", "phase"),
 }
 
 
 def _kernel_args(kernel_key, bare, bufs, lattice=None, interior=False):
     width, height = bufs["img"].shape[0], bufs["img"].shape[1]
     trace = bufs.get("trace")
-    args = tuple(_ptr(bufs, k) for k in _POINTERS[kernel_key]) + (
-        t(_palette()), t(bufs["bar"]),
+    # the split core paints nothing (its Numba kernel has no palette)
+    palette = () if kernel_key == "seed_merge_lat_core" else (t(_palette()),)
+    args = tuple(_ptr(bufs, k) for k in _POINTERS[kernel_key]) + palette + (
+        t(bufs["bar"]),
         width, height, width * height,
         int(bufs["queue"].shape[0]),               # queue capacity
         0 if trace is None else int(trace.shape[0]),  # trace capacity
@@ -266,12 +318,18 @@ def regs_per_thread(compiled):
 def kernel_info(variant="seed_merge", threads_per_block=256, bare=False,
                 lattice=None, build="fused"):
     """Registers, spills, shared bytes, warps and cooperative capacity of
-    the selected twin: the facts benchmarks record next to the timings."""
+    the selected twin: the facts benchmarks record next to the timings.
+    The split build adds its two plain cleanup kernels and their grid."""
     compiled = compiled_kernel(variant, threads_per_block, bare, lattice,
                                build)
     info = kernel_resources(compiled)
     info["coop_max_blocks"] = max_blocks(variant, threads_per_block, bare,
                                          lattice, build)
+    if _kernel_key(variant, lattice, build) == "seed_merge_lat_core":
+        info["cleanup"] = {
+            name: kernel_resources(_compiled[("plain", name)])
+            for name in ("lat_compress", "lat_finish")}
+        info["cleanup_grid"] = list(_PLAIN_GRID)
     return info
 
 
@@ -364,12 +422,28 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
     t_kernel0 = time.perf_counter()
 
     compress_ms = flatten_ms = None
-    # (the split build's core + compress + finish launches, timed with
-    # CUDA events, branch here on kernel_key == "seed_merge_lat_core")
-    _launch(spec, launch_blocks,
-            _kernel_args(kernel_key, bare, bufs, lattice, interior),
-            threads_per_block)
-    sync()
+    if kernel_key == "seed_merge_lat_core":
+        # split build: cooperative core, then the two plain cleanup
+        # kernels - stream order IS the compress-before-flatten barrier;
+        # CUDA events attribute their times without extra syncs
+        ev = [cp.cuda.Event() for _ in range(3)]
+        _launch(spec, launch_blocks,
+                _kernel_args(kernel_key, bare, bufs, lattice, interior),
+                threads_per_block)
+        ev[0].record()
+        compress_args, finish_args = _split_cleanup_args(bufs)
+        _launch_plain(lat_compress_kernel, compress_args)
+        ev[1].record()
+        _launch_plain(lat_finish_kernel, finish_args)
+        ev[2].record()
+        sync()
+        compress_ms = cp.cuda.get_elapsed_time(ev[0], ev[1])
+        flatten_ms = cp.cuda.get_elapsed_time(ev[1], ev[2])
+    else:
+        _launch(spec, launch_blocks,
+                _kernel_args(kernel_key, bare, bufs, lattice, interior),
+                threads_per_block)
+        sync()
     t_d2h0 = time.perf_counter()
     kernel_ms = (t_d2h0 - t_kernel0) * 1000
 

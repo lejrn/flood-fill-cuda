@@ -6,15 +6,14 @@ against the same CPU oracles (imported from the Numba chapter, never
 copied). The oracle-only tests there (scene contract, candidate lemma,
 oracle self-consistency) exercise no GPU code and are not repeated here.
 
-The lattice / interior / build tests need the lattice twins; they skip
-with a reason until those kernels are registered in the driver.
-
 The cross-backend section (test_cross_backend_*) runs the Numba driver
 and the twin on the same images and asserts EXACT equality of every
 deterministic output: img, visited, depth, label, n_blobs, seeds, filled,
-levels and the deterministic counters. Schedule-dependent values (owner,
-prov_label at seams, smid, union_cycles, ccl_fill cas_attempts, seed_merge
-union_attempts) are never compared.
+levels and the deterministic counters, for every kernel (seed_merge,
+ccl_fill, the lattice fused / bare / r128 / split builds, both interior
+rules, the discovery-only phase kernels). Schedule-dependent values
+(owner, prov_label at seams, smid, union_cycles, ccl_fill cas_attempts,
+seed_merge union_attempts) are never compared.
 
 Run:
 
@@ -50,23 +49,6 @@ from flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock import (
 from flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock.flood_fill import (
     VARIANTS, discovery_only, flood_fill, max_blocks, model_bytes_ch05,
 )
-
-
-def _registered(kernel_key, bare=False):
-    return (kernel_key, bare) in twin_driver._KERNELS
-
-
-needs_lattice = pytest.mark.skipif(
-    not _registered("seed_merge_lat"),
-    reason="lattice twin (seed_merge_lat) not registered in the driver yet")
-
-
-def _needs_build(build):
-    key = {"fused": "seed_merge_lat", "r128": "seed_merge_lat_r128",
-           "split": "seed_merge_lat_core"}[build]
-    return pytest.mark.skipif(
-        not (_registered("seed_merge_lat") and _registered(key)),
-        reason=f"lattice build {build!r} ({key}) not registered yet")
 
 
 # ============================================================ GPU variants
@@ -323,7 +305,6 @@ def assert_lat_matches_oracle(img, lattice, **gpu_kwargs):
     return r
 
 
-@needs_lattice
 @pytest.mark.parametrize("lattice", [0, 1, 5, 32])
 @pytest.mark.parametrize("name", ["two_squares", "two_disks", "u_shape",
                                   "comb", "blob_grid", "serpentine_like"])
@@ -335,7 +316,6 @@ def test_lattice_matches_oracle(name, lattice):
     assert_lat_matches_oracle(img, lattice)
 
 
-@needs_lattice
 def test_lattice_zero_is_bit_exact_with_v1():
     """S=0 isolates the v2 deltas that must be output-neutral (the
     compression pass and the rule refactor): identical everything."""
@@ -351,7 +331,6 @@ def test_lattice_zero_is_bit_exact_with_v1():
         assert v1.candidates == v2.candidates
 
 
-@needs_lattice
 @pytest.mark.parametrize("lattice", [1, 5, 32])
 def test_lattice_labels_and_seeds_are_stride_invariant(lattice):
     """The chapter's central claim, extended: seeding density changes the
@@ -369,7 +348,6 @@ def test_lattice_labels_and_seeds_are_stride_invariant(lattice):
         assert r.n_blobs == c.n_blobs
 
 
-@needs_lattice
 def test_lattice_one_degenerates_to_one_level():
     """S=1: every red pixel is its own wave - the ccl-like boundary."""
     img, n_blobs = SCENES["two_squares"]()
@@ -381,7 +359,6 @@ def test_lattice_one_degenerates_to_one_level():
     assert r.union_done == r.candidates - n_blobs
 
 
-@needs_lattice
 def test_lattice_shortens_the_clock():
     img, _ = SCENES["two_squares"]()
     v1 = flood_fill(img, variant="seed_merge")
@@ -390,7 +367,6 @@ def test_lattice_shortens_the_clock():
     assert v2.candidates > v1.candidates
 
 
-@needs_lattice
 def test_lattice_phase_keys_include_compress():
     img, _ = SCENES["u_shape"]()
     r = flood_fill(img, variant="seed_merge", lattice=8)
@@ -399,8 +375,6 @@ def test_lattice_phase_keys_include_compress():
     assert all(v >= 0 for v in r.phase_ms.values())
 
 
-@pytest.mark.skipif(not _registered("seed_merge_lat", True),
-                    reason="lattice bare twin not registered yet")
 def test_lattice_bare_twin_parity():
     img, _ = SCENES["blob_grid"]()
     inst = flood_fill(img, variant="seed_merge", lattice=8)
@@ -424,7 +398,6 @@ def test_lattice_validation():
 
 # --------------------------------------------- interior rule + builds
 
-@needs_lattice
 @pytest.mark.parametrize("lattice", [1, 5, 32])
 @pytest.mark.parametrize("name", ["two_squares", "two_disks", "u_shape",
                                   "single_pixel", "serpentine_like"])
@@ -444,10 +417,7 @@ def test_interior_matches_oracle(name, lattice):
     assert r.interior
 
 
-@pytest.mark.parametrize("build", [
-    pytest.param("r128", marks=_needs_build("r128")),
-    pytest.param("split", marks=_needs_build("split")),
-])
+@pytest.mark.parametrize("build", ["r128", "split"])
 def test_builds_are_bit_exact_with_fused(build):
     """The register experiments change occupancy, never the answer."""
     for name, kw in (("two_squares", {}), ("u_shape", {}),
@@ -471,7 +441,6 @@ def test_builds_are_bit_exact_with_fused(build):
         assert other.build == build
 
 
-@_needs_build("split")
 def test_split_build_phase_keys_match_fused():
     img, _ = SCENES["u_shape"]()
     r = flood_fill(img, variant="seed_merge", lattice=16, build="split")
@@ -650,6 +619,78 @@ def test_twin_bare_compiles_without_instrumentation(variant):
         assert reg not in bare, reg
 
 
+# lattice twins: kernel key -> (fn, extra plain kernels of the build)
+_LAT_FNS = {
+    "fused": (twin_driver.seed_merge_lat_kernel, ()),
+    "r128": (twin_driver.seed_merge_lat_kernel, ()),
+    "split": (twin_driver.seed_merge_lat_core_kernel,
+              (twin_driver.lat_compress_kernel,
+               twin_driver.lat_finish_kernel)),
+}
+
+
+@pytest.mark.parametrize("build", ["fused", "r128", "split"])
+def test_twin_lattice_stride_never_recompiles(build):
+    """lat_stride and lat_interior are do_not_specialize too: after the
+    warm-up, no stride (1 and multiples of 16 included), interior rule or
+    scene size compiles again - tuning.py's sweep stays off the
+    compiler."""
+    flood_fill(SCENES["two_squares"]()[0], variant="seed_merge", lattice=4,
+               build=build)
+    fn, extra = _LAT_FNS[build]
+    before = [_n_compiled(f) for f in (fn,) + extra]
+    for img in (SCENES["u_shape"]()[0], scenes.square_scene(37, 23, 5, 7)[0],
+                scenes.disk_scene(33, 65, 12)[0]):
+        for lattice in (0, 1, 16, 32, 256):
+            for interior in ((False, True) if lattice else (False,)):
+                ref_v, ref_d, ref_l, ref_levels, _ = cpu_fill_from_candidates(
+                    img, lattice, int(interior))
+                r = flood_fill(img, variant="seed_merge", lattice=lattice,
+                               interior=interior, build=build)
+                np.testing.assert_array_equal(r.label, ref_l)
+                np.testing.assert_array_equal(r.depth, ref_d)
+                assert r.levels == ref_levels
+    assert [_n_compiled(f) for f in (fn,) + extra] == before
+
+
+@pytest.mark.parametrize("tpb", [128, 256])
+def test_twin_r128_honours_the_register_cap(tpb):
+    """r128 is the fused body compiled with maxnreg=128 (Numba's
+    max_registers=128): the cap holds, and r128 is a separate compile of
+    the same kernel (its capacity is queried on its own compiled object)."""
+    fused = twin_driver.kernel_info("seed_merge", tpb, lattice=4,
+                                    build="fused")
+    r128 = twin_driver.kernel_info("seed_merge", tpb, lattice=4,
+                                   build="r128")
+    assert r128["n_regs"] <= 128
+    assert r128["coop_max_blocks"] >= 1 and fused["coop_max_blocks"] >= 1
+    assert (twin_driver.compiled_kernel("seed_merge", tpb, lattice=4,
+                                        build="r128")
+            is not twin_driver.compiled_kernel("seed_merge", tpb, lattice=4,
+                                               build="fused"))
+
+
+def test_twin_lattice_bare_compiles_without_instrumentation():
+    """The lattice bare twin drops the observer code like the Numba
+    seed_merge_lat_bare_kernel; the split core keeps it (instrumented
+    only, like Numba), the plain cleanup kernels never had any."""
+    asm = {key: twin_driver.compiled_kernel("seed_merge", 256, bare=bare,
+                                            lattice=4,
+                                            build=build).asm["ptx"]
+           for key, bare, build in (("inst", False, "fused"),
+                                    ("bare", True, "fused"),
+                                    ("core", False, "split"))}
+    for reg in ("%globaltimer", "%smid", "%clock64"):
+        assert reg in asm["inst"] and reg in asm["core"], reg
+        assert reg not in asm["bare"], reg
+    for fn in (twin_driver.lat_compress_kernel,
+               twin_driver.lat_finish_kernel):
+        for cache in fn.device_caches.values():
+            for compiled in cache[0].values():
+                for reg in ("%globaltimer", "%smid", "%clock64"):
+                    assert reg not in compiled.asm["ptx"], reg
+
+
 # ============================================== cross-backend (Numba == Triton)
 
 def _cross_scene(name):
@@ -763,6 +804,73 @@ def test_cross_backend_discovery_only_candidates(name, variant):
     assert cand_triton == cand_numba
     if variant == "seed_merge":
         assert cand_triton == int(cpu_candidates(img).sum())
+
+
+# (lattice, interior, build, bare): every lattice kernel of the Numba
+# driver, both P1 rules, the degenerate strides
+_LAT_CONFIGS = (
+    (0, False, "fused", False), (1, False, "fused", False),
+    (5, False, "fused", False), (8, True, "fused", False),
+    (32, False, "fused", False),
+    (8, False, "fused", True), (1, True, "fused", True),
+    (1, False, "r128", False), (8, True, "r128", False),
+    (16, False, "split", False), (1, True, "split", False),
+)
+_LAT_CROSS_SCENES = ("two_disks", "u_shape", "comb", "random", "serpentine")
+
+
+@pytest.mark.parametrize("lattice, interior, build, bare", _LAT_CONFIGS)
+@pytest.mark.parametrize("name", _LAT_CROSS_SCENES)
+def test_cross_backend_lattice_outputs_equal(name, lattice, interior, build,
+                                             bare):
+    img = _cross_scene(name)
+    kw = dict(variant="seed_merge", lattice=lattice, interior=interior,
+              build=build, bare=bare)
+    a = numba_driver.flood_fill(img, **kw)
+    b = flood_fill(img, **kw)
+    assert_backends_agree(a, b)
+
+
+@pytest.mark.parametrize("tpb, blocks", [(64, 4), (256, 3), (32, 7)])
+@pytest.mark.parametrize("build", ["fused", "r128", "split"])
+def test_cross_backend_lattice_pinned_grid(build, tpb, blocks):
+    """Pinned blocks and lanes: the lattice builds split the work per
+    block exactly like Numba too."""
+    for name in ("u_shape", "random"):
+        img = _cross_scene(name)
+        kw = dict(variant="seed_merge", lattice=8, build=build,
+                  threads_per_block=tpb, blocks=blocks)
+        a = numba_driver.flood_fill(img, **kw)
+        b = flood_fill(img, **kw)
+        assert_backends_agree(a, b, pinned=True)
+
+
+@pytest.mark.parametrize("build", ["fused", "split"])
+def test_cross_backend_lattice_one_prov_label_exact(build):
+    """lattice=1 without interior: every red pixel is its own candidate,
+    so prov_label is each pixel's own index - deterministic, so equal."""
+    img = _cross_scene("random")
+    a = numba_driver.flood_fill(img, variant="seed_merge", lattice=1,
+                                build=build)
+    b = flood_fill(img, variant="seed_merge", lattice=1, build=build)
+    np.testing.assert_array_equal(b.prov_label, a.prov_label)
+    lin = np.arange(img.shape[0] * img.shape[1]).reshape(img.shape[:2])
+    vis = b.visited == 1
+    np.testing.assert_array_equal(b.prov_label[vis], lin[vis])
+
+
+def test_cross_backend_lattice_capacity_story():
+    """Numba's register story (fused over the 128-register line, so fewer
+    cooperative blocks than r128 and split) is a property of Numba's
+    compiler. Each backend's capacity is its own; both are queried per
+    compiled kernel and every build's launch is the capacity it reports."""
+    img = _cross_scene("u_shape")
+    for build in ("fused", "r128", "split"):
+        for drv in (numba_driver, twin_driver):
+            cap = drv.max_blocks("seed_merge", 256, lattice=4, build=build)
+            r = drv.flood_fill(img, variant="seed_merge", lattice=4,
+                               build=build)
+            assert r.blocks == cap >= 24, (drv.__name__, build)
 
 
 def test_cross_backend_result_fields_are_the_numba_dataclass():

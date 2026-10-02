@@ -36,9 +36,12 @@ This file only changes how each CUDA construct is spelled:
   compiled out, exactly the code the Numba *_bare_kernel twins drop (their
   pointer arguments are passed as None).
 
-Phases are @triton.jit helpers (all inlined) so the lattice twins can
-reuse the same scan, fill and flatten code, the way the Numba lattice
-kernels reuse seed_merge's body.
+Phases are @triton.jit helpers (all inlined) so the lattice twins reuse
+the same fill and flatten code, the way the Numba lattice kernels repeat
+seed_merge's body. The r128 build is the same lattice body launched with
+maxnreg=128 (Numba: max_registers=128 on the same py_func); the split
+build's two plain cleanup kernels are the compress and flatten helpers
+with no barrier around them.
 """
 
 import triton
@@ -562,6 +565,199 @@ def seed_merge_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                    peak_level, peak_occ, active_thread_sum, active_warp_sum,
                    processed, cas_attempts, union_attempts, union_done,
                    union_cycles, n_candidates, INSTR, True)
+
+
+# ----------------------------------------------- seed_merge_lat (v2 twins)
+# The seeding-density experiment (see the Numba kernels.py block comment):
+# seed_merge with (1) the lattice P1 rule, (2) a verbatim P2, (3) a
+# COMPRESS pass + barrier between the fill and the flatten.
+
+
+@triton.jit
+def _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
+                  counters_ptr, width, height, n, q_cap, lat_stride,
+                  lat_interior, pid, nprog, BLOCK: tl.constexpr):
+    """seed_merge_lat P1: corner rule OR (lattice point [AND interior]).
+
+    Numba short-circuits `lat_stride > 0 and x % lat_stride == 0 and ...`;
+    lanes evaluate every operand, so the modulo divides by
+    max(lat_stride, 1) and the hit mask carries lat_stride > 0. The
+    _is_interior probes run only on lattice hits when lat_interior is set,
+    each one narrowing the mask (its early return False); the corner
+    probes run only on red pixels that are not candidates yet (Numba's
+    `if not is_cand`)."""
+    lanes = tl.arange(0, BLOCK)
+    s = tl.maximum(lat_stride, 1)
+    for base in range(0, n, nprog * BLOCK):
+        i = base + pid * BLOCK + lanes
+        m = i < n
+        x = i // height
+        y = i % height
+        red = _is_red(img_ptr, i, m)
+        hit = red & (lat_stride > 0) & (x % s == 0) & (y % s == 0)
+        inner = hit & (lat_interior != 0)
+        for d in tl.static_range(8):
+            nx = x + _DX8[d]
+            ny = y + _DY8[d]
+            inner = _is_red(img_ptr, nx * height + ny,
+                            _in_bounds(nx, ny, width, height, inner))
+        cand = hit & ((lat_interior == 0) | inner)
+        rest = red & ~cand
+        found = tl.zeros_like(red)
+        for d in tl.static_range(4):
+            nx = x + _PDX[d]
+            ny = y + _PDY[d]
+            found = found | _is_red(img_ptr, nx * height + ny,
+                                    _in_bounds(nx, ny, width, height, rest))
+        cand = cand | (rest & ~found)
+        tl.store(visited_ptr + i, 1, mask=cand)
+        tl.store(label_ptr + i, i, mask=cand)
+        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, i, cand, q_cap)
+
+
+@triton.jit
+def _compress(parent_ptr, n, pid, nprog, BLOCK: tl.constexpr):
+    """COMPRESS: rewrite every retired parent slot to its true root.
+    Post-fill the roots are static; a concurrent chase that reads a fresh
+    write only shortcuts, so one pass fully flattens."""
+    lanes = tl.arange(0, BLOCK)
+    for base in range(0, n, nprog * BLOCK):
+        i = base + pid * BLOCK + lanes
+        m = i < n
+        retired = m & (tl.load(parent_ptr + i, mask=m, other=0) != i)
+        root = _find(parent_ptr, i, retired)
+        tl.store(parent_ptr + i, root, mask=retired)
+
+
+_LAT_INTS = _RUNTIME_INTS + ["lat_stride", "lat_interior"]
+
+
+@triton.jit(do_not_specialize=_LAT_INTS)
+def seed_merge_lat_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
+                          parent_ptr, label_ptr, prov_ptr, queue_ptr,
+                          q_state_ptr, counters_ptr, block_stats_ptr,
+                          level_sizes_ptr, phase_ptr, palette_ptr, bar_ptr,
+                          width, height, n, q_cap, trace_cap, lat_stride,
+                          lat_interior, BLOCK: tl.constexpr,
+                          INSTR: tl.constexpr):
+    """Twin of seed_merge_lat_kernel (INSTR=True), seed_merge_lat_bare_kernel
+    (INSTR=False; owner/prov/block_stats/level_sizes/phase are None) and,
+    launched with maxnreg=128, seed_merge_lat_r128_kernel (Numba compiles
+    the same py_func with max_registers=128).
+
+    Host contract as seed_merge_kernel plus lat_stride (int >= 0) and
+    lat_interior (0/1)."""
+    pid = tl.program_id(0)
+    nprog = tl.num_programs(0)
+    epoch = tl.full((), 0, tl.int64)
+
+    if INSTR:
+        _stamp(phase_ptr, 0, pid)
+    _iota(parent_ptr, n, pid, nprog, BLOCK)
+    epoch = _sync(bar_ptr, epoch, nprog)
+    if INSTR:
+        _stamp(phase_ptr, 1, pid)
+
+    _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
+                  counters_ptr, width, height, n, q_cap, lat_stride,
+                  lat_interior, pid, nprog, BLOCK)
+    rear, epoch = _fence_sandwich(bar_ptr, q_state_ptr, phase_ptr, epoch, pid,
+                                  nprog, 2, INSTR)
+    n_candidates = rear
+
+    # P2: verbatim seed_merge
+    (level, epoch, peak_level, peak_occ, active_thread_sum, active_warp_sum,
+     processed, cas_attempts, union_attempts, union_done,
+     union_cycles) = _fill_levels(
+        img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr, label_ptr,
+        queue_ptr, q_state_ptr, counters_ptr, level_sizes_ptr, palette_ptr,
+        bar_ptr, width, height, q_cap, trace_cap, rear, epoch, pid, nprog,
+        BLOCK, True, INSTR)
+    if INSTR:
+        _stamp(phase_ptr, 3, pid)
+
+    # COMPRESS (delta 3), then the barrier the flatten's <= 1-hop find
+    # relies on (in both twins)
+    _compress(parent_ptr, n, pid, nprog, BLOCK)
+    epoch = _sync(bar_ptr, epoch, nprog)
+    if INSTR:
+        _stamp(phase_ptr, 4, pid)
+
+    # P3: flatten + relabel + repaint - find is now <= 1 hop
+    _merge_flatten(img_ptr, label_ptr, prov_ptr, parent_ptr, palette_ptr, n,
+                   pid, nprog, BLOCK, INSTR)
+    if INSTR:
+        epoch = _sync(bar_ptr, epoch, nprog)
+        _stamp(phase_ptr, 5, pid)
+
+    _exit_counters(counters_ptr, block_stats_ptr, q_state_ptr, pid, level,
+                   peak_level, peak_occ, active_thread_sum, active_warp_sum,
+                   processed, cas_attempts, union_attempts, union_done,
+                   union_cycles, n_candidates, INSTR, True)
+
+
+# ------------------------------------------- register-experiment builds
+# r128 is seed_merge_lat_kernel launched with maxnreg=128 (driver). split:
+# the cooperative core keeps only what needs grid barriers (P0-P2);
+# compress and flatten move to two plain kernels, ordered by the stream.
+
+
+@triton.jit(do_not_specialize=_LAT_INTS)
+def seed_merge_lat_core_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
+                               parent_ptr, label_ptr, queue_ptr, q_state_ptr,
+                               counters_ptr, block_stats_ptr, level_sizes_ptr,
+                               phase_ptr, bar_ptr, width, height, n, q_cap,
+                               trace_cap, lat_stride, lat_interior,
+                               BLOCK: tl.constexpr):
+    """Twin of seed_merge_lat_core_kernel: no prov_label and no palette
+    (nothing is painted here). The host must follow this launch with
+    lat_compress_kernel then lat_finish_kernel on the same stream."""
+    pid = tl.program_id(0)
+    nprog = tl.num_programs(0)
+    epoch = tl.full((), 0, tl.int64)
+
+    _stamp(phase_ptr, 0, pid)
+    _iota(parent_ptr, n, pid, nprog, BLOCK)
+    epoch = _sync(bar_ptr, epoch, nprog)
+    _stamp(phase_ptr, 1, pid)
+
+    _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
+                  counters_ptr, width, height, n, q_cap, lat_stride,
+                  lat_interior, pid, nprog, BLOCK)
+    rear, epoch = _fence_sandwich(bar_ptr, q_state_ptr, phase_ptr, epoch, pid,
+                                  nprog, 2, True)
+    n_candidates = rear
+
+    (level, epoch, peak_level, peak_occ, active_thread_sum, active_warp_sum,
+     processed, cas_attempts, union_attempts, union_done,
+     union_cycles) = _fill_levels(
+        img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr, label_ptr,
+        queue_ptr, q_state_ptr, counters_ptr, level_sizes_ptr, None,
+        bar_ptr, width, height, q_cap, trace_cap, rear, epoch, pid, nprog,
+        BLOCK, True, True)
+    _stamp(phase_ptr, 3, pid)
+
+    _exit_counters(counters_ptr, block_stats_ptr, q_state_ptr, pid, level,
+                   peak_level, peak_occ, active_thread_sum, active_warp_sum,
+                   processed, cas_attempts, union_attempts, union_done,
+                   union_cycles, n_candidates, True, True)
+
+
+@triton.jit(do_not_specialize=["n"])
+def lat_compress_kernel(parent_ptr, n, BLOCK: tl.constexpr):
+    """Twin of lat_compress_kernel: plain grid-stride compression (no
+    barrier; n = parent.shape[0])."""
+    _compress(parent_ptr, n, tl.program_id(0), tl.num_programs(0), BLOCK)
+
+
+@triton.jit(do_not_specialize=["n"])
+def lat_finish_kernel(img_ptr, parent_ptr, label_ptr, prov_ptr, palette_ptr,
+                      n, BLOCK: tl.constexpr):
+    """Twin of lat_finish_kernel: plain grid-stride prov snapshot, resolve
+    (<= 1 hop after lat_compress_kernel), relabel, paint. Must launch
+    after lat_compress_kernel on the same stream."""
+    _merge_flatten(img_ptr, label_ptr, prov_ptr, parent_ptr, palette_ptr, n,
+                   tl.program_id(0), tl.num_programs(0), BLOCK, True)
 
 
 # ------------------------------------------------- benchmark phase kernels
