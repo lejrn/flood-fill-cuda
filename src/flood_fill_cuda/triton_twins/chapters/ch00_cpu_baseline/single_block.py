@@ -50,7 +50,10 @@ Host side: setup_scene and profile_kernel keep their names, arguments and
 printed statistics. setup_scene gets an optional rng_seed (the Numba scene
 builder is reused, seeded). run_flood_fill is added for the tests and the
 compare: one scene, with an h2d / kernel / d2h / total decomposition whose
-kernel bracket is profile_kernel's (launch + synchronize).
+kernel bracket is profile_kernel's (launch + synchronize). It also takes a
+CuPy new_color, which stays on the device (no implicit round trip). Host
+arrays are made C-contiguous before the upload: the kernel indexes raw
+C-order buffers, while Numba follows a Fortran-ordered array's strides.
 """
 
 import os
@@ -249,14 +252,24 @@ def _check_launch(threads_per_block, blocks_per_grid):
             f"block, got {blocks_per_grid}")
 
 
+def _to_device(a):
+    """cuda.to_device's twin for the kernel's (x, y[, c]) layout: the kernel
+    indexes the raw buffer as C order, so a Fortran-ordered or strided host
+    array is made C-contiguous first (Numba follows the strides instead)."""
+    return cp.asarray(np.ascontiguousarray(a))
+
+
 def _launch(d_img, d_visited, start_x, start_y, width, height, new_color,
             threads_per_block=THREADS_PER_BLOCK, blocks_per_grid=1):
     """flood_fill[blocks_per_grid, threads_per_block](...), the Numba call.
 
     new_color may be a host array, as in the prototype. Numba then copies it
     to the device before the launch and back after it (its implicit
-    host-array transfer); the twin does the same, so a launch costs the same
-    host work on both backends.
+    host-array transfer); the twin does the same steps (cp.asarray, then
+    .get(out=new_color)). The steps match, the cost does not: Numba's
+    transfer allocates with cuMemAlloc and copies synchronously, CuPy's
+    comes from its pool, so the round trip costs Numba about twice as much
+    (see the README). A CuPy new_color stays on the device: no round trip.
     """
     _check_launch(threads_per_block, blocks_per_grid)
     d_queue, d_state = _scratch()
@@ -322,7 +335,7 @@ class PrototypeRun:
     front: int
     threads_per_block: int
     h2d_ms: float          # cuda.to_device(img), cuda.to_device(visited)
-    kernel_ms: float       # launch (+ new_color round trip) + synchronize
+    kernel_ms: float       # launch (+ host new_color round trip) + synchronize
     d2h_ms: float          # img and visited back to the host
     total_ms: float
 
@@ -332,17 +345,19 @@ def run_flood_fill(img, visited, start_x, start_y, width, height, new_color,
     """One launch on one scene; the arguments are setup_scene's tuple, so
     run_flood_fill(*setup_scene(seed)) works. Inputs are not modified.
 
-    kernel_ms is profile_kernel's bracket: the launch (with new_color's
-    implicit round trip) and a synchronize.
+    kernel_ms is profile_kernel's bracket: the launch and a synchronize.
+    A host new_color (setup_scene's) adds its implicit round trip, as in
+    Numba; a CuPy new_color is already on the device and adds nothing.
     """
     _check_launch(threads_per_block, blocks_per_grid)
     _warmup(threads_per_block)
-    new_color = np.array(new_color, dtype=np.uint8)  # the launch writes it back
+    if not isinstance(new_color, cp.ndarray):
+        new_color = np.array(new_color, dtype=np.uint8)  # the launch writes it back
     _, d_state = _scratch()
 
     t0 = time.perf_counter()
-    d_img = cp.asarray(img)
-    d_visited = cp.asarray(visited)
+    d_img = _to_device(img)
+    d_visited = _to_device(visited)
     sync()
     t1 = time.perf_counter()
     _launch(d_img, d_visited, start_x, start_y, width, height, new_color,
@@ -380,8 +395,8 @@ def profile_kernel(num_runs=100, explore_configs=False, rng_seed=None):
 
     # First run for warm-up (compilation)
     img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid = scene(0)
-    d_img = cp.asarray(img)
-    d_visited = cp.asarray(visited)
+    d_img = _to_device(img)
+    d_visited = _to_device(visited)
     _launch(d_img, d_visited, start_x, start_y, width, height, new_color,
             threads_per_block, blocks_per_grid)
     sync()
@@ -392,8 +407,8 @@ def profile_kernel(num_runs=100, explore_configs=False, rng_seed=None):
     for i in range(num_runs):
         # Generate new scene for each run
         img, visited, start_x, start_y, width, height, new_color, threads_per_block, blocks_per_grid = scene(1 + i)
-        d_img = cp.asarray(img)
-        d_visited = cp.asarray(visited)
+        d_img = _to_device(img)
+        d_visited = _to_device(visited)
 
         # Time this run
         start_time = timeit.default_timer()
