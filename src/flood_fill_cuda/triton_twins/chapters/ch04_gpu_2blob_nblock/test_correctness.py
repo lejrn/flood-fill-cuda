@@ -17,8 +17,9 @@ The enqueue-switch part (test_enqueue_*, and the test_twin_* tests after
 it) runs both ENQ settings: the default per-lane enqueue and the first
 translation's program enqueue give identical outputs and counters (to
 Numba, to the oracle, to each other), the overflow tripwire fires and
-corrupts nothing under both, and the lane binary's SASS is Numba's
-warp-aggregated pattern with no CTA barrier between enqueue sites.
+writes no slot at or past qcap under both (total, partial, and a warp's
+slab straddling qcap), and the lane binary's SASS has the warp-aggregation
+pattern of Numba's helper with no CTA barrier between enqueue sites.
 
 The cross-backend part (test_cross_backend_*) runs the Numba kernels and
 their Triton twins on the same scene at the same pinned grid and requires
@@ -709,17 +710,23 @@ def test_cross_backend_every_variant_matches_numba(variant, mode):
     assert_same_deterministic(rn, rt)
 
 
+@pytest.mark.parametrize("enqueue", ENQUEUE_MODES)
 @pytest.mark.parametrize("grid", [(5, 32), (7, 128), (2, 512)],
                          ids=lambda g: f"{g[0]}x{g[1]}")
 @pytest.mark.parametrize("variant", VARIANTS, ids=VARIANT_IDS)
-def test_cross_backend_every_lane_count_matches_numba(variant, grid):
+def test_cross_backend_every_lane_count_matches_numba(variant, grid, enqueue):
     """The other lane counts the twin accepts (tpb=32 is the one-warp
-    program), multisource on the disks."""
+    program), multisource on the disks, under both ENQ settings (the
+    program enqueue's scan spans 1, 4 and 16 warps here)."""
     kw = _variant_kw(variant)
-    blocks = _pinned(grid[0], grid[1], kw)
+    blocks = min(_pinned(grid[0], grid[1], kw),
+                 max_blocks(threads_per_block=grid[1], enqueue=enqueue, **kw))
     img, seeds = SCENES["two_disks"]()
-    rn, rt = _both(img, seeds, mode="multisource", threads_per_block=grid[1],
-                   blocks=blocks, **kw)
+    rn = numba_ff.flood_fill(img, seeds, mode="multisource",
+                             threads_per_block=grid[1], blocks=blocks, **kw)
+    rt = flood_fill(img, seeds, mode="multisource", threads_per_block=grid[1],
+                    blocks=blocks, enqueue=enqueue, **kw)
+    assert rt.enqueue == enqueue
     assert_same_deterministic(rn, rt)
 
 
@@ -1004,8 +1011,9 @@ def test_cross_backend_streams_matches_numba_streams(tmp_path):
 # ================================================== the enqueue switch (ENQ)
 #
 # ENQ="lane" (the default) enqueues with one relaxed atomic per winning
-# lane, which ptxas warp-aggregates like Numba's helper; ENQ="program" is
-# the first translation's program-aggregated enqueue. Queue ORDER differs
+# lane, which ptxas warp-aggregates in the pattern of Numba's helper;
+# ENQ="program" is the first translation's program-aggregated enqueue.
+# Queue ORDER differs
 # between them (and from Numba's), which no output depends on: every
 # deterministic output and counter must be identical under both, to Numba,
 # to the CPU oracle and to each other.
@@ -1097,55 +1105,76 @@ def test_enqueue_settings_agree_at_benchmark_grid(variant):
         _assert_oracle(img, seeds, got["lane"])
 
 
+def _forced_launch(key, block, enqueue, img, visited, queue, n_seeds, qcap):
+    """One program of the raw twin kernel ``key``, BLOCK lanes, told a
+    queue capacity of ``qcap`` while its buffer (``queue``) is longer, so
+    an overflow can be forced and inspected. Returns host copies."""
+    import cupy as cp
+
+    _, bare, _, _ = key
+    w, h = img.shape[:2]
+    d_img = cp.asarray(img)
+    d_visited = cp.asarray(visited)
+    d_depth = cp.asarray(np.full((w, h), -1, dtype=np.int32))
+    d_queue = cp.asarray(queue)
+    d_q = cp.asarray(np.array([n_seeds], dtype=np.int32))
+    d_counters = cp.zeros(twin_kernels.NUM_COUNTERS, dtype=cp.int64)
+    d_bar = cp.zeros(1, dtype=twin_ff.BAR_DTYPE)
+    t = twin_ff.t
+    kernel = twin_ff._KERNELS[key]
+    common = dict(BLOCK=block, ENQ=enqueue, num_warps=block // 32,
+                  num_stages=1, launch_cooperative_grid=True)
+    if bare:
+        kernel[(1,)](t(d_img), t(d_visited), t(d_depth), t(d_queue), t(d_q),
+                     t(d_counters), n_seeds, t(d_bar), w, h, qcap, **common)
+    else:
+        trace_cap = 64
+        d_owner = cp.asarray(np.full((w, h), -1, dtype=np.int16))
+        d_stats = cp.zeros((1, 2), dtype=cp.int64)
+        d_trace = cp.zeros(trace_cap, dtype=cp.int32)
+        kernel[(1,)](t(d_img), t(d_visited), t(d_depth), t(d_owner),
+                     t(d_queue), t(d_q), t(d_counters), t(d_stats),
+                     t(d_trace), n_seeds, t(d_bar), w, h, qcap, trace_cap,
+                     **common)
+    twin_ff.sync()
+    return {"counters": d_counters.get(), "rear": int(d_q.get()[0]),
+            "queue": d_queue.get(), "visited": d_visited.get(),
+            "img": d_img.get()}
+
+
+def _all_red(w, h):
+    img = np.empty((w, h, 3), dtype=np.uint8)
+    img[:, :] = scenes.RED
+    return img
+
+
 @pytest.mark.parametrize("enqueue", ENQUEUE_MODES)
 @pytest.mark.parametrize("bare", [False, True], ids=["instr", "bare"])
 def test_twin_overflow_tripwire_under_both_enqueues(bare, enqueue):
     """A forced overflow: the kernel is told qcap=1 while its buffer holds
     64 slots, all prefilled with the seed's entry. Level 0's four tickets
     (1..4) are all >= qcap, so the tripwire fires, no slot is written and
-    the rear overshoots qcap to 5 without corrupting anything. Level 1
-    reads the four stale slots, which decode to the already-visited seed,
-    so it claims nothing and the run ends after two levels."""
-    import cupy as cp
-
+    the rear overshoots qcap to 5. Level 1 reads the four stale slots,
+    which decode to the already-visited seed, so it claims nothing and the
+    run ends after two levels. (With a real launch qcap is the buffer
+    length, so that level would read past the buffer, as in Numba; the
+    host raises on OVERFLOW.)"""
     w = h = 8
     sx, sy = 3, 4
-    img = np.empty((w, h, 3), dtype=np.uint8)
-    img[:, :] = scenes.RED
     visited = np.zeros((w, h), dtype=np.int32)
     visited[sx, sy] = 1
     seed = twin_ff._pack(sx, sy, 0, h, "lin")
-    d_img = cp.asarray(img)
-    d_visited = cp.asarray(visited)
-    d_depth = cp.asarray(np.full((w, h), -1, dtype=np.int32))
-    d_queue = cp.asarray(np.full(w * h, seed, dtype=np.int32))
-    d_q = cp.asarray(np.array([1], dtype=np.int32))
-    d_counters = cp.zeros(twin_kernels.NUM_COUNTERS, dtype=cp.int64)
-    d_bar = cp.zeros(1, dtype=twin_ff.BAR_DTYPE)
-    t = twin_ff.t
-    kernel = twin_ff._KERNELS[("lin", bare, 4, 1)]
-    common = dict(BLOCK=32, ENQ=enqueue, num_warps=1, num_stages=1,
-                  launch_cooperative_grid=True)
-    qcap = 1
-    if bare:
-        kernel[(1,)](t(d_img), t(d_visited), t(d_depth), t(d_queue), t(d_q),
-                     t(d_counters), 1, t(d_bar), w, h, qcap, **common)
-    else:
-        d_owner = cp.asarray(np.full((w, h), -1, dtype=np.int16))
-        d_stats = cp.zeros((1, 2), dtype=cp.int64)
-        d_trace = cp.zeros(16, dtype=cp.int32)
-        kernel[(1,)](t(d_img), t(d_visited), t(d_depth), t(d_owner),
-                     t(d_queue), t(d_q), t(d_counters), t(d_stats),
-                     t(d_trace), 1, t(d_bar), w, h, qcap, 16, **common)
-    twin_ff.sync()
-    c = d_counters.get()
+    queue = np.full(w * h, seed, dtype=np.int32)
+    r = _forced_launch(("lin", bare, 4, 1), 32, enqueue, _all_red(w, h),
+                       visited, queue, n_seeds=1, qcap=1)
+    c = r["counters"]
     assert c[twin_kernels.OVERFLOW] == 1
-    assert int(d_q.get()[0]) == 5          # the rear overshoots qcap
+    assert r["rear"] == 5                  # the rear overshoots qcap
     assert c[twin_kernels.FILLED] == 5 and c[twin_kernels.LEVELS] == 2
-    assert (d_queue.get() == seed).all()   # no slot >= qcap was written
-    v = d_visited.get()
+    assert (r["queue"] == seed).all()      # no slot >= qcap was written
+    v = r["visited"]
     assert v.sum() == 5 and v[sx, sy] == 1
-    out = d_img.get()
+    out = r["img"]
     painted = np.all(out == BLUE, axis=2)
     assert painted.sum() == 1 and painted[sx, sy]
     assert (out[~painted] == scenes.RED).all()
@@ -1153,14 +1182,112 @@ def test_twin_overflow_tripwire_under_both_enqueues(bare, enqueue):
         assert c[twin_kernels.PROCESSED] == 5  # 1 seed + 4 stale slots
 
 
+@pytest.mark.parametrize("enqueue", ENQUEUE_MODES)
+@pytest.mark.parametrize("bare", [False, True], ids=["instr", "bare"])
+def test_twin_overflow_slab_straddles_qcap(bare, enqueue):
+    """One warp's slab across the capacity bound: seeds in lanes 0 and 1,
+    rear 2, qcap 3. The E step's two winners share one warp-aggregated
+    ATOMG (lane) or one program atomic (program) for tickets 2 and 3:
+    lane 0's item lands in slot 2, lane 1's ticket 3 trips the wire and
+    writes nothing. Every later ticket is past qcap too. Level 1 expands
+    slot 2's pixel (3 new claims, rear 13) and reads stale seed entries
+    from slots 3..9; level 2 reads only stale slots; three levels."""
+    w = h = 8
+    (ax, ay), (bx, by) = (1, 1), (5, 5)
+    visited = np.zeros((w, h), dtype=np.int32)
+    visited[ax, ay] = visited[bx, by] = 1
+    seed_a = twin_ff._pack(ax, ay, 0, h, "lin")
+    seed_b = twin_ff._pack(bx, by, 1, h, "lin")
+    queue = np.full(64, seed_a, dtype=np.int32)
+    queue[1] = seed_b
+    before = queue.copy()
+    r = _forced_launch(("lin", bare, 4, 1), 32, enqueue, _all_red(w, h),
+                       visited, queue, n_seeds=2, qcap=3)
+    c, q = r["counters"], r["queue"]
+    assert c[twin_kernels.OVERFLOW] == 1
+    assert q[2] == twin_ff._pack(ax + 1, ay, 0, h, "lin")  # lane 0, E
+    np.testing.assert_array_equal(q[3:], before[3:])       # nothing >= qcap
+    np.testing.assert_array_equal(q[:2], before[:2])
+    assert r["rear"] == 13 == c[twin_kernels.FILLED] == r["visited"].sum()
+    assert c[twin_kernels.LEVELS] == 3
+    if not bare:
+        assert c[twin_kernels.PROCESSED] == 13  # every slot below rear once
+    out = r["img"]
+    blue = np.all(out == BLUE, axis=2)
+    green = np.all(out == GREEN, axis=2)
+    assert sorted(zip(*np.nonzero(blue))) == [(ax, ay), (ax + 1, ay)]
+    assert sorted(zip(*np.nonzero(green))) == [(bx, by)]
+
+
+def _unpack(entry, h, entry_format):
+    if entry_format == "lin":
+        p = int(entry) >> 1
+        return p // h, p % h
+    return ((int(entry) >> twin_kernels.XY_FIELD_BITS)
+            & twin_kernels.XY_FIELD_MASK,
+            int(entry) & twin_kernels.XY_FIELD_MASK)
+
+
+PARTIAL_KEYS = [("lin", False, 8, 2), ("lin", True, 8, 2),
+                ("xy", False, 8, 1), ("lin", False, 4, 1)]
+
+
+@pytest.mark.parametrize("block", [32, 256])
+@pytest.mark.parametrize("key", PARTIAL_KEYS,
+                         ids=[twin_ff._KERNELS[k].__name__
+                              for k in PARTIAL_KEYS])
+def test_twin_partial_overflow_keeps_counters_consistent(key, block):
+    """A partial overflow (qcap 10 on a 9x9 all-red image, one seed at the
+    center), at one warp and at 8 warps, both ENQ settings. One ticket per
+    claim even past qcap: rear == FILLED == visited.sum(), and the
+    instrumented twins dequeue every slot below the rear once
+    (PROCESSED == rear). No slot >= qcap is written; slots 1..qcap-1 hold
+    distinct entries of claimed pixels. Only one warp ever has work here,
+    and both settings rank winners by lane, so the lane and program runs
+    write the same queue and the same visited map."""
+    fmt = key[0]
+    w = h = 9
+    sx, sy = 4, 4
+    qcap = 10
+    visited = np.zeros((w, h), dtype=np.int32)
+    visited[sx, sy] = 1
+    seed = twin_ff._pack(sx, sy, 0, h, fmt)
+    queue = np.full(w * h + 64, seed, dtype=np.int32)
+    got = {}
+    for enq in ENQUEUE_MODES:
+        r = _forced_launch(key, block, enq, _all_red(w, h), visited, queue,
+                           n_seeds=1, qcap=qcap)
+        c, q, v = r["counters"], r["queue"], r["visited"]
+        assert c[twin_kernels.OVERFLOW] == 1, enq
+        assert r["rear"] == c[twin_kernels.FILLED] == v.sum(), enq
+        assert r["rear"] > qcap, enq
+        assert (q[qcap:] == seed).all(), enq
+        written = [_unpack(e, h, fmt) for e in q[1:qcap]]
+        assert len(set(written)) == len(written), enq
+        assert all(v[p] == 1 and p != (sx, sy) for p in written), enq
+        if not key[1]:
+            assert c[twin_kernels.PROCESSED] == r["rear"], enq
+        got[enq] = r
+    lane, prog = got["lane"], got["program"]
+    assert lane["rear"] == prog["rear"]
+    assert (lane["counters"][twin_kernels.LEVELS]
+            == prog["counters"][twin_kernels.LEVELS])
+    np.testing.assert_array_equal(lane["queue"], prog["queue"])
+    np.testing.assert_array_equal(lane["visited"], prog["visited"])
+
+
 @pytest.mark.parametrize("variant", VARIANTS, ids=VARIANT_IDS)
 def test_twin_lane_enqueue_is_warp_aggregated_in_sass(variant, tmp_path):
     """The machine code behind the default. In the lane binary every rear
-    atomic is warp-aggregated by ptxas (VOTEU.ANY, a leader-predicated
-    ATOMG.ADD, SHFL.IDX: Numba's _warp_enqueue_global) and no CTA barrier
-    sits between two enqueue sites, except, at radius 2, the ring-2 gate's
-    program-wide tl.max between ring 1 and ring 2. The program binary has
-    CTA barriers between every pair of sites (its tl.sum + tl.cumsum).
+    atomic is a per-lane +1 that ptxas warp-aggregated (VOTEU.ANY, the
+    POPC of that mask as the operand, a leader-predicated ATOMG.ADD,
+    SHFL.IDX: the pattern of Numba's _warp_enqueue_global) and no CTA
+    barrier sits between two enqueue sites, except, at radius 2, the
+    ring-2 gate's program-wide tl.max between ring 1 and ring 2. The
+    program binary's atomic adds the program's count from one thread:
+    ptxas wraps it in the same vote / leader / shuffle sequence, but its
+    operand is count * POPC, so the strict test counts none of them. It
+    has CTA barriers between every pair of sites (its tl.sum + tl.cumsum).
     The PTX barrier count equals the SASS one (what compare.py records)."""
     _, _, conn, radius = variant
     n_sites = conn if radius == 1 else 8 + 16
@@ -1174,7 +1301,9 @@ def test_twin_lane_enqueue_is_warp_aggregated_in_sass(variant, tmp_path):
         assert twin_sass.ptx_barriers(ck.asm["ptx"]) == rep["bar_sync"], enq
         reports[enq] = rep
     lane, prog = reports["lane"], reports["program"]
-    assert lane["warp_aggregated"] == n_sites
+    assert lane["warp_aggregated"] == lane["vote_wrapped"] == n_sites
+    assert prog["warp_aggregated"] == 0
+    assert prog["vote_wrapped"] == n_sites
     gate = {conn - 1} if radius == 2 else set()
     for k, n in enumerate(lane["bar_sync_between"]):
         assert (n > 0) if k in gate else (n == 0), (k, n)
