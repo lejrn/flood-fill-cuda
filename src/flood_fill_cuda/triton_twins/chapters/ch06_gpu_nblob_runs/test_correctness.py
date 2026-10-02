@@ -20,6 +20,15 @@ Part 3 (test_twin_*) covers what only the twin has: the power-of-2
 block-size rule, the 1024-thread block Numba cannot launch, the
 no-recompile guarantee behind its timings, and the Triton twins of the
 benchmark's read/write peak probes.
+
+Part 4 (test_lane_*) runs both spellings of merge and flatten
+(lane_schedule "independent", the default, and "lockstep", the first
+translation) against each other and against Numba: identical device
+buffers and counters, also on merge / flatten grids pinned to a few
+programs so that every lane walks hundreds of runs (the state machines'
+full steps, retries and next-run fetches all run), on the multi-chunk
+shapes (width or height > 1024) and on many-run scenes. Parts 1-3 run
+the default schedule.
 """
 
 import os
@@ -41,7 +50,9 @@ from flood_fill_cuda.chapters.ch05_gpu_nblob_nblock.kernels import (
 )
 from flood_fill_cuda.triton_twins.runtime import sync
 
-from .recolor import recolor, RunRecolor, CONTRACTS
+from .recolor import (
+    recolor, RunRecolor, CONTRACTS, LANE_SCHEDULES, DEFAULT_LANE_SCHEDULE,
+)
 
 pytestmark = pytest.mark.filterwarnings("ignore::UserWarning")
 
@@ -344,12 +355,22 @@ def test_cross_backend_recolor_matches_numba(name, contract, instrumented):
     _assert_results_equal(_numba().recolor(img, **kw), recolor(img, **kw))
 
 
-def _numba_run(img, capacity, contract, instrumented, grid=None):
+def _pin_union_grid(engine, phase_blocks):
+    """Pin merge and flatten (both backends launch phase_grid[k]) to
+    `phase_blocks` blocks of the engine's block size."""
+    if phase_blocks is not None:
+        for k in ("merge", "flatten"):
+            engine.phase_grid[k] = (phase_blocks, engine.grid[1])
+
+
+def _numba_run(img, capacity, contract, instrumented, grid=None,
+               phase_blocks=None):
     from numba import cuda
     nb = _numba()
     nb._warmup()
     engine = nb.RunRecolor(img.shape[0], img.shape[1], run_capacity=capacity,
                            **({"grid": grid} if grid else {}))
+    _pin_union_grid(engine, phase_blocks)
     dev = cuda.to_device(img)
     if contract == "mask":
         engine.pack(dev)
@@ -359,11 +380,14 @@ def _numba_run(img, capacity, contract, instrumented, grid=None):
     return engine, get(dev), get
 
 
-def _triton_run(img, capacity, contract, instrumented, grid=None):
+def _triton_run(img, capacity, contract, instrumented, grid=None,
+                lane_schedule=DEFAULT_LANE_SCHEDULE, phase_blocks=None):
     from .recolor import _warmup
     engine = RunRecolor(img.shape[0], img.shape[1], run_capacity=capacity,
+                        lane_schedule=lane_schedule,
                         **({"grid": grid} if grid else {}))
-    _warmup(engine.grid[1])
+    _pin_union_grid(engine, phase_blocks)
+    _warmup(engine.grid[1], lane_schedule)
     dev = cp.asarray(img)
     if contract == "mask":
         engine.pack(dev)
@@ -517,10 +541,12 @@ def test_twin_read_write_probes_measure_real_bandwidth():
     assert 20 < write_gb_s < 1000
 
 
-def test_twin_new_shapes_do_not_recompile():
+@pytest.mark.parametrize("sched", LANE_SCHEDULES)
+def test_twin_new_shapes_do_not_recompile(sched):
     """Every size argument is do_not_specialize, so after the warm-up a
     new image shape (1, 16, 33, 97 ... wide or tall) reuses the compiled
-    kernels: a compile can never land inside a timed window."""
+    kernels: a compile can never land inside a timed window. Both lane
+    schedules."""
     from . import kernels as k
     kernels = (k.pack_kernel, k.unpack_kernel, k.count_kernel,
                k.row_scan_kernel, k.emit_kernel, k.merge_rows_kernel,
@@ -530,7 +556,7 @@ def test_twin_new_shapes_do_not_recompile():
         return sum(len(c[0]) for kern in kernels
                    for c in kern.device_caches.values())
 
-    recolor(_stripes(8, 8, 2), emit_label=True)
+    recolor(_stripes(8, 8, 2), emit_label=True, lane_schedule=sched)
     engine = RunRecolor(8, 8)
     engine.unpack_to(cp.zeros((8, 8, 3), dtype=cp.uint8))
     sync()
@@ -540,7 +566,160 @@ def test_twin_new_shapes_do_not_recompile():
         for contract in CONTRACTS:
             for instrumented in (True, False):
                 recolor(img, contract=contract, emit_label=True,
-                        instrumented=instrumented)
+                        instrumented=instrumented, lane_schedule=sched)
         RunRecolor(w, h).unpack_to(cp.zeros((w, h, 3), dtype=cp.uint8))
     sync()
     assert n_compiled() == before
+
+
+# ============================================================ part 4
+# Lane schedules. The twin spells Numba's per-thread loops in merge and
+# flatten (binary search, walk, _union retries, _find) two ways
+# (kernels.py, the LANE constexpr; RunRecolor's lane_schedule):
+# "independent" (the default, per-lane state machines) and "lockstep"
+# (the first translation, kept for compare.py's lane_schedule
+# experiment). Both must give the deterministic outputs and counters of
+# Numba, and so of each other.
+
+LANE_SCENES = {
+    "noise_045": SCENES["noise_045"],
+    "comb_80_teeth": SCENES["comb_80_teeth"],        # long walks
+    "serpentine": SCENES["serpentine"],              # one chain of runs
+    "full_red": SCENES["full_red"],
+    "stripes_1px": SCENES["stripes_1px"],            # 1-px runs
+    "blob_grid_100": SCENES["blob_grid_100"],
+    "one_col": SCENES["one_col"],
+    "noise_1000": CROSS_SCENES["noise_1000"],
+    "wide_3000x40": CROSS_SCENES["wide_3000x40"],    # width > 1024
+    "big_2049x1100": CROSS_SCENES["big_2049x1100"],  # both > 1024
+    "tall_13x2100": CROSS_SCENES["tall_13x2100"],    # height > 1024
+    # many runs: 550 per row, 1.1 M in all (rows wider than 1024 and
+    # more than 1024 rows), every run touching its row-below twin
+    "stripes_1100x1100": lambda: (_stripes(1100, 1100, 2), None),
+    # dense 8-connected noise: contended links, atomic_min retries
+    "noise_060": lambda: _scenes.random_blobs_scene(400, 400, 0.60, 5),
+}
+
+_lane_built = {}
+
+
+def _lane_scene(name):
+    if name not in _lane_built:
+        built = LANE_SCENES[name]()
+        _lane_built[name] = built[0] if isinstance(built, tuple) else built
+    return _lane_built[name]
+
+
+def _lane_buffers(img, contract, instrumented, sched, grid=None,
+                  phase_blocks=None, capacity=None):
+    cap = capacity or max(8192, _numpy_run_count(img) + 1)
+    if sched == "numba":
+        return _buffers(*_numba_run(img, cap, contract, instrumented,
+                                    grid=grid, phase_blocks=phase_blocks))
+    return _buffers(*_triton_run(img, cap, contract, instrumented, grid=grid,
+                                 lane_schedule=sched,
+                                 phase_blocks=phase_blocks))
+
+
+# merge / flatten blocks: the default PHASE_BLOCKS (512), and 3 blocks of
+# 64, where every lane walks many runs (stripes_1100x1100: ~2900 each)
+_LANE_PHASE_BLOCKS = (None, 3)
+
+
+@pytest.mark.parametrize("phase_blocks", _LANE_PHASE_BLOCKS,
+                         ids=["phase_default", "phase_3x64"])
+@pytest.mark.parametrize("name", sorted(LANE_SCENES))
+def test_lane_schedules_match_numba_and_each_other(name, phase_blocks):
+    """Both schedules: the device buffers and counters of Numba on the
+    same grid (packed mask, row offsets, run table, labels, root set,
+    union_attempts / union_done / n_blobs), so also of each other."""
+    img = _lane_scene(name)
+    grid = (64, 64) if phase_blocks else None
+    ref = _lane_buffers(img, "rgb", True, "numba", grid=grid,
+                        phase_blocks=phase_blocks)
+    got = {sched: _lane_buffers(img, "rgb", True, sched, grid=grid,
+                                phase_blocks=phase_blocks)
+           for sched in LANE_SCHEDULES}
+    for sched in LANE_SCHEDULES:
+        _assert_buffers_equal(ref, got[sched])
+    _assert_buffers_equal(got["independent"], got["lockstep"])
+
+
+@pytest.mark.parametrize("instrumented", [True, False])
+@pytest.mark.parametrize("contract", CONTRACTS)
+@pytest.mark.parametrize("name", ["noise_060", "comb_80_teeth",
+                                  "big_2049x1100", "tall_13x2100"])
+def test_lane_schedules_recolor_matches_numba(name, contract, instrumented):
+    """recolor() in both schedules: every deterministic result field of
+    the Numba driver (seeds, n_blobs, the union counters or their reset
+    zeros, label map, painted image)."""
+    img = _lane_scene(name)
+    kw = dict(contract=contract, emit_label=True, instrumented=instrumented)
+    a = _numba().recolor(img, **kw)
+    for sched in LANE_SCHEDULES:
+        _assert_results_equal(a, recolor(img, lane_schedule=sched, **kw))
+
+
+@pytest.mark.parametrize("tpb", [32, 64, 128, 512])
+@pytest.mark.parametrize("sched", LANE_SCHEDULES)
+def test_lane_schedules_block_sizes_match_numba(sched, tpb):
+    """Other program widths (BLOCK lanes, 1-16 warps): same buffers as
+    Numba at the same grid, merge and flatten on 2 blocks so the lanes
+    walk many runs."""
+    img = _lane_scene("noise_060")
+    grid = (64, tpb)
+    ref = _lane_buffers(img, "mask", True, "numba", grid=grid,
+                        phase_blocks=2)
+    _assert_buffers_equal(ref, _lane_buffers(img, "mask", True, sched,
+                                             grid=grid, phase_blocks=2))
+
+
+@pytest.mark.parametrize("sched", LANE_SCHEDULES)
+def test_lane_schedules_overflowed_table_matches_numba(sched):
+    """An overflowed run table (merge and flatten loop to N_RUNS_USED,
+    the binary search clamps its bounds to the capacity): same wrong but
+    deterministic buffers as Numba, in both schedules."""
+    img = _lane_scene("noise_045")
+    for phase_blocks in (None, 1):
+        a = _lane_buffers(img, "rgb", True, "numba", capacity=256,
+                          phase_blocks=phase_blocks)
+        b = _lane_buffers(img, "rgb", True, sched, capacity=256,
+                          phase_blocks=phase_blocks)
+        assert a["counters"][0] == 1
+        _assert_buffers_equal(a, b)
+
+
+def test_lane_schedule_default_and_validation():
+    assert DEFAULT_LANE_SCHEDULE == "independent"
+    assert set(LANE_SCHEDULES) == {"independent", "lockstep"}
+    assert RunRecolor(8, 8).lane_schedule == "independent"
+    img = _lane_scene("noise_045")
+    with pytest.raises(ValueError, match="lane_schedule"):
+        RunRecolor(8, 8, lane_schedule="warp")
+    with pytest.raises(ValueError, match="lane_schedule"):
+        recolor(img, lane_schedule="warp")
+    engine = RunRecolor(img.shape[0], img.shape[1], lane_schedule="lockstep")
+    with pytest.raises(ValueError, match="engine runs 'lockstep'"):
+        recolor(img, engine=engine, lane_schedule="independent")
+    # None (the default) runs the engine's own schedule
+    r = recolor(img, engine=engine, emit_label=True)
+    label, n_blobs = cpu_label_components(img)
+    assert r.n_blobs == n_blobs
+    np.testing.assert_array_equal(r.label, label)
+
+
+def test_lane_schedules_are_separate_compiles():
+    """LANE is a constexpr: each schedule is its own merge and flatten
+    compile, the other kernels are shared."""
+    img = _lane_scene("noise_045")
+    engines = {}
+    for sched in LANE_SCHEDULES:
+        engines[sched] = RunRecolor(img.shape[0], img.shape[1],
+                                    lane_schedule=sched)
+        recolor(img, engine=engines[sched])
+    a, b = (engines[s].compiled for s in LANE_SCHEDULES)
+    for k in ("merge", "flatten"):
+        assert a[k] is not b[k]
+        assert a[k].asm["ptx"] != b[k].asm["ptx"]
+    for k in ("count", "scan", "emit", "paint"):
+        assert a[k].asm["ptx"] == b[k].asm["ptx"]
