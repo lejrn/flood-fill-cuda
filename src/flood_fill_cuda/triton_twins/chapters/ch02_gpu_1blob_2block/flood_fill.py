@@ -1,8 +1,9 @@
 """Host driver for the Triton twin of the dual-block flood fill.
 
-Public API (same as the Numba chapter):
+Public API (the Numba chapter's, plus the twin-only enqueue switch):
     flood_fill(img, seed_x, seed_y, threads_per_block=256,
-               kernel="split", bare=False, placement=None)
+               kernel="split", bare=False, placement=None,
+               enqueue="lane")
         -> DualFloodFillResult
 
 kernel="split"    domain decomposition (per-program ring + spill, cross-seam
@@ -18,6 +19,13 @@ kernel="pinned"   placement experiment: requires placement="same_sm" (an
 bare=True selects the uninstrumented specialization (split/global/dirsplit
 only); such results carry timing, filled and levels but zeroed
 work/utilization metrics.
+
+enqueue selects the kernels' ENQ constexpr (every kernel, every append
+site): "lane" (default) is one masked atomic per claiming lane, which
+ptxas warp-aggregates exactly like Numba's hand-written ballot/popc/
+leader/shfl; "program" is the first translation, a program-wide
+tl.sum/tl.cumsum and one atomic per program per call site. Outputs are
+identical; only speed differs (README).
 
 Differences from the Numba driver, all forced by Triton:
 - threads_per_block must also be a power of 2 (num_warps = tpb // 32 and
@@ -53,7 +61,7 @@ from flood_fill_cuda.triton_twins.runtime import (
 from .kernels import (
     dual_block_global_kernel, dual_block_split_kernel,
     dual_block_dirsplit_kernel, dual_block_pinned_kernel,
-    RING_CAPACITY, NUM_COUNTERS,
+    RING_CAPACITY, NUM_COUNTERS, G_STATE_SIZE,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
     ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS,
     SPILLED, PEAK_SPILL_WINDOW,
@@ -65,14 +73,21 @@ from .kernels import (
 LEVEL_TRACE_CAPACITY = 2 ** 21
 
 # Numba uses 768 (floor(1536/768) = 2 blocks/SM). 768 lanes is not a power
-# of 2, so the twin pins 512-lane programs and caps registers so that two
-# fit per SM (65536 / (2 * 512) = 64): the nearest faithful experiment.
+# of 2, so the twin pins 512-lane programs and caps registers so that at
+# least two fit per SM (65536 / (2 * 512) = 64): the nearest faithful
+# experiment. The first translation (enqueue="program") needs 46 registers
+# and fits exactly 2; the per-lane enqueue needs 30, so 3 fit (the
+# 1,536-thread limit) and the third program on the chosen SM leaves at
+# once (the kernel's rank < 2 guard).
 PINNED_TPB = 512
 PINNED_MAXNREG = 64
 PINNED_WORKERS = 2
 
 # Numba compiles split with max_registers=120 (instrumented and bare twin).
 SPLIT_MAXNREG = 120
+
+# The kernels' ENQ constexpr: "lane" is the default (see the module doc).
+ENQUEUE_MODES = ("lane", "program")
 
 
 @dataclass
@@ -137,8 +152,8 @@ _KERNELS = {
     "pinned": dual_block_pinned_kernel,
 }
 
-_warmed = {}       # (kernel, bare, tpb) -> CompiledKernel of the warm-up launch
-_coop_cache = {}   # (kernel, bare, tpb) -> max co-resident programs
+_warmed = {}       # (kernel, bare, tpb, enqueue) -> warm-up CompiledKernel
+_coop_cache = {}   # (kernel, bare, tpb, enqueue) -> max co-resident programs
 
 
 def _is_red(img, x, y):
@@ -170,14 +185,15 @@ def _tiny_args():
     return d_img, d_visited, d_depth, d_counters
 
 
-def _warmup(kernel, bare, tpb):
-    """Compile each (kernel, bare, tpb) specialization once, off the clock.
+def _warmup(kernel, bare, tpb, enqueue="lane"):
+    """Compile each (kernel, bare, tpb, enqueue) specialization once, off
+    the clock.
 
     The warm-up launches 2 programs with the timed launch's exact options
     (cooperative, num_warps, num_stages, maxnreg) and the same argument
     kinds, so no compile can land inside kernel_ms. Returns the
     CompiledKernel (its registers size the cooperative grid)."""
-    key = (kernel, bare, tpb)
+    key = (kernel, bare, tpb, enqueue)
     if key in _warmed:
         return _warmed[key]
     d_img, d_visited, d_depth, d_counters = _tiny_args()
@@ -191,13 +207,13 @@ def _warmup(kernel, bare, tpb):
         d_spill1 = cp.empty(32, dtype=cp.int32)
         d_inbox0 = cp.empty(8, dtype=cp.int32)
         d_inbox1 = cp.empty(8, dtype=cp.int32)
-        d_g = cp.zeros(6, dtype=cp.int32)
+        d_g = cp.zeros(int(G_STATE_SIZE), dtype=cp.int32)
         d_ring = cp.empty((2, int(RING_CAPACITY)), dtype=cp.int32)
         compiled = dual_block_split_kernel[(2,)](
             t(d_img), t(d_visited), t(d_depth), t(d_owner), 1, 1,
             t(d_spill0), t(d_spill1), t(d_inbox0), t(d_inbox1), t(d_g),
             t(d_counters), t(d_trace), t(d_ring), t(d_bar), 8, 8, 8, 4,
-            TPB=tpb, INSTRUMENTED=instrumented, **opts)
+            TPB=tpb, INSTRUMENTED=instrumented, ENQ=enqueue, **opts)
     elif kernel in ("global", "dirsplit"):
         d_queue = cp.empty(64, dtype=cp.int32)
         d_queue[0] = 1 * 8 + 1
@@ -206,7 +222,7 @@ def _warmup(kernel, bare, tpb):
         compiled = _KERNELS[kernel][(2,)](
             t(d_img), t(d_visited), t(d_depth), t(d_owner), t(d_queue),
             t(d_q), t(d_counters), t(d_trace), t(d_bar), 8, 8, 4,
-            TPB=tpb, INSTRUMENTED=instrumented, **opts)
+            TPB=tpb, INSTRUMENTED=instrumented, ENQ=enqueue, **opts)
     else:  # pinned: compile via a 2-program spread run
         d_queue = cp.empty(64, dtype=cp.int32)
         d_queue[0] = 1 * 8 + 1
@@ -215,7 +231,8 @@ def _warmup(kernel, bare, tpb):
         d_pin = cp.asarray(np.array([1, -1, 0], dtype=np.int32))
         compiled = dual_block_pinned_kernel[(2,)](
             t(d_img), t(d_visited), t(d_depth), t(d_queue), t(d_q),
-            t(d_barrier), t(d_pin), t(d_counters), 8, 8, TPB=tpb, **opts)
+            t(d_barrier), t(d_pin), t(d_counters), 8, 8, TPB=tpb,
+            ENQ=enqueue, **opts)
     sync()
     counters = d_counters.get()
     if counters[OVERFLOW] or counters[FILLED] != 1:
@@ -225,30 +242,35 @@ def _warmup(kernel, bare, tpb):
     return compiled
 
 
-def compiled_kernel(kernel, bare=False, threads_per_block=256):
+def compiled_kernel(kernel, bare=False, threads_per_block=256,
+                    enqueue="lane"):
     """The CompiledKernel behind a configuration (warming it up if needed):
-    for kernel_resources() and the occupancy calculator."""
-    return _warmup(kernel, bare, threads_per_block)
+    for kernel_resources(), the occupancy calculator and SASS inspection
+    (compiled.asm["cubin"])."""
+    return _warmup(kernel, bare, threads_per_block, enqueue)
 
 
-def _coop_max_blocks(kernel, bare, tpb):
-    key = (kernel, bare, tpb)
+def _coop_max_blocks(kernel, bare, tpb, enqueue):
+    key = (kernel, bare, tpb, enqueue)
     if key not in _coop_cache:
-        _coop_cache[key] = max_coresident_programs(_warmup(kernel, bare, tpb))
+        _coop_cache[key] = max_coresident_programs(
+            _warmup(kernel, bare, tpb, enqueue))
     return _coop_cache[key]
 
 
-def launch_grid(kernel, placement=None, threads_per_block=256, bare=False):
+def launch_grid(kernel, placement=None, threads_per_block=256, bare=False,
+                enqueue="lane"):
     """Programs a configuration launches (2, or C * sm_count for pinned
     same_sm, C = resident programs per SM of the compiled pinned kernel)."""
     if kernel == "pinned" and placement == "same_sm":
-        per_sm = programs_per_sm(_warmup(kernel, bare, threads_per_block))
+        per_sm = programs_per_sm(_warmup(kernel, bare, threads_per_block,
+                                         enqueue))
         return per_sm * device_info().sm_count
     return 2
 
 
 def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
-               kernel="split", bare=False, placement=None):
+               kernel="split", bare=False, placement=None, enqueue="lane"):
     """Flood-fill the red blob containing (seed_x, seed_y) with two programs.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
@@ -269,6 +291,9 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
         raise ValueError(
             f'kernel must be "split", "global", "dirsplit" or "pinned", '
             f'got {kernel!r}')
+    if enqueue not in ENQUEUE_MODES:
+        raise ValueError(
+            f'enqueue must be "lane" or "program", got {enqueue!r}')
     if kernel == "pinned":
         if placement not in ("same_sm", "spread"):
             raise ValueError(
@@ -301,16 +326,17 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     # already indexed img_host above, so they are integers.
     seed_x, seed_y = operator.index(seed_x), operator.index(seed_y)
 
-    _warmup(kernel, bare, threads_per_block)
+    _warmup(kernel, bare, threads_per_block, enqueue)
     sm_count = device_info().sm_count
-    launch_blocks = launch_grid(kernel, placement, threads_per_block, bare)
+    launch_blocks = launch_grid(kernel, placement, threads_per_block, bare,
+                                enqueue)
     if kernel == "pinned" and placement == "same_sm" and \
             launch_blocks < PINNED_WORKERS * sm_count:
         raise RuntimeError(
             f"the pinned kernel fits {launch_blocks // sm_count} program(s) "
             f"of {threads_per_block} lanes per SM; at least "
             f"{PINNED_WORKERS} are needed to put both workers on one SM")
-    max_blocks = _coop_max_blocks(kernel, bare, threads_per_block)
+    max_blocks = _coop_max_blocks(kernel, bare, threads_per_block, enqueue)
     if max_blocks < launch_blocks:
         raise RuntimeError(
             f"this GPU supports at most {max_blocks} cooperative blocks of "
@@ -365,7 +391,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     if instrumented:
         d_owner.set(owner_host)
     if kernel == "split":
-        d_g_state = cp.asarray(np.zeros(6, dtype=np.int32))
+        d_g_state = cp.asarray(np.zeros(int(G_STATE_SIZE), dtype=np.int32))
     elif kernel == "global":
         d_queue[:1].set(seed_lin)
         d_q_state = cp.asarray(np.array([1], dtype=np.int32))
@@ -387,18 +413,19 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
             t(d_spill0), t(d_spill1), t(d_inbox0), t(d_inbox1),
             t(d_g_state), t(d_counters), t(d_trace), t(d_ring), t(d_bar),
             width, height, max(height, 1), trace_capacity,
-            TPB=threads_per_block, INSTRUMENTED=instrumented, **opts)
+            TPB=threads_per_block, INSTRUMENTED=instrumented, ENQ=enqueue,
+            **opts)
     elif kernel in ("global", "dirsplit"):
         _KERNELS[kernel][(2,)](
             t(d_img), t(d_visited), t(d_depth), t(d_owner), t(d_queue),
             t(d_q_state), t(d_counters), t(d_trace), t(d_bar), width, height,
             trace_capacity, TPB=threads_per_block, INSTRUMENTED=instrumented,
-            **opts)
+            ENQ=enqueue, **opts)
     else:  # pinned
         dual_block_pinned_kernel[(launch_blocks,)](
             t(d_img), t(d_visited), t(d_depth), t(d_queue), t(d_q_state),
             t(d_barrier), t(d_pin), t(d_counters), width, height,
-            TPB=threads_per_block, **opts)
+            TPB=threads_per_block, ENQ=enqueue, **opts)
     sync()
     t_d2h0 = time.perf_counter()
 
@@ -498,5 +525,5 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
 __all__ = [
     "DualFloodFillResult", "flood_fill", "compiled_kernel", "launch_grid",
     "kernel_resources", "LEVEL_TRACE_CAPACITY", "PINNED_TPB",
-    "PINNED_MAXNREG", "SPLIT_MAXNREG",
+    "PINNED_MAXNREG", "SPLIT_MAXNREG", "ENQUEUE_MODES",
 ]

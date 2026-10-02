@@ -16,6 +16,16 @@ placement scenes imported from it:
                2 x 768 threads, the twin 2 x 512 lanes. Not like-for-like,
                so these rows carry comparable=False;
              - pinned spread at 2 x 512 on both backends: the matched row.
+  enqueue    the twin's two enqueue translations against Numba, same
+             harness: on ENQUEUE_SCENES, {split, global, dirsplit} at tpb
+             256 (instrumented), plus the matched pinned 2 x 512 spread row
+             on sq_2000_center. Two rows per cell: enqueue="lane" (the
+             default everywhere else, a per-lane atomic that ptxas
+             warp-aggregates like Numba's hand-written ballot) and
+             enqueue="program" (config label "first_translation": the
+             program-wide tl.sum/tl.cumsum the twin started with).
+
+Every other experiment runs the twin's default, enqueue="lane".
 
 Not mirrored: the benchmark's @njit rows (CPU, no GPU backend).
 
@@ -73,6 +83,14 @@ QUICK_SCENES = [
     ("seam_serpentine_64", lambda: scenes.seam_serpentine_scene(64, 64),
      "quick smoke scene"),
 ]
+
+# enqueue experiment: one scene per regime of the benchmark. Medium and
+# large frontiers, the narrow serpentine (per-level overhead), the
+# seam-crossing serpentine (split's inbox path every level).
+ENQUEUE_SCENES = ["sq_2000_center", "sq_4000_corner", "serpentine_256",
+                  "seam_serpentine_256"]
+ENQUEUE_PINNED_SCENE = "sq_2000_center"
+FIRST_TRANSLATION = "first_translation"
 
 
 @dataclass
@@ -225,10 +243,15 @@ def _numba_resources(kernel, bare, tpb):
 
 
 def _make_case(experiment, scene_name, builder, note, kernel, bare,
-               tpb_numba, tpb_triton, placement=None, label=None):
+               tpb_numba, tpb_triton, placement=None, label=None,
+               enqueue=None):
+    """enqueue=None runs the twin's default ("lane") and leaves the config
+    as it was; the enqueue experiment passes "lane" or "program" and both
+    land in the config."""
     numba_pinned_override = (kernel == "pinned"
                              and tpb_numba != NUMBA_PINNED_TPB)
     matched = tpb_numba == tpb_triton
+    enq = enqueue or "lane"
 
     def run_numba():
         img, sx, sy = _cache.get(scene_name, builder)
@@ -243,7 +266,8 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
         img, sx, sy = _cache.get(scene_name, builder)
         return _slim(tff.flood_fill(img, sx, sy, threads_per_block=tpb_triton,
                                     kernel=kernel, bare=bare,
-                                    placement=placement), kernel, bare)
+                                    placement=placement, enqueue=enq),
+                     kernel, bare)
 
     def info(n, t):
         sm = device_info().sm_count
@@ -259,18 +283,27 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
             "triton": {**t.obs, "alloc_ms": t.alloc_ms, "h2d_ms": t.h2d_ms,
                        "d2h_ms": t.d2h_ms,
                        "grid": tff.launch_grid(kernel, placement, tpb_triton,
-                                               bare),
+                                               bare, enq),
                        "tpb": tpb_triton,
                        "num_warps": tpb_triton // 32,
+                       "enqueue": enq,
                        "resources": kernel_resources(
-                           tff.compiled_kernel(kernel, bare, tpb_triton))},
+                           tff.compiled_kernel(kernel, bare, tpb_triton,
+                                               enq))},
         }
 
     config = {"kernel": kernel, "bare": bare, "tpb": tpb_numba,
               "placement": placement}
+    if enqueue is not None:
+        config["enqueue"] = enqueue
     if label:
         config["label"] = label
     notes = _ascii_dashes(note)
+    extra = {"config_matched": matched}
+    if enqueue == "program":
+        notes += ("; first translation: program-wide tl.sum/tl.cumsum "
+                  "enqueue, superseded by the per-lane default")
+        extra["first_translation"] = True
     if not matched:
         config["tpb_triton"] = tpb_triton
         notes = (f"{notes}; Numba pins 2 x {tpb_numba} threads, the twin "
@@ -282,8 +315,7 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
     return Case(experiment=experiment, scene=scene_name, config=config,
                 run_numba=run_numba, run_triton=run_triton, same=_same,
                 pixels=_scene_pixels(scene_name, builder), info=info,
-                notes=notes, extra={"config_matched": matched},
-                comparable=matched)
+                notes=notes, extra=extra, comparable=matched)
 
 
 def _make_v2_case(experiment, scene_name, builder, note, tpb, label=None):
@@ -362,6 +394,34 @@ def build_cases(quick=False):
             "placement", name, builder, note, "pinned", False,
             tff.PINNED_TPB, tff.PINNED_TPB, "spread",
             f"pinned 2x{tff.PINNED_TPB} spread (matched)"))
+    cases += _enqueue_cases(quick, lookup)
+    return cases
+
+
+def _enqueue_cases(quick, lookup):
+    """Numba vs both enqueue translations of the twin: per (scene, kernel)
+    a lane row, then the program row labelled first_translation."""
+    rows = (QUICK_SCENES if quick
+            else [(n,) + lookup[n] for n in ENQUEUE_SCENES])
+    pinned_name = QUICK_SCENES[0][0] if quick else ENQUEUE_PINNED_SCENE
+    pinned_builder, pinned_note = ((QUICK_SCENES[0][1], QUICK_SCENES[0][2])
+                                   if quick else lookup[pinned_name])
+    cases = []
+    for name, builder, note in rows:
+        for kernel in nbench.KERNELS:
+            for enqueue in ("lane", "program"):
+                cases.append(_make_case(
+                    "enqueue", name, builder, note, kernel, False, TPB, TPB,
+                    enqueue=enqueue,
+                    label=FIRST_TRANSLATION if enqueue == "program" else None))
+    for enqueue in ("lane", "program"):
+        label = f"pinned 2x{tff.PINNED_TPB} spread (matched)"
+        if enqueue == "program":
+            label = f"{label} {FIRST_TRANSLATION}"
+        cases.append(_make_case(
+            "enqueue", pinned_name, pinned_builder, pinned_note, "pinned",
+            False, tff.PINNED_TPB, tff.PINNED_TPB, "spread", label,
+            enqueue=enqueue))
     return cases
 
 
@@ -386,6 +446,15 @@ def main(argv=None):
                          "1x768), pinned same_sm / spread as the chapter "
                          "runs them (Numba 768, twin 512), pinned spread "
                          "matched at 2 x 512",
+            "enqueue": "ENQUEUE_SCENES x {split, global, dirsplit} at tpb "
+                       "256 plus pinned 2 x 512 spread on sq_2000_center, "
+                       "each twice: enqueue=lane (the twin's default, a "
+                       "per-lane atomic that ptxas warp-aggregates: VOTEU.ANY"
+                       ", POPC, one leader ATOMG, SHFL.IDX, as in Numba's "
+                       "SASS) and enqueue=program (label first_translation, "
+                       "extra first_translation=true: program-wide "
+                       "tl.sum/tl.cumsum, ~7 BAR.SYNC per append). Every "
+                       "other experiment runs enqueue=lane.",
         },
         "not_mirrored": ["@njit CPU rows (no GPU backend to compare)"],
         "placement_matching": [
@@ -406,10 +475,12 @@ def main(argv=None):
         ],
         "caps": [] if not args.quick else [
             "quick: scenes replaced by sq_128_center and seam_serpentine_64, "
-            "tpb sweep and placement on sq_128_center"],
+            "tpb sweep, placement and pinned enqueue on sq_128_center, "
+            "enqueue on both quick scenes"],
         "budget": "no scene capped: the largest case (sq_6000_center) "
                   "measured at ~1.45 GB host RSS; default mode ~8 min of "
-                  "GPU time",
+                  "GPU time before the enqueue experiment, which adds 26 "
+                  "rows (estimated 1-2 min, not yet timed in default mode)",
         "timing": "speedup_kernel is the backend comparison. total_ms adds "
                   "the host stacks: CuPy's pooled allocation (warm after "
                   "a case's first run) vs Numba's cuMemAlloc on every run, "
@@ -421,7 +492,9 @@ def main(argv=None):
             "max_registers 40, the twin's 2 x 512 lanes at maxnreg 64; both "
             "put exactly 2 programs per SM in same_sm mode",
             "split: the 8192-slot ring is shared memory in Numba, global "
-            "scratch in Triton",
+            "scratch in Triton; under enqueue=lane its two rears are "
+            "program-private global int32 slots (global atomics in place "
+            "of Numba's shared ones)",
             "the twin's driver allocates an int32 grid_sync counter "
             "(split/global/dirsplit), zeroed in the h2d bracket",
         ],

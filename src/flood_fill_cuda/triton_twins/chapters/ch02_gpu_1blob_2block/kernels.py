@@ -23,15 +23,26 @@ What changes in the translation (see README for the full mapping table):
 
 - grid.sync() -> runtime.device.grid_sync on a host-zeroed counter, inside
   a cooperative launch (launch_cooperative_grid=True), same placement.
-- Warp-aggregated appends -> program-aggregated appends: tl.cumsum ranks
-  the claiming lanes, one atomic per program per call site reserves the
-  slab. Tickets keep their meaning; contiguity is per program, not per warp.
+- Warp-aggregated appends, chosen by the ENQ constexpr:
+  ENQ="lane" (default): every claiming lane does its own masked
+  tl.atomic_add(rear, 1) and writes its item at the ticket it got back.
+  ptxas compiles a uniform-address add like that into a warp-aggregated
+  atomic (VOTEU.ANY of the claiming lanes, FLO leader, POPC count, one
+  leader ATOMG.E.ADD, SHFL.IDX broadcast, lanemask POPC rank): the same
+  machine pattern as Numba's hand-written ballot/popc/leader/shfl.
+  ENQ="program" (the first translation): tl.sum + tl.cumsum rank the
+  claiming lanes over the whole program and one atomic per program per
+  call site reserves the slab. The scans cost CTA barriers and lock the
+  program's warps together; README has the measured cost.
 - The split kernel's shared-memory ring has no Triton equivalent (no
   user-addressable shared memory): it becomes a per-program 8192-slot
   region of global scratch with the same virtual tickets, mask, clamp and
-  spill-over rule. Its shared rears become program registers: a program
-  is the only producer of its own ring, so the shared atomics reduce to
-  register adds.
+  spill-over rule. Its shared rears become, under ENQ="lane", two
+  program-private int32 slots of g_state (a global atomic in place of
+  Numba's shared one; ring rear overshoot clamped at the level end, as in
+  Numba), and under ENQ="program" program registers (the program is the
+  only producer of its own ring, so the slab reservation is a register
+  add).
 - The 0/1 visited claim is a masked tl.atomic_xchg(.., 1): old == 0 wins,
   exactly the CAS(0 -> 1) outcome, without dummy traffic for masked lanes.
 - Per-thread register counters (my_processed, my_cas_attempts) -> per-lane
@@ -85,6 +96,13 @@ G_PUB_RING0 = tl.constexpr(2)         # program 0's published next-level ring co
 G_PUB_SPILL0 = tl.constexpr(3)        # program 0's published next-level spill count
 G_PUB_RING1 = tl.constexpr(4)
 G_PUB_SPILL1 = tl.constexpr(5)
+# ENQ="lane" only (twin-specific): program p's ring rear lives at
+# G_OWN_REARS + p * G_OWN_STRIDE and its spill rear in the next slot (the
+# twins of Numba's shared s_rear / s_spill_rear). One 128-byte line per
+# program, away from the inbox rears the other program bumps.
+G_OWN_REARS = tl.constexpr(32)
+G_OWN_STRIDE = tl.constexpr(32)
+G_STATE_SIZE = tl.constexpr(96)       # int32 slots the host zeroes
 
 # pin_state slots ("pinned")
 P_MODE = tl.constexpr(0)              # host-set, immutable: 0 = same_sm, 1 = spread
@@ -143,32 +161,76 @@ def _claim(visited, nlin, m):
 
 @triton.jit
 def _enqueue_global(arr, cap, state, rear_slot, item, won, counters,
-                    BACKWARD: tl.constexpr):
-    """Program-aggregated append on a global rear counter.
+                    BACKWARD: tl.constexpr, ENQ: tl.constexpr):
+    """Append the claiming lanes' items on a global rear counter.
 
-    Twin of _warp_enqueue_global: the claiming lanes are ranked with a
-    prefix sum and one atomic per program reserves the slab (Numba: one per
-    warp). backward=True writes slot cap-1-idx (dirsplit's double-ended
-    buffer). The bound check is a defensive tripwire only.
+    Twin of _warp_enqueue_global. BACKWARD=True writes slot cap-1-idx
+    (dirsplit's double-ended buffer). The bound check is a defensive
+    tripwire only.
+
+    ENQ="lane": one masked atomic per claiming lane, which ptxas turns into
+    one atomic per warp (the leader adds the warp's popcount, SHFL hands
+    each lane base + rank): Numba's warp aggregation, with no CTA barrier.
+    ENQ="program": the first translation. A program-wide prefix sum ranks
+    the claiming lanes and one atomic per program reserves the slab.
     """
-    w = won.to(tl.int32)
-    cnt = tl.sum(w, axis=0)
-    rank = tl.cumsum(w, axis=0) - w  # scans stay outside conditionals
-    if cnt > 0:
-        base = tl.atomic_add(state + rear_slot, cnt, sem="relaxed", scope="gpu")
-        idx = base + rank
+    if ENQ == "lane":
+        z = tl.zeros_like(item)
+        idx = tl.atomic_add(state + rear_slot + z, z + 1, mask=won,
+                            sem="relaxed", scope="gpu")
         ok = won & (idx < cap)
         if BACKWARD:
             tl.store(arr + (cap - 1 - idx), item, mask=ok)
         else:
             tl.store(arr + idx, item, mask=ok)
         # unreachable by the structural arguments
-        tl.store(counters + OVERFLOW + rank * 0, 1, mask=won & (idx >= cap))
+        tl.store(counters + OVERFLOW + z, 1, mask=won & (idx >= cap))
+    else:
+        w = won.to(tl.int32)
+        cnt = tl.sum(w, axis=0)
+        rank = tl.cumsum(w, axis=0) - w  # scans stay outside conditionals
+        if cnt > 0:
+            base = tl.atomic_add(state + rear_slot, cnt, sem="relaxed",
+                                 scope="gpu")
+            idx = base + rank
+            ok = won & (idx < cap)
+            if BACKWARD:
+                tl.store(arr + (cap - 1 - idx), item, mask=ok)
+            else:
+                tl.store(arr + idx, item, mask=ok)
+            # unreachable by the structural arguments
+            tl.store(counters + OVERFLOW + rank * 0, 1,
+                     mask=won & (idx >= cap))
+
+
+@triton.jit
+def _enqueue_two_tier_lane(ring, spill, rears, front, item, won):
+    """Own-half append, ENQ="lane": ring fast path, own spill tier past it.
+
+    Twin of _warp_enqueue_two_tier, statement for statement. rears[0] is
+    the ring rear (virtual tickets), rears[1] the spill rear. Each claiming
+    lane takes a ticket with its own atomic (warp-aggregated by ptxas, as
+    Numba aggregates by hand); a ticket inside [front, front + 8192) takes
+    ring slot ticket & 8191, and the lanes whose tickets fall past the
+    window take spill slots with a second per-lane atomic (Numba's
+    re-ballot of the else-branch lanes). The ring rear may overshoot by the
+    spilled count; nothing is written past the window, and the kernel
+    clamps the rear back at the level end, as Numba does.
+    """
+    z = tl.zeros_like(item)
+    ticket = tl.atomic_add(rears + z, z + 1, mask=won, sem="relaxed",
+                           scope="gpu")
+    in_window = (ticket - front) < RING_CAPACITY
+    tl.store(ring + (ticket & RING_MASK), item, mask=won & in_window)
+    to_spill = won & (~in_window)
+    gidx = tl.atomic_add(rears + 1 + z, z + 1, mask=to_spill, sem="relaxed",
+                         scope="gpu")
+    tl.store(spill + gidx, item, mask=to_spill)
 
 
 @triton.jit
 def _enqueue_two_tier(ring, spill, s_rear, s_spill_rear, front, item, won):
-    """Own-half append: ring fast path, own spill tier past it.
+    """Own-half append, ENQ="program": ring fast path, own spill tier.
 
     Twin of _warp_enqueue_two_tier. The program reserves cnt virtual
     tickets [s_rear, s_rear + cnt); tickets inside [front, front + 8192)
@@ -226,7 +288,8 @@ def _pair_barrier(barrier_state, n_workers):
 def dual_block_global_kernel(img, visited, depth, owner, queue, q_state,
                              counters, level_sizes, bar, width, height,
                              trace_cap, TPB: tl.constexpr,
-                             INSTRUMENTED: tl.constexpr):
+                             INSTRUMENTED: tl.constexpr,
+                             ENQ: tl.constexpr = "lane"):
     """One shared global queue, both programs grid-stride each level window.
 
     Host contract: launch (2,) cooperative with num_warps = TPB // 32;
@@ -287,7 +350,7 @@ def dual_block_global_kernel(img, visited, depth, owner, queue, q_state,
                     my_cas_attempts += m.to(tl.int32)
                 won = _claim(visited, nlin, m)
                 _enqueue_global(queue, cap, q_state, Q_REAR, nlin, won,
-                                counters, False)
+                                counters, False, ENQ)
 
         epoch += 1
         grid_sync(bar, epoch * nprog)  # enqueues + final rear visible
@@ -328,7 +391,8 @@ def dual_block_split_kernel(img, visited, depth, owner, seed_x, seed_y,
                             spill0, spill1, inbox0, inbox1, g_state,
                             counters, level_sizes, ring, bar, width, height,
                             inbox_cap, trace_cap, TPB: tl.constexpr,
-                            INSTRUMENTED: tl.constexpr):
+                            INSTRUMENTED: tl.constexpr,
+                            ENQ: tl.constexpr = "lane"):
     """Domain decomposition: program 0 owns x < width//2, program 1 the rest.
 
     Each program runs the two-tier machinery on its half: its 8192-slot
@@ -336,15 +400,21 @@ def dual_block_split_kernel(img, visited, depth, owner, seed_x, seed_y,
     place of Numba's shared array) plus its own spill tier. Cross-seam
     claims go to the OTHER program's inbox.
 
-    Host contract: launch (2,) cooperative; visited[seed]=1; g_state, bar
-    and counters zeroed; spill_b sized to half b, inboxes sized height;
-    depth=-1. The seed-owning program seeds its own ring in the prologue.
+    Host contract: launch (2,) cooperative; visited[seed]=1; g_state
+    (G_STATE_SIZE slots), bar and counters zeroed; spill_b sized to half b,
+    inboxes sized height; depth=-1. The seed-owning program seeds its own
+    ring (and, under ENQ="lane", its ring rear slot) in the prologue.
 
     Level boundary = 1 cta_sync + 2 grid_sync: the program clamps its ring
     rear (retracting tickets that went to the spill tier) and publishes its
     next-level ring/spill counts; grid_sync #1 makes enqueues, inbox rears
     and both pubs visible; every program reads the six g_state values;
     grid_sync #2 orders those reads before the next level's atomics.
+    Under ENQ="lane" the rears are the program's two g_state slots: the
+    cta_sync guarantees every lane's ticket atomics are performed, one
+    thread reads both rears, clamps the ring rear and writes the clamp back
+    (Numba: thread 0 reads and fixes the shared s_rear); grid_sync #1 then
+    orders that write before the next level's tickets.
     """
     pid = tl.program_id(0)
     nprog = tl.num_programs(0)
@@ -361,15 +431,20 @@ def dual_block_split_kernel(img, visited, depth, owner, seed_x, seed_y,
         my_inbox = inbox1
         their_inbox = inbox0
     their_rear_slot = G_INBOX_REAR1 - pid  # G_INBOX_REAR1 for 0, 0 for 1
+    # ENQ="lane": [ring rear, spill rear], this program's alone
+    my_rears = g_state + G_OWN_REARS + G_OWN_STRIDE * pid
 
     seed_owner = tl.where(seed_x < half, 0, 1)
-    if pid == seed_owner:
-        tl.store(my_ring, seed_x * height + seed_y)
-    cta_sync()  # the seed slot is visible to every lane of the program
-
-    # the program-private shared rears of the Numba kernel
+    # the program-private shared rears of the Numba kernel: program
+    # registers under ENQ="program", register copies of my_rears under
+    # ENQ="lane" (refreshed at every level end)
     s_rear = (pid == seed_owner).to(tl.int32)
     s_spill_rear = 0
+    if pid == seed_owner:
+        tl.store(my_ring, seed_x * height + seed_y)
+        if ENQ == "lane":
+            tl.store(my_rears, s_rear)  # spill rear: host-zeroed
+    cta_sync()  # the seed slot (and rear) is visible to every lane
 
     sf = 0                          # own ring window (virtual tickets)
     sr = s_rear
@@ -433,15 +508,28 @@ def dual_block_split_kernel(img, visited, depth, owner, seed_x, seed_y,
                     my_cas_attempts += m.to(tl.int32)
                 won = _claim(visited, nlin, m)
                 own_side = (nx < half) == (pid == 0)
-                s_rear, s_spill_rear = _enqueue_two_tier(
-                    my_ring, my_spill, s_rear, s_spill_rear, sf, nlin,
-                    won & own_side)
+                if ENQ == "lane":
+                    _enqueue_two_tier_lane(my_ring, my_spill, my_rears, sf,
+                                           nlin, won & own_side)
+                else:
+                    s_rear, s_spill_rear = _enqueue_two_tier(
+                        my_ring, my_spill, s_rear, s_spill_rear, sf, nlin,
+                        won & own_side)
                 _enqueue_global(their_inbox, inbox_cap, g_state,
                                 their_rear_slot, nlin, won & (~own_side),
-                                counters, False)
+                                counters, False, ENQ)
 
         cta_sync()  # Numba: own shared atomics final; thread 0 may read them
+        if ENQ == "lane":
+            # every lane's ticket atomics are performed (bar.sync): the
+            # raw ring rear (it may overshoot the window) and the spill rear
+            s_rear = tl.atomic_add(my_rears, 0, sem="relaxed", scope="gpu")
+            s_spill_rear = tl.atomic_add(my_rears + 1, 0, sem="relaxed",
+                                         scope="gpu")
         sr_eff = tl.minimum(s_rear, sf + RING_CAPACITY)
+        if ENQ == "lane":
+            if sr_eff != s_rear:
+                tl.store(my_rears, sr_eff)  # Numba: s_rear[0] = sr_eff
         s_rear = sr_eff  # retract tickets that went to the spill tier
         tl.store(g_state + G_PUB_RING0 + 2 * pid, sr_eff - sr)
         tl.store(g_state + G_PUB_SPILL0 + 2 * pid, s_spill_rear - gr)
@@ -514,7 +602,8 @@ def dual_block_split_kernel(img, visited, depth, owner, seed_x, seed_y,
 def dual_block_dirsplit_kernel(img, visited, depth, owner, queue, q_state,
                                counters, level_sizes, bar, width, height,
                                trace_cap, TPB: tl.constexpr,
-                               INSTRUMENTED: tl.constexpr):
+                               INSTRUMENTED: tl.constexpr,
+                               ENQ: tl.constexpr = "lane"):
     """Partition by discovery direction: right/up claims -> queue 0
     (program 0), down/left claims -> queue 1 (program 1).
 
@@ -582,10 +671,10 @@ def dual_block_dirsplit_kernel(img, visited, depth, owner, queue, q_state,
                 won = _claim(visited, nlin, m)
                 if d == 0 or d == 3:  # right/up -> queue 0
                     _enqueue_global(queue, cap, q_state, Q_REAR0, nlin, won,
-                                    counters, False)
+                                    counters, False, ENQ)
                 else:                 # down/left -> queue 1
                     _enqueue_global(queue, cap, q_state, Q_REAR1, nlin, won,
-                                    counters, True)
+                                    counters, True, ENQ)
 
         epoch += 1
         grid_sync(bar, epoch * nprog)  # both queues' enqueues + rears visible
@@ -629,7 +718,8 @@ def dual_block_dirsplit_kernel(img, visited, depth, owner, queue, q_state,
 @triton.jit(do_not_specialize=["width", "height"])
 def dual_block_pinned_kernel(img, visited, depth, queue, q_state,
                              barrier_state, pin_state, counters, width,
-                             height, TPB: tl.constexpr):
+                             height, TPB: tl.constexpr,
+                             ENQ: tl.constexpr = "lane"):
     """The placement experiment: global-queue BFS, hand-rolled pair barrier.
 
     pin_state[P_MODE] == 0 (same_sm): launched with C * sm_count programs,
@@ -687,7 +777,7 @@ def dual_block_pinned_kernel(img, visited, depth, queue, q_state,
                     m = _is_red(img, nlin, inb)
                     won = _claim(visited, nlin, m)
                     _enqueue_global(queue, cap, q_state, Q_REAR, nlin, won,
-                                    counters, False)
+                                    counters, False, ENQ)
 
             _pair_barrier(barrier_state, 2)  # enqueues + rear visible
             new_rear = tl.load(q_state + Q_REAR)
