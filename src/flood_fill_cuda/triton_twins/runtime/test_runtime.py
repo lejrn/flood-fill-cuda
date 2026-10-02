@@ -168,5 +168,8 @@ def test_triton_copy_peak_is_a_real_bandwidth():
     from flood_fill_cuda.triton_twins.runtime.bandwidth import (
         measure_peak_bandwidth,
     )
-    peak = measure_peak_bandwidth(n_bytes=64 * 2 ** 20, repeats=3)
-    assert 20 < peak["gb_s"] < 1000
+    # Best of 8, not the median of 3: WSL stalls single copies (43 and
+    # 111 GB/s next to 185 alone; a full-suite run once got a 12 GB/s
+    # median). The question here is whether Triton CAN stream at DRAM speed.
+    peak = measure_peak_bandwidth(n_bytes=64 * 2 ** 20, repeats=8)
+    assert 20 < max(peak["runs_gb_s"]) < 1000
