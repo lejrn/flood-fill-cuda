@@ -15,7 +15,7 @@ from flood_fill_cuda.triton_twins.runtime import (
     device_info, kernel_resources, max_coresident_programs, sync, t,
 )
 from flood_fill_cuda.triton_twins.runtime.device import (
-    grid_sync, read_clock64, read_smid,
+    atomic_cas_masked, grid_sync, read_clock64, read_globaltimer, read_smid,
 )
 
 
@@ -75,7 +75,8 @@ def test_grid_sync_at_full_residency(num_warps):
         smid = cp.full(nprog, -1, cp.int32)
         clk = cp.zeros(nprog, cp.int64)
         k = _phases[(nprog,)](t(buf), t(bar), t(err), t(smid), t(clk), phases,
-                              BLOCK=BLOCK, num_warps=num_warps)
+                              BLOCK=BLOCK, num_warps=num_warps,
+                              launch_cooperative_grid=True)
         sync()
         return k, int(bar[0]), int(err[0]), cp.asnumpy(smid), cp.asnumpy(clk)
 
@@ -110,3 +111,62 @@ def test_numba_and_triton_share_a_buffer():
     _add_one[(triton.cdiv(n, 256),)](t(view), t(out), n, BLOCK=256)
     sync()
     np.testing.assert_array_equal(cp.asnumpy(out), np.arange(n) + 1)
+
+
+def test_oversized_cooperative_grid_raises_and_context_survives():
+    """The twin of Numba's cooperative-launch refusal: an error, not a hang."""
+    BLOCK = 256
+
+    def run(nprog):
+        buf = cp.zeros(nprog * BLOCK, cp.int32)
+        bar = cp.zeros(1, cp.int32)
+        err = cp.zeros(1, cp.int32)
+        smid = cp.zeros(nprog, cp.int32)
+        clk = cp.zeros(nprog, cp.int64)
+        k = _phases[(nprog,)](t(buf), t(bar), t(err), t(smid), t(clk), 2,
+                              BLOCK=BLOCK, num_warps=4,
+                              launch_cooperative_grid=True)
+        sync()
+        return k, int(err[0])
+
+    k, _ = run(1)
+    nprog = max_coresident_programs(k)
+    with pytest.raises(RuntimeError, match="too many blocks"):
+        run(nprog + device_info().sm_count)
+    assert run(nprog)[1] == 0
+
+
+@triton.jit
+def _claim(flag_ptr, won_ptr, sink_ptr, t_ptr, n, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    lanes = tl.arange(0, BLOCK)
+    m = lanes < n
+    # every program races for the same n slots; masked lanes hit the sink
+    old = atomic_cas_masked(flag_ptr + lanes, tl.zeros([BLOCK], tl.int32),
+                            tl.zeros([BLOCK], tl.int32) + pid + 1, m,
+                            sink_ptr + pid * BLOCK + lanes)
+    tl.atomic_add(won_ptr, tl.sum(((old == 0) & m).to(tl.int32)))
+    tl.store(t_ptr + pid, read_globaltimer(pid))
+
+
+def test_atomic_cas_masked_claims_exactly_once_and_spares_the_sink():
+    BLOCK, nprog, n = 128, 64, 100
+    flag = cp.zeros(BLOCK, cp.int32)
+    won = cp.zeros(1, cp.int32)
+    sink = cp.zeros(nprog * BLOCK, cp.int32)
+    stamps = cp.zeros(nprog, cp.int64)
+    _claim[(nprog,)](t(flag), t(won), t(sink), t(stamps), n, BLOCK=BLOCK)
+    sync()
+    assert int(won[0]) == n  # each of the n slots won by exactly one program
+    f = cp.asnumpy(flag)
+    assert (f[:n] >= 1).all() and (f[:n] <= nprog).all() and (f[n:] == 0).all()
+    assert int(sink.sum()) == 0
+    assert (cp.asnumpy(stamps) > 0).all()
+
+
+def test_triton_copy_peak_is_a_real_bandwidth():
+    from flood_fill_cuda.triton_twins.runtime.bandwidth import (
+        measure_peak_bandwidth,
+    )
+    peak = measure_peak_bandwidth(n_bytes=64 * 2 ** 20, repeats=3)
+    assert 20 < peak["gb_s"] < 1000

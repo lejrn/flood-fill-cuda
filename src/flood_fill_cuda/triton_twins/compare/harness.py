@@ -17,6 +17,12 @@ the same thing:
    ``total_ms``: the repo's perf_counter + synchronize convention, which
    includes launch overhead on both sides.
 
+Before the first case the GPU is spun up to its boost clock (the ch06
+benchmark's rule: an idle laptop GPU sits at a third of its clock), and
+every row records the SM clock, power and temperature nvidia-smi saw
+right after it. Between cases both runtimes' memory pools are released:
+VRAM is shared by Numba and CuPy, and the host has 6 GB.
+
 ``speedup`` is numba_ms / triton_ms: above 1 means Triton is faster.
 
 The JSON lands in results/triton_twins/<chapter>/compare_<UTC stamp>.json.
@@ -29,6 +35,8 @@ import json
 import os
 import platform
 import statistics
+import subprocess
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -86,6 +94,59 @@ def _versions():
     }
 
 
+def _git_commit():
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+            text=True, check=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))).stdout.strip()
+    except Exception:
+        return None
+
+
+def gpu_clocks():
+    """SM clock, its max, power and temperature, as nvidia-smi reports."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=clocks.sm,clocks.max.sm,power.draw,"
+             "temperature.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        sm, sm_max, power, temp = (v.strip() for v in out.split(","))
+        return {"sm_mhz": int(sm), "max_sm_mhz": int(sm_max),
+                "power_w": float(power), "temp_c": int(temp)}
+    except Exception:
+        return None
+
+
+def free_device_memory():
+    """Release CuPy's pool and Numba's deferred frees between cases."""
+    import cupy
+
+    cupy.get_default_memory_pool().free_all_blocks()
+    cupy.get_default_pinned_memory_pool().free_all_blocks()
+    try:
+        from numba import cuda
+
+        cuda.current_context().deallocations.clear()
+    except Exception:
+        pass
+
+
+def spin_up(seconds: float = 8.0):
+    """Keep the GPU busy with back-to-back copies until it reaches boost."""
+    import cupy
+
+    a = cupy.empty(64 * 2 ** 20 // 8, dtype=cupy.int64)
+    b = cupy.empty_like(a)
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        for _ in range(20):
+            b[...] = a
+        cupy.cuda.Device().synchronize()
+    del a, b
+    free_device_memory()
+
+
 def run_case(case: Case, repeats: int) -> dict:
     """Measure one case. Never raises for a backend failure: the row records
     the error instead, so one bad cell cannot sink a whole sweep."""
@@ -112,19 +173,24 @@ def run_case(case: Case, repeats: int) -> dict:
              "triton": {"kernel": [], "total": []}}
     runners = {"numba": case.run_numba, "triton": case.run_triton}
     mismatches = 0 if equal else 1
-    for r in range(repeats):
-        order = ("numba", "triton") if r % 2 == 0 else ("triton", "numba")
-        got = {}
-        for name in order:
-            res = runners[name]()
-            times[name]["kernel"].append(float(res.kernel_ms))
-            times[name]["total"].append(float(res.total_ms))
-            got[name] = res
-        ok, d = case.same(got["numba"], got["triton"])
-        if not ok:
-            mismatches += 1
-            detail = detail or d
-        del got
+    try:
+        for r in range(repeats):
+            order = ("numba", "triton") if r % 2 == 0 else ("triton", "numba")
+            got = {}
+            for name in order:
+                res = runners[name]()
+                times[name]["kernel"].append(float(res.kernel_ms))
+                times[name]["total"].append(float(res.total_ms))
+                got[name] = res
+            ok, d = case.same(got["numba"], got["triton"])
+            if not ok:
+                mismatches += 1
+                detail = detail or d
+            del got
+    except Exception as exc:  # recorded, not hidden
+        row["error"] = f"timed round failed: {type(exc).__name__}: {exc}"
+        return row
+    row["clocks_after"] = gpu_clocks()
 
     for name in ("numba", "triton"):
         row[name] = {"kernel_ms": _stats(times[name]["kernel"]),
@@ -142,14 +208,19 @@ def run_case(case: Case, repeats: int) -> dict:
 
 def run_cases(chapter: str, cases: list[Case], repeats: int,
               meta: dict | None = None, write: bool = True,
-              log: Callable[[str], None] = print) -> dict:
+              log: Callable[[str], None] = print,
+              spin_seconds: float = 8.0) -> dict:
     """Measure every case in order and write the comparison JSON."""
     from flood_fill_cuda.triton_twins.runtime import device_info
 
     dev = device_info()
+    clocks_before = gpu_clocks()
+    if spin_seconds > 0:
+        spin_up(spin_seconds)
     rows = []
     for i, case in enumerate(cases, 1):
         row = run_case(case, repeats)
+        free_device_memory()
         rows.append(row)
         if "error" in row:
             log(f"[{i}/{len(cases)}] {case.experiment} {case.scene} "
@@ -169,6 +240,9 @@ def run_cases(chapter: str, cases: list[Case], repeats: int,
         "gpu": {"name": dev.name, "sm_count": dev.sm_count,
                 "max_threads_per_sm": dev.max_threads_per_sm},
         "versions": _versions(),
+        "git_commit": _git_commit(),
+        "clocks_idle": clocks_before,
+        "spin_up_seconds": spin_seconds,
         "repeats": repeats,
         "method": (
             "Both backends warmed per case; repeats rounds with the run order "
