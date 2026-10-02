@@ -1,0 +1,671 @@
+/* Layout: the Nerfies page. One centred column (Bulma is-max-desktop),
+   a light band for the clip carousel, a grey panel for the scrub slider.
+   Light values reproduce Bulma 0.9.1 + Nerfies exactly; dark values only
+   redefine the same tokens. */
+:root {
+  --bg: #ffffff;
+  --fg: #4a4a4a;
+  --heading: #363636;
+  --muted: #7a7a7a;
+  --band: #f5f5f5;
+  --panel: #f5f5f5;
+  --hairline: #dbdbdb;
+  --item-border: #bbbbbb;
+  --link: #3273dc;
+  --author-link: hsl(204, 86%, 53%);
+  --pill-bg: #363636;
+  --pill-fg: #ffffff;
+  --pill-hover: #2f2f2f;
+  --code-bg: #f5f5f5;
+  --code-fg: #4a4a4a;
+  --inline-code: #da1039;
+  --footer-bg: #fafafa;
+  --nav-bg: #ffffff;
+  --nav-hover: #fafafa;
+  --slider-track: #209cee;
+  --slider-thumb: #ffffff;
+  --slider-thumb-border: #b5b5b5;
+  --footer-icon: #000000;
+  --media-bg: #ffffff;
+  --focus: #3273dc;
+
+  /* figure roles (see tools/build_figures.py); light values reach 4.5:1 on white */
+  --fig-ink: #1f2328;
+  --fig-muted: #59636e;
+  --fig-grid: #8b949e;
+  --fig-teal: #1a7f72;
+  --fig-amber: #9a6700;
+  --fig-red: #cf222e;
+  --fig-blue: #0969da;
+
+  --font-display: 'Google Sans', 'Noto Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'Noto Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416;
+    --fg: #c4c8cd;
+    --heading: #eceef0;
+    --muted: #8d939a;
+    --band: #1b1e21;
+    --panel: #1d2023;
+    --hairline: #33383d;
+    --item-border: #3a4046;
+    --link: #6ea8ff;
+    --author-link: hsl(204, 86%, 64%);
+    --pill-bg: #e9ebee;
+    --pill-fg: #16191c;
+    --pill-hover: #ffffff;
+    --code-bg: #1b1e21;
+    --code-fg: #d0d4d8;
+    --inline-code: #ff7a9c;
+    --footer-bg: #16181b;
+    --nav-bg: #121416;
+    --nav-hover: #1b1e21;
+    --slider-track: #3a9fe6;
+    --slider-thumb: #e9ebee;
+    --slider-thumb-border: #8d939a;
+    --footer-icon: #eceef0;
+    --media-bg: #ffffff;
+    --focus: #6ea8ff;
+    --fig-ink: #adbac7;
+    --fig-muted: #8b949e;
+    --fig-grid: #8b949e;
+    --fig-teal: #2aa198;
+    --fig-amber: #d99a2b;
+    --fig-red: #e2645a;
+    --fig-blue: #4c8fd6;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #121416;
+  --fg: #c4c8cd;
+  --heading: #eceef0;
+  --muted: #8d939a;
+  --band: #1b1e21;
+  --panel: #1d2023;
+  --hairline: #33383d;
+  --item-border: #3a4046;
+  --link: #6ea8ff;
+  --author-link: hsl(204, 86%, 64%);
+  --pill-bg: #e9ebee;
+  --pill-fg: #16191c;
+  --pill-hover: #ffffff;
+  --code-bg: #1b1e21;
+  --code-fg: #d0d4d8;
+  --inline-code: #ff7a9c;
+  --footer-bg: #16181b;
+  --nav-bg: #121416;
+  --nav-hover: #1b1e21;
+  --slider-track: #3a9fe6;
+  --slider-thumb: #e9ebee;
+  --slider-thumb-border: #8d939a;
+  --footer-icon: #eceef0;
+  --media-bg: #ffffff;
+  --focus: #6ea8ff;
+  --fig-ink: #adbac7;
+  --fig-muted: #8b949e;
+  --fig-grid: #8b949e;
+  --fig-teal: #2aa198;
+  --fig-amber: #d99a2b;
+  --fig-red: #e2645a;
+  --fig-blue: #4c8fd6;
+  color-scheme: dark;
+}
+
+/* ---- Bulma surfaces, routed through the tokens ---- */
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-body);
+}
+
+a {
+  color: var(--link);
+}
+
+strong,
+.content h1, .content h2, .content h3, .content h4,
+.title {
+  color: var(--heading);
+}
+
+.subtitle {
+  color: var(--fg);
+}
+
+.content pre,
+pre {
+  background: var(--code-bg);
+  color: var(--code-fg);
+}
+
+code {
+  background: var(--code-bg);
+  color: var(--inline-code);
+}
+
+pre code {
+  color: inherit;
+}
+
+.hero.is-light {
+  background: var(--band);
+  color: var(--fg);
+}
+
+.footer {
+  background: var(--footer-bg);
+}
+
+.navbar,
+.navbar-menu,
+.navbar-dropdown {
+  background: var(--nav-bg);
+}
+
+.navbar-dropdown {
+  border-top-color: var(--hairline);
+}
+
+.navbar-item,
+.navbar-link {
+  color: var(--fg);
+}
+
+a.navbar-item:hover,
+a.navbar-item:focus-visible,
+.navbar-link:hover,
+.navbar-item.has-dropdown:hover .navbar-link,
+.navbar-dropdown a.navbar-item:hover {
+  background: var(--nav-hover);
+  color: var(--link);
+}
+
+.navbar-link:not(.is-arrowless)::after {
+  border-color: var(--link);
+}
+
+.navbar-burger {
+  color: var(--fg);
+}
+
+.table {
+  background: transparent;
+  color: var(--fg);
+}
+
+.table th,
+.table thead td,
+.table thead th {
+  color: var(--heading);
+}
+
+.table td,
+.table th {
+  border-color: var(--hairline);
+}
+
+.table.is-hoverable tbody tr:not(.is-selected):hover {
+  background: var(--band);
+}
+
+hr {
+  background: var(--hairline);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+video:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---- Nerfies (static/css/index.css), kept as written ---- */
+
+.footer .icon-link {
+  font-size: 25px;
+  color: var(--footer-icon);
+}
+
+.link-block a {
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.dnerf {
+  font-variant: small-caps;
+}
+
+.teaser .hero-body {
+  padding-top: 0;
+  padding-bottom: 3rem;
+}
+
+.teaser {
+  font-family: var(--font-display);
+}
+
+.publication-title {
+  font-family: var(--font-display);
+  text-wrap: balance;
+}
+
+.publication-authors {
+  font-family: var(--font-display);
+}
+
+.publication-authors a {
+  color: var(--author-link) !important;
+}
+
+.publication-authors a:hover {
+  text-decoration: underline;
+}
+
+.author-block {
+  display: inline-block;
+}
+
+.publication-video {
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 56.25%;
+  overflow: hidden;
+  border-radius: 10px !important;
+  background: #000;
+}
+
+.publication-video video,
+.publication-video iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.results-carousel {
+  overflow: hidden;
+}
+
+.results-carousel .item {
+  margin: 5px 5px 2.25rem;
+  overflow: hidden;
+  border: 1px solid var(--item-border);
+  border-radius: 10px;
+  padding: 0;
+  font-size: 0;
+  background: var(--bg);
+}
+
+.results-carousel video {
+  margin: 0;
+}
+
+.interpolation-panel {
+  background: var(--panel);
+  border-radius: 10px;
+}
+
+.interpolation-panel .interpolation-image {
+  width: 100%;
+  border-radius: 5px;
+}
+
+.interpolation-panel .slider {
+  margin: 0 !important;
+}
+
+#interpolation-image-wrapper {
+  width: 100%;
+}
+
+#interpolation-image-wrapper img {
+  border-radius: 5px;
+}
+
+/* ---- additions for this page ---- */
+
+/* The scenes' white background is data: keep it white in both themes. */
+.media-card {
+  background: var(--media-bg);
+  border-radius: 5px;
+}
+
+.publication-venue {
+  color: var(--muted);
+  font-family: var(--font-display);
+}
+
+.button.is-dark {
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+}
+
+.button.is-dark:hover,
+.button.is-dark:focus-visible {
+  background: var(--pill-hover);
+  color: var(--pill-fg);
+}
+
+.button .icon svg,
+.navbar-item .icon svg,
+.icon-link svg {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+}
+
+.hero-teaser-media {
+  width: 100%;
+  max-width: 600px;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 10px;
+  display: block;
+}
+
+.teaser .subtitle {
+  margin-top: 1rem;
+  text-wrap: balance;
+}
+
+.teaser .footnote {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.results-carousel .item video,
+.results-carousel .item img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  background: var(--media-bg);
+  image-rendering: pixelated;
+}
+
+.results-carousel .item .carousel-caption {
+  font-size: 0.85rem;
+  line-height: 1.35;
+  padding: 0.6rem 0.75rem 0.7rem;
+  color: var(--fg);
+  font-family: var(--font-display);
+}
+
+.carousel-caption .chapter-tag {
+  display: inline-block;
+  font-weight: 700;
+  color: var(--heading);
+  margin-right: 0.35rem;
+}
+
+/* bulma-carousel draws its own arrows; route them through the tokens */
+.slider-navigation-previous,
+.slider-navigation-next {
+  background: var(--bg) !important;
+  color: var(--heading) !important;
+}
+
+.slider-pagination .slider-page {
+  background: var(--item-border) !important;
+}
+
+.slider-pagination .slider-page.is-active {
+  background: var(--slider-thumb) !important;
+}
+
+.interpolation-panel {
+  padding: 0.75rem;
+}
+
+.interpolation-panel p {
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+
+.wavefront-image,
+#interpolation-image-wrapper img {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.slider-readout {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 0.4rem;
+}
+
+/* bulma-slider paints a fixed track; route it through the tokens */
+input[type="range"].slider.is-info::-webkit-slider-runnable-track {
+  background: var(--slider-track);
+}
+
+input[type="range"].slider.is-info::-moz-range-track {
+  background: var(--slider-track);
+}
+
+input[type="range"].slider.is-info::-webkit-slider-thumb {
+  background: var(--slider-thumb);
+  border-color: var(--slider-thumb-border);
+}
+
+input[type="range"].slider.is-info::-moz-range-thumb {
+  background: var(--slider-thumb);
+  border-color: var(--slider-thumb-border);
+}
+
+.figure-block {
+  margin: 1.25rem 0 0.5rem;
+}
+
+.figure-block figcaption {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+}
+
+.figure-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+/* figure roles: fills */
+.fig-ink { fill: var(--fig-ink); }
+.fig-muted { fill: var(--fig-muted); }
+.fig-grid { fill: var(--fig-grid); }
+.fig-teal { fill: var(--fig-teal); }
+.fig-amber { fill: var(--fig-amber); }
+.fig-red { fill: var(--fig-red); }
+.fig-blue { fill: var(--fig-blue); }
+/* figure roles: strokes */
+.fig-ink-s { stroke: var(--fig-ink); }
+.fig-muted-s { stroke: var(--fig-muted); }
+.fig-grid-s { stroke: var(--fig-grid); }
+.fig-teal-s { stroke: var(--fig-teal); }
+.fig-amber-s { stroke: var(--fig-amber); }
+.fig-red-s { stroke: var(--fig-red); }
+.fig-blue-s { stroke: var(--fig-blue); }
+
+.table-container {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.table td.num,
+.table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.column {
+  min-width: 0;
+}
+
+.bibtex-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.bibtex-head .title {
+  margin-bottom: 0 !important;
+}
+
+.copy-button {
+  font-family: var(--font-display);
+}
+
+#BibTeX pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+/* ---- scrub panels (Nerfies interpolation panel, generalised) ---- */
+
+.scrub-frames img,
+.interpolation-panel .interpolation-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 5px;
+  background: var(--media-bg);
+  image-rendering: pixelated;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.interpolation-panel {
+  margin: 0 0 1.5rem;
+}
+
+.scrub-pair .columns {
+  margin-bottom: 0.25rem;
+}
+
+.scrub-pair .scrub-label {
+  margin-top: 0.4rem;
+  font-family: var(--font-display);
+}
+
+.scrub-slider-row {
+  padding: 0.25rem 0.75rem 0.5rem;
+}
+
+/* ---- stacked comparison clips (Nerfies "dolly zoom stacked") ---- */
+
+.stacked-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--media-bg);
+  image-rendering: pixelated;
+}
+
+.stacked-labels {
+  display: flex;
+  justify-content: space-around;
+  gap: 1rem;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+
+/* ---- ch06 pipeline strip ---- */
+
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin: 1rem 0 1.25rem;
+  font-family: var(--font-display);
+}
+
+.pipeline .stage {
+  flex: 1 1 9rem;
+  min-width: 0;
+  border: 1px solid var(--item-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg);
+}
+
+.pipeline .stage.is-hot {
+  border-color: var(--fig-amber);
+}
+
+.pipeline .stage.is-cold {
+  border-color: var(--fig-teal);
+}
+
+.pipeline .stage-name {
+  font-weight: 700;
+  color: var(--heading);
+}
+
+.pipeline .stage-name {
+  display: block;
+}
+
+.pipeline .stage-ms {
+  display: block;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.25rem;
+  color: var(--heading);
+  margin-top: 0.15rem;
+}
+
+.pipeline .stage-what {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--fg);
+  margin-top: 0.2rem;
+}
+
+.before-after {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--item-border);
+  border-radius: 10px;
+  background: var(--media-bg);
+}
+
+.measure-list li + li {
+  margin-top: 0.35rem;
+}
