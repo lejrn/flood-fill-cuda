@@ -160,24 +160,36 @@ def run_flood_fill_scan(grid_dev, changed_dev, *, max_rounds: int = 100_000):
 
     Each round floods entire horizontal then vertical runs, so convergence
     takes roughly one round per bend in the blob's geodesics rather than one
-    launch per tile of distance.  Dirty flags keep settled lines nearly free.
+    launch per tile of distance.  Each pass first compacts its dirty lines
+    with ``gather_dirty`` (``changed_dev`` doubles as the count), then
+    launches one program per dirty line.  When neither pass finds a dirty
+    line, no red pixel can still reach blue: converged.
     Returns ``(kernel_launches, converged)``.
     """
     H, W = grid_dev.shape
     dirty_rows = cp.ones(H, dtype=cp.uint8)
     dirty_cols = cp.ones(W, dtype=cp.uint8)
-    row_pass = ((H,), (dirty_rows, dirty_cols, W, W, 1), triton.next_power_of_2(W))
-    col_pass = ((W,), (dirty_cols, dirty_rows, H, 1, W), triton.next_power_of_2(H))
-    for rounds in range(1, max_rounds + 1):
-        changed_dev.fill(0)
-        for launch_grid, (mine, cross, line_len, line_stride, elem_stride), L in (
-            row_pass,
-            col_pass,
-        ):
-            scan_line_step[launch_grid](
+    line_list = cp.empty(max(H, W), dtype=cp.int32)
+    # (own flags, crossing flags, lines, line_len, line_stride, elem_stride, L)
+    passes = (
+        (dirty_rows, dirty_cols, H, W, W, 1, triton.next_power_of_2(W)),
+        (dirty_cols, dirty_rows, W, H, 1, W, triton.next_power_of_2(H)),
+    )
+    launches = 0
+    for _ in range(max_rounds):
+        any_dirty = False
+        for mine, cross, n_lines, line_len, line_stride, elem_stride, L in passes:
+            changed_dev.fill(0)
+            gather_dirty[(triton.cdiv(n_lines, 1024),)](
+                t(mine), t(line_list), t(changed_dev), n_lines, BLOCK=1024)
+            launches += 1
+            n_dirty = int(changed_dev[0])  # D2H read; also syncs the stream
+            if n_dirty == 0:
+                continue
+            any_dirty = True
+            scan_line_step[(n_dirty,)](
                 t(grid_dev),
-                t(changed_dev),
-                t(mine),
+                t(line_list),
                 t(cross),
                 line_len,
                 line_stride,
@@ -187,9 +199,10 @@ def run_flood_fill_scan(grid_dev, changed_dev, *, max_rounds: int = 100_000):
                 BLUE_V=BLUE,
                 num_warps=4,
             )
-        if int(changed_dev[0]) == 0:
-            return 2 * rounds, True
-    return 2 * max_rounds, False
+            launches += 1
+        if not any_dirty:
+            return launches, True
+    return launches, False
 
 
 def run_flood_fill(
