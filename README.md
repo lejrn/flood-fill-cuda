@@ -188,13 +188,14 @@ Both retroactively explain five chapters of "timing noise":
 
 Every Numba kernel above has a Triton twin: same algorithm, same tests,
 same host API. A harness times both on the same cells and compares
-their outputs on every run.
+their deterministic outputs on every run.
 
-| | |
+| measure | result |
 |---|---|
-| rows timed | 1,214, outputs identical on every run |
-| kernel time, Numba / Triton | **x1.12** overall; ch05 still loses (x0.87) |
-| the first, faithful translation | x0.91: two translation choices, not Triton, lost it |
+| rows timed | 1,214, deterministic outputs identical on every run |
+| `kernel_ms`, Numba / Triton (host launch path included) | **x1.12** overall (above x1 = Triton faster); about x1.07 with GPU-only time where it was measured |
+| where Triton still trails | ch05 (x0.87) and the ch00 prototype (x0.90) |
+| the first, faithful translation | x0.91: two translation choices lost it (each a workaround for a construct Triton lacks), not Triton's code generation |
 
 **The report: [`triton_twins/README.md`](src/flood_fill_cuda/triton_twins/README.md)**
 
@@ -233,15 +234,15 @@ uv run python -m flood_fill_cuda.overview.build
 
 ```
 src/flood_fill_cuda/
-  chapters/    the numbered narrative: ch00_cpu_baseline .. ch06_gpu_nblob_runs
-  shared/      scene generators, CPU oracles, bandwidth model, plot core
-  dashboard/   assembles every chapter's section into one page
-  service/     interactive demo app (not part of the benchmark chain)
-  overview/    the one-page grand table
-  experiments/ live side-tracks (triton/, scan_multi_blob/)
+  chapters/     the numbered narrative: ch00_cpu_baseline .. ch06_gpu_nblob_runs
+  shared/       scene generators, CPU oracles, bandwidth model, plot core
+  dashboard/    assembles every chapter's section into one page
+  service/      interactive demo app (not part of the benchmark chain)
+  overview/     the one-page grand table
+  experiments/  live side-tracks (triton/, scan_multi_blob/)
   triton_twins/ every chapter rebuilt in Triton, plus the Numba-vs-Triton harness
-  results/     generated JSON/CSV/HTML + wavefront renders, one folder per chapter
-graveyard/     superseded code, kept for reference
+  results/      generated JSON/CSV/HTML + wavefront renders, one folder per chapter
+graveyard/      superseded code, kept for reference
 ```
 
 Each chapter folder holds its kernel, its CPU-matching test suite, and a
