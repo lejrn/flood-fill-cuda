@@ -130,6 +130,24 @@ flatten helpers with no barrier, on the Numba driver's `_PLAIN_GRID`.
   of the comparison (min of the Numba and the twin capacity) is the same
   for both schedules at tpb 256.
 
+  No comparison row uses tpb 512, where the schedules differ more:
+
+  | kernel | Numba @512 | lockstep @512 | independent @512 |
+  |---|---|---|---|
+  | seed_merge | 114 / 24 | 117 / 24 | 127 / 24 |
+  | seed_merge bare | 64 / 48 | 64 (6 spills) / 48 | 101 / 24 |
+  | ccl_fill | 113 / 24 | 93 / 24 | 103 / 24 |
+  | ccl_fill bare | 66 / 24 | 40 (2 spills) / 72 | 60 / 48 |
+  | lattice fused | 129 / 0 | 117 / 24 | 127 / 24 |
+  | lattice fused bare | 64 / 48 | 64 (6 spills) / 48 | 102 / 24 |
+  | lattice r128 | 122 / 24 | 119 / 24 | 127 / 24 |
+  | lattice split core | 114 / 24 | 117 / 24 | 126 / 24 |
+
+  So at tpb 512, `blocks=None` launches half the programs of the
+  lockstep build for the bare `seed_merge` twins (24 vs 48) and for
+  `ccl_fill` bare (48 vs 72). Numba's fused lattice kernel cannot
+  launch a 512-thread block at all (129 registers); its r128 build can.
+
 - The chapter's register story does not carry over. Numba's fused
   lattice kernel needs 129 registers, one over the line that allows two
   256-thread blocks per SM, so it runs 24 cooperative blocks, and r128 /
@@ -275,7 +293,8 @@ lockstep one, or against Numba where stated):
 
 ### What it does not recover
 
-- `ccl_fill` on `asym_4000_800` stays at x0.74. SIMT warps keep 32
+- `ccl_fill` on `asym_4000_800` stays at x0.65 (the table above;
+  development runs gave up to x0.74). SIMT warps keep 32
   neighbouring pixels on the same item, so their chases share cache lines
   (Numba's merge sustains 17 G parent loads/s there). Free lanes drift
   apart and reach about 8 G/s. Coupling the lanes (a window on the item
@@ -315,12 +334,36 @@ interior. Each build also runs pinned at stride 8 on three grids, and at
 compared exactly.
 
 These tests run the default lane schedule. `test_lane_schedules_*` and
-`test_cross_backend_both_lane_schedules` run both schedules on nine
-configurations (both variants, both bare twins, lattice 1 and 4, every
-build) and five scenes. They assert the same equality between the two
-schedules and between each schedule and Numba. Small grids (32 x 2 and
-64 x 1) make every lane walk many items, so the lane bodies, the fill's
-switch and its window all run.
+`test_cross_backend_both_lane_schedules` run both schedules on ten
+configurations (both variants, both bare twins, lattice 1, 3 and 4,
+every build) and five scenes. They assert the same equality between the
+two schedules and between each schedule and Numba. Small grids (32 x 2
+and 64 x 1) make every lane walk many items, so the lane bodies, the
+fill's switch and its window all run. At lattice 3 the window binds in
+levels that also claim pixels.
+
+`test_lane_schedules_edge_shapes` adds 15 small scenes: one pixel wide
+or tall, odd sizes, noise from 5% to 97% density, a checkerboard, rings,
+zigzag lines and a blank image. It runs seven configurations (ccl_fill,
+v1, lattice 0, 1, 2, 3 interior and 16) at 32 x 1, 32 x 3 and 128 x 7.
+
+Each cell checks both schedules against Numba and the CPU oracle, plus
+the union accounting: `union_done == roots - n_blobs`, where every red
+pixel is a root in `ccl_fill` and every candidate in `seed_merge`.
+
+`test_lane_schedules_at_tpb_512` runs the widest program. Numba's fused
+lattice kernel cannot launch there, so the fused lattice twin is checked
+against the oracle, and its r128 build against Numba too.
+
+A counting copy of the kernels confirmed that these tests reach the
+fill's lane body. Lattice 1 switches on the five 2D scenes of at least
+42% density at every small grid.
+
+On the two near-solid ones it still switches with the threshold raised
+from 3 to 7 colliding probes per lane, so a retune up to 7 keeps the
+lane body covered. Lattice 16 switches in some programs only (the mixed
+case), and at lattice 2 and 3 the window binds in levels that claim
+pixels.
 
 Comparison (writes `results/triton_twins/ch05_gpu_nblob_nblock/compare_<UTC>.json`;
 never commit it):

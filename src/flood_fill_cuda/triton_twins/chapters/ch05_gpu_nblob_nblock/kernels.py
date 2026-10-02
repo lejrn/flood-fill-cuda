@@ -600,6 +600,13 @@ _LANE_HOPS = tl.constexpr(8)
 # and gives back ~20% at lattice 16 where some programs still switch.
 _DENSE_COLL = tl.constexpr(3)
 _LANE_WINDOW = tl.constexpr(16)
+# _merge_level_lanes counts its live lanes and its lanes in a union with
+# one reduction, as in_union * _LIVE_PACK + live. A count of BLOCK lanes
+# must stay in the low digit: CUDA's block limit is 1024 lanes, which
+# compiled_kernel / max_blocks / kernel_info accept (flood_fill stops at
+# 512), so the digit is 2048 (with 1024, a full program of 1024 live
+# lanes read as live = 0 and the level ended early).
+_LIVE_PACK = tl.constexpr(2048)
 # DX8 / DY8 + 1 packed two bits per direction: a lane-varying direction d
 # reads its offset as ((BITS >> 2d) & 3) - 1
 _DX8_BITS = tl.constexpr(sum((int(v) + 1) << (2 * i)
@@ -851,6 +858,9 @@ def _merge_level_lanes(img_ptr, visited_ptr, depth_ptr, owner_ptr,
     split into a fast group and a stuck tail (on two_sq_2800 at lattice
     1, 38% of the lane-steps were finished lanes waiting), the window
     took that fill from 387 to 121 ms (Numba 83)."""
+    tl.static_assert(BLOCK < _LIVE_PACK,
+                     "the packed live / in-union count needs BLOCK < "
+                     "_LIVE_PACK")
     lanes = tl.arange(0, BLOCK)
     stride = nprog * BLOCK
     offs = start + pid * BLOCK + lanes
@@ -926,14 +936,15 @@ def _merge_level_lanes(img_ptr, visited_ptr, depth_ptr, owner_ptr,
         if INSTR:
             union_attempts += coll.to(tl.int32)
             t0 = tl.where(coll, read_clock64(pid), t0)
-        # live lanes and lanes in a union, one reduction (BLOCK < 1024)
-        cnt = tl.sum(tl.where(st == _ST_HOP, 1024, 0) + (st > 0).to(tl.int32),
-                     0)
-        live = cnt % 1024
+        # live lanes and lanes in a union, one reduction: live <= BLOCK <
+        # _LIVE_PACK, so the low digit never carries into the high one
+        cnt = tl.sum(tl.where(st == _ST_HOP, _LIVE_PACK, 0)
+                     + (st > 0).to(tl.int32), 0)
+        live = cnt % _LIVE_PACK
         klim = (tl.min(tl.where(st > 0, k, 2147483647), 0) + _LANE_WINDOW
                 + tl.zeros_like(k))
         # ---- hop mini-steps while a quarter of the live lanes is in one
-        if ((cnt // 1024) * 4 >= live) & (live > 0):
+        if ((cnt // _LIVE_PACK) * 4 >= live) & (live > 0):
             for _ in tl.static_range(_LANE_HOPS):
                 st, which, a, b, c, same = _union_hop(parent_ptr, st, which,
                                                       a, b, c)
