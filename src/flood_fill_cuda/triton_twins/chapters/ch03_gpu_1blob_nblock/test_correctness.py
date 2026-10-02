@@ -857,11 +857,13 @@ def test_twin_grid_barrier_is_64_bit(key, enqueue):
 # enqueue="program" is the first translation (aggregated over the program).
 # Both must give Numba's outputs and the CPU oracle's, and the same
 # deterministic counters. Queue order differs between the modes, which is
-# schedule-dependent in both backends anyway.
+# schedule-dependent in both backends anyway. A forced overflow checks the
+# tripwire and the queue itself (one slot per claim, nothing past qcap).
 
 ENQ_SCENES = ["disk_101", "serpentine_nonsquare", "random_supercritical",
               "full_red_128", "disk_1001"]
-ENQ_GRIDS = [(8, 256), (3, 64)]
+# one-warp programs (32), the benchmark's 256 and the widest program (512)
+ENQ_GRIDS = [(5, 32), (3, 64), (8, 256), (2, 512)]
 
 
 def _enq_scene(name, kw):
@@ -929,7 +931,7 @@ def test_enqueue_modes_owner_map_at_one_block(variant, enqueue):
                                    "random_supercritical"])
 def test_enqueue_modes_conn4_cas_attempts_is_edge_count(scene, enqueue):
     """conn4's cas_attempts is exact (one probe per edge) in both modes,
-    at each backend's own full residency of one-warp programs."""
+    at the twin's own full residency of one-warp programs."""
     img, sx, sy = SCENES[scene]()
     t = flood_fill(img, sx, sy, threads_per_block=32, enqueue=enqueue)
     assert t.blocks == max_blocks(threads_per_block=32, enqueue=enqueue)
@@ -965,6 +967,156 @@ def test_enqueue_lane_capacity_at_least_numba(variant):
                 >= numba_max_blocks(threads_per_block=tpb, **kw))
 
 
+# The OVERFLOW tripwire and queue integrity, by direct launches of both
+# backends' kernels. The queue a kernel gets is a qcap-long view of a
+# longer buffer whose every slot starts as the seed's linear index: a
+# valid, already-visited pixel. So the reads past qcap that follow an
+# overflow stay in bounds and claim nothing, and a hole (a slot below the
+# rear never written) shows up as a second copy of the seed. "full" is the
+# driver's own qcap (width * height: no overflow); "short" (700) forces
+# the rear past qcap on the 96 x 96 full-red image.
+
+TRIP_W = TRIP_H = 96
+TRIP_PAD = 256
+TRIP_QCAP = {"full": TRIP_W * TRIP_H, "short": 700}
+
+
+def _trip_inputs():
+    img = np.empty((TRIP_W, TRIP_H, 3), dtype=np.uint8)
+    img[:, :] = scenes.RED
+    sx = sy = TRIP_W // 2
+    visited = np.zeros((TRIP_W, TRIP_H), dtype=np.int32)
+    visited[sx, sy] = 1
+    seed = sx * TRIP_H + sy
+    queue = np.full(TRIP_W * TRIP_H + TRIP_PAD, seed, dtype=np.int32)
+    return img, visited, seed, queue
+
+
+def _trip_numba(key, blocks, tpb, qcap):
+    from numba import cuda
+
+    from flood_fill_cuda.chapters.ch03_gpu_1blob_nblock import (
+        flood_fill as numba_driver,
+    )
+
+    img, visited, seed, queue = _trip_inputs()
+    d_vis = cuda.to_device(visited)
+    d_queue = cuda.to_device(queue)
+    d_q = cuda.to_device(np.array([1], dtype=np.int32))
+    d_counters = cuda.to_device(np.zeros(numba_kernels.NUM_COUNTERS,
+                                         dtype=np.int64))
+    args = [cuda.to_device(img), d_vis,
+            cuda.to_device(np.full(visited.shape, -1, dtype=np.int32))]
+    view = d_queue[:qcap]  # Numba's qcap is queue.shape[0]
+    if key[0]:
+        args += [view, d_q, d_counters]
+    else:
+        args += [cuda.to_device(np.full(visited.shape, -1, dtype=np.int16)),
+                 view, d_q, d_counters,
+                 cuda.to_device(np.zeros((blocks, 2), dtype=np.int64)),
+                 cuda.to_device(np.zeros(visited.size, dtype=np.int32))]
+    numba_driver._KERNELS[key][blocks, tpb](*args)
+    cuda.synchronize()
+    return (d_queue.copy_to_host(), int(d_q.copy_to_host()[0]),
+            d_counters.copy_to_host(), d_vis.copy_to_host(), seed)
+
+
+def _trip_triton(key, blocks, tpb, qcap, enqueue):
+    import cupy as cp
+
+    img, visited, seed, queue = _trip_inputs()
+    d_vis = cp.asarray(visited)
+    d_queue = cp.asarray(queue)
+    d_q = cp.asarray(np.array([1], dtype=np.int32))
+    d_counters = cp.zeros(twin_kernels.NUM_COUNTERS, dtype=cp.int64)
+    instrumented = not key[0]
+    twin_driver._warmup(*key, threads_per_block=tpb, enqueue=enqueue)
+    twin_driver._launch(
+        twin_driver._KERNELS[key], blocks, tpb, instrumented,
+        cp.asarray(img), d_vis, cp.full(visited.shape, -1, dtype=cp.int32),
+        cp.full(visited.shape, -1, dtype=cp.int16) if instrumented else None,
+        d_queue[:qcap], d_q, d_counters,
+        cp.zeros((blocks, 2), dtype=cp.int64) if instrumented else None,
+        cp.zeros(visited.size, dtype=cp.int32) if instrumented else None,
+        cp.zeros(1, dtype=twin_driver.BAR_DTYPE), TRIP_W, TRIP_H, enqueue)
+    twin_driver.sync()
+    return (d_queue.get(), int(d_q.get()[0]), d_counters.get(), d_vis.get(),
+            seed)
+
+
+def _assert_tripwire_and_queue(tag, out, qcap, must_overflow):
+    queue, rear, counters, visited, seed = out
+    n_visited = int(visited.sum())
+    # one ticket per claim, even for the claims past qcap
+    assert rear == n_visited == counters[twin_kernels.FILLED], tag
+    over = rear > qcap
+    assert over == must_overflow, tag
+    assert counters[twin_kernels.OVERFLOW] == int(over), tag
+    # nothing stored at or past qcap
+    assert (queue[qcap:] == seed).all(), tag
+    # no slot written twice, no hole, and only claimed pixels
+    stored = queue[:min(rear, qcap)]
+    assert np.unique(stored).size == stored.size, tag
+    assert (visited.reshape(-1)[stored] == 1).all(), tag
+    if not over:
+        assert stored.size == n_visited, tag  # a permutation of the fill
+
+
+@pytest.mark.parametrize("grid", [(1, 256), (4, 128), (6, 32)],
+                         ids=lambda g: f"{g[0]}x{g[1]}")
+@pytest.mark.parametrize("qcap", list(TRIP_QCAP))
+@pytest.mark.parametrize("key", list(twin_driver._KERNELS),
+                         ids=lambda k: "-".join(map(str, k)))
+def test_enqueue_modes_overflow_tripwire(key, qcap, grid):
+    """The structurally unreachable tripwire, forced: a rear past qcap
+    sets OVERFLOW and stores nothing out of bounds, in both enqueue modes
+    and in Numba, and the queue below min(rear, qcap) holds each claimed
+    pixel once. Without overflow the queue is a permutation of the fill."""
+    blocks, tpb = grid
+    cap = TRIP_QCAP[qcap]
+    must_overflow = qcap == "short"
+    _assert_tripwire_and_queue(f"numba {qcap} {grid}",
+                               _trip_numba(key, blocks, tpb, cap), cap,
+                               must_overflow)
+    for enqueue in ("lane", "program"):
+        _assert_tripwire_and_queue(
+            f"triton {enqueue} {qcap} {grid}",
+            _trip_triton(key, blocks, tpb, cap, enqueue), cap, must_overflow)
+
+
+def test_compare_marks_first_translation_and_repeated_cells():
+    """compare.py: only the enqueue experiment's program rows are the first
+    translation (label, first_translation=true, comparable=False, as in
+    ch01, ch02 and ch04), and exactly the per_lane enqueue rows whose cell
+    another experiment measures carry duplicate_of=<that experiment>."""
+    from flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock import (
+        compare,
+    )
+
+    cases, meta = compare.build(quick=True)
+    enq = [c for c in cases if c.experiment == "enqueue"]
+    assert enq and len(enq) % 2 == 0
+    for c in cases:
+        program = c.config["enqueue"] == "program"
+        assert program == (c.config["label"] == "first_translation")
+        assert program == bool(c.extra.get("first_translation"))
+        if program:
+            assert c.experiment == "enqueue" and not c.comparable
+    cells = {}
+    for c in cases:
+        if c.experiment != "enqueue" and c.config["blocks"] != "None":
+            cells.setdefault(compare._cell(c), c.experiment)
+    tagged = 0
+    for c in enq:
+        dup = c.extra.get("duplicate_of")
+        if c.config["enqueue"] == "lane":
+            assert dup == cells.get(compare._cell(c))
+            tagged += dup is not None
+        else:
+            assert dup is None
+    assert tagged == meta["enqueue"]["per_lane_rows_repeating_a_cell"] > 0
+
+
 # SASS evidence: ptxas warp-aggregates the per-lane ticket.
 
 ENQ_SITES = {(False, 4, 1, "thread"): 4, (False, 8, 1, "thread"): 8,
@@ -984,15 +1136,15 @@ def _nvdisasm():
     return None
 
 
-def _sass(key, enqueue, tmp_path):
+def _sass(key, enqueue, tmp_path, tpb=256):
     import subprocess
 
     tool = _nvdisasm()
     if tool is None:
         pytest.skip("nvdisasm not found (CUDA toolkit or Triton bundle)")
-    twin_driver._warmup(*key, threads_per_block=256, enqueue=enqueue)
-    cubin = twin_driver._warmed[(key, 256, enqueue)].asm["cubin"]
-    path = tmp_path / f"k_{enqueue}.cubin"
+    twin_driver._warmup(*key, threads_per_block=tpb, enqueue=enqueue)
+    cubin = twin_driver._warmed[(key, tpb, enqueue)].asm["cubin"]
+    path = tmp_path / f"k_{'-'.join(map(str, key))}_{tpb}_{enqueue}.cubin"
     path.write_bytes(cubin)
     out = subprocess.run([tool, "-c", str(path)], capture_output=True,
                          text=True, check=True).stdout
@@ -1009,18 +1161,22 @@ def _rear_tickets(sass):
             if "ATOMG.E.ADD" in ins and "ATOMG.E.ADD.64" not in ins]
 
 
+@pytest.mark.parametrize("tpb", [32, 256, 512])
 @pytest.mark.parametrize("bare", [False, True], ids=["inst", "bare"])
 @pytest.mark.parametrize("site", list(ENQ_SITES),
                          ids=lambda k: "-".join(map(str, k[1:])))
-def test_twin_lane_enqueue_is_warp_aggregated_in_sass(site, bare, tmp_path):
+def test_twin_lane_enqueue_is_warp_aggregated_in_sass(site, bare, tpb,
+                                                     tmp_path):
     """Each per-lane ticket compiles to the warp-aggregated pattern of
     Numba's helper: an active-mask vote and a POPC before one predicated
     (leader-only) ATOMG.E.ADD, and a SHFL.IDX broadcast of the base after
     it. And the lane mode adds no CTA barrier per enqueue site: the
-    program mode adds at least one per site (7 on Triton 3.7)."""
+    program mode adds at least one per site (on Triton 3.7: 7 at 256 and
+    512 lanes, 2 in a one-warp program). Checked at one-warp programs, the
+    benchmark's 256 lanes and the widest program."""
     key = (bare,) + site[1:]
     n_sites = ENQ_SITES[site]
-    lane = _sass(key, "lane", tmp_path)
+    lane = _sass(key, "lane", tmp_path, tpb)
     tickets = _rear_tickets(lane)
     assert len(tickets) == n_sites
     for i in tickets:
@@ -1029,11 +1185,11 @@ def test_twin_lane_enqueue_is_warp_aggregated_in_sass(site, bare, tmp_path):
         assert any("VOTEU.ANY" in s or "VOTE.ANY" in s for s in before)
         assert any(s.split()[0].endswith("POPC") for s in before)
         assert any("SHFL.IDX" in s for s in after)
-    program = _sass(key, "program", tmp_path)
+    program = _sass(key, "program", tmp_path, tpb)
     bars_lane = sum("BAR.SYNC" in s for s in lane)
     bars_program = sum("BAR.SYNC" in s for s in program)
     assert bars_program - bars_lane >= n_sites
     # per-lane tickets: the barrier count does not grow with the sites
-    base = _sass((bare, 4, 1, "thread"), "lane", tmp_path)
+    base = _sass((bare, 4, 1, "thread"), "lane", tmp_path, tpb)
     if site[2] == 1:  # r2 adds the ring-2 skip reduction, not enqueue bars
         assert bars_lane == sum("BAR.SYNC" in s for s in base)

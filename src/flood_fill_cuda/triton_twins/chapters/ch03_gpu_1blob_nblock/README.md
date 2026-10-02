@@ -93,7 +93,10 @@ programs.
   336 vs 288 at tpb=64). The program-wide scan of the first translation
   cost the radius-2 pair 38-48 registers, so its `r2_bare` hosted fewer
   programs than Numba (48 vs 72). Compare backends at an explicit, equal
-  `blocks`, as the cross-backend tests and the compare script do.
+  `blocks`, as the cross-backend tests and the compare script do. More
+  programs are not always faster: when every level already fits in
+  Numba's grid, the bigger default grid loses (see
+  [What it costs](#what-it-costs)).
 - **One extra keyword, `enqueue`.** `flood_fill`, `max_blocks` and
   `kernel_info` take `enqueue="lane"` (the default) or `"program"`, and
   the result records it. Numba has no such switch: it only has the
@@ -147,7 +150,7 @@ measurable.
 Every 32-bit `ATOMG.E.ADD` of every lane kernel has this shape. There are
 4 in conn4, 8 in conn8, 24 in r2 and 1 in wc, one per enqueue site.
 `test_twin_lane_enqueue_is_warp_aggregated_in_sass` checks it on every
-build.
+build, at 32, 256 and 512 lanes per program.
 
 The barrier count tells the two modes apart:
 
@@ -161,7 +164,8 @@ The barrier count tells the two modes apart:
 In lane mode no barrier belongs to the enqueue. The two grid barriers
 take 5 each, and the rest are the exit reductions of the instrumented
 kernels and r2's ring-2 skip (`tl.max`). Program mode adds exactly 7
-`BAR.SYNC`, 4 `STS` and 5 `LDS` per enqueue site. So every direction of
+`BAR.SYNC`, 4 `STS` and 5 `LDS` per enqueue site (at 256 and 512 lanes;
+a one-warp program needs 2 `BAR.SYNC` per site). So every direction of
 every tile made the 8 warps of a program wait for each other, with the
 sum and the scan going through shared memory. Numba never had those
 barriers.
@@ -194,20 +198,48 @@ pays 7 barriers per direction on every level. On a one-program grid all
 of a level's work goes through one program, tile after tile, and each
 tile pays them again.
 
-Before and after on the five worst rows of the first full run, measured
+Before and after on the first full run's worst rows, measured
 interleaved (Numba, program, lane, rotating order, 6 rounds, median
-kernel_ms):
+kernel_ms). The first five are the run's five worst comparable rows, all
+sweep cells on one or two programs. The last three are the worst rows of
+barrier_work and of suite.
 
 | row (first-run speedup) | Numba | program | lane | x program | x lane |
 |---|---|---|---|---|---|
 | sweep disk_4001_r1900 conn4 1x512 (x0.571) | 121.85 | 192.01 | 113.53 | 0.63 | 1.07 |
 | sweep disk_4001_r1900 conn8 1x512 (x0.578) | 135.13 | 234.83 | 121.92 | 0.58 | 1.11 |
+| sweep disk_4001_r1900 conn8 2x512 (x0.625) | 77.10 | 122.94 | 66.07 | 0.63 | 1.17 |
+| sweep sq_4000_corner conn8 1x512 (x0.625) | 192.62 | 307.63 | 167.48 | 0.63 | 1.15 |
+| sweep disk_4001_r1900 conn8 1x256 (x0.640) | 208.16 | 325.26 | 174.11 | 0.64 | 1.20 |
 | barrier_work sq_2000_center r2_bare 48x256 (x0.669) | 4.92 | 7.20 | 4.78 | 0.68 | 1.03 |
 | barrier_work sq_2000_center r2 48x256 (x0.709) | 5.47 | 7.65 | 5.30 | 0.72 | 1.03 |
 | suite sq_1024_center conn8_bare 48x256 (x0.729) | 2.89 | 4.08 | 2.89 | 0.71 | 1.00 |
 
 The program column reproduces the first run's ratios, so the enqueue
-accounts for the whole gap on these rows.
+accounts for the whole gap on these rows. Outputs were identical in
+every run.
+
+The own-default rows (`suite_blocks_none`, each backend at its own
+`blocks=None` grid, `comparable=false`) stay below x1. That comes from
+the grid, not the enqueue. Same method, on sq_4000_corner (the worst of
+them):
+
+| row (first-run speedup) | programs: Numba / program / lane | Numba | program | lane | x program | x lane |
+|---|---|---|---|---|---|---|
+| suite_blocks_none conn8 (x0.596) | 48 / 120 / 144 | 37.36 | 62.95 | 50.72 | 0.59 | 0.74 |
+| suite_blocks_none conn4 (x0.635) | 48 / 144 / 144 | 55.45 | 87.99 | 73.39 | 0.63 | 0.76 |
+| suite conn8, all at 48 x 256 | 48 / 48 / 48 | 37.40 | 43.69 | 34.03 | 0.86 | 1.10 |
+| suite conn4, all at 48 x 256 | 48 / 48 / 48 | 55.62 | 57.86 | 46.60 | 0.96 | 1.19 |
+
+At Numba's 48 programs the lane twin wins (x1.10-1.19). The same lane
+kernel at its own default of 144 programs is 1.5-1.6x slower.
+
+The reason is the scene. Its corner seed gives 4,000 (conn8) or 7,999
+(conn4) levels of at most 7,999 pixels each. That already fits in the
+12,288 lanes of 48 programs. So the extra programs add no useful work,
+only more arrivals at the two grid barriers of every level. The lane
+enqueue's larger capacity (conn8: 144 instead of 120) makes this
+default grid even bigger.
 
 ## Deterministic outputs (what the cross-backend tests assert)
 
@@ -228,9 +260,20 @@ painting), the spatial owner map, `sm_ids` and timings.
 
 All of this holds in both enqueue modes, which the
 `test_enqueue_modes_*` tests check against Numba, the CPU oracle and each
-other (every variant, five scenes up to a 1M-pixel disk, two grids). The
-modes change only the queue order, which is schedule-dependent in both
-backends anyway.
+other (every variant, five scenes up to a 1M-pixel disk, four grids from
+32 to 512 lanes per program). The modes change only the queue order,
+which is schedule-dependent in both backends anyway.
+
+`test_enqueue_modes_overflow_tripwire` forces the structurally
+unreachable overflow. The queue is a short view (700 slots) of a longer
+buffer, on a 96 x 96 full-red image. In both modes, and in Numba:
+
+- `OVERFLOW` is set exactly when the final rear passes the capacity;
+- nothing is stored at or past the capacity;
+- the final rear (`filled`) is still one ticket per claim;
+- the queue below the capacity holds each claimed pixel once.
+
+At full capacity the queue is a permutation of the fill.
 
 ## Running
 
@@ -253,7 +296,7 @@ plus the `enqueue` experiment:
   min(Numba capacity, Triton capacity).
 - `suite_blocks_none`: each backend at its own maximum, with both grids
   in `config["resolved_blocks"]`. The grids differ, so these rows are
-  `comparable=false` and stay out of the summary averages.
+  `comparable=false` and stay out of the like-for-like averages.
 - `sweep`: TPB_SWEEP x BLOCKS_SWEEP. Its "max" column is the common grid,
   min(both capacities). That is Numba's maximum but usually not Triton's
   (`is_common_max`, and `is_backend_max` per backend).
@@ -263,8 +306,15 @@ plus the `enqueue` experiment:
   (label `first_translation`). All eight variants on sq_2000_center,
   disk_4001_r1900 and serpentine_256 at the pinned grid, plus the first
   run's worst sweep cells (1 x 512 on disk_4001_r1900, conn4 and conn8).
-  The `first_translation` rows are `comparable=false`: they measure the
-  first translation's cost and stay out of the unit's averages.
+  The `first_translation` rows are `comparable=false` and carry
+  `first_translation=true`, as in ch01, ch02 and ch04. They measure the
+  first translation's cost and stay out of the like-for-like averages.
+  An "own default" average over all measured rows must drop them too.
+- In the default run all 26 `per_lane` enqueue rows repeat a cell of
+  `suite` (12), `barrier_work` (12) or `sweep` (2). Those rows carry
+  `duplicate_of=<experiment>`. They stay
+  comparable for the `enqueue` experiment's own average, but a unit-wide
+  average should skip them, or it counts those cells twice.
 
 Its `meta["caps"]` lists the one reduction: the 64M-pixel scene is
 dropped, because holding a Numba and a Triton result at that size would
