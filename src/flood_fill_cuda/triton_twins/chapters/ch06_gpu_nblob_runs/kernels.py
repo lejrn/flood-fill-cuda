@@ -35,6 +35,11 @@ CUDA constructs Triton cannot spell, and what stands in for them:
     divergent loops       lockstep loops over a lane mask,
                           `while tl.max(active) > 0`
 
+On sm_80+ an integer OR or sum along the 32-lane axis compiles to ONE
+`redux.sync` warp instruction (the PTX of pack, count and paint has no
+shuffles for them), so the ballot and the broadcast stay one warp
+instruction each.
+
 The last row is the one real difference. A CUDA warp runs a
 data-dependent loop until its slowest lane is done, and the warps of a
 block never wait for each other. A Triton program has one control flow,
@@ -198,7 +203,8 @@ def pack_kernel(img_ptr, mask_ptr, width, height, words_per_row,
 
     Bits past `height` in a row's last word are written as 0. The ballot
     is an OR-reduction of each lane's vote shifted to its bit position:
-    the same word, built by five shuffle rounds instead of one vote.
+    the same word. It lowers to one `redux.sync.or.b32` per warp (sm_80+,
+    checked in the PTX), a single warp instruction like the vote.
     """
     w = tl.program_id(0) * WPB + tl.arange(0, WPB)      # warp i -> word w
     lane = tl.arange(0, _WARP)[None, :]
@@ -368,7 +374,8 @@ def merge_rows_kernel(run_x_ptr, run_y0_ptr, run_y1_ptr, row_off_ptr,
     device. Per lane: the Numba `continue` on the last row is a mask,
     the lower-bound binary search and the forward walk are lockstep
     loops, and each walk step is one `_union` (attempts and successful
-    links counted per lane, summed per program, one atomic each).
+    links counted per lane, then one relaxed atomic per lane with a
+    nonzero count, as each Numba thread issues its own).
     """
     n_runs = tl.load(counters_ptr + _N_RUNS_USED).to(tl.int32)
     lane = tl.arange(0, BLOCK)
@@ -409,14 +416,15 @@ def merge_rows_kernel(run_x_ptr, run_y0_ptr, run_y1_ptr, row_off_ptr,
                            <= y1 + 1)
 
     if INSTRUMENTED:
-        n_attempts = tl.sum(attempts, axis=0)
-        n_done = tl.sum(done, axis=0)
-        if n_attempts > 0:
-            tl.atomic_add(counters_ptr + _UNION_ATTEMPTS,
-                          n_attempts.to(tl.int64), sem="relaxed", scope="gpu")
-        if n_done > 0:
-            tl.atomic_add(counters_ptr + _UNION_DONE, n_done.to(tl.int64),
-                          sem="relaxed", scope="gpu")
+        # One atomic per THREAD with a nonzero count, as Numba issues
+        # them (`if attempts: cuda.atomic.add(...)`): the same-address
+        # traffic is part of what the instrumented variant costs.
+        slot = tl.zeros([BLOCK], tl.int32)
+        tl.atomic_add(counters_ptr + _UNION_ATTEMPTS + slot,
+                      attempts.to(tl.int64), mask=attempts > 0,
+                      sem="relaxed", scope="gpu")
+        tl.atomic_add(counters_ptr + _UNION_DONE + slot, done.to(tl.int64),
+                      mask=done > 0, sem="relaxed", scope="gpu")
 
 
 # --------------------------------------------------------------- flatten
@@ -427,7 +435,8 @@ def flatten_kernel(parent_ptr, run_x_ptr, run_y0_ptr, run_label_ptr, height,
                    BLOCK: tl.constexpr):
     """Path-compress every run to its root, resolve its canonical label
     (run_x[root]*height + run_y0[root], the scattered gathers paid here
-    and not in paint), and count the survivors."""
+    and not in paint), and count the survivors (per lane, one atomic per
+    lane that found a root, as in Numba)."""
     n_runs = tl.load(counters_ptr + _N_RUNS_USED).to(tl.int32)
     lane = tl.arange(0, BLOCK)
     stride = tl.num_programs(0) * BLOCK
@@ -444,10 +453,10 @@ def flatten_kernel(parent_ptr, run_x_ptr, run_y0_ptr, run_label_ptr, height,
         roots += (valid & (root == r)).to(tl.int32)
 
     if INSTRUMENTED:
-        n_roots = tl.sum(roots, axis=0)
-        if n_roots > 0:
-            tl.atomic_add(counters_ptr + _N_BLOBS, n_roots.to(tl.int64),
-                          sem="relaxed", scope="gpu")
+        # One atomic per thread with a nonzero count, as in Numba.
+        tl.atomic_add(counters_ptr + _N_BLOBS + tl.zeros([BLOCK], tl.int32),
+                      roots.to(tl.int64), mask=roots > 0,
+                      sem="relaxed", scope="gpu")
 
 
 # ----------------------------------------------------------------- paint
@@ -460,7 +469,8 @@ def paint_kernel(img_ptr, run_x_ptr, run_y0_ptr, run_y1_ptr, run_label_ptr,
     Each warp fetches 32 run descriptors cooperatively (lane l takes run
     r0 + l: four coalesced loads) and replays them one at a time, as the
     Numba kernel does with shfl_sync. The broadcast of lane k's values
-    is a masked sum along the lane axis. The span loop's trip count for
+    is a masked sum along the lane axis, one `redux.sync.add` per value
+    (one warp instruction, as the shuffle is). The span loop's trip count for
     replay step k is the largest span among the program's warps at that
     step; it is computed once per 32-run group (one cross-warp max per
     group) and read back per step from a [32] vector.

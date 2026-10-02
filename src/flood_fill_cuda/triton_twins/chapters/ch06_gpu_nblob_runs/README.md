@@ -38,8 +38,8 @@ thread-per-run kernels use a flat `[T]` tensor.
 | 6-7 plain launches, stream order as the barrier | 6-7 plain launches on the null stream | exact | no cooperative launch anywhere in ch06 |
 | `kernel[blocks, tpb]` | `kernel[(blocks,)](..., num_warps=tpb // 32)` | exact | same grids per phase; the 2D pack grid is `(words/WPB, min(width, 64))` |
 | warp per row / per run, `warp_id = grid(1) // 32` | `[WPB, 32]` tile, `warp_id = pid * WPB + i` | exact | same rows, same strides |
-| `cuda.ballot_sync` (pack) | `tl.reduce(red << lane, axis=1, or)` | close | the same word, by a 5-step shuffle reduction instead of one vote |
-| `shfl_down` reduction (count) | `tl.sum(axis=1)` | exact | |
+| `cuda.ballot_sync` (pack) | `tl.reduce(red << lane, axis=1, or)` | close | the same word; it compiles to one `redux.sync.or.b32` per warp (sm_80+, checked in the PTX), one warp instruction like the vote |
+| `shfl_down` reduction (count) | `tl.sum(axis=1)` | exact | one `redux.sync.add.s32` per warp |
 | `shfl_up` warp scan + `shfl_sync(31)` total (emit) | `tl.cumsum(axis=1)` + `tl.sum(axis=1)` | exact | same slot for every run |
 | `cuda.popc`, `cuda.ffs` | libdevice `popc` / `ffs` on the bit-cast `uint32` word | exact | words stay `uint32`, so `>>` is logical (Numba widens to int64) |
 | per-lane bit walk `while s: ffs; s &= s - 1` (emit) | `for _ in range(tl.max(popc))`, masked by `s != 0` | emulated | trip count = max popc in the program (Numba: in the warp) |
@@ -47,8 +47,8 @@ thread-per-run kernels use a flat `[T]` tensor.
 | `_find` with path halving, lane-divergent | `while tl.max(active) > 0` over a lane mask, masked loads, masked halving store | emulated | same operations per lane; divergence unit is the program, not the warp |
 | `_union` retry loop, `cuda.atomic.min` | lockstep loop, `tl.atomic_min(mask=..., sem="relaxed")` | emulated | Numba atomics are relaxed; so are these |
 | binary search and forward walk with `continue` (merge) | lockstep `while` loops; `continue` becomes a lane mask | emulated | Triton has no `break` / `continue` |
-| per-thread `cuda.atomic.add` of attempts / done / roots | `tl.sum` per program, one `tl.atomic_add(int64, sem="relaxed")` | close | same totals, fewer atomics; skipped when zero, as in Numba |
-| `shfl_sync(k)` descriptor replay (paint) | masked sum along the lane axis picks lane k's value | close | descriptors still fetched 32 at a time, coalesced; the rejected per-run broadcast loads stay out |
+| per-thread `cuda.atomic.add` of attempts / done / roots, `if count:` | per-lane `tl.atomic_add(int64, mask=count > 0, sem="relaxed")` under `INSTRUMENTED` | exact | one atomic per thread with a nonzero count, as in Numba; the bare variants have none |
+| `shfl_sync(k)` descriptor replay (paint) | masked sum along the lane axis picks lane k's value | close | one `redux.sync.add.s32` per value, one warp instruction like the shuffle; descriptors still fetched 32 at a time, coalesced; the rejected per-run broadcast loads stay out |
 | span loop `for y in range(y0 + lane, y1 + 1, 32)` (paint, label) | `for ci in range(n_chunks)`, masked by `y <= y1` | emulated | trip count = longest span among the program's warps at that step |
 | `cuda.event(timing=True)`, `event_elapsed_time` | `cp.cuda.Event()`, `cp.cuda.get_elapsed_time` | exact | same bracket points: before the first launch, after each |
 | `cuda.to_device`, `device_array`, `copy_to_host` | `cp.asarray`, `cp.empty`, `.get()` | exact | |
@@ -95,13 +95,39 @@ Performance comparison (Numba vs Triton on the chapter's own
 benchmarks, written to `results/triton_twins/ch06_gpu_nblob_runs/`):
 
 ```
-.venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch06_gpu_nblob_runs.compare            # full, ~3-5 min
+.venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch06_gpu_nblob_runs.compare            # full, ~4-6 min
 .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch06_gpu_nblob_runs.compare --quick    # smoke test, no JSON
 ```
 
-Each row has both backends' `kernel_ms` (event span of the pipeline)
-and `total_ms` (host wall time of `run()` + synchronize), their per-phase
-medians, `speedup_kernel = numba / triton` (above 1: Triton faster), the
-Triton kernels' registers and the Numba kernels' registers. Outputs are
-compared on the device after every run. `meta.caps` lists what the full
-run leaves out of the Numba benchmarks (the ch05 column, the 8 s spin).
+Each row has both backends' `kernel_ms` (CUDA-event span of the
+pipeline, the chapter's number) and `total_ms` (host wall time of
+`run()` + synchronize), their per-phase medians, `model_gb_s`,
+`speedup_kernel = numba / triton` (above 1: Triton faster), the floor
+arithmetic at each backend's own read/write peaks, the Triton kernels'
+registers and the Numba kernels' registers. Outputs are compared on the
+device after every run. The scaling sweep's 1.0 / 0.5 ms crossings are
+in `meta.scaling_crossings`, per backend. `meta.caps` lists what the
+full run leaves out of the Numba benchmarks (the ch05 column, the 8 s
+spin).
+
+**Small scenes are launch-bound.** The events sit on the stream. When
+the GPU finishes a kernel before Python has queued the next one, the
+event span includes the host's launch time.
+
+A pipeline run is 6-7 launches, about 25 us each in Triton and about
+57 us each in Numba. Below roughly 4 Mpx (`input_blocks`, the
+1000-2000 px crops, and the mask rows of the smaller scenes),
+`kernel_ms` and `phase_ms` therefore mostly measure Python launch
+overhead, for both backends. There `speedup_kernel` is a host-stack
+result, not a kernel result. Each row also carries:
+
+- `gpu_only`: the same pipeline, once per call, with every launch queued
+  behind a 3 ms device spin, so its event span is GPU work only.
+  `speedup_gpu_kernel` and `speedup_gpu_phase` compare the kernels;
+- `enqueue_ms`, `gpu_fraction` (GPU-only span / event span) and a
+  `launch_bound` flag (`enqueue_ms >= 0.8 * kernel_ms` or
+  `gpu_fraction < 0.8`, per backend; the row flag is set when either
+  backend's is).
+
+In the quick smoke run, for example, every scene reads about 2x
+"faster in Triton" on the event span, but only 0.6-1.3x GPU-only.

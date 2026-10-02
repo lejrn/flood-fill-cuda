@@ -272,10 +272,21 @@ def test_rejects_non_uint8_image():
 # ============================================================ part 2
 # Numba and Triton side by side: identical deterministic outputs.
 
+def _tall_scene():
+    """13 x 2100 noise plus one 100-px run across y = 1023/1024: the
+    count and emit loops take two 32-word chunks per row, and a run
+    spans the chunk boundary (emit's carried cur_start / cur_end)."""
+    img, _ = _scenes.random_blobs_scene(13, 2100, 0.45, 2)
+    img[4, 1000:1100] = RED
+    return img
+
+
 # Representative scenes: dense noise (the run table's worst case and
 # the merge's heaviest contention), word-size edges, degenerate shapes,
-# 1-px runs, the shapes that broke earlier chapters, and one scene big
-# enough to keep every program of the merge grid busy.
+# 1-px runs, the shapes that broke earlier chapters, one scene big
+# enough to keep every program of the merge grid busy, and the
+# multi-chunk paths: width > 1024 (row_scan's carry across 1024-row
+# chunks) and height > 1024 (more than 32 words per row in count/emit).
 CROSS_SCENES = {
     "noise_030": SCENES["noise_030"],
     "noise_045": SCENES["noise_045"],
@@ -286,6 +297,9 @@ CROSS_SCENES = {
     "comb_80_teeth": SCENES["comb_80_teeth"],
     "blank": SCENES["blank"],
     "noise_1000": lambda: _scenes.random_blobs_scene(1000, 1000, 0.30, 0),
+    "wide_3000x40": lambda: _scenes.random_blobs_scene(3000, 40, 0.30, 1),
+    "big_2049x1100": lambda: _scenes.random_blobs_scene(2049, 1100, 0.30, 0),
+    "tall_13x2100": _tall_scene,
 }
 
 _built = {}
@@ -392,7 +406,8 @@ def _assert_buffers_equal(a, b):
 @pytest.mark.parametrize("instrumented", [True, False])
 @pytest.mark.parametrize("contract", CONTRACTS)
 @pytest.mark.parametrize("name", ["noise_045", "size_31x97", "one_col",
-                                  "noise_1000"])
+                                  "noise_1000", "wide_3000x40",
+                                  "big_2049x1100", "tall_13x2100"])
 def test_cross_backend_device_buffers_match_numba(name, contract,
                                                   instrumented):
     img = _cross_scene(name)
@@ -490,10 +505,11 @@ def test_twin_rejects_multiple_of_32_rule_like_numba():
 
 def test_twin_read_write_probes_measure_real_bandwidth():
     """The Triton twins of benchmark.py's read/write peak probes report
-    a real DRAM bandwidth (64 MiB is past the L2), not a deleted read."""
+    a real DRAM bandwidth (64 MiB is past the L2), not a deleted read.
+    Median of 5, so two stalled launches (a WSL hiccup) cannot fail it."""
     from .compare import measure_read_write_peaks_triton
     read_gb_s, write_gb_s = measure_read_write_peaks_triton(64 * 2 ** 20,
-                                                            repeats=3)
+                                                            repeats=5)
     assert 20 < read_gb_s < 1000
     assert 20 < write_gb_s < 1000
 

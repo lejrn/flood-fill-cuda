@@ -15,12 +15,40 @@ it (max(8192, runs * 1.05)).
 One case is one scene in one contract. Each backend runs the pipeline
 the way _bench_ch06 does: restore the pristine image (device to
 device), pack off the clock for the "mask" contract, synchronize,
-run(), synchronize. kernel_ms is the CUDA-event span from before the
-first launch to after the last (the chapter's headline number);
-total_ms is the host wall time of run() + synchronize, so it adds the
-Python launch enqueue that the event span hides when the GPU outruns
-the host. Per-phase medians (and label_only_ms, every phase but paint)
-are added to each row, from the same timed runs.
+run(), synchronize. Each scene is packed before its clock spin, as
+benchmark.py packs before _spin_up.
+
+What the numbers mean:
+
+  kernel_ms     the CUDA-event span from before the first launch to
+                after the last: the chapter's headline number. The
+                events sit on the stream, so when the HOST is the
+                bottleneck (small scenes: 7 launches at ~25 us each in
+                Triton, ~57 us in Numba) the GPU waits for every launch
+                and the span INCLUDES the Python launch enqueue. Only
+                when the GPU is the bottleneck does the span hide it.
+  total_ms      host wall time of run() + synchronize: the span plus
+                the host work before the first event executes and the
+                sync return.
+  enqueue_ms    host time for run() to return (all launches queued).
+  gpu_fraction  gpu_only kernel_ms / kernel_ms: the share of the span
+                that is GPU work.
+  launch_bound  per backend: enqueue_ms >= 0.8 * kernel_ms or
+                gpu_fraction < 0.8, i.e. a fifth or more of the span is
+                the GPU waiting for the host. On such rows
+                speedup_kernel and speedup_phase compare Python launch
+                paths as much as kernels.
+  gpu_only      the same pipeline run once more per call with every
+                launch queued behind a QUEUE_US device spin, so the
+                event span is GPU work only (a run counts only if its
+                first event had not executed when run() returned).
+                speedup_gpu_kernel / speedup_gpu_phase compare kernels.
+
+Per-phase medians (and label_only_ms, every phase but paint) are added
+to each row from the same runs, with model_gb_s per backend, the
+floor arithmetic (floor_ms) at each backend's own read/write peaks, and,
+for the scaling sweep, the 1.0 / 0.5 ms crossings per backend
+(meta["scaling_crossings"], scaling._crossings unchanged).
 
 Outputs are compared on the device after every run: the counters, the
 painted image, the packed mask, row offsets, the run table and labels up
@@ -47,6 +75,7 @@ os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
 import argparse
 import gc
 import json
+import resource
 import statistics
 import time
 from functools import lru_cache
@@ -73,6 +102,7 @@ from flood_fill_cuda.triton_twins.runtime import kernel_resources, sync, t
 from flood_fill_cuda.triton_twins.runtime.bandwidth import (
     measure_peak_bandwidth as triton_copy_peak,
 )
+from flood_fill_cuda.triton_twins.runtime.device import read_globaltimer
 
 from . import recolor as tr_recolor
 from .kernels import (
@@ -84,6 +114,26 @@ CHAPTER = "ch06_gpu_nblob_runs"
 ROUNDS = nb_benchmark.ROUNDS            # 9, as in benchmark.py and scaling.py
 SCENE_SPIN_SECONDS = 3.0                # per scene, both backends alternating
 PEAK_BYTES = 256 * 2 ** 20
+QUEUE_US = 3000                         # device spin ahead of a GPU-only run
+LAUNCH_BOUND = 0.8                      # enqueue_ms / kernel_ms threshold
+
+
+# ------------------------------------------------------- GPU-only timing
+
+@triton.jit(do_not_specialize=["ns"])
+def _queue_kernel(ns):
+    """Hold the stream for `ns` nanoseconds: one program spinning on
+    %globaltimer. Everything enqueued behind it on the (legacy, shared)
+    null stream waits, so a run() enqueued meanwhile is fully queued
+    before its first event executes."""
+    t0 = read_globaltimer(tl.program_id(0))
+    now = t0
+    while now - t0 < ns:
+        now = read_globaltimer(tl.program_id(0))
+
+
+def _queue(us):
+    _queue_kernel[(1,)](us * 1000, num_warps=1)
 
 
 # ------------------------------------------------ read / write peak probes
@@ -172,6 +222,10 @@ class _NumbaSide:
     sync = staticmethod(cuda.synchronize)
     elapsed = staticmethod(cuda.event_elapsed_time)
 
+    @staticmethod
+    def done(event):
+        return event.query()
+
     def counters(self):
         return self.engine.counters.copy_to_host()
 
@@ -218,6 +272,10 @@ class _TritonSide:
     sync = staticmethod(sync)
     elapsed = staticmethod(cp.cuda.get_elapsed_time)
 
+    @staticmethod
+    def done(event):
+        return event.done
+
     def counters(self):
         return self.engine.counters.get()
 
@@ -226,25 +284,57 @@ class _TritonSide:
                 for name, k in self.engine.compiled.items()}
 
 
-def _measure(side, contract, samples):
-    """One timed pipeline run of one backend (the harness's callable)."""
+def _prepare(side, contract):
     side.restore()
     if contract == "mask":
         side.pack()                     # the packed input, off the clock
     side.sync()
+
+
+def _phases(side, names, events):
+    return {n: side.elapsed(events[i], events[i + 1])
+            for i, n in enumerate(names)}
+
+
+def _gpu_only_run(side, contract):
+    """The pipeline with every launch queued behind a QUEUE_US device
+    spin: its event span is GPU work only. `valid` is False when the
+    first event had already executed by the time run() returned (the
+    host was slower than the spin), and then the run is not used."""
+    _prepare(side, contract)
+    _queue(QUEUE_US)
+    names, events = side.run(contract)
+    valid = not side.done(events[0])
+    side.sync()
+    return (valid, side.elapsed(events[0], events[-1]),
+            _phases(side, names, events), side.counters())
+
+
+def _measure(side, contract, samples):
+    """One call of the harness: a GPU-only run (recorded in `samples`),
+    then the timed run the harness reads (kernel_ms, total_ms), whose
+    outputs same() compares."""
+    q_valid, q_kernel, q_phase, q_counters = _gpu_only_run(side, contract)
+    _prepare(side, contract)
     t0 = time.perf_counter()
     names, events = side.run(contract)
+    t_enq = time.perf_counter()
     side.sync()
     t1 = time.perf_counter()
     counters = side.counters()
     if counters[RUN_OVERFLOW]:
         raise RuntimeError("run table overflowed during benchmark")
-    phase_ms = {n: side.elapsed(events[i], events[i + 1])
-                for i, n in enumerate(names)}
-    samples.append(phase_ms)
-    return SimpleNamespace(kernel_ms=side.elapsed(events[0], events[-1]),
-                           total_ms=(t1 - t0) * 1000, phase_ms=phase_ms,
-                           counters=counters, side=side)
+    if not np.array_equal(counters, q_counters):
+        raise RuntimeError(f"GPU-only run counters {q_counters.tolist()} != "
+                           f"timed run counters {counters.tolist()}")
+    phase_ms = _phases(side, names, events)
+    kernel_ms = side.elapsed(events[0], events[-1])
+    samples.append({"phase_ms": phase_ms, "kernel_ms": kernel_ms,
+                    "enqueue_ms": (t_enq - t0) * 1000,
+                    "gpu_valid": q_valid, "gpu_kernel_ms": q_kernel,
+                    "gpu_phase_ms": q_phase})
+    return SimpleNamespace(kernel_ms=kernel_ms, total_ms=(t1 - t0) * 1000,
+                           phase_ms=phase_ms, counters=counters, side=side)
 
 
 def _same(rn, rt):
@@ -269,8 +359,10 @@ def _same(rn, rt):
 
 # ------------------------------------------------------------------ scenes
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1)
 def _png(path):
+    """The decoded PNG, one at a time: input_blobs.png (243 MB) stays
+    cached while its crops run, and is dropped for any other PNG."""
     img, _ = _scenes.png_scene(path)
     img.setflags(write=False)
     return img
@@ -359,6 +451,13 @@ class _Pair:
                 triton=_TritonSide(img, capacity))
             del img
             self.key = key
+            # Pack before the spin, as benchmark._scene_row does: the
+            # spin runs the "mask" contract, and an unpacked mask is
+            # uninitialised memory (garbage runs, padding bits set).
+            for side in (self.cur.numba, self.cur.triton):
+                side.restore()
+                side.pack()
+                side.sync()
             self._spin()
         return self.cur
 
@@ -374,12 +473,118 @@ class _Pair:
             sync()
 
 
+def _phase_medians(dicts):
+    phase = {k: statistics.median(d[k] for d in dicts) for k in dicts[0]}
+    return phase, sum(v for k, v in phase.items() if k != "paint")
+
+
 def _summary(samples):
+    """Per-backend medians over the timed calls: phases, enqueue, and
+    the GPU-only runs that were valid."""
     if not samples:
         return None
-    phase = {k: statistics.median(s[k] for s in samples) for k in samples[0]}
-    return {"phase_ms": phase,
-            "label_only_ms": sum(v for k, v in phase.items() if k != "paint")}
+    med = statistics.median
+    phase, label_only = _phase_medians([s["phase_ms"] for s in samples])
+    span = med(s["kernel_ms"] for s in samples)
+    enqueue = med(s["enqueue_ms"] for s in samples)
+    out = {"phase_ms": phase, "label_only_ms": label_only,
+           "enqueue_ms": enqueue}
+    ok = [s for s in samples if s["gpu_valid"]]
+    gpu = {"valid_runs": len(ok), "runs": len(samples)}
+    launch_bound = enqueue >= LAUNCH_BOUND * span
+    if ok:
+        g_phase, g_label = _phase_medians([s["gpu_phase_ms"] for s in ok])
+        gpu.update(kernel_ms=med(s["gpu_kernel_ms"] for s in ok),
+                   phase_ms=g_phase, label_only_ms=g_label)
+        out["gpu_fraction"] = gpu["kernel_ms"] / span
+        launch_bound = launch_bound or out["gpu_fraction"] < LAUNCH_BOUND
+    out["launch_bound"] = launch_bound
+    out["gpu_only"] = gpu
+    return out
+
+
+def _ratio(a, b):
+    return a / b if a is not None and b else None
+
+
+def _finish_row(row, smp, peaks):
+    """Everything compare.py adds to a harness row (see the module doc)."""
+    info = row.get("info")
+    if info:
+        row["pixels"] = info["width"] * info["height"]
+    if "error" in row:
+        return
+    for backend in ("numba", "triton"):
+        s = _summary(smp[backend][1:])          # sample 0 is the warm-up
+        if s:
+            row[backend].update(s)
+        b = row[backend]
+        b["model_gb_s"] = info["model_bytes"] / (
+            b["kernel_ms"]["median"] * 1e6)
+        g = b.get("gpu_only", {})
+        if g.get("kernel_ms"):
+            g["model_gb_s"] = info["model_bytes"] / (g["kernel_ms"] * 1e6)
+    nb, tr = row["numba"], row["triton"]
+    row["launch_bound"] = bool(nb.get("launch_bound")
+                               or tr.get("launch_bound"))
+    if nb.get("phase_ms") and tr.get("phase_ms"):
+        row["speedup_phase"] = {k: _ratio(nb["phase_ms"][k], tr["phase_ms"][k])
+                                for k in nb["phase_ms"]}
+    gn, gt = nb.get("gpu_only", {}), tr.get("gpu_only", {})
+    if gn.get("kernel_ms") and gt.get("kernel_ms"):
+        row["speedup_gpu_kernel"] = gn["kernel_ms"] / gt["kernel_ms"]
+        row["speedup_gpu_phase"] = {
+            k: _ratio(gn["phase_ms"][k], gt["phase_ms"][k])
+            for k in gn["phase_ms"]}
+    # benchmark._scene_row's floor arithmetic, at each backend's peaks
+    n, red_px = row["pixels"], info["red_px"]
+    row["floor_ms"] = {
+        backend: {
+            "rgb_read": n * 3 / (peaks[backend]["read_gb_s"] * 1e6),
+            "mask_read": ((n + 7) // 8) / (peaks[backend]["read_gb_s"] * 1e6),
+            "paint_write": red_px * 3 / (peaks[backend]["write_gb_s"] * 1e6),
+        } for backend in ("numba", "triton")}
+
+
+def _scaling_crossings(rows):
+    """scaling.py's 1.0 / 0.5 ms crossings (its own _crossings, linear
+    in megapixels between bracketing crops), per backend, from the event
+    span medians (the chapter's number) and from the GPU-only medians."""
+    by_scene = {}
+    for row in rows:
+        if row["experiment"] == "scaling" and "error" not in row:
+            by_scene.setdefault(row["scene"], {})[
+                row["config"]["contract"]] = row
+    tiers = {
+        "event_span": lambda b: (b["kernel_ms"]["median"],
+                                 b.get("label_only_ms")),
+        "gpu_only": lambda b: (b.get("gpu_only", {}).get("kernel_ms"),
+                               b.get("gpu_only", {}).get("label_only_ms")),
+    }
+    out = {"targets_ms": list(nb_scaling.TARGETS)}
+    for tier, get in tiers.items():
+        out[tier] = {}
+        for backend in ("numba", "triton"):
+            pts = []
+            for by_c in by_scene.values():
+                if set(by_c) != set(nb_recolor.CONTRACTS):
+                    continue
+                entry = {"n_pixels": by_c["rgb"]["pixels"]}
+                for c in nb_recolor.CONTRACTS:
+                    ms, label_ms = get(by_c[c][backend])
+                    if ms is None or label_ms is None:
+                        break
+                    entry[c] = {"median_ms": ms, "label_only_ms": label_ms}
+                else:
+                    pts.append(entry)
+            if pts:
+                out[tier][backend] = {
+                    "rgb": nb_scaling._crossings(pts, "rgb", "median_ms"),
+                    "mask": nb_scaling._crossings(pts, "mask", "median_ms"),
+                    "label_only": nb_scaling._crossings(pts, "mask",
+                                                        "label_only_ms"),
+                }
+    return out
 
 
 def build_cases(quick, spin_seconds):
@@ -457,6 +662,8 @@ def main(argv=None):
     print("Warming up both backends...")
     nb_recolor._warmup()
     tr_recolor._warmup(nb_recolor.DEFAULT_GRID[1])
+    _queue(1)                           # compile the GPU-only spin
+    sync()
 
     peak_bytes = 16 * 2 ** 20 if quick else PEAK_BYTES
     peak_reps = 3 if quick else 10
@@ -482,8 +689,13 @@ def main(argv=None):
         f"(benchmark.py spins 8 s, scaling.py 4 s, per scene, one backend)",
         "one case per (scene, contract); the harness interleaves the two "
         "backends every round instead of the two contracts",
-        "no scene-size caps: the largest scene is 9000x9000 (243 MB RGB), "
-        "one scene resident at a time on host and device",
+        "no scene-size caps: the largest scene is 9000x9000 (243 MB RGB). "
+        "One scene is resident on the device at a time; on the host the "
+        "decoded input_blobs.png (243 MB) also stays cached while its "
+        "crops run (one decoded PNG at a time). Peak host RSS is about "
+        "2.1-2.3 GB (meta.peak_host_rss_mb has this run's value)",
+        "no scaling.py JSON of its own: its crossings are "
+        "meta.scaling_crossings, per backend",
         "figures.py / visualize.py not mirrored (no kernels of their own)",
         "overview/bench_ch06.py not mirrored (overview phase)",
     ]
@@ -503,10 +715,28 @@ def main(argv=None):
             "run_capacity_rule": "max(8192, int(host_run_count * 1.05))",
             "instrumented": True,
         },
-        "timing": ("kernel_ms = CUDA-event span of run() (first launch to "
-                   "last); total_ms = perf_counter around run() + "
-                   "synchronize (adds host launch enqueue); phase_ms = "
-                   "per-phase event medians over the timed rounds"),
+        "timing": (
+            "kernel_ms = CUDA-event span of run() (first launch to last), "
+            "the chapter's number. The events are on the stream, so when "
+            "the host is the bottleneck the span INCLUDES the Python "
+            "launch enqueue (the GPU waits for each launch); it hides the "
+            "enqueue only when the GPU is the bottleneck. total_ms = "
+            "perf_counter around run() + synchronize: the span plus the "
+            "host work before the first event executes and the sync "
+            "return. enqueue_ms = host time for run() to return. "
+            "gpu_fraction = gpu_only kernel_ms / kernel_ms. launch_bound "
+            "= enqueue_ms >= 0.8 * kernel_ms or gpu_fraction < 0.8 (per "
+            "backend; the row flag is either): there, speedup_kernel and "
+            "speedup_phase measure Python launch paths as much as "
+            "kernels. "
+            "gpu_only = the same pipeline, once per call, with every "
+            "launch queued behind a device spin of queue_us, so its event "
+            "span is GPU work only; a run counts only if its first event "
+            "had not executed when run() returned. speedup_gpu_kernel and "
+            "speedup_gpu_phase compare kernels. phase_ms = per-phase event "
+            "medians over the timed rounds (the warm-up call excluded)."),
+        "queue_us": QUEUE_US,
+        "launch_bound_threshold": LAUNCH_BOUND,
         "scene_spin_seconds": spin,
         "peaks": peaks,
         "bandwidth_model": nb_recolor.MODEL_NOTE,
@@ -517,22 +747,21 @@ def main(argv=None):
                     spin_seconds=0.0 if quick else 8.0)
     pair.release()
 
-    # Per-phase medians from the timed rounds (sample 0 is the warm-up),
-    # and the pixel count of the lazily built scene.
+    _png.cache_clear()
     for row, smp in zip(doc["rows"], samples):
-        if "info" in row:
-            row["pixels"] = row["info"]["width"] * row["info"]["height"]
+        _finish_row(row, smp, peaks)
+    doc["meta"]["scaling_crossings"] = _scaling_crossings(doc["rows"])
+    doc["meta"]["peak_host_rss_mb"] = round(
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)
+
+    for row in doc["rows"]:
         if "error" in row:
             continue
-        for backend in ("numba", "triton"):
-            s = _summary(smp[backend][1:])
-            if s:
-                row[backend].update(s)
-        if row["numba"].get("phase_ms") and row["triton"].get("phase_ms"):
-            row["speedup_phase"] = {
-                k: (row["numba"]["phase_ms"][k] / row["triton"]["phase_ms"][k]
-                    if row["triton"]["phase_ms"][k] > 0 else None)
-                for k in row["numba"]["phase_ms"]}
+        g = row.get("speedup_gpu_kernel")
+        print(f"  {row['experiment']:9s} {row['scene']:18s} "
+              f"{row['config']['contract']:4s} span x{row['speedup_kernel']:.2f}"
+              f"  gpu-only " + (f"x{g:.2f}" if g else "n/a")
+              + ("  (launch-bound)" if row["launch_bound"] else ""))
 
     if not quick:
         path = os.path.join(results_dir("triton_twins", CHAPTER),
