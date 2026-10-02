@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import cupy as cp
+import triton
 from triton.backends.nvidia.driver import CudaDriver, CudaLauncher, CudaUtils
 from triton.runtime.driver import driver as _driver_config
 
@@ -70,6 +71,15 @@ class CupyCudaDriver(CudaDriver):
 _installed = False
 
 
+def _cupy_allocator(size: int, alignment: int, stream):
+    """Workspace for kernels that ask Triton for global scratch at launch.
+
+    Everything here runs on the null stream, so the CuPy pool's reuse of a
+    freed block is stream-ordered after the kernel that used it.
+    """
+    return TensorArg(cp.empty(max(size, 1), dtype=cp.uint8))
+
+
 def install() -> None:
     """Point Triton at CuPy's current device and stream. Idempotent."""
     global _installed
@@ -77,6 +87,7 @@ def install() -> None:
         return
     cp.cuda.Device(0).use()  # a CUDA context must exist before any launch
     _driver_config.set_active(CupyCudaDriver())
+    triton.set_allocator(_cupy_allocator)
     _installed = True
 
 

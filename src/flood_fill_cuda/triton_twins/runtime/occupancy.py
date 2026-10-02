@@ -42,8 +42,17 @@ def device_info(device: int = 0) -> DeviceInfo:
     )
 
 
+def _loaded(compiled):
+    """CompiledKernel loads its module lazily (after ``warmup`` the handle
+    and register count may not exist yet)."""
+    if getattr(compiled, "function", None) is None and hasattr(compiled, "_init_handles"):
+        compiled._init_handles()
+    return compiled
+
+
 def kernel_resources(compiled) -> dict:
     """Registers, spills, shared bytes and warps of a compiled kernel."""
+    compiled = _loaded(compiled)
     return {
         "n_regs": int(compiled.n_regs),
         "n_spills": int(compiled.n_spills),
@@ -54,6 +63,7 @@ def kernel_resources(compiled) -> dict:
 
 def programs_per_sm(compiled) -> int:
     """Resident programs per SM, from the driver's occupancy calculator."""
+    compiled = _loaded(compiled)
     threads = int(compiled.metadata.num_warps) * 32
     return int(cp.cuda.driver.occupancyMaxActiveBlocksPerMultiprocessor(
         compiled.function, threads, int(compiled.metadata.shared)))

@@ -44,6 +44,21 @@ def test_backend_error_is_recorded_not_raised():
     def boom():
         raise RuntimeError("tripwire")
     case = Case("e", "s", {}, boom, boom, _same)
-    doc = run_cases("chXX", [case], repeats=1, write=False, log=lambda m: None)
+    doc = run_cases("chXX", [case], repeats=1, write=False, log=lambda m: None,
+                    spin_seconds=0)
     assert "tripwire" in doc["rows"][0]["error"]
     assert doc["versions"]["triton"]
+
+
+def test_failure_in_a_timed_round_is_recorded():
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("second call fails")
+        return SimpleNamespace(kernel_ms=1.0, total_ms=1.0, out=[1])
+
+    ok = _backend(1.0, [], "T", [1])
+    row = run_case(Case("e", "s", {}, flaky, ok, _same), repeats=2)
+    assert "timed round failed" in row["error"]
