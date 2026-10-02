@@ -19,12 +19,14 @@ seeding                benchmarks/seeding.py: the fused lattice twin at every
                        the fused lattice kernel (Numba's own blocks=None
                        grid). Its v1 and ccl columns are the benchmark rows
                        merge and ccl.
-tuning                 benchmarks/tuning.py, a 6-config subset of its 53 (see
+tuning                 benchmarks/tuning.py, an 8-config subset of its 53 (see
                        caps): fused_L8, fused_I8 and, per experiment build
-                       (r128, split), b_L1 and b_L8, blocks=None as
+                       (r128, split), b_L1, b_L8 and b_I8, blocks=None as
                        tuning.py launches them (the register experiment is
-                       about each build's own capacity). Its v1 and ccl are
-                       the benchmark rows.
+                       about each build's own capacity). r128 and split
+                       resolve to the same grid on both backends, so their
+                       L8 / I8 pairs are the like-for-like rows of the
+                       RULE axis. Its v1 and ccl are the benchmark rows.
 png                    benchmarks/png_inputs.py: v1, ccl and the tuning subset,
                        blocks=None, on images/input/input_blocks.png (whole)
                        and input_blobs.png (cropped, see caps).
@@ -44,16 +46,28 @@ host-RAM budget. The per-run kernel_ms, in-kernel phase_ms and
 union_thread_ms are kept in each row's "runs" (entry 0 is the warm-up).
 A discovery probe's total_ms is the wall time of the discovery_only call.
 
+union_thread_ms is NOT comparable across backends: Numba sums each
+thread's own %clock64 cycles inside _union; the twin adds the program's
+whole lockstep union duration to every colliding lane (an emulated
+indicator, see the README mapping table), so it reads higher.
+
 speedup_kernel is the metric to read; speedup_total also compares the
 two stacks' host allocators. A blocks=None row whose two grids resolve
-differently (benchmark_blocks_none; fused lattice and ccl rows in tuning
-and png) is marked comparable=False, with both grids in
-config["resolved_blocks"], so the summary keeps it out of the averages.
+differently (every benchmark_blocks_none row, the fused-lattice rows of
+tuning and png, and png's ccl rows) is marked comparable=False, with
+both grids in config["resolved_blocks"], so the summary keeps it out of
+the averages.
 
-Budget: 148 cases by default (benchmark 42, benchmark_blocks_none 18,
-seeding 36, tuning 36, png 16). From single-run timings of every config
-on the full-size scenes, about 14 minutes of GPU time at 4 repeats; peak
-host RSS 2.03 GB measured on asym_4000_800 with both slim results alive.
+meta.builds_info mirrors tuning.py's register story (v1, fused, r128,
+split) on both backends at tpb 256 and 128: registers (Triton's differ
+per block size, so both, with spills) and cooperative capacity.
+
+Budget: 164 cases by default (benchmark 42, benchmark_blocks_none 18,
+seeding 36, tuning 48, png 20). From single-run timings of every config
+on the full-size scenes, about 15 minutes of GPU time at 4 repeats (the
+r128_I8 and split_I8 rows cost ~6.3 s per round over all their scenes,
+both backends); peak host RSS 2.03 GB measured on asym_4000_800 with
+both slim results alive.
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock.compare [--quick] [--repeats N] [--experiments a,b]
@@ -105,11 +119,13 @@ BENCH_RUNNERS = {
 
 # tuning.py's 53 configs, by its own names; the subset this script runs.
 # fused_L1 is left out: its Numba launch is seeding's S1 row (both run
-# Numba's 24-block fused grid). The interior rule is a runtime int of the
-# same kernel body in every build, so fused_I8 carries it.
+# Numba's 24-block fused grid). The interior rule (RULE axis) is a runtime
+# int of the same kernel body in every build: fused_I8 runs it at each
+# backend's own grid (24 vs 48), r128_I8 and split_I8 at the same grid.
 TUNING_CONFIGS = dict(nb_tuning._configs())
 TUNING_SUBSET = ["fused_L8", "fused_I8"] + [
-    f"{b}_L{s}" for b in nb_tuning.BUILDS if b != "fused" for s in (1, 8)]
+    f"{b}_{rule}{s}" for b in nb_tuning.BUILDS if b != "fused"
+    for rule, s in (("L", 1), ("L", 8), ("I", 8))]
 assert set(TUNING_SUBSET) <= set(TUNING_CONFIGS)
 PNG_CONFIGS = ["v1", "ccl"] + TUNING_SUBSET
 
@@ -119,17 +135,17 @@ PNG_CONFIGS = ["v1", "ccl"] + TUNING_SUBSET
 BENCHMARK_ONLY_SCENES = {"asym_4000_800"}
 PNG_CROP = {"input_blobs.png": (4500, 4500)}
 CAPS = [
-    "tuning: 6 of tuning.py's 53 configs per scene (fused L8 and I8; r128 "
-    "and split L1 and L8). The stride axis of the fused build is the "
-    "seeding experiment (S0..S256), the interior rule rides on fused_I8, "
-    "v1 and ccl are the benchmark rows. 53 configs x 7 scenes x 2 backends "
-    "would take about 1.5 hours",
+    "tuning: 8 of tuning.py's 53 configs per scene (fused L8 and I8; r128 "
+    "and split L1, L8 and I8). The stride axis of the fused build is the "
+    "seeding experiment (S0..S256), the interior rule is I8 in every "
+    "build, v1 and ccl are the benchmark rows. 53 configs x 7 scenes x 2 "
+    "backends would take about 1.5 hours",
     "asym_4000_800 (22.9 M px, the largest scene; two solid squares like "
     "two_sq_2800) runs in benchmark only, not in benchmark_blocks_none, "
     "seeding or tuning: GPU-time budget",
     "benchmark_blocks_none runs the flood_fill runners only; the discovery "
     "probes (scan, cclp) are compared at a pinned grid in benchmark",
-    "png: the same 6 tuning configs plus v1 and ccl (png_inputs.py runs all "
+    "png: the same 8 tuning configs plus v1 and ccl (png_inputs.py runs all "
     "53)",
     "png: input_blobs.png (9000 x 9000, 81 M px) is cropped to its top-left "
     "4500 x 4500 quadrant (png columns and rows 0-4499; 655 blobs, 3.4 M "
@@ -149,8 +165,14 @@ METHOD_NOTES = [
     "host memory management (CuPy's caching pool vs Numba's cuMemAlloc)",
     "blocks=None rows whose grids resolve differently per backend are "
     "comparable=false (config.resolved_blocks has both): every "
-    "benchmark_blocks_none row, and fused-lattice and ccl rows in tuning "
-    "and png",
+    "benchmark_blocks_none row, the fused-lattice rows of tuning and png, "
+    "and png's ccl rows. The RULE axis (L8 vs I8) has like-for-like rows "
+    "in the r128 and split builds, which resolve to the same grid",
+    "union_thread_ms (in runs) is not comparable across backends: Numba "
+    "sums each thread's own %clock64 cycles inside _union, the twin adds "
+    "the program's whole lockstep union duration to every colliding lane "
+    "(emulated indicator), so it reads higher by construction. Compare it "
+    "only within one backend",
     "seeding and the benchmark pin each kernel to min(Numba, Triton "
     "capacity); tuning and png launch blocks=None like tuning.py and "
     "png_inputs.py, so the fused lattice build runs Numba's 24-block grid "
@@ -293,6 +315,39 @@ def facts(kind, spec):
                    threads_per_block=TPB, **kw)}
     _facts[key] = (caps, res)
     return caps, res
+
+
+# tuning.py's builds_info keys and kwargs (its register story)
+BUILDS_INFO = (("v1", {}),
+               ("fused", {"lattice": 4, "build": "fused"}),
+               ("r128", {"lattice": 4, "build": "r128"}),
+               ("split", {"lattice": 4, "build": "split"}))
+BUILDS_INFO_TPB = (256, 128)
+
+
+def builds_info():
+    """tuning.py's builds_info on both backends: registers and cooperative
+    capacity at tpb 256 and 128. Numba compiles one kernel for every block
+    size (one register count); Triton compiles per num_warps, so its
+    registers and spills are recorded per block size. Compiles only, no
+    timed launch."""
+    out = {}
+    for name, kw in BUILDS_INFO:
+        kw = {"variant": "seed_merge", **kw}
+        numba, triton = {}, {}
+        for tpb in BUILDS_INFO_TPB:
+            numba[f"coop_{tpb}"] = numba_ff.max_blocks(threads_per_block=tpb,
+                                                       **kw)
+            info = triton_ff.kernel_info(threads_per_block=tpb, **kw)
+            triton[f"regs_{tpb}"] = int(info["n_regs"])
+            triton[f"spills_{tpb}"] = int(info["n_spills"])
+            triton[f"coop_{tpb}"] = int(info["coop_max_blocks"])
+        key_n = numba_ff._kernel_key("seed_merge", kw.get("lattice"),
+                                     kw.get("build", "fused"))
+        numba["regs"] = numba_ff.regs_per_thread(
+            numba_ff._KERNELS[(key_n, False)])
+        out[name] = {"numba": numba, "triton": triton}
+    return out
 
 
 # ------------------------------------------------------- runners and checks
@@ -542,6 +597,7 @@ def build(quick, experiments):
         "experiment_detail": meta_exp,
         "tpb": TPB,
         "coop_max_at_tpb": capacity,
+        "builds_info": builds_info(),
         "scenes": {n: note for n, _, note in scene_list + pngs},
         "bandwidth_model": numba_ff.MODEL_NOTE,
         "derived": ("model GB/s = info.<backend>_model_bytes / (median "
@@ -597,6 +653,13 @@ def main(argv=None):
     print(f"{len(cases)} cases, repeats={repeats}, capacities @tpb={TPB}: "
           + ", ".join(f"{k} {v['numba']}/{v['triton']}"
                       for k, v in meta["coop_max_at_tpb"].items()))
+    for name, b in meta["builds_info"].items():
+        n, tr = b["numba"], b["triton"]
+        print(f"  {name:6s}: numba {n['regs']} regs, coop {n['coop_256']} "
+              f"@256 / {n['coop_128']} @128 | triton {tr['regs_256']} regs "
+              f"({tr['spills_256']} spills) coop {tr['coop_256']} @256, "
+              f"{tr['regs_128']} regs ({tr['spills_128']} spills) coop "
+              f"{tr['coop_128']} @128")
     doc = run_cases(CHAPTER, cases, repeats=repeats, meta=meta,
                     write=not args.quick, spin_seconds=spin)
     bad = [r for r in doc["rows"]

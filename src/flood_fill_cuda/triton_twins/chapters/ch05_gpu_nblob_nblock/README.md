@@ -58,7 +58,7 @@ flatten helpers with no barrier, on the Numba driver's `_PLAIN_GRID`.
 | `_find` per-thread while loop | lockstep loop over a lane mask, exit checked every 8 hops | emulated | finished lanes run masked no-ops; the slowest of the program's lanes sets the pace |
 | `_union` while-True with early returns (a real device call) | lane-mask loop (`go`, `retired`), inlined | emulated | same retry-from-returned-value protocol, same termination argument |
 | per-thread `my_*` registers, exit `atomic.add` per thread | per-lane register vectors, one reduction + one atomic per program at exit | exact | totals identical (tested against Numba) |
-| `%clock64` around each in-flight `_union`, summed per thread | `%clock64` around the program's lockstep union, added on each colliding lane | emulated | per-thread meaning kept: a colliding lane is busy for the whole lockstep union |
+| `%clock64` around each in-flight `_union`, summed per thread | `%clock64` around the program's lockstep union, added on each colliding lane | emulated | per-thread meaning kept: a colliding lane is busy for the whole lockstep union. So `union_thread_ms` reads higher than Numba's by construction: compare it within one backend only |
 | `smid.cu` (`%smid`, `%globaltimer`) | inline PTX (`read_smid`, `read_globaltimer`) | exact | |
 | `lat_stride > 0 and x % lat_stride == 0 and ...` (short-circuit) | `hit = red & (lat_stride > 0) & (x % max(lat_stride, 1) == 0) & ...` | exact | lanes evaluate every operand, so the modulo never divides by 0 |
 | `_is_interior` (8 probes, early `return False`) | 8 probes, each masked by the lanes still interior | exact | a failed probe masks the later ones off: the early return's loads |
@@ -78,6 +78,18 @@ flatten helpers with no barrier, on the Numba driver's `_PLAIN_GRID`.
 
 - `threads_per_block` must be a power of 2 (32 ... 512). Numba accepts any
   multiple of 32; the twin raises `ValueError` naming the power-of-2 rule.
+- Grid-stride indices are int32 in the twin (Numba's `range` loops are
+  int64), so the twin also needs `width * height + blocks *
+  threads_per_block < 2**31` (the split build counts its 256 x 256 plain
+  grid too) and raises `ValueError` otherwise. Numba's own limit is
+  `width * height < 2**31`. The gap cannot be reached on an 8 GB GPU:
+  such an image needs about 35 GB of device buffers.
+- Image layout: the twin applies `cuda.to_device`'s own contiguity check
+  (Numba's `sentry_contiguous`, same `ValueError`), so a non-contiguous
+  view is refused on both backends. An F-ordered image is accepted by
+  both; the twin copies it to C order on the host (its kernels index C
+  bytes), where Numba uploads it as is and indexes through its strides.
+  The outputs are equal (tested).
 - Two Triton-only buffers per launch: the grid barrier counter (int64,
   zeroed in the alloc bracket) and the palette.
 - `blocks=None` resolves to the twin's own capacity. On the RTX 4060
@@ -110,7 +122,13 @@ flatten helpers with no barrier, on the Numba driver's `_PLAIN_GRID`.
 - Schedule-dependent outputs differ between backends as they differ
   between Numba runs: queue order, `owner`, `prov_label` at equidistant
   seams, `seed_merge` `union_attempts`, `ccl_fill` `cas_attempts`, smid,
-  timings. Everything else is asserted equal to Numba in the tests.
+  timings. The tests never compare them, nor what is built from them:
+  `model_bytes` / `model_gb_s` (they add those two counters; compared
+  only on a `seed_merge` scene with no unions), `union_cycles` /
+  `union_thread_ms` (emulated, see the mapping table). `blocks`,
+  `thread_util_pct` and `processed_per_block` depend on the grid, so
+  they are compared only with `blocks` and `threads_per_block` pinned;
+  at `blocks=None` each backend runs its own capacity.
 
 ## The cost of the lockstep
 
@@ -162,11 +180,16 @@ images and asserts exact equality of img, visited, depth, label, n_blobs,
 seeds, filled, levels, the level trace and the deterministic counters
 (candidates, union_done, processed, peak_level, peak_occupancy, seed_merge
 family cas_attempts, ccl_fill union_attempts), and with pinned blocks and
-tpb also `processed_per_block` and `thread_util_pct`. It covers both
-variants, both bare twins, every lattice build (fused, bare, r128, split)
-at strides 0, 1, 5, 8, 16 and 32 with and without the interior rule, and
-the discovery-only phase kernels. With `lattice=1` (no interior) even
-`prov_label` is deterministic, and is compared exactly.
+tpb also `blocks`, `processed_per_block` and `thread_util_pct`. It covers
+both variants and both bare twins on eight scenes, the discovery-only
+phase kernels, and every lattice build on five scenes with a sparse set
+of 11 (stride, rule, build) configs, not the full cross product: fused at
+strides 0, 1, 5, 32 plain and 8 interior; bare at 8 plain and 1
+interior; r128 at 1 plain and 8 interior; split at 16 plain and 1
+interior. Each build also runs pinned at stride 8 on three grids, and at
+`blocks=None` (each backend's own capacity) with equal outputs. With
+`lattice=1` (no interior) even `prov_label` is deterministic, and is
+compared exactly.
 
 Comparison (writes `results/triton_twins/ch05_gpu_nblob_nblock/compare_<UTC>.json`;
 never commit it):
@@ -179,17 +202,21 @@ never commit it):
 | `benchmark` | `benchmark.py`: merge, ccl, both bare twins, the scan / cclp probes, all 7 scenes, each pinned to min(Numba, Triton) capacity | 42 |
 | `benchmark_blocks_none` | the same launches at `blocks=None` for the runners whose capacity differs (ccl, merge_bare, ccl_bare) | 18 |
 | `seeding` | `seeding.py`: strides 0, 1, 4, 16, 64, 256, fused build, pinned (Numba's 24-block grid) | 36 |
-| `tuning` | `tuning.py`: fused L8 / I8, r128 and split L1 / L8, `blocks=None` | 36 |
-| `png` | `png_inputs.py`: v1, ccl and the tuning subset on both input PNGs | 16 |
+| `tuning` | `tuning.py`: fused L8 / I8, r128 and split L1 / L8 / I8, `blocks=None` | 48 |
+| `png` | `png_inputs.py`: v1, ccl and the tuning subset on both input PNGs | 20 |
 
-Caps, recorded in the JSON's `meta.caps`: 6 of tuning.py's 53 configs;
+Caps, recorded in the JSON's `meta.caps`: 8 of tuning.py's 53 configs;
 `asym_4000_800` (the largest scene) only in `benchmark`;
 `input_blobs.png` cropped to its top-left 4500 x 4500 quadrant. Rows
 whose `blocks=None` grids differ per backend (all of
-`benchmark_blocks_none`, fused-lattice and ccl rows of `tuning` / `png`)
-are `comparable=false`. Read `speedup_kernel`; `speedup_total` also
-compares the host allocators. The default run is about 14 minutes of GPU
-time (4 repeats, even so each backend goes first equally often) and
-peaks at about 2 GB of host RAM. `--quick` runs every experiment on tiny
-scenes with one repeat and writes nothing. `--experiments a,b` runs a
-subset.
+`benchmark_blocks_none`, the fused-lattice rows of `tuning` and `png`,
+and the ccl rows of `png`) are `comparable=false`. The interior rule's
+like-for-like rows are r128 and split L8 vs I8 (same grid on both
+backends). `meta.builds_info` is tuning.py's register story on both
+backends at tpb 256 and 128. `union_thread_ms` in each row's runs is
+not comparable across backends (emulated, see the mapping table). Read
+`speedup_kernel`; `speedup_total` also compares the host allocators.
+The default run is about 15 minutes of GPU time (4 repeats, even so
+each backend goes first equally often) and peaks at about 2 GB of host
+RAM. `--quick` runs every experiment on tiny scenes with one repeat and
+writes nothing. `--experiments a,b` runs a subset.
