@@ -1,7 +1,7 @@
 """Numba vs Triton for chapter 3, on the chapter's own benchmark experiments.
 
-Four experiments, built from the Numba benchmarks' own scene and config
-lists (imported, so they cannot drift):
+Five experiments, the first four built from the Numba benchmarks' own
+scene and config lists (imported, so they cannot drift):
 
 suite              benchmarks/benchmark.py section 1: every suite scene at
                    tpb=256 with conn4, conn4 bare, conn8 and conn8 bare.
@@ -26,6 +26,18 @@ barrier_work       benchmarks/benchmark_connectivity_and_barrier_work.py:
                    conn4, conn8, r2, wc and the three conn8-family bare
                    twins at tpb=256, all pinned to the minimum capacity over
                    the seven kernels and both backends.
+enqueue            The twin's two enqueue settings against the same Numba
+                   kernel, two rows per cell: config.enqueue "lane" (label
+                   per_lane, the default every other experiment runs) and
+                   "program" (label first_translation, the program-
+                   aggregated enqueue of the first translation). All eight
+                   variants on sq_2000_center, disk_4001_r1900 and
+                   serpentine_256 at the minimum capacity over variants,
+                   backends and settings, plus the first run's worst sweep
+                   cells (one 512-lane program on disk_4001_r1900, conn4
+                   and conn8). first_translation rows are comparable=False:
+                   they measure the first translation's cost and stay out
+                   of the unit's averages.
 
 Every case runs the same configuration on both backends (same tpb =
 num_warps * 32, same explicit program count except in suite_blocks_none)
@@ -49,7 +61,8 @@ the default run under 2 GB of host RAM (1.84 GB peak measured). Every
 other scene, variant and sweep cell is the Numba benchmarks' own. One run
 of every case per backend took 2.3 minutes, so the default (warm-up + 4
 rounds; repeats are kept even so each backend runs first equally often)
-is about 12 minutes of GPU time.
+is about 12 minutes of GPU time, plus about 70 s for the enqueue
+experiment (52 cases, measured).
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock.compare [--quick] [--repeats N]
@@ -72,6 +85,7 @@ from ....shared import bandwidth
 from ...compare.harness import Case, arrays_equal, run_cases, spin_up
 from ...runtime.bandwidth import measure_peak_bandwidth as triton_peak
 from . import flood_fill as triton_ff
+from .kernels import DEFAULT_ENQ, ENQ_MODES
 
 CHAPTER = "ch03_gpu_1blob_nblock"
 # Even, so each backend runs first in half the rounds: the second run of a
@@ -124,6 +138,9 @@ METHOD_NOTES = [
     "sweep 'max' is the common grid min(Numba cap, Triton cap): "
     "extra.is_common_max marks it, extra.is_backend_max says which backend "
     "(if either) is at its own capacity there",
+    "every row's config.enqueue names the twin's enqueue mode: 'lane' (the "
+    "default) everywhere except the enqueue experiment's first_translation "
+    "rows",
 ]
 SCOPE = (
     "benchmark.py also times ch01 v2, ch02 dual-global and the @njit "
@@ -142,6 +159,34 @@ QUICK_SWEEP = ["sq_256_center", "serpentine_64"]
 QUICK_SWEEP_CONN8 = ["sq_256_center"]
 QUICK_TPB = [32, 256]
 QUICK_BLOCKS = [1, 8, "max"]
+
+# ------------------------------------------------------ enqueue experiment
+# The twin's enqueue in both settings against the same Numba run: per lane
+# (the default, warp-aggregated by ptxas like Numba's helper) and per
+# program (the first translation). Every variant on three of the barrier
+# benchmark's scenes at its pinned grid, plus the sweep's worst cells of
+# the first run (one 512-lane program on the 11.3M-px disk, x0.57-0.58).
+
+ENQ_LABELS = {"lane": "per_lane", "program": "first_translation"}
+assert set(ENQ_LABELS) == set(ENQ_MODES)
+ENQUEUE_SCENES = ["sq_2000_center", "disk_4001_r1900", "serpentine_256"]
+assert set(ENQUEUE_SCENES) <= {n for n, _, _ in nb_barrier.SCENES}
+# (scene, variant, tpb, blocks)
+ENQUEUE_LOW_GRID = [("disk_4001_r1900", "conn4", 512, 1),
+                    ("disk_4001_r1900", "conn8", 512, 1)]
+QUICK_ENQUEUE_SCENES = ["sq_256_center", "serpentine_64"]
+QUICK_ENQUEUE_LOW_GRID = [("sq_256_center", "conn4", 512, 1),
+                          ("sq_256_center", "conn8", 512, 1)]
+ENQUEUE_NOTE = (
+    "enqueue: two rows per (scene, variant, grid), config.enqueue 'lane' "
+    "(label per_lane: the twin's default, one relaxed atomic per claiming "
+    "lane, which ptxas warp-aggregates into the SASS of Numba's "
+    "_warp_enqueue_global) and 'program' (label first_translation: tl.sum + "
+    "tl.cumsum over the program and one atomic per program per direction, "
+    "7 CTA barriers per enqueue site in SASS). Both rows time the same "
+    "Numba kernel. first_translation rows are comparable=false, so the "
+    "unit's averages describe the default twin only; their speedups are "
+    "the measured cost of the first translation")
 
 
 class SceneSlot:
@@ -176,14 +221,16 @@ class SceneSlot:
 
 # ---------------------------------------------------------- per-backend facts
 
-def caps(name, tpb):
-    """Co-resident capacity of one variant at one tpb, per backend."""
+def caps(name, tpb, enqueue=DEFAULT_ENQ):
+    """Co-resident capacity of one variant at one tpb, per backend (the
+    Triton one for the given enqueue mode)."""
     kw = VARIANTS[name]
     return {"numba": numba_ff.max_blocks(threads_per_block=tpb, **kw),
-            "triton": triton_ff.max_blocks(threads_per_block=tpb, **kw)}
+            "triton": triton_ff.max_blocks(threads_per_block=tpb,
+                                           enqueue=enqueue, **kw)}
 
 
-def resources(name, tpb):
+def resources(name, tpb, enqueue=DEFAULT_ENQ):
     """Registers and friends of both compiled kernels (compiles if needed)."""
     kw = VARIANTS[name]
     key = (kw.get("bare", False), kw.get("connectivity", 4),
@@ -191,7 +238,8 @@ def resources(name, tpb):
     numba_ff.max_blocks(threads_per_block=tpb, **kw)
     numba_kernel = numba_ff._KERNELS[key]
     return {
-        "triton_resources": triton_ff.kernel_info(threads_per_block=tpb, **kw),
+        "triton_resources": triton_ff.kernel_info(threads_per_block=tpb,
+                                                  enqueue=enqueue, **kw),
         "numba_resources": {
             "n_regs": _one(numba_kernel.get_regs_per_thread()),
             "shared_bytes": _one(numba_kernel.get_shared_mem_per_block()),
@@ -261,12 +309,15 @@ def info(n, t):
 
 
 def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
-              grid_of=None, extra=None):
+              grid_of=None, extra=None, enqueue=DEFAULT_ENQ):
     """One cell: same scene, same kwargs, same grid on both backends.
     blocks=None lets each backend resolve its own grid: both resolved sizes
-    go into the config, and the row is comparable only if they agree."""
+    go into the config, and the row is comparable only if they agree.
+    enqueue picks the Triton twin's enqueue mode (config["enqueue"]); a
+    "program" row is the first translation, labelled and kept out of the
+    averages (see ENQUEUE_NOTE)."""
     kw = {**VARIANTS[name], "threads_per_block": tpb, "blocks": blocks}
-    c = caps(name, tpb)
+    c = caps(name, tpb, enqueue)
 
     def run_numba():
         img, sx, sy = slot.get(scene)
@@ -274,25 +325,27 @@ def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
 
     def run_triton():
         img, sx, sy = slot.get(scene)
-        return triton_ff.flood_fill(img, sx, sy, **kw)
+        return triton_ff.flood_fill(img, sx, sy, enqueue=enqueue, **kw)
 
     config = {"variant": name, **VARIANTS[name], "tpb": tpb,
               "num_warps": tpb // 32,
-              "blocks": "None" if blocks is None else int(blocks)}
+              "blocks": "None" if blocks is None else int(blocks),
+              "enqueue": enqueue, "label": ENQ_LABELS[enqueue]}
     if blocks is None:
         resolved = dict(c)
     else:
         resolved = {"numba": int(blocks), "triton": int(blocks)}
     config["resolved_blocks"] = resolved
     equal_grid = resolved["numba"] == resolved["triton"]
-    row_extra = {"caps": c, **resources(name, tpb), **(extra or {})}
+    row_extra = {"caps": c, **resources(name, tpb, enqueue), **(extra or {})}
     if grid_of:
         row_extra["grid_of"] = grid_of
     return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=run_numba, run_triton=run_triton,
                 same=make_same(name, pinned=equal_grid),
                 pixels=slot.pixels(scene), info=info,
-                notes=notes, extra=row_extra, comparable=equal_grid)
+                notes=notes, extra=row_extra,
+                comparable=equal_grid and enqueue == DEFAULT_ENQ)
 
 
 # -------------------------------------------------------------- experiments
@@ -352,6 +405,35 @@ def barrier_cases(slot, scene_list, tpb):
     return out, all_caps, pin
 
 
+def enqueue_cases(slot, scene_list, low_grid, tpb, notes):
+    """Both enqueue settings of every variant at one pinned grid (the
+    minimum capacity over the variants, both backends and both settings),
+    then the low-grid cells. Scene-grouped, lane row first."""
+    names = list(VARIANTS)
+    all_caps = {n: {e: caps(n, tpb, e) for e in ENQ_MODES} for n in names}
+    pin = min(v for c in all_caps.values() for e in c.values()
+              for v in e.values())
+    out = []
+    order = list(scene_list) + [s for s, _, _, _ in low_grid
+                                if s not in scene_list]
+    for sname in dict.fromkeys(order):
+        if sname in scene_list:
+            for name in names:
+                for enq in ENQ_MODES:
+                    out.append(make_case("enqueue", slot, sname, name, tpb,
+                                         pin, notes=notes.get(sname, ""),
+                                         enqueue=enq))
+        for s, name, ltpb, blocks in low_grid:
+            if s != sname:
+                continue
+            for enq in ENQ_MODES:
+                out.append(make_case(
+                    "enqueue", slot, sname, name, ltpb, blocks,
+                    notes="the first run's worst sweep cell: one program",
+                    enqueue=enq))
+    return out, all_caps, pin
+
+
 def build(quick):
     """All cases plus the meta block, in scene-grouped order."""
     if quick:
@@ -360,6 +442,7 @@ def build(quick):
                         + [(s, 8) for s in QUICK_SWEEP_CONN8])
         tpbs, blocks_axis = QUICK_TPB, QUICK_BLOCKS
         barrier_list = QUICK_SUITE
+        enq_scenes, enq_low = QUICK_ENQUEUE_SCENES, QUICK_ENQUEUE_LOW_GRID
     else:
         suite_list = [s for s in nb_bench.SCENES if s[0] not in DROPPED_SCENES]
         sweep_passes = ([(s, 4) for s in nb_bench.SWEEP_SCENES]
@@ -367,6 +450,7 @@ def build(quick):
         tpbs, blocks_axis = nb_bench.TPB_SWEEP, nb_bench.BLOCKS_SWEEP
         barrier_list = [s for s in nb_barrier.SCENES
                         if s[0] not in DROPPED_SCENES]
+        enq_scenes, enq_low = ENQUEUE_SCENES, ENQUEUE_LOW_GRID
 
     builders = {n: b for n, b, _ in suite_list + barrier_list}
     for n, b, _ in nb_bench.SCENES:
@@ -380,11 +464,15 @@ def build(quick):
     cases += sweep_cases(slot, sweep_passes, tpbs, blocks_axis, skipped)
     bcases, bcaps, bpin = barrier_cases(slot, barrier_list, tpb)
     cases += bcases
+    ecases, ecaps, epin = enqueue_cases(
+        slot, enq_scenes, enq_low, tpb,
+        {n: note for n, _, note in suite_list + barrier_list})
+    cases += ecases
     slot.release()  # the cases rebuild each scene when they run
 
     meta = {
         "caps": [] if quick else CAPS,
-        "method_notes": METHOD_NOTES,
+        "method_notes": METHOD_NOTES + [ENQUEUE_NOTE],
         "quick": quick,
         "scope": SCOPE,
         "skipped_cells": skipped,
@@ -394,6 +482,15 @@ def build(quick):
         },
         "barrier_work": {"tpb": tpb, "pinned_blocks": bpin,
                          "coop_max_by_config": bcaps},
+        "enqueue": {"tpb": tpb, "pinned_blocks": epin,
+                    "scenes": enq_scenes,
+                    "low_grid_cells": [
+                        {"scene": s, "variant": v, "tpb": t, "blocks": b}
+                        for s, v, t, b in enq_low],
+                    "coop_max_by_config_and_enqueue": ecaps,
+                    "labels": ENQ_LABELS, "default": DEFAULT_ENQ,
+                    "note": ENQUEUE_NOTE},
+        "triton_enqueue_default": DEFAULT_ENQ,
         "suite_tpb": tpb,
         "sweep": {"tpb_sweep": tpbs,
                   "blocks_sweep": [str(b) for b in blocks_axis],
