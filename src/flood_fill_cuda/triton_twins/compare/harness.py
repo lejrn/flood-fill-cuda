@@ -11,7 +11,9 @@ the same thing:
 2. Run ``repeats`` rounds. Each round runs both backends back to back, and
    the order flips every round (N T, T N, N T, ...). This laptop's clocks
    drift by up to 8% between sessions, so timing one backend's runs
-   after the other's would mostly measure the drift.
+   after the other's would mostly measure the drift. An odd count is
+   rounded up to the next even one, so each backend goes first equally
+   often.
 3. Re-check output equality on every timed run, not only the first.
 4. Report the median and min of the drivers' own ``kernel_ms`` and
    ``total_ms``: the repo's perf_counter + synchronize convention, which
@@ -24,6 +26,16 @@ right after it. Between cases both runtimes' memory pools are released:
 VRAM is shared by Numba and CuPy, and the host has 6 GB.
 
 ``speedup`` is numba_ms / triton_ms: above 1 means Triton is faster.
+
+kernel_ms is the primary comparison. total_ms adds allocation and copies,
+and those go through each stack's own allocator: CuPy's pool returns a
+warm block almost for free, while Numba's device_array calls cuMemAlloc
+every time. So speedup_total compares host stacks as much as backends.
+
+A case whose two sides cannot be like-for-like (different thread counts,
+grids that resolve differently per backend) sets ``comparable=False``:
+the row is still measured and written, but the summary leaves it out of
+the averages and extremes.
 
 The JSON lands in results/triton_twins/<chapter>/compare_<UTC stamp>.json.
 """
@@ -67,6 +79,8 @@ class Case:
     info: Callable[[Any, Any], dict] | None = None
     notes: str = ""
     extra: dict = field(default_factory=dict)
+    # False when the two sides are not like-for-like; see the module doc.
+    comparable: bool = True
 
 
 def _stats(values):
@@ -150,12 +164,14 @@ def spin_up(seconds: float = 8.0):
 def run_case(case: Case, repeats: int) -> dict:
     """Measure one case. Never raises for a backend failure: the row records
     the error instead, so one bad cell cannot sink a whole sweep."""
+    repeats = repeats + (repeats % 2)  # each backend first equally often
     row = {
         "experiment": case.experiment,
         "scene": case.scene,
         "pixels": case.pixels,
         "config": case.config,
         "notes": case.notes,
+        "comparable": case.comparable,
         **case.extra,
     }
     try:
@@ -214,6 +230,7 @@ def run_cases(chapter: str, cases: list[Case], repeats: int,
     from flood_fill_cuda.triton_twins.runtime import device_info
 
     dev = device_info()
+    repeats = repeats + (repeats % 2)
     clocks_before = gpu_clocks()
     if spin_seconds > 0:
         spin_up(spin_seconds)
@@ -249,7 +266,10 @@ def run_cases(chapter: str, cases: list[Case], repeats: int,
             "flipping each round (N,T then T,N); outputs compared on every "
             "run. kernel_ms/total_ms are each driver's own perf_counter + "
             "synchronize measurements, launch overhead included. "
-            "speedup = numba_ms / triton_ms (>1: Triton faster)."),
+            "speedup = numba_ms / triton_ms (>1: Triton faster). kernel_ms "
+            "is primary; total_ms also compares the allocators (CuPy pool vs "
+            "Numba cuMemAlloc). Rows with comparable=false are not "
+            "like-for-like and stay out of the summary's averages."),
         "meta": meta or {},
         "rows": rows,
     }

@@ -62,3 +62,15 @@ def test_failure_in_a_timed_round_is_recorded():
     ok = _backend(1.0, [], "T", [1])
     row = run_case(Case("e", "s", {}, flaky, ok, _same), repeats=2)
     assert "timed round failed" in row["error"]
+
+
+def test_odd_repeats_round_up_so_each_backend_leads_equally():
+    log = []
+    case = Case("e", "s", {}, _backend(1.0, log, "N", [1]),
+                _backend(1.0, log, "T", [1]), _same, comparable=False)
+    row = run_case(case, repeats=3)
+    assert len(row["numba"]["kernel_ms"]["samples"]) == 4
+    rounds = log[2:]
+    firsts = rounds[0::2]
+    assert firsts.count("N") == firsts.count("T") == 2
+    assert row["comparable"] is False
