@@ -506,10 +506,13 @@ def test_twin_rejects_multiple_of_32_rule_like_numba():
 def test_twin_read_write_probes_measure_real_bandwidth():
     """The Triton twins of benchmark.py's read/write peak probes report
     a real DRAM bandwidth (64 MiB is past the L2), not a deleted read.
-    Median of 5, so two stalled launches (a WSL hiccup) cannot fail it."""
+    Median of 5, best of two attempts: one full-suite run measured a
+    13.9 GB/s read (a WSL stall), while the same probe alone reads ~194."""
     from .compare import measure_read_write_peaks_triton
-    read_gb_s, write_gb_s = measure_read_write_peaks_triton(64 * 2 ** 20,
-                                                            repeats=5)
+    attempts = [measure_read_write_peaks_triton(64 * 2 ** 20, repeats=5)
+                for _ in range(2)]
+    read_gb_s = max(a[0] for a in attempts)
+    write_gb_s = max(a[1] for a in attempts)
     assert 20 < read_gb_s < 1000
     assert 20 < write_gb_s < 1000
 
