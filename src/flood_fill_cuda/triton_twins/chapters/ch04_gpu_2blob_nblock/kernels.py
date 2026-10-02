@@ -14,8 +14,11 @@ twin families:
 The ten Numba kernels ({lin, xy} x {instrumented, bare} x {4, 8}-conn, plus
 the guarded radius-2 pair, lin 8-conn only) keep their names and argument
 lists here. Each is a thin @triton.jit wrapper around one body,
-``_dual_blob``, whose constexpr flags (FMT, CONN, RADIUS, INSTR) pick the
-variant. A constexpr ``if`` is resolved while compiling, so every Numba
+``_dual_blob``, whose constexpr flags (FMT, CONN, RADIUS, INSTR, ENQ) pick
+the variant. ENQ is a twin-only constexpr with a default ("lane"), so the
+Numba argument lists are unchanged; ENQ="program" compiles the first
+translation's program-aggregated enqueue, kept so its cost stays
+measurable. A constexpr ``if`` is resolved while compiling, so every Numba
 kernel has its own binary and the bare twins carry none of the
 instrumentation code (no owner map, no per-lane counters, no level trace,
 no %smid read).
@@ -33,9 +36,16 @@ T // 32, lane i plays thread i):
                               the same exactly-once claim on a 0/1 flag,
                               relaxed like Numba's atom.cas (Triton's CAS
                               takes no mask)
-- _warp_enqueue_global     -> _block_enqueue_global: aggregated per program
-                              (tl.sum + tl.cumsum + one atomic), because
-                              Triton has no activemask/popc/shfl
+- _warp_enqueue_global     -> ENQ="lane" (default): _lane_enqueue_global, one
+                              relaxed tl.atomic_add(rear, 1) per winning
+                              lane. ptxas warp-aggregates it (VOTEU.ANY,
+                              FLO + POPC, one leader ATOMG.E.ADD, SHFL.IDX),
+                              the machine code of Numba's hand-written
+                              activemask/popc/shfl helper.
+                              ENQ="program" (the first translation):
+                              _block_enqueue_global, tl.sum + tl.cumsum
+                              over the program and one atomic; the scan
+                              adds CTA barriers Numba never had
 - per-thread int64 counters + exit atomics
                            -> per-lane int64 tensors + the same per-lane
                               atomics at exit
@@ -107,6 +117,11 @@ Q_REAR = 0
 FMT_LIN = 0
 FMT_XY = 1
 
+# ENQ constexpr values: the enqueue helper each kernel compiles with
+ENQ_LANE = "lane"          # default: per-lane atomic, warp-aggregated by ptxas
+ENQ_PROGRAM = "program"    # the first translation: tl.sum + tl.cumsum
+ENQ_MODES = (ENQ_LANE, ENQ_PROGRAM)
+
 # Device-side twins of the const arrays: compile-time tuples, so every
 # offset and color folds into an immediate.
 DX4 = tl.constexpr(tuple(int(v) for v in DX_HOST))
@@ -158,16 +173,46 @@ def _is_red(img_ptr, pix, inb):
 
 
 @triton.jit
+def _lane_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap, item,
+                         won):
+    """Per-lane append on a global rear counter (ENQ="lane", the default).
+
+    Every winning lane takes its own ticket with one relaxed atomic on the
+    rear and writes its item at the slot the atomic returned. The address
+    is uniform and the operand is the constant 1, so ptxas compiles the
+    atomic warp-aggregated: VOTEU.ANY collects the active lanes, FLO picks
+    the leader and POPC counts them, the leader issues one ATOMG.E.ADD of
+    that count, SHFL.IDX broadcasts the old rear and each lane adds its
+    rank (POPC of the active mask below it). That is the SASS
+    of Numba's _warp_enqueue_global (activemask, popc, leader atomic,
+    shfl), with no CTA barrier and no lockstep across warps. Tickets are
+    the same set of slots as Numba's (one per winner, in some order); the
+    bound check is the same defensive tripwire.
+    """
+    same = item * 0  # keeps the rear pointer a per-lane tensor
+    idx = tl.atomic_add(q_state_ptr + _Q_REAR + same, 1, mask=won,
+                        sem="relaxed", scope="gpu")
+    tl.store(queue_ptr + idx, item, mask=won & (idx < qcap))
+    # unreachable by the structural argument
+    tl.store(counters_ptr + _OVERFLOW + same, (same + 1).to(tl.int64),
+             mask=won & (idx >= qcap))
+
+
+@triton.jit
 def _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap, item,
                           won):
-    """Program-aggregated append on a global rear counter (one atomic per
-    program, the twin of the warp-aggregated helper).
+    """Program-aggregated append on a global rear counter (ENQ="program",
+    the first translation: one atomic per program).
 
     The winning lanes are ranked by an exclusive prefix sum; one relaxed
     atomic reserves a slab of ``count`` slots and its result reaches every
     lane. The scan stays unconditional (Triton 3.7 miscompiles a scan
     inside an ``if``); only the atomic is masked, and a program with no
     winner issues none. The bound check is the same defensive tripwire.
+    The sum and scan run across the program's warps through shared
+    memory, so every call adds CTA barriers (BAR.SYNC) that hold the
+    program's warps in lockstep direction by direction; Numba's warp
+    helper has none. Kept selectable to measure that cost.
     """
     w = won.to(tl.int32)
     rank = tl.cumsum(w, 0) - w
@@ -183,12 +228,14 @@ def _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap, item,
 
 @triton.jit
 def _probe(img_ptr, visited_ptr, queue_ptr, q_state_ptr, counters_ptr, qcap,
-           nx, ny, width64, height64, lbl, active, FMT: tl.constexpr):
+           nx, ny, width64, height64, lbl, active, FMT: tl.constexpr,
+           ENQ: tl.constexpr):
     """One neighbor per lane: bounds -> is_red -> claim -> enqueue.
 
     Returns (inb, red, npix): the in-bounds mask, the lanes that found the
     neighbor red (each tried one claim, the CAS_ATTEMPTS unit) and the
-    neighbor's linear index.
+    neighbor's linear index. ENQ picks the enqueue helper (see
+    _lane_enqueue_global and _block_enqueue_global).
     """
     inb = active & (nx >= 0) & (nx < width64) & (ny >= 0) & (ny < height64)
     npix = nx * height64 + ny
@@ -201,8 +248,13 @@ def _probe(img_ptr, visited_ptr, queue_ptr, q_state_ptr, counters_ptr, qcap,
     else:
         item = ((lbl.to(tl.int64) << _XY_LBL_SHIFT)
                 | (nx << _XY_FIELD_BITS) | ny).to(tl.int32)
-    _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap, item,
-                          won)
+    if ENQ == "lane":
+        _lane_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap,
+                             item, won)
+    else:
+        tl.static_assert(ENQ == "program", "ENQ must be 'lane' or 'program'")
+        _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap,
+                              item, won)
     return inb, red, npix
 
 
@@ -211,9 +263,10 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
                q_state_ptr, counters_ptr, block_stats_ptr, level_sizes_ptr,
                n_seeds, bar_ptr, width, height, qcap, trace_cap,
                FMT: tl.constexpr, CONN: tl.constexpr, RADIUS: tl.constexpr,
-               INSTR: tl.constexpr, BLOCK: tl.constexpr):
+               INSTR: tl.constexpr, BLOCK: tl.constexpr, ENQ: tl.constexpr):
     """One shared global queue of label-packed entries; every program
-    grid-strides each level window.
+    grid-strides each level window. ENQ ("lane" or "program") picks the
+    enqueue helper; nothing else depends on it.
 
     Host contract (the Numba kernels' own): launch (blocks,) programs of
     BLOCK lanes cooperatively; visited[seed]=1 for every seed,
@@ -293,7 +346,7 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
                 inb, red, npix = _probe(
                     img_ptr, visited_ptr, queue_ptr, q_state_ptr,
                     counters_ptr, qcap, nx, ny, width64, height64, lbl,
-                    valid, FMT)
+                    valid, FMT, ENQ)
                 if INSTR:
                     my_cas_attempts += red.to(tl.int64)
                 if RADIUS == 2:
@@ -308,8 +361,11 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
                 if INSTR:
                     my_interior += interior.to(tl.int64)
                 # Numba's divergent `if interior:` skips ring 2 per warp;
-                # here per program, as a 0/1-trip loop so the enqueue's
-                # scan is never inside an if.
+                # here per program (structural: Triton has no per-warp
+                # branch), as a 0/1-trip loop so the program enqueue's
+                # scan is never inside an if. The gate itself is a
+                # program-wide tl.max, under both ENQ settings, so the two
+                # differ in the enqueue only.
                 any_interior = tl.max(interior.to(tl.int32), axis=0)
                 for _ring2 in range(0, any_interior):
                     for d in tl.static_range(16):
@@ -318,7 +374,7 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
                         inb2, red2, npix2 = _probe(
                             img_ptr, visited_ptr, queue_ptr, q_state_ptr,
                             counters_ptr, qcap, x + DX_R2[d], y + DY_R2[d],
-                            width64, height64, lbl, interior, FMT)
+                            width64, height64, lbl, interior, FMT, ENQ)
                         if INSTR:
                             my_cas_attempts += red2.to(tl.int64)
 
@@ -366,7 +422,9 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
 # barrier counter and the sizes Numba reads from the arrays' shapes. Bare
 # twins take Numba's (img, visited, depth, queue, q_state, counters,
 # n_seeds) plus the same extras; their unused instrumentation pointers are
-# filled with `counters`, and the code reading them is compiled out.
+# filled with `counters`, and the code reading them is compiled out. Every
+# wrapper also takes the twin-only ENQ constexpr ("lane" by default,
+# "program" for the first translation's enqueue).
 
 # ===================================================== lin entry family
 
@@ -375,38 +433,39 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
 def dual_blob_lin_kernel(img, visited, depth, owner, queue, q_state,
                          counters, block_stats, level_sizes, n_seeds, bar,
                          width, height, qcap, trace_cap,
-                         BLOCK: tl.constexpr):
+                         BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, owner, queue, q_state, counters,
                block_stats, level_sizes, n_seeds, bar, width, height, qcap,
-               trace_cap, 0, 4, 1, True, BLOCK)
+               trace_cap, 0, 4, 1, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS_BARE)
 def dual_blob_lin_bare_kernel(img, visited, depth, queue, q_state, counters,
                               n_seeds, bar, width, height, qcap,
-                              BLOCK: tl.constexpr):
+                              BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, counters, queue, q_state, counters,
                counters, counters, n_seeds, bar, width, height, qcap, 0,
-               0, 4, 1, False, BLOCK)
+               0, 4, 1, False, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS)
 def dual_blob_lin8_kernel(img, visited, depth, owner, queue, q_state,
                           counters, block_stats, level_sizes, n_seeds, bar,
                           width, height, qcap, trace_cap,
-                          BLOCK: tl.constexpr):
+                          BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, owner, queue, q_state, counters,
                block_stats, level_sizes, n_seeds, bar, width, height, qcap,
-               trace_cap, 0, 8, 1, True, BLOCK)
+               trace_cap, 0, 8, 1, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS_BARE)
 def dual_blob_lin8_bare_kernel(img, visited, depth, queue, q_state, counters,
                                n_seeds, bar, width, height, qcap,
-                               BLOCK: tl.constexpr):
+                               BLOCK: tl.constexpr,
+                               ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, counters, queue, q_state, counters,
                counters, counters, n_seeds, bar, width, height, qcap, 0,
-               0, 8, 1, False, BLOCK)
+               0, 8, 1, False, BLOCK, ENQ)
 
 
 # ------------------------------------- radius-2 twins (guarded, lin only)
@@ -416,19 +475,20 @@ def dual_blob_lin8_bare_kernel(img, visited, depth, queue, q_state, counters,
 def dual_blob_lin8r2_kernel(img, visited, depth, owner, queue, q_state,
                             counters, block_stats, level_sizes, n_seeds, bar,
                             width, height, qcap, trace_cap,
-                            BLOCK: tl.constexpr):
+                            BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, owner, queue, q_state, counters,
                block_stats, level_sizes, n_seeds, bar, width, height, qcap,
-               trace_cap, 0, 8, 2, True, BLOCK)
+               trace_cap, 0, 8, 2, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS_BARE)
 def dual_blob_lin8r2_bare_kernel(img, visited, depth, queue, q_state,
                                  counters, n_seeds, bar, width, height, qcap,
-                                 BLOCK: tl.constexpr):
+                                 BLOCK: tl.constexpr,
+                                 ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, counters, queue, q_state, counters,
                counters, counters, n_seeds, bar, width, height, qcap, 0,
-               0, 8, 2, False, BLOCK)
+               0, 8, 2, False, BLOCK, ENQ)
 
 
 # ====================================================== xy entry family
@@ -438,35 +498,35 @@ def dual_blob_lin8r2_bare_kernel(img, visited, depth, queue, q_state,
 def dual_blob_xy_kernel(img, visited, depth, owner, queue, q_state,
                         counters, block_stats, level_sizes, n_seeds, bar,
                         width, height, qcap, trace_cap,
-                        BLOCK: tl.constexpr):
+                        BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, owner, queue, q_state, counters,
                block_stats, level_sizes, n_seeds, bar, width, height, qcap,
-               trace_cap, 1, 4, 1, True, BLOCK)
+               trace_cap, 1, 4, 1, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS_BARE)
 def dual_blob_xy_bare_kernel(img, visited, depth, queue, q_state, counters,
                              n_seeds, bar, width, height, qcap,
-                             BLOCK: tl.constexpr):
+                             BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, counters, queue, q_state, counters,
                counters, counters, n_seeds, bar, width, height, qcap, 0,
-               1, 4, 1, False, BLOCK)
+               1, 4, 1, False, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS)
 def dual_blob_xy8_kernel(img, visited, depth, owner, queue, q_state,
                          counters, block_stats, level_sizes, n_seeds, bar,
                          width, height, qcap, trace_cap,
-                         BLOCK: tl.constexpr):
+                         BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, owner, queue, q_state, counters,
                block_stats, level_sizes, n_seeds, bar, width, height, qcap,
-               trace_cap, 1, 8, 1, True, BLOCK)
+               trace_cap, 1, 8, 1, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS_BARE)
 def dual_blob_xy8_bare_kernel(img, visited, depth, queue, q_state, counters,
                               n_seeds, bar, width, height, qcap,
-                              BLOCK: tl.constexpr):
+                              BLOCK: tl.constexpr, ENQ: tl.constexpr = "lane"):
     _dual_blob(img, visited, depth, counters, queue, q_state, counters,
                counters, counters, n_seeds, bar, width, height, qcap, 0,
-               1, 8, 1, False, BLOCK)
+               1, 8, 1, False, BLOCK, ENQ)
