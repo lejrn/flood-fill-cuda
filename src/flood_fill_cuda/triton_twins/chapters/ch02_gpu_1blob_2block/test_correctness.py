@@ -694,23 +694,59 @@ def test_enqueue_modes_agree_at_tpb_extremes(tpb, kernel, numba_ff):
         _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, False)
 
 
-def test_enqueue_modes_spill_tiers_match_numba(numba_ff):
-    """A blob in the left half only, big enough to overflow program 0's
-    8192-slot ring (two-level occupancy ~9,400). No seam race can move a
-    pixel between tiers, so the spill counters are deterministic: Numba,
-    lane and program must report the same nonzero spill, the same peak
-    spill window, and stay reference-exact through the spill tier. Under
-    enqueue="lane" the ring rear overshoots by the spilled tickets every
-    spilling level and is clamped back at the level end."""
+def _one_half_spill_scene(side):
+    """offcenter_blob_scene(4800, 2400, 2350): a blob in program 0's half
+    only, big enough to overflow its 8192-slot ring (two-level occupancy
+    ~9,400). side="right" mirrors it along x (seed x -> width-1-x), so the
+    blob, the work and the spill all move to program 1 and its own rear
+    slots (g_state[G_OWN_REARS + G_OWN_STRIDE + 0/1] under "lane")."""
     img, sx, sy = scenes.offcenter_blob_scene(4800, 2400, 2350)
-    n = numba_ff.flood_fill(img, sx, sy, kernel="split")
-    assert n.spilled_b0 > 0 and n.spilled_b1 == 0
+    if side == "right":
+        img = np.ascontiguousarray(img[::-1])
+        sx = img.shape[0] - 1 - sx
+    return img, sx, sy
+
+
+SPILL_COUNTERS = ("spilled", "spilled_b0", "spilled_b1", "peak_spill_window",
+                  "inbox_to_b0", "inbox_to_b1")
+
+
+@pytest.mark.parametrize("tpb", [32, 256, 512])
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_enqueue_modes_spill_tiers_match_numba(side, tpb, numba_ff):
+    """One program works and its ring overflows. No seam race can move a
+    pixel between tiers, so the spill counters are deterministic: Numba,
+    lane and program must report the same nonzero spill on the working
+    program, none on the other, the same peak spill window, and stay
+    reference-exact through the spill tier. Under enqueue="lane" the ring
+    rear overshoots by the spilled tickets every spilling level and is
+    clamped back at the level end. tpb 32 and 512 move the warps that
+    straddle the ring window."""
+    img, sx, sy = _one_half_spill_scene(side)
+    n = numba_ff.flood_fill(img, sx, sy, threads_per_block=tpb, kernel="split")
+    busy, idle = (("spilled_b0", "spilled_b1") if side == "left"
+                  else ("spilled_b1", "spilled_b0"))
+    assert getattr(n, busy) > 0 and getattr(n, idle) == 0
     for enqueue in ENQUEUE_MODES:
-        t = flood_fill(img, sx, sy, kernel="split", enqueue=enqueue)
+        t = flood_fill(img, sx, sy, threads_per_block=tpb, kernel="split",
+                       enqueue=enqueue)
         _assert_same_as_numba_and_reference(img, sx, sy, n, t, "split", False)
-        for name in ("spilled", "spilled_b0", "spilled_b1",
-                     "peak_spill_window", "inbox_to_b0", "inbox_to_b1"):
+        for name in SPILL_COUNTERS:
             assert getattr(t, name) == getattr(n, name), (enqueue, name)
+        del t
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_enqueue_modes_bare_split_through_spill_tier(side, numba_ff):
+    """The bare split specialization (no counters) through the same spill
+    tier, both enqueue modes: every output equals Numba's bare kernel and
+    the CPU oracle."""
+    img, sx, sy = _one_half_spill_scene(side)
+    n = numba_ff.flood_fill(img, sx, sy, kernel="split", bare=True)
+    for enqueue in ENQUEUE_MODES:
+        t = flood_fill(img, sx, sy, kernel="split", bare=True,
+                       enqueue=enqueue)
+        _assert_same_as_numba_and_reference(img, sx, sy, n, t, "split", True)
         del t
 
 
@@ -718,6 +754,69 @@ def test_enqueue_bad_mode_raises():
     img, sx, sy = scenes.square_scene(64, 64, 20, 20)
     with pytest.raises(ValueError, match="enqueue"):
         flood_fill(img, sx, sy, enqueue="warp")
+
+
+def test_enqueue_default_is_lane(monkeypatch):
+    """Every default is the lane form: the host API's keyword defaults, the
+    kernels' ENQ constexpr defaults, and a call that names no enqueue warms
+    up (and so launches, with the same enqueue) the lane build of every
+    kernel. Flipping any one default to "program" fails here."""
+    import inspect
+    import sys
+    from . import kernels as K
+    ff_mod = sys.modules[flood_fill.__module__]
+    for fn in (ff_mod.flood_fill, ff_mod.compiled_kernel, ff_mod.launch_grid,
+               ff_mod._warmup):
+        assert inspect.signature(fn).parameters["enqueue"].default == "lane"
+    for kern in (K.dual_block_global_kernel, K.dual_block_split_kernel,
+                 K.dual_block_dirsplit_kernel, K.dual_block_pinned_kernel):
+        assert inspect.signature(kern.fn).parameters["ENQ"].default == "lane"
+    assert ff_mod.ENQUEUE_MODES[0] == "lane"
+
+    seen = []
+    real_warmup = ff_mod._warmup
+
+    def spy(kernel, bare, tpb, enqueue="lane"):
+        seen.append((kernel, enqueue))
+        return real_warmup(kernel, bare, tpb, enqueue)
+
+    monkeypatch.setattr(ff_mod, "_warmup", spy)
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    for kernel in KERNELS:
+        flood_fill(img, sx, sy, kernel=kernel)
+    flood_fill(img, sx, sy, kernel="pinned", threads_per_block=PINNED_TPB,
+               placement="spread")
+    assert {k for k, _ in seen} == set(KERNELS) | {"pinned"}, seen
+    assert {e for _, e in seen} == {"lane"}, seen
+
+
+def test_enqueue_bad_mode_refused_by_compiled_kernel_and_launch_grid():
+    """compiled_kernel and launch_grid refuse what flood_fill refuses, so no
+    kernel is ever compiled or cached under an unknown mode."""
+    from .flood_fill import compiled_kernel, launch_grid
+    with pytest.raises(ValueError, match="enqueue"):
+        compiled_kernel("split", False, 256, "warp")
+    with pytest.raises(ValueError, match="enqueue"):
+        launch_grid("pinned", "same_sm", PINNED_TPB, False, "warp")
+
+
+def test_kernel_static_assert_rejects_unknown_enqueue():
+    """Below the host checks, the kernels' tl.static_assert on ENQ (in the
+    _enqueue_global helper every kernel calls) refuses to compile an
+    unknown mode instead of taking the "program" branch. Triton reports a
+    helper's failure as a CompilationError at the call site, caused by the
+    CompileTimeAssertionFailure."""
+    from triton.compiler.errors import (CompilationError,
+                                        CompileTimeAssertionFailure)
+    from .flood_fill import _warmup
+    with pytest.raises(CompilationError) as info:
+        _warmup("global", True, 256, "warp")
+    chain, exc = [], info.value
+    while exc is not None and len(chain) < 16:
+        chain.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    assert any(isinstance(e, CompileTimeAssertionFailure) and
+               "ENQ must be" in str(e) for e in chain), chain
 
 
 # ---------------------------------------------------------- SASS evidence
@@ -741,6 +840,14 @@ NVDISASM = _find_nvdisasm()
 # per-lane append sites per kernel: 4 directions x (global queue | ring
 # ticket + spill ticket + inbox), pinned shares global's 4
 LANE_APPEND_SITES = {"global": 4, "dirsplit": 4, "split": 12, "pinned": 4}
+
+# (kernel, bare, tpb): every kernel at the benchmark's tpb, plus one-warp
+# programs (tpb 32) for global and split
+ENQ_BUILDS = [("global", False, 256), ("global", True, 256),
+              ("dirsplit", False, 256), ("dirsplit", True, 256),
+              ("split", False, 256), ("split", True, 256),
+              ("pinned", False, PINNED_TPB),
+              ("global", True, 32), ("split", True, 32)]
 
 
 def _sass_instructions(cubin, path):
@@ -768,13 +875,12 @@ def _warp_aggregated_adds(ins, back=8, fwd=8):
 
 
 @pytest.mark.skipif(not os.path.exists(NVDISASM), reason="nvdisasm not found")
-@pytest.mark.parametrize("kernel,bare", [("global", False), ("global", True),
-                                         ("dirsplit", False),
-                                         ("dirsplit", True), ("split", False),
-                                         ("split", True), ("pinned", False)])
-def test_lane_enqueue_is_warp_aggregated_in_sass(kernel, bare, tmp_path):
+@pytest.mark.parametrize("kernel,bare,tpb", ENQ_BUILDS)
+def test_lane_enqueue_is_warp_aggregated_in_sass(kernel, bare, tpb, tmp_path):
+    """Every ATOMG.E.ADD of the lane build is warp-aggregated. ptxas wraps
+    the first translation's scalar slab atomic in the same idiom, so this
+    alone does not tell the two modes apart; the PTX test below does."""
     from .flood_fill import compiled_kernel
-    tpb = PINNED_TPB if kernel == "pinned" else 256
     lane = _sass_instructions(
         compiled_kernel(kernel, bare, tpb, "lane").asm["cubin"],
         tmp_path / "lane.cubin")
@@ -782,10 +888,61 @@ def test_lane_enqueue_is_warp_aggregated_in_sass(kernel, bare, tmp_path):
         compiled_kernel(kernel, bare, tpb, "program").asm["cubin"],
         tmp_path / "program.cubin")
     # every per-lane append site is one leader atomic per warp (pinned's
-    # pair-barrier and rank atomics may add aggregated adds of their own)
+    # rank dispenser and 2 pair-barrier arrivals are aggregated too: 7)
     assert _warp_aggregated_adds(lane) >= LANE_APPEND_SITES[kernel]
     assert sum("ATOMG.E.ADD" in s for s in lane) == \
         _warp_aggregated_adds(lane), "an add atomic is not warp-aggregated"
-    # the first translation's scans are CTA barriers the lane path lacks
+    # the first translation's scans are CTA barriers the lane path lacks;
+    # a one-warp program scans with shuffles, so fewer remain at tpb 32
     bars = lambda ins: sum("BAR.SYNC" in s for s in ins)
-    assert bars(program) >= bars(lane) + 20
+    assert bars(program) >= bars(lane) + (20 if tpb > 32 else 1)
+
+
+_PTX_ADD32 = re.compile(r"atom\.global\.gpu\.relaxed\.add\.u32\s")
+
+
+def _ptx_append_atomics(ptx):
+    """Each relaxed 32-bit add atomic of a PTX listing, as (predicated,
+    first memory event after it). A per-lane append's ticket goes straight
+    into the lane's own st.global (its item at the ticket), with no
+    bar.sync, st.shared or other atomic in between. The first
+    translation's slab atomic is a scalar: its result is broadcast through
+    st.shared and a bar.sync before any lane can store."""
+    lines = [ln.strip() for ln in ptx.splitlines()
+             if ln.strip() and not ln.strip().startswith((".loc", "//"))]
+    found = []
+    for i, line in enumerate(lines):
+        if not _PTX_ADD32.search(line):
+            continue
+        first = "end"
+        for nxt in lines[i + 1:]:
+            hit = next((k for k in ("bar.sync", "st.shared", "st.global",
+                                    "atom.") if k in nxt), None)
+            if hit:
+                first = hit
+                break
+        found.append((line.startswith("@%p"), first))
+    return found
+
+
+# relaxed 32-bit adds that are not appends: pinned's worker-rank dispenser
+PTX_SCALAR_ADDS = {"pinned": 1}
+
+
+@pytest.mark.parametrize("kernel,bare,tpb", ENQ_BUILDS)
+def test_lane_enqueue_is_per_lane_in_ptx(kernel, bare, tpb):
+    """What tells the modes apart, before ptxas: in the lane build each
+    append site is a predicated per-lane atom.global.gpu.relaxed.add.u32
+    whose result feeds the lane's own store with no barrier in between; in
+    the program build no append atomic is per lane, each is broadcast
+    through shared memory behind a bar.sync."""
+    from .flood_fill import compiled_kernel
+    lane = _ptx_append_atomics(
+        compiled_kernel(kernel, bare, tpb, "lane").asm["ptx"])
+    program = _ptx_append_atomics(
+        compiled_kernel(kernel, bare, tpb, "program").asm["ptx"])
+    per_lane = [a for a in lane if a == (True, "st.global")]
+    assert len(per_lane) == LANE_APPEND_SITES[kernel], lane
+    assert len(lane) - len(per_lane) == PTX_SCALAR_ADDS.get(kernel, 0), lane
+    assert program and all(first == "st.shared" for _, first in program), \
+        program

@@ -19,13 +19,17 @@ placement scenes imported from it:
   enqueue    the twin's two enqueue translations against Numba, same
              harness: on ENQUEUE_SCENES, {split, global, dirsplit} at tpb
              256 (instrumented), plus the matched pinned 2 x 512 spread row
-             on sq_2000_center. Two rows per cell: enqueue="lane" (label
-             "per_lane", the default everywhere else, a per-lane atomic
-             that ptxas warp-aggregates like Numba's hand-written ballot)
-             and enqueue="program" (label "first_translation": the
-             program-wide tl.sum/tl.cumsum the twin started with). Both
-             rows are like-for-like (comparable=True); the program rows
-             also carry first_translation=true for filtering.
+             on sq_2000_center. Two rows per cell, config.label exactly
+             "per_lane" or "first_translation" (pinned too; its placement
+             is in config): enqueue="lane" (the default everywhere else, a
+             per-lane atomic that ptxas warp-aggregates like Numba's
+             hand-written ballot) and enqueue="program" (the program-wide
+             tl.sum/tl.cumsum the twin started with). first_translation
+             rows are comparable=False and carry first_translation=true,
+             as in ch01, ch03 and ch04: they measure a superseded twin, so
+             they stay out of the like-for-like averages and extremes of
+             summary.py and figures.py. per_lane rows whose cell an earlier
+             experiment already times carry duplicate_of=<experiment>.
 
 Every other experiment runs the twin's default, enqueue="lane".
 
@@ -93,8 +97,12 @@ ENQUEUE_SCENES = ["sq_2000_center", "sq_4000_corner", "serpentine_256",
                   "seam_serpentine_256"]
 ENQUEUE_PINNED_SCENE = "sq_2000_center"
 FIRST_TRANSLATION = "first_translation"
-# same config labels as the ch03 / ch04 twins' enqueue experiments
+# same config labels as the ch01 / ch03 / ch04 twins' enqueue experiments;
+# only the lane form is the twin's default
 ENQ_LABELS = {"lane": "per_lane", "program": FIRST_TRANSLATION}
+DEFAULT_ENQ = "lane"
+assert set(ENQ_LABELS) == set(tff.ENQUEUE_MODES)
+assert tff.ENQUEUE_MODES[0] == DEFAULT_ENQ
 
 
 @dataclass
@@ -251,11 +259,13 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
                enqueue=None):
     """enqueue=None runs the twin's default ("lane") and leaves the config
     as it was; the enqueue experiment passes "lane" or "program" and both
-    land in the config."""
+    land in the config. A "program" row is the first translation:
+    comparable=False and first_translation=true, as in ch01, ch03, ch04."""
     numba_pinned_override = (kernel == "pinned"
                              and tpb_numba != NUMBA_PINNED_TPB)
     matched = tpb_numba == tpb_triton
-    enq = enqueue or "lane"
+    enq = enqueue or DEFAULT_ENQ
+    default = enq == DEFAULT_ENQ
 
     def run_numba():
         img, sx, sy = _cache.get(scene_name, builder)
@@ -304,9 +314,10 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
         config["label"] = label
     notes = _ascii_dashes(note)
     extra = {"config_matched": matched}
-    if enqueue == "program":
+    if not default:
         notes += ("; first translation: program-wide tl.sum/tl.cumsum "
-                  "enqueue, superseded by the per-lane default")
+                  "enqueue, superseded by the per-lane default: not in the "
+                  "like-for-like averages")
         extra["first_translation"] = True
     if not matched:
         config["tpb_triton"] = tpb_triton
@@ -319,7 +330,7 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
     return Case(experiment=experiment, scene=scene_name, config=config,
                 run_numba=run_numba, run_triton=run_triton, same=_same,
                 pixels=_scene_pixels(scene_name, builder), info=info,
-                notes=notes, extra=extra, comparable=matched)
+                notes=notes, extra=extra, comparable=matched and default)
 
 
 def _make_v2_case(experiment, scene_name, builder, note, tpb, label=None):
@@ -398,13 +409,43 @@ def build_cases(quick=False):
             "placement", name, builder, note, "pinned", False,
             tff.PINNED_TPB, tff.PINNED_TPB, "spread",
             f"pinned 2x{tff.PINNED_TPB} spread (matched)"))
-    cases += _enqueue_cases(quick, lookup)
-    return cases
+    enqueue_cases = _enqueue_cases(quick, lookup)
+    mark_repeated_cells(cases, enqueue_cases)
+    return cases + enqueue_cases
+
+
+def _cell(case):
+    """What a row measures, whatever its experiment: scene, kernel, bare,
+    both tpbs, placement, enqueue."""
+    cfg = case.config
+    return (case.scene, cfg["kernel"], cfg.get("bare"), cfg["tpb"],
+            cfg.get("tpb_triton", cfg["tpb"]), cfg.get("placement"),
+            cfg.get("enqueue", DEFAULT_ENQ))
+
+
+def mark_repeated_cells(earlier, enqueue_rows):
+    """Tag each per_lane enqueue row whose cell an earlier experiment
+    already times with duplicate_of=<that experiment> (as ch03 does). The
+    rows stay comparable, since the enqueue experiment's own block needs
+    them, but a unit-wide average should skip them to weigh each cell
+    once. Returns the tagged count."""
+    seen = {}
+    for c in earlier:
+        if c.config.get("kernel") != "v2":
+            seen.setdefault(_cell(c), c.experiment)
+    tagged = 0
+    for c in enqueue_rows:
+        if c.config["enqueue"] == DEFAULT_ENQ and _cell(c) in seen:
+            c.extra["duplicate_of"] = seen[_cell(c)]
+            tagged += 1
+    return tagged
 
 
 def _enqueue_cases(quick, lookup):
     """Numba vs both enqueue translations of the twin: per (scene, kernel)
-    a lane row, then the program row labelled first_translation."""
+    a lane row (label per_lane), then the program row (label
+    first_translation). The pinned pair uses the same two labels; its
+    placement and tpb are in the config."""
     rows = (QUICK_SCENES if quick
             else [(n,) + lookup[n] for n in ENQUEUE_SCENES])
     pinned_name = QUICK_SCENES[0][0] if quick else ENQUEUE_PINNED_SCENE
@@ -413,17 +454,17 @@ def _enqueue_cases(quick, lookup):
     cases = []
     for name, builder, note in rows:
         for kernel in nbench.KERNELS:
-            for enqueue in ("lane", "program"):
+            for enqueue in tff.ENQUEUE_MODES:
                 cases.append(_make_case(
                     "enqueue", name, builder, note, kernel, False, TPB, TPB,
                     enqueue=enqueue, label=ENQ_LABELS[enqueue]))
-    for enqueue in ("lane", "program"):
-        label = (f"pinned 2x{tff.PINNED_TPB} spread (matched) "
-                 f"{ENQ_LABELS[enqueue]}")
+    pinned_note = (f"{pinned_note}; pinned 2x{tff.PINNED_TPB} spread "
+                   f"(matched)")
+    for enqueue in tff.ENQUEUE_MODES:
         cases.append(_make_case(
             "enqueue", pinned_name, pinned_builder, pinned_note, "pinned",
-            False, tff.PINNED_TPB, tff.PINNED_TPB, "spread", label,
-            enqueue=enqueue))
+            False, tff.PINNED_TPB, tff.PINNED_TPB, "spread",
+            ENQ_LABELS[enqueue], enqueue=enqueue))
     return cases
 
 
@@ -456,10 +497,24 @@ def main(argv=None):
                        ", POPC, one leader ATOMG, SHFL.IDX, as in Numba's "
                        "SASS) and enqueue=program (label first_translation, "
                        "extra first_translation=true: program-wide "
-                       "tl.sum/tl.cumsum, ~7 BAR.SYNC per append). Every "
+                       "tl.sum/tl.cumsum, ~7 BAR.SYNC per append). The "
+                       "pinned pair carries the same two labels. Every "
                        "other experiment runs enqueue=lane.",
         },
         "not_mirrored": ["@njit CPU rows (no GPU backend to compare)"],
+        "row_policy": [
+            "first_translation rows (config.enqueue='program') are "
+            "comparable=false and carry first_translation=true, as in "
+            "ch01, ch03 and ch04: they time the superseded first "
+            "translation, so the like-for-like averages and extremes "
+            "describe the default twin only. Their speedups are the "
+            "measured cost of the first translation.",
+            "per_lane enqueue rows whose cell (scene, kernel, bare, tpbs, "
+            "placement, enqueue) scenes, tpb_sweep or placement already "
+            "times carry duplicate_of=<experiment>. They stay comparable "
+            "for the enqueue experiment's own block; a unit-wide average "
+            "that keeps them counts those cells twice.",
+        ],
         "placement_matching": [
             "Rows labeled 'pinned 2x768 ... (twin 2x512)' compare 1,536 "
             "Numba threads with 1,024 Triton lanes: comparable=false, "
@@ -492,8 +547,13 @@ def main(argv=None):
                   "split: alloc 0.62 ms Numba vs 0.13 ms Triton).",
         "deviations": [
             "placement: Numba's experiment is 2 x 768 threads at "
-            "max_registers 40, the twin's 2 x 512 lanes at maxnreg 64; both "
-            "put exactly 2 programs per SM in same_sm mode",
+            "max_registers 40, exactly 2 blocks per SM (48 launched); the "
+            "twin's is 2 x 512 lanes at maxnreg 64. The default "
+            "enqueue=lane build uses 30 registers and fits 3 programs per "
+            "SM (72 launched; the kernel's rank < 2 guard sends the third "
+            "on the chosen SM away at once), the enqueue=program build "
+            "fits exactly 2 (48 launched). Either way the two workers "
+            "share one SM",
             "split: the 8192-slot ring is shared memory in Numba, global "
             "scratch in Triton; under enqueue=lane its two rears are "
             "program-private global int32 slots (global atomics in place "

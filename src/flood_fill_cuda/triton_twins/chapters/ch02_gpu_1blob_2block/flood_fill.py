@@ -242,11 +242,21 @@ def _warmup(kernel, bare, tpb, enqueue="lane"):
     return compiled
 
 
+def _check_enqueue(enqueue):
+    """The one enqueue check of flood_fill, compiled_kernel and launch_grid,
+    so no CompiledKernel is ever cached under an unknown mode."""
+    if enqueue not in ENQUEUE_MODES:
+        raise ValueError(
+            f'enqueue must be "lane" or "program", got {enqueue!r}')
+
+
 def compiled_kernel(kernel, bare=False, threads_per_block=256,
                     enqueue="lane"):
     """The CompiledKernel behind a configuration (warming it up if needed):
-    for kernel_resources(), the occupancy calculator and SASS inspection
-    (compiled.asm["cubin"])."""
+    for kernel_resources(), the occupancy calculator and SASS / PTX
+    inspection (compiled.asm["cubin"], compiled.asm["ptx"]). Raises
+    ValueError for an enqueue mode flood_fill refuses."""
+    _check_enqueue(enqueue)
     return _warmup(kernel, bare, threads_per_block, enqueue)
 
 
@@ -261,7 +271,10 @@ def _coop_max_blocks(kernel, bare, tpb, enqueue):
 def launch_grid(kernel, placement=None, threads_per_block=256, bare=False,
                 enqueue="lane"):
     """Programs a configuration launches (2, or C * sm_count for pinned
-    same_sm, C = resident programs per SM of the compiled pinned kernel)."""
+    same_sm, C = resident programs per SM of the compiled pinned kernel:
+    3 x sm_count for the default enqueue="lane" build, 2 x sm_count for
+    enqueue="program")."""
+    _check_enqueue(enqueue)
     if kernel == "pinned" and placement == "same_sm":
         per_sm = programs_per_sm(_warmup(kernel, bare, threads_per_block,
                                          enqueue))
@@ -291,9 +304,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
         raise ValueError(
             f'kernel must be "split", "global", "dirsplit" or "pinned", '
             f'got {kernel!r}')
-    if enqueue not in ENQUEUE_MODES:
-        raise ValueError(
-            f'enqueue must be "lane" or "program", got {enqueue!r}')
+    _check_enqueue(enqueue)
     if kernel == "pinned":
         if placement not in ("same_sm", "spread"):
             raise ValueError(
@@ -302,8 +313,10 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
             raise ValueError(
                 f"the pinned experiment requires threads_per_block == "
                 f"{PINNED_TPB}: 512-lane programs capped at {PINNED_MAXNREG} "
-                f"registers fit 2 per SM, which is what pins the two "
-                f"workers to one SM (Numba's 768 is not a power of 2)")
+                f"registers fit at least 2 per SM (3 for the default "
+                f"enqueue=\"lane\" build, whose rank < 2 guard sends the "
+                f"third away), which is what pins the two workers to one "
+                f"SM (Numba's 768 is not a power of 2)")
         if bare:
             raise ValueError("the pinned kernel is minimal by design; "
                              "bare=True does not apply")
