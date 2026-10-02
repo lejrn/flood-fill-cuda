@@ -1,0 +1,409 @@
+"""Numba vs Triton for chapter 3, on the chapter's own benchmark experiments.
+
+Four experiments, built from the Numba benchmarks' own scene and config
+lists (imported, so they cannot drift):
+
+suite              benchmarks/benchmark.py section 1: every suite scene at
+                   tpb=256 with conn4, conn4 bare, conn8 and conn8 bare.
+                   Pinned to one grid per variant, min(Numba capacity,
+                   Triton capacity) of the instrumented kernel; the bare
+                   twin runs on the instrumented kernel's grid, as in the
+                   Numba benchmark.
+suite_blocks_none  The same scenes with blocks=None on both sides, conn4 and
+                   conn8: each backend at its own co-resident maximum, the
+                   launch a caller gets by default. Both resolved grids are
+                   in each row's info.
+sweep              benchmark.py section 2: TPB_SWEEP x BLOCKS_SWEEP on the
+                   sweep scenes at conn4 and conn8. "max" resolves per tpb
+                   to min(both capacities); cells beyond either capacity
+                   are listed in meta["skipped_cells"], like the Numba
+                   sweep's skipped rows.
+barrier_work       benchmarks/benchmark_connectivity_and_barrier_work.py:
+                   conn4, conn8, r2, wc and the three conn8-family bare
+                   twins at tpb=256, all pinned to the minimum capacity over
+                   the seven kernels and both backends.
+
+Every case runs the same configuration on both backends (same tpb =
+num_warps * 32, same explicit program count except in suite_blocks_none)
+through compare/harness.py. same() compares only outputs the algorithm
+fixes regardless of scheduling (img, visited, depth, levels, filled, the
+level trace, processed, interior, peaks; per-block counts when the grids
+match; cas_attempts for conn4 only). Both copy peaks (Numba and Triton
+probes) are measured after a spin-up and stored in meta; model_bytes per
+backend is in each row's info, so model GB/s = model_bytes /
+(median kernel_ms * 1e6).
+
+Cap (recorded in meta["caps"]): the 64M-px scene is dropped, which keeps
+the default run under 2 GB of host RAM (1.84 GB peak measured). Every
+other scene, variant and sweep cell is the Numba benchmarks' own. One run
+of every case per backend took 2.3 minutes, so the default (warm-up + 5
+rounds) is about 13-14 minutes of GPU time.
+
+Run:
+    python -m flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock.compare [--quick] [--repeats N]
+"""
+
+import os
+
+os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
+
+import argparse
+import gc
+
+from ....chapters.ch03_gpu_1blob_nblock import flood_fill as numba_ff
+from ....chapters.ch03_gpu_1blob_nblock import scenes
+from ....chapters.ch03_gpu_1blob_nblock.benchmarks import benchmark as nb_bench
+from ....chapters.ch03_gpu_1blob_nblock.benchmarks import (
+    benchmark_connectivity_and_barrier_work as nb_barrier,
+)
+from ....shared import bandwidth
+from ...compare.harness import Case, arrays_equal, run_cases, spin_up
+from ...runtime.bandwidth import measure_peak_bandwidth as triton_peak
+from . import flood_fill as triton_ff
+
+CHAPTER = "ch03_gpu_1blob_nblock"
+DEFAULT_REPEATS = 5  # GPU_REPEATS of both Numba benchmarks
+
+# flood_fill kwargs per variant, named as in the Numba benchmarks
+VARIANTS = {
+    "conn4": {"connectivity": 4},
+    "conn4_bare": {"connectivity": 4, "bare": True},
+    "conn8": {"connectivity": 8},
+    "conn8_bare": {"connectivity": 8, "bare": True},
+    "r2": {"connectivity": 8, "radius": 2},
+    "r2_bare": {"connectivity": 8, "radius": 2, "bare": True},
+    "wc": {"connectivity": 8, "probe_layout": "warp"},
+    "wc_bare": {"connectivity": 8, "probe_layout": "warp", "bare": True},
+}
+SUITE_VARIANTS = [("conn4", "conn4"), ("conn4_bare", "conn4"),
+                  ("conn8", "conn8"), ("conn8_bare", "conn8")]  # (run, grid of)
+assert set(nb_barrier.CONFIGS) <= set(VARIANTS)
+for _name, _kw in nb_barrier.CONFIGS.items():
+    assert {**{"connectivity": 4}, **_kw} == VARIANTS[_name], _name
+
+# ------------------------------------------------------------------- caps
+
+DROPPED_SCENES = {"sq_8000_center"}
+CAPS = [
+    "sq_8000_center dropped from suite, suite_blocks_none and barrier_work: "
+    "the harness holds a Numba and a Triton result at once (~0.8 GB of "
+    "host arrays each at 64M px), past the 2.5 GB host-RAM budget",
+]
+METHOD_NOTES = [
+    "every experiment runs at the harness's repeats (default 5, both "
+    "Numba benchmarks' GPU_REPEATS); the Numba sweep used SWEEP_REPEATS=3",
+    "the Numba barrier-work benchmark interleaves its 7 configs per round; "
+    "the harness interleaves the two backends per case instead",
+]
+SCOPE = (
+    "benchmark.py also times ch01 v2, ch02 dual-global and the @njit "
+    "oracle on every scene; those are other units' comparisons and are not "
+    "run here. The Numba-only wavefront.py (GIF renderer) and visualize.py "
+    "(dashboard) have no timing to compare.")
+
+# --------------------------------------------------------------- quick mode
+
+QUICK_SUITE = [
+    ("sq_256_center", lambda: scenes.square_scene(256, 256, 128, 128), "tiny"),
+    ("disk_201_r90", lambda: scenes.disk_scene(201, 201, 90), "tiny"),
+    ("serpentine_64", lambda: scenes.serpentine_scene(64, 64), "tiny"),
+]
+QUICK_SWEEP = ["sq_256_center", "serpentine_64"]
+QUICK_SWEEP_CONN8 = ["sq_256_center"]
+QUICK_TPB = [32, 256]
+QUICK_BLOCKS = [1, 8, "max"]
+
+
+class SceneSlot:
+    """Holds one scene at a time: cases are grouped by scene, so a scene is
+    built when its first case runs and dropped when the next one starts."""
+
+    def __init__(self, builders):
+        self.builders = builders
+        self.name = None
+        self.scene = None
+        self.shapes = {}
+
+    def get(self, name):
+        if name != self.name:
+            self.release()
+            self.scene = self.builders[name]()
+            self.name = name
+            self.shapes[name] = self.scene[0].shape[:2]
+        return self.scene
+
+    def pixels(self, name):
+        """width * height, building the scene once if it was never seen."""
+        if name not in self.shapes:
+            self.get(name)
+        w, h = self.shapes[name]
+        return int(w * h)
+
+    def release(self):
+        self.scene = self.name = None
+        gc.collect()
+
+
+# ---------------------------------------------------------- per-backend facts
+
+def caps(name, tpb):
+    """Co-resident capacity of one variant at one tpb, per backend."""
+    kw = VARIANTS[name]
+    return {"numba": numba_ff.max_blocks(threads_per_block=tpb, **kw),
+            "triton": triton_ff.max_blocks(threads_per_block=tpb, **kw)}
+
+
+def resources(name, tpb):
+    """Registers and friends of both compiled kernels (compiles if needed)."""
+    kw = VARIANTS[name]
+    key = (kw.get("bare", False), kw.get("connectivity", 4),
+           kw.get("radius", 1), kw.get("probe_layout", "thread"))
+    numba_ff.max_blocks(threads_per_block=tpb, **kw)
+    numba_kernel = numba_ff._KERNELS[key]
+    return {
+        "triton_resources": triton_ff.kernel_info(threads_per_block=tpb, **kw),
+        "numba_resources": {
+            "n_regs": _one(numba_kernel.get_regs_per_thread()),
+            "shared_bytes": _one(numba_kernel.get_shared_mem_per_block()),
+            "local_bytes": _one(numba_kernel.get_local_mem_per_thread()),
+        },
+    }
+
+
+def _one(value):
+    """Numba returns {signature: value}; a kernel here has one signature."""
+    if isinstance(value, dict):
+        values = sorted({int(v) for v in value.values()})
+        return values[0] if len(values) == 1 else values
+    return int(value)
+
+
+def make_same(name, pinned):
+    """same(numba, triton): the deterministic outputs only."""
+    kw = VARIANTS[name]
+    instrumented = not kw.get("bare", False)
+    conn4 = kw.get("connectivity", 4) == 4
+
+    def same(n, t):
+        pairs = {"img": (n.img, t.img), "visited": (n.visited, t.visited),
+                 "depth": (n.depth, t.depth)}
+        if instrumented:
+            pairs["level_sizes"] = (n.level_sizes, t.level_sizes)
+        if pinned:
+            pairs["processed_per_block"] = (n.processed_per_block,
+                                            t.processed_per_block)
+        ok, detail = arrays_equal(**pairs)
+        if not ok:
+            return ok, detail
+        fields = ["levels", "filled", "processed", "interior", "peak_level",
+                  "peak_occupancy", "level_trace_truncated"]
+        if pinned:
+            fields += ["blocks", "thread_util_pct", "warp_engagement_pct"]
+        if conn4 and instrumented:
+            fields.append("cas_attempts")  # exact: one probe per edge
+        for f in fields:
+            a, b = getattr(n, f), getattr(t, f)
+            if a != b:
+                return False, f"{f}: numba {a} vs triton {b}"
+        return True, ""
+
+    return same
+
+
+def info(n, t):
+    """Per-case facts from the warm-up results."""
+    return {
+        "filled": t.filled, "levels": t.levels, "peak_level": t.peak_level,
+        "interior": t.interior, "thread_util_pct": t.thread_util_pct,
+        "numba_blocks": n.blocks, "triton_blocks": t.blocks,
+        "numba_cas_attempts": n.cas_attempts,
+        "triton_cas_attempts": t.cas_attempts,
+        "numba_model_bytes": n.model_bytes,
+        "triton_model_bytes": t.model_bytes,
+        "numba_balance_cv_pct": n.balance_cv_pct,
+        "triton_balance_cv_pct": t.balance_cv_pct,
+        "numba_distinct_sms": n.distinct_sms,
+        "triton_distinct_sms": t.distinct_sms,
+    }
+
+
+def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
+              grid_of=None, extra=None):
+    """One cell: same scene, same kwargs, same grid on both backends."""
+    kw = {**VARIANTS[name], "threads_per_block": tpb, "blocks": blocks}
+
+    def run_numba():
+        img, sx, sy = slot.get(scene)
+        return numba_ff.flood_fill(img, sx, sy, **kw)
+
+    def run_triton():
+        img, sx, sy = slot.get(scene)
+        return triton_ff.flood_fill(img, sx, sy, **kw)
+
+    config = {"variant": name, **VARIANTS[name], "tpb": tpb,
+              "num_warps": tpb // 32,
+              "blocks": "None" if blocks is None else int(blocks)}
+    row_extra = {"caps": caps(name, tpb), **resources(name, tpb),
+                 **(extra or {})}
+    if grid_of:
+        row_extra["grid_of"] = grid_of
+    return Case(experiment=experiment, scene=scene, config=config,
+                run_numba=run_numba, run_triton=run_triton,
+                same=make_same(name, pinned=blocks is not None),
+                pixels=slot.pixels(scene), info=info,
+                notes=notes, extra=row_extra)
+
+
+# -------------------------------------------------------------- experiments
+
+def suite_cases(slot, scene_list, tpb):
+    out = []
+    for sname, _, note in scene_list:
+        for name, grid_of in SUITE_VARIANTS:
+            c = caps(grid_of, tpb)
+            pin = min(c["numba"], c["triton"])
+            out.append(make_case("suite", slot, sname, name, tpb, pin,
+                                 notes=note, grid_of=grid_of))
+    return out
+
+
+def blocks_none_cases(slot, scene_list, tpb):
+    return [make_case("suite_blocks_none", slot, sname, name, tpb, None,
+                      notes=note)
+            for sname, _, note in scene_list for name in ("conn4", "conn8")]
+
+
+def sweep_cases(slot, passes, tpbs, blocks_axis, skipped):
+    out = []
+    for sname, conn in passes:
+        name = "conn4" if conn == 4 else "conn8"
+        for tpb in tpbs:
+            c = caps(name, tpb)
+            cap = min(c["numba"], c["triton"])
+            seen = set()
+            for b in blocks_axis:
+                n = cap if b == "max" else b
+                if n in seen:
+                    continue
+                seen.add(n)
+                if n > cap:
+                    skipped.append({"scene": sname, "connectivity": conn,
+                                    "tpb": tpb, "blocks": n,
+                                    "numba_cap": c["numba"],
+                                    "triton_cap": c["triton"]})
+                    continue
+                out.append(make_case(
+                    "sweep", slot, sname, name, tpb, n,
+                    extra={"is_coop_max": n == cap}))
+    return out
+
+
+def barrier_cases(slot, scene_list, tpb):
+    names = list(nb_barrier.CONFIGS)
+    all_caps = {n: caps(n, tpb) for n in names}
+    pin = min(min(c.values()) for c in all_caps.values())
+    out = [make_case("barrier_work", slot, sname, name, tpb, pin, notes=note)
+           for sname, _, note in scene_list for name in names]
+    return out, all_caps, pin
+
+
+def build(quick):
+    """All cases plus the meta block, in scene-grouped order."""
+    if quick:
+        suite_list = QUICK_SUITE
+        sweep_passes = ([(s, 4) for s in QUICK_SWEEP]
+                        + [(s, 8) for s in QUICK_SWEEP_CONN8])
+        tpbs, blocks_axis = QUICK_TPB, QUICK_BLOCKS
+        barrier_list = QUICK_SUITE
+    else:
+        suite_list = [s for s in nb_bench.SCENES if s[0] not in DROPPED_SCENES]
+        sweep_passes = ([(s, 4) for s in nb_bench.SWEEP_SCENES]
+                        + [(s, 8) for s in nb_bench.SWEEP_SCENES_CONN8])
+        tpbs, blocks_axis = nb_bench.TPB_SWEEP, nb_bench.BLOCKS_SWEEP
+        barrier_list = [s for s in nb_barrier.SCENES
+                        if s[0] not in DROPPED_SCENES]
+
+    builders = {n: b for n, b, _ in suite_list + barrier_list}
+    for n, b, _ in nb_bench.SCENES:
+        builders.setdefault(n, b)
+    slot = SceneSlot(builders)
+
+    tpb = nb_barrier.TPB  # 256, the suite's tpb too
+    skipped = []
+    cases = suite_cases(slot, suite_list, tpb)
+    cases += blocks_none_cases(slot, suite_list, tpb)
+    cases += sweep_cases(slot, sweep_passes, tpbs, blocks_axis, skipped)
+    bcases, bcaps, bpin = barrier_cases(slot, barrier_list, tpb)
+    cases += bcases
+    slot.release()  # the cases rebuild each scene when they run
+
+    meta = {
+        "caps": [] if quick else CAPS,
+        "method_notes": METHOD_NOTES,
+        "quick": quick,
+        "scope": SCOPE,
+        "skipped_cells": skipped,
+        "coop_max_by_tpb": {
+            "conn4": {t: caps("conn4", t) for t in tpbs},
+            "conn8": {t: caps("conn8", t) for t in tpbs},
+        },
+        "barrier_work": {"tpb": tpb, "pinned_blocks": bpin,
+                         "coop_max_by_config": bcaps},
+        "suite_tpb": tpb,
+        "sweep": {"tpb_sweep": tpbs,
+                  "blocks_sweep": [str(b) for b in blocks_axis],
+                  "passes": [{"scene": s, "connectivity": c}
+                             for s, c in sweep_passes]},
+        "bandwidth_model": bandwidth.MODEL_NOTE,
+        "derived": ("model GB/s = info.<backend>_model_bytes / (median "
+                    "kernel_ms * 1e6); % of peak against meta.peak_gb_s of "
+                    "the same backend's copy probe"),
+        "pixels": "scene width * height; info.filled is the blob size",
+    }
+    return cases, meta
+
+
+def measure_peaks(quick):
+    """Both copy probes, back to back, after the GPU is at boost."""
+    n_bytes = 16 * 2 ** 20 if quick else 256 * 2 ** 20
+    repeats = 2 if quick else 10
+    nb = bandwidth.measure_peak_bandwidth(n_bytes=n_bytes, repeats=repeats)
+    tr = triton_peak(n_bytes=n_bytes, repeats=repeats)
+    gc.collect()
+    try:
+        from numba import cuda
+        cuda.current_context().deallocations.clear()
+    except Exception:
+        pass
+    return {"numba": nb, "triton": tr}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--quick", action="store_true",
+                    help="tiny scenes, 1 repeat, no JSON (smoke test)")
+    ap.add_argument("--repeats", type=int, default=None)
+    args = ap.parse_args(argv)
+    repeats = args.repeats or (1 if args.quick else DEFAULT_REPEATS)
+    spin = 0.0 if args.quick else 8.0
+
+    if spin:
+        spin_up(spin)
+    peaks = measure_peaks(args.quick)
+    print(f"copy peak: numba {peaks['numba']['gb_s']:.1f} GB/s | "
+          f"triton {peaks['triton']['gb_s']:.1f} GB/s")
+    cases, meta = build(args.quick)
+    meta["peak_gb_s"] = {k: v["gb_s"] for k, v in peaks.items()}
+    meta["peak_runs_gb_s"] = {k: v["runs_gb_s"] for k, v in peaks.items()}
+    print(f"{len(cases)} cases, repeats={repeats}, "
+          f"{len(meta['skipped_cells'])} sweep cells beyond a capacity")
+    doc = run_cases(CHAPTER, cases, repeats=repeats, meta=meta,
+                    write=not args.quick, spin_seconds=spin)
+    bad = [r for r in doc["rows"]
+           if "error" in r or not r.get("outputs_equal", False)]
+    print(f"{len(doc['rows'])} rows, {len(bad)} with an error or a mismatch")
+    return doc
+
+
+if __name__ == "__main__":
+    main()
