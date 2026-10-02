@@ -20,9 +20,16 @@ T // 32, lane i plays thread i):
                            -> masked tl.atomic_xchg(visited, 1): the same
                               exactly-once claim on a 0/1 flag (old == 0
                               wins), relaxed like Numba's atom.cas
-- _warp_enqueue_global     -> _block_enqueue_global: aggregated per program
-                              (tl.sum + tl.cumsum + one atomic), because
-                              Triton has no ballot/popc/shfl
+- _warp_enqueue_global     -> _lane_enqueue_global (ENQ="lane", the
+                              default): one relaxed tl.atomic_add per
+                              claiming lane on the rear, which ptxas
+                              warp-aggregates (VOTEU.ANY, UPOPC, one leader
+                              ATOMG, SHFL.IDX): the SASS pattern of Numba's
+                              activemask/popc/leader/shfl helper.
+                              ENQ="program" keeps the first translation,
+                              _block_enqueue_global (tl.sum + tl.cumsum +
+                              one atomic per program), whose CTA barriers
+                              Numba never had; it stays for measurement.
 - per-thread counters      -> per-lane int32 accumulators, reduced once at
                               exit (one atomic per program instead of one
                               per thread)
@@ -94,6 +101,18 @@ _BS_PROCESSED = tl.constexpr(BS_PROCESSED)
 _BS_SMID = tl.constexpr(BS_SMID)
 _Q_REAR = tl.constexpr(Q_REAR)
 
+# Enqueue modes: the ENQ constexpr of every kernel (one binary per mode).
+#   "lane"     the default: one relaxed atomic_add per claiming lane on the
+#              rear counter; ptxas warp-aggregates it, so the SASS matches
+#              Numba's _warp_enqueue_global (no CTA barrier).
+#   "program"  the first translation: tl.sum + tl.cumsum over the program,
+#              one atomic per program per direction (CTA barriers and
+#              shared-memory round trips in SASS). Kept to measure its cost.
+ENQ_LANE = "lane"
+ENQ_PROGRAM = "program"
+ENQ_MODES = (ENQ_LANE, ENQ_PROGRAM)
+DEFAULT_ENQ = ENQ_LANE
+
 # Runtime ints that vary between calls: never specialize on them (a new
 # divisibility-by-16 or ==1 class would otherwise recompile mid-benchmark).
 _DNS = ["width", "height", "qcap", "trace_cap"]
@@ -123,15 +142,41 @@ def _claim(visited_ptr, lin, red):
 
 
 @triton.jit
+def _lane_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item, claimed,
+                         qcap):
+    """Per-lane append on the global rear counter (ENQ="lane", the default).
+
+    Twin of _warp_enqueue_global: every claiming lane takes its own ticket
+    with one relaxed atomic_add of 1 on the rear and writes its item at the
+    slot the atomic returned. The address is the same for the whole warp,
+    so ptxas compiles the add into a warp-aggregated atomic: VOTEU.ANY of
+    the active lanes, UPOPC for the count, one ATOMG by the leader lane,
+    SHFL.IDX of the base and each lane's rank among the active lanes. That
+    is the machine code Numba's activemask/popc/leader/shfl helper produces,
+    with no CTA barrier. The bound check is the same defensive tripwire
+    (a rear past qcap writes nothing out of bounds).
+    """
+    zero = item * 0
+    slot = tl.atomic_add(q_state_ptr + _Q_REAR + zero, 1, mask=claimed,
+                         sem="relaxed", scope="gpu")
+    tl.store(queue_ptr + slot, item, mask=claimed & (slot < qcap))
+    # unreachable by the structural argument
+    tl.store(counters_ptr + _OVERFLOW + zero, (zero + 1).to(tl.int64),
+             mask=claimed & (slot >= qcap))
+
+
+@triton.jit
 def _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item, claimed,
                           qcap):
-    """Program-aggregated append on the global rear counter.
+    """Program-aggregated append on the global rear counter (ENQ="program").
 
-    Twin of _warp_enqueue_global: the claiming lanes count themselves, one
-    atomic reserves a slab for the whole program, and each lane writes at
-    base + its rank among the claimants. The scan stays outside the branch
-    (Triton 3.7 miscompiles scans inside an if). The bound check is the same
-    defensive tripwire as Numba's.
+    The first translation of _warp_enqueue_global, kept to measure its
+    cost: the claiming lanes count themselves, one atomic reserves a slab
+    for the whole program, and each lane writes at base + its rank among
+    the claimants. tl.sum and tl.cumsum across 8 warps go through shared
+    memory with CTA barriers, which Numba's warp helper never has. The scan
+    stays outside the branch (Triton 3.7 miscompiles scans inside an if).
+    The bound check is the same defensive tripwire as Numba's.
     """
     c = claimed.to(tl.int32)
     count = tl.sum(c, axis=0)
@@ -147,11 +192,27 @@ def _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item, claimed,
 
 
 @triton.jit
+def _enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item, claimed,
+                    qcap, ENQ: tl.constexpr):
+    """Append the ``claimed`` lanes' items: per lane (the default) or
+    aggregated over the program (the first translation)."""
+    tl.static_assert((ENQ == "lane") | (ENQ == "program"),
+                     "ENQ must be 'lane' or 'program'")
+    if ENQ == "program":
+        _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item,
+                              claimed, qcap)
+    else:
+        _lane_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item,
+                             claimed, qcap)
+
+
+@triton.jit
 def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
          counters_ptr, block_stats_ptr, level_sizes_ptr, bar_ptr,
          width, height, qcap, trace_cap,
          CONN: tl.constexpr, RADIUS2: tl.constexpr, WARP_COOP: tl.constexpr,
-         INSTRUMENTED: tl.constexpr, BLOCK: tl.constexpr):
+         INSTRUMENTED: tl.constexpr, BLOCK: tl.constexpr,
+         ENQ: tl.constexpr):
     """The level-synchronous BFS every ch03 kernel runs.
 
     Host contract (as in Numba): launch [blocks] programs of BLOCK lanes,
@@ -159,7 +220,8 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
     depth=-1, counters and block_stats zeroed (BS_SMID column -1), owner=-1,
     bar=int64[0]. Two grid barriers per level: #1 makes the level's enqueues and
     rear visible grid-wide, #2 guarantees every program has read the new
-    rear before any next-level atomic.
+    rear before any next-level atomic. ENQ picks the enqueue (see
+    ENQ_MODES); everything else is the same code in both modes.
     """
     bx = tl.program_id(0)
     nprog = tl.num_programs(0)
@@ -241,8 +303,8 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
                 if INSTRUMENTED:
                     my_cas_attempts += red.to(tl.int32)
                 claimed = _claim(visited_ptr, nlin, red)
-                _block_enqueue_global(queue_ptr, q_state_ptr, counters_ptr,
-                                      nlin, claimed, qcap)
+                _enqueue_global(queue_ptr, q_state_ptr, counters_ptr, nlin,
+                                claimed, qcap, ENQ)
         else:
             for base in range(front + bx * BLOCK, rear, stride):
                 i = base + lanes
@@ -276,8 +338,8 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
                     if INSTRUMENTED:
                         my_cas_attempts += red.to(tl.int32)
                     claimed = _claim(visited_ptr, nlin, red)
-                    _block_enqueue_global(queue_ptr, q_state_ptr,
-                                          counters_ptr, nlin, claimed, qcap)
+                    _enqueue_global(queue_ptr, q_state_ptr, counters_ptr,
+                                    nlin, claimed, qcap, ENQ)
                     if RADIUS2:
                         # in bounds and not red: blob material only if it
                         # was already claimed (visited == 1); out of bounds
@@ -290,8 +352,9 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
                     if INSTRUMENTED:
                         my_interior += interior.to(tl.int32)
                     # Numba's divergent `if interior:` skips ring 2 per warp;
-                    # here per program, as a 0/1-trip loop so the enqueue's
-                    # scan is never inside an if.
+                    # here per program, as a 0/1-trip loop so the program
+                    # enqueue's scan is never inside an if. Same skip in both
+                    # ENQ modes, so the switch measures the enqueue alone.
                     any_interior = tl.max(interior.to(tl.int32), axis=0)
                     for _ring2 in range(0, any_interior):
                         for d in tl.static_range(16):
@@ -306,9 +369,9 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
                             if INSTRUMENTED:
                                 my_cas_attempts += red.to(tl.int32)
                             claimed = _claim(visited_ptr, nlin, red)
-                            _block_enqueue_global(queue_ptr, q_state_ptr,
-                                                  counters_ptr, nlin, claimed,
-                                                  qcap)
+                            _enqueue_global(queue_ptr, q_state_ptr,
+                                            counters_ptr, nlin, claimed,
+                                            qcap, ENQ)
 
         epoch += 1
         grid_sync(bar_ptr, epoch.to(tl.int64) * nprog)  # enqueues + rear visible
@@ -359,10 +422,11 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
 def multi_block_global_kernel(img, visited, depth, owner, queue, q_state,
                               counters, block_stats, level_sizes, bar,
                               width, height, qcap, trace_cap,
-                              BLOCK: tl.constexpr):
+                              BLOCK: tl.constexpr,
+                              ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, owner, queue, q_state, counters, block_stats,
          level_sizes, bar, width, height, qcap, trace_cap,
-         4, False, False, True, BLOCK)
+         4, False, False, True, BLOCK, ENQ)
 
 
 # Bare twins: (img, visited, depth, queue, q_state, counters) like Numba.
@@ -373,10 +437,11 @@ def multi_block_global_kernel(img, visited, depth, owner, queue, q_state,
 @triton.jit(do_not_specialize=_DNS[:3])
 def multi_block_global_bare_kernel(img, visited, depth, queue, q_state,
                                    counters, bar, width, height, qcap,
-                                   BLOCK: tl.constexpr):
+                                   BLOCK: tl.constexpr,
+                                   ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, counters, queue, q_state, counters, counters,
          counters, bar, width, height, qcap, 0,
-         4, False, False, False, BLOCK)
+         4, False, False, False, BLOCK, ENQ)
 
 
 # ------------------------------------------------------- 8-connectivity pair
@@ -386,19 +451,21 @@ def multi_block_global_bare_kernel(img, visited, depth, queue, q_state,
 def multi_block_global8_kernel(img, visited, depth, owner, queue, q_state,
                                counters, block_stats, level_sizes, bar,
                                width, height, qcap, trace_cap,
-                               BLOCK: tl.constexpr):
+                               BLOCK: tl.constexpr,
+                               ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, owner, queue, q_state, counters, block_stats,
          level_sizes, bar, width, height, qcap, trace_cap,
-         8, False, False, True, BLOCK)
+         8, False, False, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS[:3])
 def multi_block_global8_bare_kernel(img, visited, depth, queue, q_state,
                                     counters, bar, width, height, qcap,
-                                    BLOCK: tl.constexpr):
+                                    BLOCK: tl.constexpr,
+                                    ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, counters, queue, q_state, counters, counters,
          counters, bar, width, height, qcap, 0,
-         8, False, False, False, BLOCK)
+         8, False, False, False, BLOCK, ENQ)
 
 
 # ------------------------------------------------ radius-2 pair (guarded)
@@ -408,19 +475,21 @@ def multi_block_global8_bare_kernel(img, visited, depth, queue, q_state,
 def multi_block_global8r2_kernel(img, visited, depth, owner, queue, q_state,
                                  counters, block_stats, level_sizes, bar,
                                  width, height, qcap, trace_cap,
-                                 BLOCK: tl.constexpr):
+                                 BLOCK: tl.constexpr,
+                                 ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, owner, queue, q_state, counters, block_stats,
          level_sizes, bar, width, height, qcap, trace_cap,
-         8, True, False, True, BLOCK)
+         8, True, False, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS[:3])
 def multi_block_global8r2_bare_kernel(img, visited, depth, queue, q_state,
                                       counters, bar, width, height, qcap,
-                                      BLOCK: tl.constexpr):
+                                      BLOCK: tl.constexpr,
+                                      ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, counters, queue, q_state, counters, counters,
          counters, bar, width, height, qcap, 0,
-         8, True, False, False, BLOCK)
+         8, True, False, False, BLOCK, ENQ)
 
 
 # ------------------------------------- warp-cooperative probing pair
@@ -430,16 +499,18 @@ def multi_block_global8r2_bare_kernel(img, visited, depth, queue, q_state,
 def multi_block_global8wc_kernel(img, visited, depth, owner, queue, q_state,
                                  counters, block_stats, level_sizes, bar,
                                  width, height, qcap, trace_cap,
-                                 BLOCK: tl.constexpr):
+                                 BLOCK: tl.constexpr,
+                                 ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, owner, queue, q_state, counters, block_stats,
          level_sizes, bar, width, height, qcap, trace_cap,
-         8, False, True, True, BLOCK)
+         8, False, True, True, BLOCK, ENQ)
 
 
 @triton.jit(do_not_specialize=_DNS[:3])
 def multi_block_global8wc_bare_kernel(img, visited, depth, queue, q_state,
                                       counters, bar, width, height, qcap,
-                                      BLOCK: tl.constexpr):
+                                      BLOCK: tl.constexpr,
+                                      ENQ: tl.constexpr = DEFAULT_ENQ):
     _bfs(img, visited, depth, counters, queue, q_state, counters, counters,
          counters, bar, width, height, qcap, 0,
-         8, False, True, False, BLOCK)
+         8, False, True, False, BLOCK, ENQ)

@@ -7,6 +7,14 @@ Public API (identical to chapters/ch03_gpu_1blob_nblock/flood_fill.py):
     max_blocks(threads_per_block=256, bare=False, connectivity=4, radius=1,
                probe_layout="thread") -> int
 
+Both also take a twin-only keyword, enqueue="lane" (the default) or
+"program": which enqueue the kernels compile with (kernels.ENQ_MODES).
+"lane" is one relaxed atomic per claiming lane, which ptxas
+warp-aggregates into the same SASS as Numba's _warp_enqueue_global;
+"program" is the first translation (aggregated over the whole program,
+with CTA barriers), kept so its cost stays measurable. Outputs are
+identical in both modes.
+
 Same variants, validation, result fields and timing decomposition as the
 Numba driver; see that module for what each option means. The differences
 are the backend's:
@@ -40,7 +48,7 @@ from .kernels import (
     multi_block_global8_kernel, multi_block_global8_bare_kernel,
     multi_block_global8r2_kernel, multi_block_global8r2_bare_kernel,
     multi_block_global8wc_kernel, multi_block_global8wc_bare_kernel,
-    NUM_COUNTERS,
+    NUM_COUNTERS, ENQ_MODES, DEFAULT_ENQ,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
     ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS, INTERIOR,
     BS_PROCESSED, BS_SMID,
@@ -87,6 +95,7 @@ class MultiFloodFillResult:
     connectivity: int      # 4 (Manhattan waves) or 8 (Chebyshev waves)
     radius: int            # 1, or 2 for the guarded radius-2 twin
     probe_layout: str      # "thread" or "warp" (4 entries x 8 dirs per warp)
+    enqueue: str           # twin-only: "lane" (default) or "program"
     # Work / balance
     processed: int
     cas_attempts: int
@@ -119,7 +128,8 @@ class MultiFloodFillResult:
     model_gb_s: float
 
 
-# (key, tpb) -> CompiledKernel of the warm-up launch; (key, tpb) -> capacity
+# (key, tpb, enqueue) -> CompiledKernel of the warm-up launch, and
+# (key, tpb, enqueue) -> capacity: each enqueue mode is its own binary.
 _warmed = {}
 _coop_cache = {}
 
@@ -130,9 +140,10 @@ def _is_red(img, x, y):
 
 def _launch(kernel_fn, blocks, tpb, instrumented, d_img, d_visited, d_depth,
             d_owner, d_queue, d_q_state, d_counters, d_stats, d_trace, d_bar,
-            width, height):
+            width, height, enqueue):
     """One cooperative launch; returns the CompiledKernel."""
-    common = dict(BLOCK=tpb, num_warps=tpb // 32, launch_cooperative_grid=True)
+    common = dict(BLOCK=tpb, ENQ=enqueue, num_warps=tpb // 32,
+                  launch_cooperative_grid=True)
     if instrumented:
         return kernel_fn[(blocks,)](
             t(d_img), t(d_visited), t(d_depth), t(d_owner), t(d_queue),
@@ -160,7 +171,7 @@ def _tiny_args():
 
 
 def _warmup(bare, connectivity=4, radius=1, probe_layout="thread",
-            threads_per_block=256):
+            threads_per_block=256, enqueue=DEFAULT_ENQ):
     """Compile each kernel once per threads_per_block, off the clock.
 
     Numba compiles one binary per kernel and warms it with a [1, 32]
@@ -169,57 +180,70 @@ def _warmup(bare, connectivity=4, radius=1, probe_layout="thread",
     The launch returns the CompiledKernel the occupancy query needs.
     """
     key = (bare, connectivity, radius, probe_layout)
-    if (key, threads_per_block) in _warmed:
-        return _warmed[(key, threads_per_block)]
+    if (key, threads_per_block, enqueue) in _warmed:
+        return _warmed[(key, threads_per_block, enqueue)]
     d_img, d_visited, d_depth, d_counters, d_queue, d_q = _tiny_args()
     d_bar = cp.zeros(1, dtype=BAR_DTYPE)
     kernel_fn = _KERNELS[key]
     if bare:
         compiled = _launch(kernel_fn, 1, threads_per_block, False, d_img,
                            d_visited, d_depth, None, d_queue, d_q,
-                           d_counters, None, None, d_bar, 8, 8)
+                           d_counters, None, None, d_bar, 8, 8, enqueue)
     else:
         d_owner = cp.full((8, 8), -1, dtype=cp.int16)
         d_stats = cp.zeros((1, 2), dtype=cp.int64)
         d_trace = cp.zeros(4, dtype=cp.int32)
         compiled = _launch(kernel_fn, 1, threads_per_block, True, d_img,
                            d_visited, d_depth, d_owner, d_queue, d_q,
-                           d_counters, d_stats, d_trace, d_bar, 8, 8)
+                           d_counters, d_stats, d_trace, d_bar, 8, 8, enqueue)
     sync()
-    _warmed[(key, threads_per_block)] = compiled
+    _warmed[(key, threads_per_block, enqueue)] = compiled
     return compiled
 
 
-def _coop_max_blocks(key, tpb):
-    if (key, tpb) not in _coop_cache:
-        _coop_cache[(key, tpb)] = max_coresident_programs(
-            _warmed[(key, tpb)])
-    return _coop_cache[(key, tpb)]
+def _coop_max_blocks(key, tpb, enqueue=DEFAULT_ENQ):
+    if (key, tpb, enqueue) not in _coop_cache:
+        _coop_cache[(key, tpb, enqueue)] = max_coresident_programs(
+            _warmed[(key, tpb, enqueue)])
+    return _coop_cache[(key, tpb, enqueue)]
+
+
+def _check_enqueue(enqueue):
+    if enqueue not in ENQ_MODES:
+        raise ValueError(
+            f"enqueue must be one of {ENQ_MODES}, got {enqueue!r}")
 
 
 def kernel_info(threads_per_block=256, bare=False, connectivity=4, radius=1,
-                probe_layout="thread"):
+                probe_layout="thread", enqueue=DEFAULT_ENQ):
     """Registers, spills, shared bytes and warps of the compiled twin
     (runtime.occupancy.kernel_resources); compiles it on first call."""
     from ...runtime import kernel_resources
 
+    _check_enqueue(enqueue)
     return kernel_resources(_warmup(bare, connectivity, radius, probe_layout,
-                                    threads_per_block))
+                                    threads_per_block, enqueue))
 
 
 def max_blocks(threads_per_block=256, bare=False, connectivity=4, radius=1,
-               probe_layout="thread"):
+               probe_layout="thread", enqueue=DEFAULT_ENQ):
     """The largest co-resident grid this GPU can host at threads_per_block
     (what blocks=None resolves to). Compiles the kernel on first call.
-    Queried per kernel and per tpb, never assumed equal across twins."""
-    _warmup(bare, connectivity, radius, probe_layout, threads_per_block)
+    Queried per kernel, per tpb and per enqueue mode, never assumed equal
+    across twins."""
+    _check_enqueue(enqueue)
+    _warmup(bare, connectivity, radius, probe_layout, threads_per_block,
+            enqueue)
     return _coop_max_blocks((bare, connectivity, radius, probe_layout),
-                            threads_per_block)
+                            threads_per_block, enqueue)
 
 
 def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
-               bare=False, connectivity=4, radius=1, probe_layout="thread"):
+               bare=False, connectivity=4, radius=1, probe_layout="thread",
+               enqueue=DEFAULT_ENQ):
     """Flood-fill the red blob containing (seed_x, seed_y) with N programs.
+
+    enqueue (twin-only): "lane" (default) or "program", see the module doc.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
     returned. Raises ValueError for bad inputs and RuntimeError if the GPU
@@ -265,14 +289,16 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
         raise ValueError(
             "probe_layout='warp' requires connectivity=8 and radius=1 (the "
             "warp-cooperative twin exists only for the plain conn8 kernel)")
+    _check_enqueue(enqueue)
 
-    _warmup(bare, connectivity, radius, probe_layout, threads_per_block)
+    _warmup(bare, connectivity, radius, probe_layout, threads_per_block,
+            enqueue)
     dev = device_info()
     sm_count = dev.sm_count
 
     key = (bare, connectivity, radius, probe_layout)
     kernel_fn = _KERNELS[key]
-    coop_max = _coop_max_blocks(key, threads_per_block)
+    coop_max = _coop_max_blocks(key, threads_per_block, enqueue)
     if coop_max < 1:
         raise RuntimeError(
             f"this GPU cannot host even one cooperative block of this "
@@ -330,7 +356,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
 
     _launch(kernel_fn, launch_blocks, threads_per_block, instrumented, d_img,
             d_visited, d_depth, d_owner, d_queue, d_q_state, d_counters,
-            d_stats, d_trace, d_bar, width, height)
+            d_stats, d_trace, d_bar, width, height, enqueue)
     sync()
     t_d2h0 = time.perf_counter()
 
@@ -392,6 +418,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
         connectivity=connectivity,
         radius=radius,
         probe_layout=probe_layout,
+        enqueue=enqueue,
         processed=processed,
         cas_attempts=cas_attempts,
         interior=interior,

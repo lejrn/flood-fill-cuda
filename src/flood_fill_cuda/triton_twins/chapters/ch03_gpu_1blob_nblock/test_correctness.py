@@ -4,7 +4,10 @@ A test-for-test mirror of chapters/ch03_gpu_1blob_nblock/test_correctness.py
 (same names, scenes, parameters and assertions; only the implementation
 under test changes), followed by a cross-backend section that runs the
 Numba original and this twin on identical inputs and grids and asserts
-their deterministic outputs are identical.
+their deterministic outputs are identical, and an enqueue section: both
+settings of the twin's enqueue ("lane", the default, and "program", the
+first translation) against Numba, the CPU oracle and each other, plus the
+SASS check that ptxas warp-aggregates the per-lane ticket.
 
 The kernel must match the reference exactly (visited mask, depth map -
 which catches level-mixing races a visited-only check would miss - level
@@ -803,15 +806,16 @@ def _kernel_kwargs(key):
                 probe_layout=probe_layout)
 
 
-@pytest.mark.parametrize("tpb", [32, 128, 512])
+@pytest.mark.parametrize("tpb,enqueue", [(32, "lane"), (128, "lane"),
+                                         (512, "lane"), (128, "program")])
 @pytest.mark.parametrize("key", list(twin_driver._KERNELS),
                          ids=lambda k: "-".join(map(str, k)))
-def test_twin_no_recompile_inside_the_timed_launch(key, tpb):
+def test_twin_no_recompile_inside_the_timed_launch(key, tpb, enqueue):
     """The warm-up compiles the exact binary the timed launch uses: image
     sizes of every divisibility class reuse the one specialization per
-    (kernel, tpb), so no compile can land inside kernel_ms."""
+    (kernel, tpb, enqueue), so no compile can land inside kernel_ms."""
     kernel = twin_driver._KERNELS[key]
-    kw = _kernel_kwargs(key)
+    kw = dict(_kernel_kwargs(key), enqueue=enqueue)
 
     def compiled():
         return sum(len(c[0]) for c in kernel.device_caches.values())
@@ -827,9 +831,10 @@ def test_twin_no_recompile_inside_the_timed_launch(key, tpb):
     assert compiled() == before
 
 
+@pytest.mark.parametrize("enqueue", ["lane", "program"])
 @pytest.mark.parametrize("key", list(twin_driver._KERNELS),
                          ids=lambda k: "-".join(map(str, k)))
-def test_twin_grid_barrier_is_64_bit(key):
+def test_twin_grid_barrier_is_64_bit(key, enqueue):
     """The barrier counter and its target are int64, so 2 * levels *
     programs arrivals cannot wrap (an int32 target goes negative after
     2**31 arrivals and lets a program through early). Both arrivals per
@@ -837,9 +842,198 @@ def test_twin_grid_barrier_is_64_bit(key):
     import re
 
     assert twin_driver.BAR_DTYPE == np.int64
-    twin_driver._warmup(*key, threads_per_block=256)
-    ptx = twin_driver._warmed[(key, 256)].asm["ptx"]
+    twin_driver._warmup(*key, threads_per_block=256, enqueue=enqueue)
+    ptx = twin_driver._warmed[(key, 256, enqueue)].asm["ptx"]
     assert len(re.findall(r"atom\.global\.gpu\.release\.add\.u64", ptx)) == 2
     assert not re.search(r"release\.add\.[us]32", ptx)
     spins = re.findall(r"ld\.global\.gpu\.acquire\.(\w+)", ptx)
     assert spins and set(spins) == {"b64"}
+
+
+# ------------------------------------------------------------ enqueue modes
+#
+# enqueue="lane" (the default) takes one relaxed ticket per claiming lane,
+# which ptxas warp-aggregates like Numba's _warp_enqueue_global;
+# enqueue="program" is the first translation (aggregated over the program).
+# Both must give Numba's outputs and the CPU oracle's, and the same
+# deterministic counters. Queue order differs between the modes, which is
+# schedule-dependent in both backends anyway.
+
+ENQ_SCENES = ["disk_101", "serpentine_nonsquare", "random_supercritical",
+              "full_red_128", "disk_1001"]
+ENQ_GRIDS = [(8, 256), (3, 64)]
+
+
+def _enq_scene(name, kw):
+    if name == "disk_1001":
+        return scenes.disk_scene(1001, 1001, 480)
+    return _scene(name, kw)
+
+
+def assert_matches_oracle(img, sx, sy, kw, result):
+    """The CPU oracle's fill: full reference for conn4/conn8/wc, the fill
+    set for r2 (its depth is a supergraph BFS; Numba checks it)."""
+    if kw.get("radius") == 2:
+        ref_visited, _, _, ref_filled = cpu_flood_fill_8(img, sx, sy)
+    else:
+        ref = cpu_flood_fill_8 if kw.get("connectivity") == 8 else cpu_flood_fill
+        ref_visited, ref_depth, ref_levels, ref_filled = ref(img, sx, sy)
+        np.testing.assert_array_equal(result.depth, ref_depth)
+        assert result.levels == ref_levels
+    np.testing.assert_array_equal(result.visited, ref_visited)
+    assert result.filled == ref_filled
+    filled_mask = result.visited == 1
+    assert (result.img[filled_mask] == BLUE).all()
+    np.testing.assert_array_equal(result.img[~filled_mask], img[~filled_mask])
+
+
+def _pinned_both_modes(blocks, tpb, kw):
+    return min(_pinned(blocks, tpb, kw),
+               max_blocks(threads_per_block=tpb, enqueue="program", **kw))
+
+
+@pytest.mark.parametrize("grid", ENQ_GRIDS, ids=lambda g: f"{g[0]}x{g[1]}")
+@pytest.mark.parametrize("scene", ENQ_SCENES)
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_enqueue_modes_match_numba_oracle_and_each_other(variant, scene, grid):
+    kw = VARIANTS[variant]
+    img, sx, sy = _enq_scene(scene, kw)
+    blocks = _pinned_both_modes(grid[0], grid[1], kw)
+    n = numba_flood_fill(img, sx, sy, threads_per_block=grid[1],
+                         blocks=blocks, **kw)
+    runs = {enq: flood_fill(img, sx, sy, threads_per_block=grid[1],
+                            blocks=blocks, enqueue=enq, **kw)
+            for enq in ("lane", "program")}
+    for enq, t in runs.items():
+        assert t.enqueue == enq
+        assert_matches_oracle(img, sx, sy, kw, t)
+        assert_same_deterministic_outputs(n, t, kw)
+    # and directly against each other: every deterministic counter
+    assert_same_deterministic_outputs(runs["program"], runs["lane"], kw)
+
+
+@pytest.mark.parametrize("enqueue", ["lane", "program"])
+@pytest.mark.parametrize("variant", INSTRUMENTED)
+def test_enqueue_modes_owner_map_at_one_block(variant, enqueue):
+    """One program: the full owner map is deterministic in both modes."""
+    kw = VARIANTS[variant]
+    img, sx, sy = _scene("random_supercritical", kw)
+    n = numba_flood_fill(img, sx, sy, blocks=1, **kw)
+    t = flood_fill(img, sx, sy, blocks=1, enqueue=enqueue, **kw)
+    assert_same_deterministic_outputs(n, t, kw)
+    np.testing.assert_array_equal(t.owner, n.owner)
+
+
+@pytest.mark.parametrize("enqueue", ["lane", "program"])
+@pytest.mark.parametrize("scene", ["disk_101", "full_red_128",
+                                   "random_supercritical"])
+def test_enqueue_modes_conn4_cas_attempts_is_edge_count(scene, enqueue):
+    """conn4's cas_attempts is exact (one probe per edge) in both modes,
+    at each backend's own full residency of one-warp programs."""
+    img, sx, sy = SCENES[scene]()
+    t = flood_fill(img, sx, sy, threads_per_block=32, enqueue=enqueue)
+    assert t.blocks == max_blocks(threads_per_block=32, enqueue=enqueue)
+    assert t.cas_attempts == _adjacent_pairs_4(t.visited == 1)
+
+
+def test_enqueue_default_is_lane():
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    assert twin_kernels.DEFAULT_ENQ == "lane"
+    assert twin_kernels.ENQ_MODES == ("lane", "program")
+    assert flood_fill(img, sx, sy).enqueue == "lane"
+    assert flood_fill(img, sx, sy, bare=True).enqueue == "lane"
+
+
+@pytest.mark.parametrize("enqueue", ["warp", "", None, "Lane"])
+def test_twin_rejects_bad_enqueue(enqueue):
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="enqueue"):
+        flood_fill(img, sx, sy, enqueue=enqueue)
+    with pytest.raises(ValueError, match="enqueue"):
+        max_blocks(threads_per_block=256, enqueue=enqueue)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_enqueue_lane_capacity_at_least_numba(variant):
+    """Without the program-wide scan the r2 pair drops from 118-128 to 80
+    registers, so every lane twin hosts at least Numba's co-resident grid
+    (the first translation's r2_bare did not: 48 vs Numba's 72 at
+    tpb=256)."""
+    kw = VARIANTS[variant]
+    for tpb in (64, 256):
+        assert (max_blocks(threads_per_block=tpb, **kw)
+                >= numba_max_blocks(threads_per_block=tpb, **kw))
+
+
+# SASS evidence: ptxas warp-aggregates the per-lane ticket.
+
+ENQ_SITES = {(False, 4, 1, "thread"): 4, (False, 8, 1, "thread"): 8,
+             (False, 8, 2, "thread"): 24, (False, 8, 1, "warp"): 1}
+
+
+def _nvdisasm():
+    import shutil
+
+    import triton.backends.nvidia as nv
+
+    for path in (os.path.join(os.path.dirname(nv.__file__), "bin", "nvdisasm"),
+                 shutil.which("nvdisasm") or "",
+                 "/usr/local/cuda/bin/nvdisasm"):
+        if path and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def _sass(key, enqueue, tmp_path):
+    import subprocess
+
+    tool = _nvdisasm()
+    if tool is None:
+        pytest.skip("nvdisasm not found (CUDA toolkit or Triton bundle)")
+    twin_driver._warmup(*key, threads_per_block=256, enqueue=enqueue)
+    cubin = twin_driver._warmed[(key, 256, enqueue)].asm["cubin"]
+    path = tmp_path / f"k_{enqueue}.cubin"
+    path.write_bytes(cubin)
+    out = subprocess.run([tool, "-c", str(path)], capture_output=True,
+                         text=True, check=True).stdout
+    # one opcode string per instruction, in address order
+    return [line.split("*/", 1)[1].strip() for line in out.splitlines()
+            if line.strip().startswith("/*") and "*/" in line
+            and line.split("*/", 1)[1].strip()]
+
+
+def _rear_tickets(sass):
+    """Indices of 32-bit global atomic adds: the rear-counter tickets (the
+    exit counters and the grid barrier are 64-bit)."""
+    return [i for i, ins in enumerate(sass)
+            if "ATOMG.E.ADD" in ins and "ATOMG.E.ADD.64" not in ins]
+
+
+@pytest.mark.parametrize("bare", [False, True], ids=["inst", "bare"])
+@pytest.mark.parametrize("site", list(ENQ_SITES),
+                         ids=lambda k: "-".join(map(str, k[1:])))
+def test_twin_lane_enqueue_is_warp_aggregated_in_sass(site, bare, tmp_path):
+    """Each per-lane ticket compiles to the warp-aggregated pattern of
+    Numba's helper: an active-mask vote and a POPC before one predicated
+    (leader-only) ATOMG.E.ADD, and a SHFL.IDX broadcast of the base after
+    it. And the lane mode adds no CTA barrier per enqueue site: the
+    program mode adds at least one per site (7 on Triton 3.7)."""
+    key = (bare,) + site[1:]
+    n_sites = ENQ_SITES[site]
+    lane = _sass(key, "lane", tmp_path)
+    tickets = _rear_tickets(lane)
+    assert len(tickets) == n_sites
+    for i in tickets:
+        before, after = lane[max(0, i - 12):i], lane[i + 1:i + 13]
+        assert lane[i].startswith("@"), lane[i]  # only the leader issues it
+        assert any("VOTEU.ANY" in s or "VOTE.ANY" in s for s in before)
+        assert any(s.split()[0].endswith("POPC") for s in before)
+        assert any("SHFL.IDX" in s for s in after)
+    program = _sass(key, "program", tmp_path)
+    bars_lane = sum("BAR.SYNC" in s for s in lane)
+    bars_program = sum("BAR.SYNC" in s for s in program)
+    assert bars_program - bars_lane >= n_sites
+    # per-lane tickets: the barrier count does not grow with the sites
+    base = _sass((bare, 4, 1, "thread"), "lane", tmp_path)
+    if site[2] == 1:  # r2 adds the ring-2 skip reduction, not enqueue bars
+        assert bars_lane == sum("BAR.SYNC" in s for s in base)
