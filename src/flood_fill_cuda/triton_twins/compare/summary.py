@@ -10,6 +10,12 @@ config, and whether every row's outputs were identical.
 The geometric mean is the right average for ratios: a 2x win and a 2x
 loss cancel to 1.0, where an arithmetic mean would call it 1.25.
 
+"overall" weighs every unit equally (the geometric mean of the units'
+geometric means), so the grand table's 300-odd cells cannot drown out a
+chapter with 30. Rows marked comparable=false are reported per unit as
+"own default" figures (each backend at its own default grid) and never
+enter the like-for-like averages.
+
 Run:  python -m flood_fill_cuda.triton_twins.compare.summary
 """
 
@@ -43,7 +49,9 @@ def _extreme(rows, key, pick):
     return {"speedup": row[key], "experiment": row["experiment"],
             "scene": row["scene"], "config": row["config"],
             "numba_ms": row["numba"]["kernel_ms"]["median"],
-            "triton_ms": row["triton"]["kernel_ms"]["median"]}
+            "triton_ms": row["triton"]["kernel_ms"]["median"],
+            # projected from a per-blob sample (grand table), not one call
+            "est": bool(row.get("est") or row.get("config", {}).get("est"))}
 
 
 def summarize_rows(rows):
@@ -62,6 +70,9 @@ def summarize_rows(rows):
                           "detail": r.get("mismatch_detail", "")}
                          for r in measured if not r.get("outputs_equal")],
     }
+    if len(measured) > len(ok):
+        out["own_default_geomean_speedup_kernel"] = geomean(
+            r["speedup_kernel"] for r in measured)
     if ok:
         out["geomean_speedup_kernel"] = geomean(r["speedup_kernel"] for r in ok)
         out["geomean_speedup_total"] = geomean(r["speedup_total"] for r in ok)
@@ -90,12 +101,20 @@ def summarize(root=TWINS_ROOT):
             "experiments": {k: summarize_rows(v)
                             for k, v in experiments.items()},
         }
-    every = [r for u, p in newest_per_unit(root).items()
-             for r in json.load(open(p))["rows"] if "error" not in r]
+    per_unit = [u["geomean_speedup_kernel"] for u in units.values()
+                if u.get("geomean_speedup_kernel")]
+    per_unit_total = [u["geomean_speedup_total"] for u in units.values()
+                      if u.get("geomean_speedup_total")]
     return {
         "speedup_definition": "numba_ms / triton_ms; above 1 = Triton faster",
         "units": units,
-        "overall": summarize_rows(every) if every else {},
+        "overall": {
+            "units": len(units),
+            "geomean_of_unit_geomeans_kernel": geomean(per_unit),
+            "geomean_of_unit_geomeans_total": geomean(per_unit_total),
+            "all_outputs_equal": all(u["all_outputs_equal"]
+                                     for u in units.values()),
+        },
     }
 
 

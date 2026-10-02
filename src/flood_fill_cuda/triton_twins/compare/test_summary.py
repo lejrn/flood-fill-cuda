@@ -47,7 +47,9 @@ def test_newest_file_wins_and_extremes_are_named(tmp_path):
     assert ch01["best_for_numba"]["scene"] == "serp"
     assert ch01["triton_faster_rows"] == 1
     assert not doc["units"]["ch02"]["all_outputs_equal"]
-    assert doc["overall"]["rows"] == 3
+    assert not doc["overall"]["all_outputs_equal"]
+    # units weigh equally: ch01 geomean 1.0, ch02 1.0
+    assert doc["overall"]["geomean_of_unit_geomeans_kernel"] == pytest.approx(1.0)
 
 
 def test_not_comparable_rows_are_counted_but_not_averaged(tmp_path):
@@ -59,3 +61,4 @@ def test_not_comparable_rows_are_counted_but_not_averaged(tmp_path):
     assert u["geomean_speedup_kernel"] == pytest.approx(2.0)
     assert u["not_comparable_rows"] == 1
     assert u["best_for_numba"]["scene"] == "a"
+    assert u["own_default_geomean_speedup_kernel"] == pytest.approx((2.0 * 0.1) ** 0.5)
