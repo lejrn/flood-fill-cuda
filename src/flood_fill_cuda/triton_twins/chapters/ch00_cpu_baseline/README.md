@@ -60,8 +60,8 @@ One Numba block of T threads = one program with T-lane tensors and
 | `cuda.atomic.add(queue_rear, 0, 1)` per winning thread | per-lane masked `tl.atomic_add(state + REAR, 1, sem="relaxed")` | close | One atomic per winning lane, as in Numba (L2 instead of shared memory). |
 | `queue_x[pos] = nx` if `pos < 6000` | masked `tl.store` | exact | A dropped enqueue writes nothing. |
 | `img[x, y, 2] = (tid*4) % 255` | `((lane * 4) % 255).to(uint8)` | exact | Schedule-dependent across runs on both backends. |
-| `print(queue_front[0])` at exit | `state[PRINTED] = front`, read by the host | close | The value is the same; the print is dropped (`tl.device_print` would print once per lane). Measured cost of Numba's printf: about 0.045 ms of `kernel_ms` per launch, about 0.02 ms of it on the GPU. |
-| host `new_color` passed to the kernel | `cp.asarray` before, `.get(out=new_color)` after the launch | close | The same steps as Numba's implicit host-array round trip, at a different cost: Numba allocates with `cuMemAlloc` and copies synchronously (about 0.25 ms per launch here), the twin uses CuPy's pool (about 0.10 ms). A CuPy `new_color` stays on the device. |
+| `print(queue_front[0])` at exit | `state[PRINTED] = front`, read by the host | close | The value is the same; the print is dropped (`tl.device_print` would print once per lane). Numba's printf adds about 0.02-0.08 ms to `kernel_ms` per launch (interleaved runs on this laptop; it moves with the clock). |
+| host `new_color` passed to the kernel | `cp.asarray` before, `.get(out=new_color)` after the launch | close | The same steps as Numba's implicit host-array round trip, at a different cost: Numba allocates with `cuMemAlloc` and copies synchronously (about 0.18-0.27 ms per launch here), the twin uses CuPy's pool (about 0.07-0.11 ms). A CuPy `new_color` stays on the device. |
 | `cuda.to_device`, `copy_to_host`, `cuda.synchronize` | `cp.asarray(np.ascontiguousarray(...))`, `.get`, `runtime.sync()` | close | The kernel indexes raw C-order buffers, so Fortran-ordered or strided inputs are made contiguous first (Numba follows their strides). |
 | unseeded `random` scene | `setup_scene(rng_seed)` | close | The Numba builder, seeded from outside. `None` keeps the unseeded behaviour. |
 
@@ -75,9 +75,14 @@ One Numba block of T threads = one program with T-lane tensors and
   overflow behaviour has its own tests.
 - **The device print** of `queue_front` is replaced by a store the host
   reads after the timed brackets. Numba's `kernel_ms` includes the printf
-  (about 0.045 ms per launch, measured).
+  (about 0.02-0.08 ms per launch).
 - **The host `new_color` round trip** has the same steps on both sides but
-  costs Numba about 0.25 ms per launch and the twin about 0.10 ms.
+  costs Numba about 0.18-0.27 ms per launch and the twin about
+  0.07-0.11 ms.
+
+These costs are ranges over several interleaved measurements (see
+Compare), not single runs: they are a few percent of a 0.5 ms launch and
+scale with the GPU clock, which one block lets fall.
 - **Images** from `python -m ...single_block` go to
   `results/triton_twins/ch00_cpu_baseline/` instead of `./images/results/`.
 
@@ -95,16 +100,26 @@ both sides: Numba's exit printf and the host `new_color` round trip. So
 | `profile_kernel_as_written` | as written (printf) | host array, both sides | no (reference) |
 
 The print-less build is compiled at import from `single_block.py` itself,
-with only `if global_tid == 0: print(queue_front[0])` removed. The JSON's
-`meta.decomposition` holds the measured printf share and each stack's
-round trip, and each row's `info.device_us` holds the GPU-only time
-(CUDA events). One block uses 1 of 24 SMs, so the GPU clocks down during
-the rounds: read speedups with `clocks_after`.
+with only `if global_tid == 0: print(queue_front[0])` removed. Each row's
+`info.device_us` holds the GPU-only time (CUDA events). One block uses 1
+of 24 SMs, so the GPU clocks down during the rounds: read speedups with
+`clocks_after`.
+
+The printf share and the two round trips are not differences between
+rows: the rows run minutes apart, and the clock drift between them is as
+large as the costs. After the rows, one interleaved loop (300 rounds,
+`--decomposition-rounds`) runs six variants back to back on the seed-0
+scene every round, order rotating: Numba with and without the printf,
+each with a host and a device `new_color`, and Triton with both. The
+JSON's `meta.decomposition` holds each variant's median, each cost as the
+median and quartiles of its within-round differences, and the row
+differences, labelled approximate.
 
 One 40-round run on this laptop: like for like, Triton's `kernel_ms` is
 about 8% higher (0.569 vs 0.528 ms) and its GPU-only time about 15% higher
-(501 vs 432 us). Only the as-written row shows Triton ahead (x1.21), from
-the cheaper round trip and the missing printf.
+(501 vs 432 us). Only the as-written row can show Triton ahead (x1.21 in
+that run, x1.03 in a smoke run), from the cheaper round trip and the
+missing printf; it is the most clock-sensitive row.
 
 ## Run
 
