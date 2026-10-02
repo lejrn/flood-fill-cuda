@@ -542,15 +542,21 @@ judges both chapters, bit for bit.
 
 Every chapter above was rebuilt in Triton, kernel for kernel, with the
 same tests. Both backends were timed on the same cells: 1,214 rows,
-outputs identical on every run.
+deterministic outputs identical on every run.
 
-The first, faithful translation lost (x0.91, Numba / Triton kernel
-time). Two spelling choices did it, not Triton: a program-wide enqueue
-and lockstep union-find. Per-lane atomics (ptxas rebuilt Numba's warp
-aggregation by itself) and per-lane state machines took it to x1.12.
+The first, faithful translation lost: x0.91, Numba / Triton `kernel_ms`
+with the host launch path included (above x1 = Triton faster). Two
+spelling choices did most of it: a program-wide enqueue and lockstep
+union-find. Each worked around a construct Triton lacks; Triton's code
+generation was not the cost.
 
-This file's lesson again: the cost was who waits for whom. ch05 still
-loses (x0.87). The report: [`triton_twins/README.md`](../triton_twins/README.md).
+Per-lane atomics (ptxas rebuilt Numba's warp aggregation by itself) and
+per-lane state machines took it to x1.12 (about x1.07 with GPU-only
+time where it was measured).
+
+This file's lesson again: the cost was who waits for whom. Triton still
+trails on ch05 (x0.87) and the ch00 prototype (x0.90). The report:
+[`triton_twins/README.md`](../triton_twins/README.md).
 
 ---
 

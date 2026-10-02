@@ -2,11 +2,14 @@
 Static figures for the Triton twins' README, rendered from the committed
 comparison JSON, never drawn by hand.
 
-Two files into results/triton_twins/figures/:
+Three files into results/triton_twins/figures/:
 
     speedup_by_unit.svg  every like-for-like row of every unit, one strip
                          per unit on a log axis, with the unit's geometric
                          mean marked
+    ablations.svg        first translation vs the refined default, per
+                         translation choice: the same paired cells, two
+                         geometric means joined by a line
     grand_table.svg      the grand table, cell by cell: which backend wins
                          each (scene, chapter column), and by how much
 
