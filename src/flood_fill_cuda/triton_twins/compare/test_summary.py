@@ -80,8 +80,30 @@ def test_ablation_and_duplicate_rows_stay_out_of_every_average(tmp_path):
     assert u["geomean_speedup_kernel"] == pytest.approx(2.0)
     assert "own_default_geomean_speedup_kernel" not in u  # nothing left over
     assert u["ablation_rows"] == 1 and u["duplicate_rows"] == 1
-    ab = u["first_translation_ablation"]
+    ab = u["first_translation_ablations"]["enqueue"]
     assert ab["paired"] == 1
     assert ab["geomean_speedup_kernel_first_translation"] == pytest.approx(0.5)
     assert ab["geomean_speedup_kernel_default"] == pytest.approx(2.0)
     assert ab["geomean_triton_gain"] == pytest.approx(4.0)
+
+
+def test_two_ablations_in_one_unit_are_reported_apart(tmp_path):
+    root = str(tmp_path)
+    rows = []
+    for exp, key, first, default, t_first in (
+            ("enqueue", "enqueue", "program", "lane", 8.0),
+            ("lane_schedule", "lane_sched", "lockstep", "independent", 40.0)):
+        d = _row(exp, "sq", 4.0, 2.0)
+        d["config"] = {"tpb": 256, key: default}
+        d["duplicate_of"] = "benchmark"
+        f = _row(exp, "sq", 4.0, t_first)
+        f["config"] = {"tpb": 256, key: first, "label": "first_translation"}
+        f["comparable"] = False
+        f["first_translation"] = True
+        rows += [d, f]
+    rows.append(_row("benchmark", "sq", 4.0, 2.0))
+    _write(root, "ch05", "20260101T000000Z", rows)
+    ab = summarize(root)["units"]["ch05"]["first_translation_ablations"]
+    assert set(ab) == {"enqueue", "lane_schedule"}
+    assert ab["enqueue"]["geomean_triton_gain"] == pytest.approx(4.0)
+    assert ab["lane_schedule"]["geomean_triton_gain"] == pytest.approx(20.0)

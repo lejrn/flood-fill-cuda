@@ -60,7 +60,8 @@ def _extreme(rows, key, pick):
             "est": bool(row.get("est") or row.get("config", {}).get("est"))}
 
 
-ABLATION_KEYS = ("enqueue", "label", "schedule", "lane_sched", "LANE_SCHED")
+ABLATION_KEYS = ("enqueue", "label", "schedule", "lane_sched", "LANE_SCHED",
+                 "lane_schedule")
 
 
 def _is_ablation(r):
@@ -77,13 +78,13 @@ def _pair_key(r):
     return (r["experiment"], r["scene"], json.dumps(cfg, sort_keys=True))
 
 
-def ablation(rows):
-    """First-translation rows against the default rows they differ from:
-    same experiment, scene and config apart from the ablated setting."""
+def ablation(rows, experiment):
+    """One experiment's first-translation rows against the default rows
+    they differ from: same experiment, scene and config apart from the
+    ablated setting. Partners may be duplicate_of rows."""
     measured = [r for r in rows if "error" not in r]
-    first = [r for r in measured if _is_ablation(r)]
-    if not first:
-        return None
+    first = [r for r in measured
+             if _is_ablation(r) and r["experiment"] == experiment]
     default = {}
     for r in measured:
         if not _is_ablation(r):
@@ -101,6 +102,15 @@ def ablation(rows):
             f["triton"]["kernel_ms"]["median"] / d["triton"]["kernel_ms"]["median"]
             for f, d in pairs),
     }
+
+
+def ablations(rows):
+    """{experiment: ablation} for every experiment that holds
+    first-translation rows; one entry per translation choice, never
+    pooled (ch05 ablates both its enqueue and its union-find schedule)."""
+    exps = sorted({r["experiment"] for r in rows
+                   if "error" not in r and _is_ablation(r)})
+    return {e: ablation(rows, e) for e in exps} or None
 
 
 def summarize_rows(rows):
@@ -150,7 +160,7 @@ def summarize(root=TWINS_ROOT):
             "repeats": doc["repeats"],
             "caps": doc.get("meta", {}).get("caps"),
             **summarize_rows(rows),
-            "first_translation_ablation": ablation(rows),
+            "first_translation_ablations": ablations(rows),
             "experiments": {k: summarize_rows(v)
                             for k, v in experiments.items()},
         }
