@@ -12,12 +12,20 @@ The second part (test_cross_backend_*) runs the Numba chapter and the twin
 on the same inputs and asserts that every deterministic output is
 identical.
 
+The third part (test_enqueue_*, test_lane_enqueue_*) runs both enqueue
+translations of every kernel (enqueue="lane", the default, and "program",
+the first translation) against Numba and the CPU oracle, and checks in
+the SASS that ptxas warp-aggregates the per-lane atomics.
+
 Run:
 
     .venv/bin/python -m pytest -p no:cacheprovider src/flood_fill_cuda/triton_twins/chapters/ch02_gpu_1blob_2block/test_correctness.py -v
 """
 
 import os
+import re
+import shutil
+import subprocess
 
 os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
 
@@ -628,3 +636,156 @@ def test_cross_backend_numpy_int_seeds(kernel, bare, numba_ff):
         n, t = _run_both(numba_ff, img, sx, sy, kernel, bare)
         _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, bare)
         assert t.filled == 400
+
+
+# ================================================== enqueue translations
+# Every kernel has two enqueue translations (the ENQ constexpr, the
+# driver's enqueue=): "lane" (default: one masked atomic per claiming lane,
+# warp-aggregated by ptxas) and "program" (the first translation:
+# program-wide tl.sum/tl.cumsum, one atomic per program). Only queue order
+# may differ between them; every deterministic output must equal Numba's
+# and the CPU oracle's in both.
+
+ENQUEUE_MODES = ["lane", "program"]
+ENQ_SCENES = ["seam_seeded", "random_supercritical", "seam_serpentine_128",
+              "full_red_128"]
+
+
+@pytest.mark.parametrize("enqueue", ENQUEUE_MODES)
+@pytest.mark.parametrize("bare", [False, True])
+@pytest.mark.parametrize("kernel", KERNELS)
+@pytest.mark.parametrize("name", ENQ_SCENES)
+def test_enqueue_modes_match_numba_and_reference(name, kernel, bare, enqueue,
+                                                 numba_ff):
+    img, sx, sy = CROSS_SCENES[name]()
+    n = numba_ff.flood_fill(img, sx, sy, kernel=kernel, bare=bare)
+    t = flood_fill(img, sx, sy, kernel=kernel, bare=bare, enqueue=enqueue)
+    _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, bare)
+
+
+@pytest.mark.parametrize("enqueue", ENQUEUE_MODES)
+@pytest.mark.parametrize("placement", ["same_sm", "spread"])
+@pytest.mark.parametrize("scene", ["random_supercritical",
+                                   "seam_serpentine_128"])
+def test_enqueue_modes_pinned_match_numba_and_reference(scene, placement,
+                                                        enqueue, numba_ff):
+    img, sx, sy = SCENES[scene]()
+    n = numba_ff.flood_fill(img, sx, sy, kernel="pinned",
+                            threads_per_block=numba_ff.PINNED_TPB,
+                            placement=placement)
+    t = flood_fill(img, sx, sy, kernel="pinned", threads_per_block=PINNED_TPB,
+                   placement=placement, enqueue=enqueue)
+    _assert_same_as_numba_and_reference(img, sx, sy, n, t, "pinned", False)
+    if placement == "same_sm":
+        assert t.same_sm
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+@pytest.mark.parametrize("tpb", [32, 512])
+def test_enqueue_modes_agree_at_tpb_extremes(tpb, kernel, numba_ff):
+    """One warp per program (32) and 16 warps per program (512): the lane
+    path's per-warp slabs and the program path's single slab give the same
+    deterministic outputs as Numba."""
+    img, sx, sy = scenes.random_scene(256, 256, 0.65, rng_seed=17)
+    n = numba_ff.flood_fill(img, sx, sy, threads_per_block=tpb, kernel=kernel)
+    for enqueue in ENQUEUE_MODES:
+        t = flood_fill(img, sx, sy, threads_per_block=tpb, kernel=kernel,
+                       enqueue=enqueue)
+        _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, False)
+
+
+def test_enqueue_modes_spill_tiers_match_numba(numba_ff):
+    """A blob in the left half only, big enough to overflow program 0's
+    8192-slot ring (two-level occupancy ~9,400). No seam race can move a
+    pixel between tiers, so the spill counters are deterministic: Numba,
+    lane and program must report the same nonzero spill, the same peak
+    spill window, and stay reference-exact through the spill tier. Under
+    enqueue="lane" the ring rear overshoots by the spilled tickets every
+    spilling level and is clamped back at the level end."""
+    img, sx, sy = scenes.offcenter_blob_scene(4800, 2400, 2350)
+    n = numba_ff.flood_fill(img, sx, sy, kernel="split")
+    assert n.spilled_b0 > 0 and n.spilled_b1 == 0
+    for enqueue in ENQUEUE_MODES:
+        t = flood_fill(img, sx, sy, kernel="split", enqueue=enqueue)
+        _assert_same_as_numba_and_reference(img, sx, sy, n, t, "split", False)
+        for name in ("spilled", "spilled_b0", "spilled_b1",
+                     "peak_spill_window", "inbox_to_b0", "inbox_to_b1"):
+            assert getattr(t, name) == getattr(n, name), (enqueue, name)
+        del t
+
+
+def test_enqueue_bad_mode_raises():
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="enqueue"):
+        flood_fill(img, sx, sy, enqueue="warp")
+
+
+# ---------------------------------------------------------- SASS evidence
+# The point of enqueue="lane": ptxas compiles a masked per-lane
+# atomic_add on a uniform address into a warp-aggregated atomic (vote of
+# the claiming lanes, popcount, ONE leader ATOMG.E.ADD, SHFL.IDX of its
+# result, lanemask popcount for the rank), the pattern Numba's
+# _warp_enqueue_* writes by hand, and with no CTA barrier. If a Triton or
+# ptxas upgrade stops doing that, these tests say so.
+
+def _find_nvdisasm():
+    """PATH first, then the copy Triton ships beside its ptxas."""
+    import triton
+    bundled = os.path.join(os.path.dirname(triton.__file__), "backends",
+                           "nvidia", "bin", "nvdisasm")
+    return shutil.which("nvdisasm") or bundled
+
+
+NVDISASM = _find_nvdisasm()
+
+# per-lane append sites per kernel: 4 directions x (global queue | ring
+# ticket + spill ticket + inbox), pinned shares global's 4
+LANE_APPEND_SITES = {"global": 4, "dirsplit": 4, "split": 12, "pinned": 4}
+
+
+def _sass_instructions(cubin, path):
+    """nvdisasm needs a seekable file, so the cubin goes to path first."""
+    path.write_bytes(cubin)
+    out = subprocess.run([NVDISASM, "-c", str(path)], capture_output=True,
+                         check=True).stdout.decode()
+    return [m.group(1) for m in
+            (re.search(r"/\*[0-9a-f]{4,}\*/\s+(.*?)\s*;", line)
+             for line in out.splitlines()) if m]
+
+
+def _warp_aggregated_adds(ins, back=8, fwd=8):
+    """Leader-only ATOMG.E.ADD with a lane vote and a popcount before it
+    and a SHFL.IDX broadcast of its result after it."""
+    n = 0
+    for i, s in enumerate(ins):
+        if s.startswith("@") and "ATOMG.E.ADD" in s:
+            before, after = ins[max(0, i - back):i], ins[i + 1:i + 1 + fwd]
+            if (any("VOTE" in b and ".ANY" in b for b in before)
+                    and any("POPC" in b for b in before)
+                    and any("SHFL.IDX" in a for a in after)):
+                n += 1
+    return n
+
+
+@pytest.mark.skipif(not os.path.exists(NVDISASM), reason="nvdisasm not found")
+@pytest.mark.parametrize("kernel,bare", [("global", False), ("global", True),
+                                         ("dirsplit", False),
+                                         ("dirsplit", True), ("split", False),
+                                         ("split", True), ("pinned", False)])
+def test_lane_enqueue_is_warp_aggregated_in_sass(kernel, bare, tmp_path):
+    from .flood_fill import compiled_kernel
+    tpb = PINNED_TPB if kernel == "pinned" else 256
+    lane = _sass_instructions(
+        compiled_kernel(kernel, bare, tpb, "lane").asm["cubin"],
+        tmp_path / "lane.cubin")
+    program = _sass_instructions(
+        compiled_kernel(kernel, bare, tpb, "program").asm["cubin"],
+        tmp_path / "program.cubin")
+    # every per-lane append site is one leader atomic per warp (pinned's
+    # pair-barrier and rank atomics may add aggregated adds of their own)
+    assert _warp_aggregated_adds(lane) >= LANE_APPEND_SITES[kernel]
+    assert sum("ATOMG.E.ADD" in s for s in lane) == \
+        _warp_aggregated_adds(lane), "an add atomic is not warp-aggregated"
+    # the first translation's scans are CTA barriers the lane path lacks
+    bars = lambda ins: sum("BAR.SYNC" in s for s in ins)
+    assert bars(program) >= bars(lane) + 20
