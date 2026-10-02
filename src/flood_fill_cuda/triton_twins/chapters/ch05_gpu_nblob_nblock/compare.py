@@ -44,9 +44,15 @@ host-RAM budget. The per-run kernel_ms, in-kernel phase_ms and
 union_thread_ms are kept in each row's "runs" (entry 0 is the warm-up).
 A discovery probe's total_ms is the wall time of the discovery_only call.
 
+speedup_kernel is the metric to read; speedup_total also compares the
+two stacks' host allocators. A blocks=None row whose two grids resolve
+differently (benchmark_blocks_none; fused lattice and ccl rows in tuning
+and png) is marked comparable=False, with both grids in
+config["resolved_blocks"], so the summary keeps it out of the averages.
+
 Budget: 148 cases by default (benchmark 42, benchmark_blocks_none 18,
 seeding 36, tuning 36, png 16). From single-run timings of every config
-on the full-size scenes, about 16 minutes of GPU time at 5 repeats; peak
+on the full-size scenes, about 14 minutes of GPU time at 4 repeats; peak
 host RSS 2.03 GB measured on asym_4000_800 with both slim results alive.
 
 Run:
@@ -79,7 +85,9 @@ from ...runtime.bandwidth import measure_peak_bandwidth as triton_peak
 from . import flood_fill as triton_ff
 
 CHAPTER = "ch05_gpu_nblob_nblock"
-DEFAULT_REPEATS = nb_bench.GPU_REPEATS  # 5, all three timing scripts
+# Even, so each backend runs first in half the rounds (the harness rounds
+# an odd count up); the Numba scripts use GPU_REPEATS = 5.
+DEFAULT_REPEATS = 4
 TPB = nb_bench.TPB
 EXPERIMENTS = ("benchmark", "benchmark_blocks_none", "seeding", "tuning",
                "png")
@@ -131,9 +139,18 @@ CAPS = [
     "buffers. input_blocks.png runs whole",
 ]
 METHOD_NOTES = [
-    "every experiment runs at the harness's repeats (default 5, the Numba "
-    "scripts' GPU_REPEATS); the Numba scripts interleave all configs of a "
-    "scene per round, the harness interleaves the two backends per case",
+    "every experiment runs at the harness's repeats (default 4, even so each "
+    "backend runs first in half the rounds; the Numba scripts use "
+    "GPU_REPEATS=5); the Numba scripts interleave all configs of a scene "
+    "per round, the harness interleaves the two backends per case",
+    "speedup_kernel is the Numba-vs-Triton metric. kernel_ms includes each "
+    "runtime's Python launch path (three launches in the split build), "
+    "which matters only on the ms-scale scenes. speedup_total also compares "
+    "host memory management (CuPy's caching pool vs Numba's cuMemAlloc)",
+    "blocks=None rows whose grids resolve differently per backend are "
+    "comparable=false (config.resolved_blocks has both): every "
+    "benchmark_blocks_none row, and fused-lattice and ccl rows in tuning "
+    "and png",
     "seeding and the benchmark pin each kernel to min(Numba, Triton "
     "capacity); tuning and png launch blocks=None like tuning.py and "
     "png_inputs.py, so the fused lattice build runs Numba's 24-block grid "
@@ -396,6 +413,8 @@ def make_case(experiment, slot, scene, name, kind, spec, pinned, notes=""):
     same explicit grid when pinned, else blocks=None on both."""
     caps, res = facts(kind, spec)
     blocks = min(caps.values()) if pinned else None
+    # blocks=None resolves to each backend's own capacity
+    comparable = pinned or caps["numba"] == caps["triton"]
     runs = {"numba": [], "triton": []}
     if kind == "probe":
         rn = _probe_runner(numba_ff, slot, scene, spec, blocks, runs["numba"])
@@ -410,11 +429,13 @@ def make_case(experiment, slot, scene, name, kind, spec, pinned, notes=""):
         config = {"runner": name, **spec}
     config.update({"tpb": TPB, "num_warps": TPB // 32,
                    "blocks": "None" if blocks is None else int(blocks)})
+    if blocks is None:
+        config["resolved_blocks"] = dict(caps)
     extra = {"caps": caps, **res, "runs": runs}
     return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=rn, run_triton=rt, same=same,
                 pixels=slot.pixels(scene), info=info, notes=notes,
-                extra=extra)
+                extra=extra, comparable=comparable)
 
 
 # -------------------------------------------------------------- experiments

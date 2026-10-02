@@ -184,7 +184,12 @@ never commit it):
 
 Caps, recorded in the JSON's `meta.caps`: 6 of tuning.py's 53 configs;
 `asym_4000_800` (the largest scene) only in `benchmark`;
-`input_blobs.png` cropped to its top-left 4500 x 4500 quadrant. The
-default run is about 16 minutes of GPU time (5 repeats) and peaks at
-about 2 GB of host RAM. `--quick` runs every experiment on tiny scenes
-with one repeat and writes nothing. `--experiments a,b` runs a subset.
+`input_blobs.png` cropped to its top-left 4500 x 4500 quadrant. Rows
+whose `blocks=None` grids differ per backend (all of
+`benchmark_blocks_none`, fused-lattice and ccl rows of `tuning` / `png`)
+are `comparable=false`. Read `speedup_kernel`; `speedup_total` also
+compares the host allocators. The default run is about 14 minutes of GPU
+time (4 repeats, even so each backend goes first equally often) and
+peaks at about 2 GB of host RAM. `--quick` runs every experiment on tiny
+scenes with one repeat and writes nothing. `--experiments a,b` runs a
+subset.
