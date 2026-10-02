@@ -15,6 +15,12 @@ rules, the discovery-only phase kernels). Schedule-dependent values
 (owner, prov_label at seams, smid, union_cycles, ccl_fill cas_attempts,
 seed_merge union_attempts) are never compared.
 
+The lane-schedule and enqueue sections run the twin's two union-find
+schedules and its two enqueue modes (per lane, the default, and per
+program, the first translation) against Numba and the CPU oracle, force
+the OVERFLOW tripwire, and check in SASS that ptxas warp-aggregates the
+per-lane enqueue the way Numba's _warp_enqueue_global does.
+
 Run:
 
     .venv/bin/python -m pytest -p no:cacheprovider \
@@ -1202,3 +1208,358 @@ def test_lane_schedules_at_tpb_512(kw, blocks):
             assert_edge_contract(img, b, ref, roots)
             if a is not None:
                 assert_backends_agree(a, b, pinned=blocks is not None)
+
+
+# ================================================================ enqueue
+# The twin spells Numba's _warp_enqueue_global two ways (kernels.py, the
+# ENQ constexpr; the driver's enqueue keyword): "lane" (the default, one
+# relaxed atomic per winning lane, warp-aggregated by ptxas) and
+# "program" (the first translation, tl.cumsum ranks and one atomic per
+# program, kept for the enqueue ablation). Both must give the same
+# deterministic outputs, as each other, as Numba and as the CPU oracle,
+# in both lane schedules; the OVERFLOW tripwire must keep its meaning.
+
+_ENQ_CONFIGS = (
+    dict(variant="ccl_fill"),
+    dict(variant="ccl_fill", bare=True),
+    dict(variant="seed_merge"),
+    dict(variant="seed_merge", bare=True),
+    dict(variant="seed_merge", lattice=1),
+    dict(variant="seed_merge", lattice=4),
+    dict(variant="seed_merge", lattice=8, interior=True, bare=True),
+    dict(variant="seed_merge", lattice=1, build="r128"),
+    dict(variant="seed_merge", lattice=4, build="split"),
+)
+_ENQ_SCENES = ("full_red", "two_disks", "comb", "random", "serpentine")
+# a small grid (lanes walk many items, the fill's lane body runs) and the
+# benchmark's block size, both pinned so the per-block split is compared
+_ENQ_GRIDS = ((32, 2), (256, 3))
+
+
+def _scene_reference(img, kw):
+    """(the oracle's (visited, depth, label, levels, filled), roots) of a
+    flood_fill config, as _edge_oracle computes it."""
+    if kw["variant"] == "ccl_fill":
+        return cpu_fill_canonical(img), int(_red_mask(img).sum())
+    lattice = kw.get("lattice") or 0
+    interior = int(kw.get("interior", False))
+    return (cpu_fill_from_candidates(img, lattice, interior),
+            int(cpu_candidates(img, lattice, interior).sum()))
+
+
+@pytest.mark.parametrize("tpb, blocks", _ENQ_GRIDS)
+@pytest.mark.parametrize("kw", _ENQ_CONFIGS, ids=_kw_id)
+def test_enqueue_modes_match_numba_and_oracle(kw, tpb, blocks):
+    """Both enqueue modes, default lane schedule: identical deterministic
+    outputs and counters to Numba (pinned grid: blocks, processed_per_block
+    and thread_util_pct too) and the CPU oracle contract, union accounting
+    included."""
+    for name in _ENQ_SCENES:
+        img = _sched_scene(name)
+        ref, roots = _scene_reference(img, kw)
+        a = numba_driver.flood_fill(img, threads_per_block=tpb,
+                                    blocks=blocks, **kw)
+        for enq in twin_driver.ENQ_MODES:
+            b = flood_fill(img, threads_per_block=tpb, blocks=blocks,
+                           enqueue=enq, **kw)
+            assert_backends_agree(a, b, pinned=True)
+            if not kw.get("bare"):
+                assert_edge_contract(img, b, ref, roots)
+
+
+@pytest.mark.parametrize("kw", _ENQ_CONFIGS, ids=_kw_id)
+def test_enqueue_modes_in_the_lockstep_schedule(kw):
+    """The full first translation (lockstep union-find, program enqueue)
+    and the lockstep schedule with the per-lane enqueue: still Numba's
+    outputs exactly, on a small grid where every body runs."""
+    for name in ("full_red", "two_disks", "random"):
+        img = _sched_scene(name)
+        a = numba_driver.flood_fill(img, threads_per_block=32, blocks=2, **kw)
+        for enq in twin_driver.ENQ_MODES:
+            b = flood_fill(img, threads_per_block=32, blocks=2,
+                           lane_schedule="lockstep", enqueue=enq, **kw)
+            assert_backends_agree(a, b, pinned=True)
+
+
+@pytest.mark.parametrize("name", ("full_1x300", "noise_33x257_d97",
+                                  "noise_517x1_d80", "checker_97x131",
+                                  "rings_45x45", "sawtooth_97x131",
+                                  "blank_17x19", "full_1x1"))
+@pytest.mark.parametrize("kw", _EDGE_CONFIGS, ids=_kw_id)
+def test_enqueue_program_edge_shapes(kw, name):
+    """The first translation's enqueue on the edge scenes (the per-lane
+    one runs them in test_lane_schedules_edge_shapes): Numba and the CPU
+    oracle, one-warp programs on one and three programs."""
+    img = _edge_scene(name)
+    ref, roots = _edge_reference(name, kw)
+    for blocks in (1, 3):
+        a = numba_driver.flood_fill(img, threads_per_block=32,
+                                    blocks=blocks, **kw)
+        b = flood_fill(img, threads_per_block=32, blocks=blocks,
+                       enqueue="program", **kw)
+        assert_backends_agree(a, b, pinned=True)
+        assert_edge_contract(img, b, ref, roots)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_enqueue_modes_discovery_only_agree(variant):
+    """The phase kernels (seed_scan, ccl) in both modes: Numba's count."""
+    for name in ("full_red", "two_disks", "random", "comb"):
+        img = _sched_scene(name)
+        _, cand = numba_driver.discovery_only(img, variant=variant)
+        for enq in twin_driver.ENQ_MODES:
+            for blocks in (None, 2):
+                assert discovery_only(img, variant=variant, blocks=blocks,
+                                      enqueue=enq)[1] == cand
+
+
+def test_enqueue_default_and_validation():
+    assert twin_driver.DEFAULT_ENQ == "lane"
+    assert twin_driver.ENQ_MODES == ("lane", "program")
+    img = _sched_scene("two_disks")
+    for bad in ("warp", None, 1, "LANE"):
+        for fn in (flood_fill, discovery_only):
+            with pytest.raises(ValueError, match="enqueue"):
+                fn(img, enqueue=bad)
+        with pytest.raises(ValueError, match="enqueue"):
+            max_blocks(enqueue=bad)
+        with pytest.raises(ValueError, match="enqueue"):
+            twin_driver.kernel_info(enqueue=bad)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_enqueue_modes_are_separate_compiles(variant):
+    """Each mode is its own binary, with its own registers and its own
+    measured cooperative capacity (never assumed equal)."""
+    lane = twin_driver.compiled_kernel(variant, 256, enqueue="lane")
+    prog = twin_driver.compiled_kernel(variant, 256, enqueue="program")
+    assert lane is not prog
+    assert twin_driver.compiled_kernel(variant, 256) is lane
+    for enq in twin_driver.ENQ_MODES:
+        info = twin_driver.kernel_info(variant, 256, enqueue=enq)
+        assert info["coop_max_blocks"] == max_blocks(variant, 256,
+                                                     enqueue=enq) >= 1
+
+
+# ---- the OVERFLOW tripwire, forced
+# The queue holds one slot per red pixel, so the bound check never fires
+# in a real run (Numba's structural argument). Launching a twin with a
+# queue capacity below the fill forces it: the rear still hands out one
+# ticket per claim, a ticket past the capacity sets OVERFLOW and stores
+# nothing, and the dequeue of such a slot reads the sentinel the queue
+# was filled with (a red pixel: processing it again is harmless).
+
+_TRIP_KEYS = (("seed_merge", False, None), ("seed_merge", True, None),
+              ("ccl_fill", False, None), ("ccl_fill", True, None),
+              ("seed_merge_lat", False, 4), ("seed_merge_lat_core", False, 1))
+_TRIP_SCENES = ("two_disks", "random")
+
+
+def _trip_launch(img, key, bare, lattice, tpb, blocks, enq, q_cap):
+    """One launch of the twin `key` with the queue capacity argument set
+    to q_cap (the buffer keeps one slot per pixel). Returns the queue,
+    the rear, the counters, visited and the sentinel."""
+    import cupy as cp
+
+    lane = 1
+    twin_driver._warmup(key, bare, tpb, lane, enq)
+    spec = twin_driver._spec(key, bare)
+    n = img.shape[0] * img.shape[1]
+    bufs = twin_driver._device_buffers(img, key, not bare, blocks,
+                                       min(n, 1024))
+    sentinel = int(np.flatnonzero(_red_mask(img).reshape(-1))[0])
+    bufs["queue"][:] = sentinel
+    args = list(twin_driver._kernel_args(key, bare, bufs, lattice))
+    at = len(twin_driver._POINTERS[key]) + (key != "seed_merge_lat_core")
+    assert args[at + 1:at + 5] == [img.shape[0], img.shape[1], n, n]
+    args[at + 4] = q_cap
+    twin_driver._launch(spec, blocks, tuple(args), tpb, lane, enq)
+    twin_driver.sync()
+    return (cp.asnumpy(bufs["queue"]), int(cp.asnumpy(bufs["q_state"])[0]),
+            cp.asnumpy(bufs["counters"]), cp.asnumpy(bufs["visited"]),
+            sentinel)
+
+
+@pytest.mark.parametrize("tpb, blocks", ((32, 3), (256, 2)))
+@pytest.mark.parametrize("enq", ("lane", "program"))
+@pytest.mark.parametrize("key, bare, lattice", _TRIP_KEYS,
+                         ids=lambda v: str(v))
+def test_enqueue_overflow_tripwire(key, bare, lattice, enq, tpb, blocks):
+    """Forced overflow in both modes: OVERFLOW is set iff the rear passed
+    the capacity, nothing is stored at or past it, the rear counts one
+    ticket per claimed pixel, and the stored slots hold distinct claimed
+    pixels. At exactly the fill's size nothing fires and the queue is a
+    permutation of the filled pixels."""
+    from flood_fill_cuda.chapters.ch05_gpu_nblob_nblock.kernels import (
+        FILLED, OVERFLOW,
+    )
+    for name in _TRIP_SCENES:
+        img = _cross_scene(name)
+        n_red = int(_red_mask(img).sum())
+        for q_cap, must in ((n_red, False), (n_red - 7, True),
+                            (n_red // 2, True)):
+            queue, rear, counters, visited, sentinel = _trip_launch(
+                img, key, bare, lattice, tpb, blocks, enq, q_cap)
+            tag = (name, q_cap)
+            claimed = np.flatnonzero(visited.reshape(-1))
+            assert rear == claimed.size == counters[FILLED], tag
+            assert (rear > q_cap) == must, tag
+            assert counters[OVERFLOW] == int(must), tag
+            assert (queue[q_cap:] == sentinel).all(), tag
+            stored = queue[:min(rear, q_cap)]
+            assert np.unique(stored).size == stored.size, tag
+            assert np.isin(stored, claimed).all(), tag
+            if not must:
+                assert rear == n_red, tag
+                np.testing.assert_array_equal(np.sort(stored), claimed)
+
+
+@pytest.mark.parametrize("enq", ("lane", "program"))
+def test_enqueue_overflow_raises_in_the_driver(enq, monkeypatch):
+    """flood_fill turns a fired tripwire into the RuntimeError of the
+    Numba driver, in both modes."""
+    real = twin_driver._kernel_args
+    img = _cross_scene("random")
+    sentinel = int(np.flatnonzero(_red_mask(img).reshape(-1))[0])
+
+    def short_queue(kernel_key, bare, bufs, *a, **k):
+        # the slots past the capacity are dequeued too: a red pixel there,
+        # never the uninitialized cp.empty contents
+        bufs["queue"][:] = sentinel
+        args = list(real(kernel_key, bare, bufs, *a, **k))
+        at = len(twin_driver._POINTERS[kernel_key]) + (
+            kernel_key != "seed_merge_lat_core")
+        args[at + 4] = 3
+        return tuple(args)
+
+    # warm-up (compile and capacity) with the real capacity
+    flood_fill(img, threads_per_block=64, blocks=2, enqueue=enq)
+    monkeypatch.setattr(twin_driver, "_kernel_args", short_queue)
+    with pytest.raises(RuntimeError, match="structural tripwire"):
+        flood_fill(img, threads_per_block=64, blocks=2, enqueue=enq)
+
+
+# ---- SASS evidence: ptxas warp-aggregates the per-lane ticket
+
+# rear-ticket sites per binary: the P1 scan or ccl seed append (1), the
+# 8 directions of the per-direction fill batch (8), the lane-independent
+# fill body's probe (1, seed_merge family in the independent schedule)
+_SASS_SELECTIONS = {
+    "seed_merge": (dict(variant="seed_merge"), 10, 9),
+    "seed_merge_bare": (dict(variant="seed_merge", bare=True), 10, 9),
+    "ccl_fill": (dict(variant="ccl_fill"), 9, 9),
+    "ccl_fill_bare": (dict(variant="ccl_fill", bare=True), 9, 9),
+    "lat_fused": (dict(variant="seed_merge", lattice=4), 10, 9),
+    "lat_fused_bare": (dict(variant="seed_merge", lattice=4, bare=True),
+                       10, 9),
+    "lat_r128": (dict(variant="seed_merge", lattice=4, build="r128"), 10, 9),
+    "lat_split_core": (dict(variant="seed_merge", lattice=4, build="split"),
+                       10, 9),
+    "scan_probe": ("seed_merge", 1, 1),
+    "cclp_probe": ("ccl_fill", 1, 1),
+}
+
+
+def _sass_report(sel, tpb, sched, enq, tmp_path):
+    from flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock import (
+        sass,
+    )
+    if sass.nvdisasm_path() is None:
+        pytest.skip("nvdisasm not found (Triton bundle or CUDA toolkit)")
+    kw = _SASS_SELECTIONS[sel][0]
+    if isinstance(kw, str):
+        compiled = twin_driver.phase_kernel(kw, tpb, lane_schedule=sched,
+                                            enqueue=enq)[1]
+    else:
+        compiled = twin_driver.compiled_kernel(
+            threads_per_block=tpb, lane_schedule=sched, enqueue=enq, **kw)
+    text = sass.disassemble(compiled.asm["cubin"],
+                            tmp_path / f"{sel}_{tpb}_{sched}_{enq}.cubin")
+    report = sass.enqueue_report(text)
+    report["ptx_bar"] = sass.ptx_barriers(compiled.asm["ptx"])
+    report["ptx_atom32"] = sass.ptx_rear_atomics(compiled.asm["ptx"])
+    return report
+
+
+@pytest.mark.parametrize("tpb, sched", ((32, "independent"),
+                                        (256, "independent"),
+                                        (512, "independent"),
+                                        (256, "lockstep")))
+@pytest.mark.parametrize("sel", list(_SASS_SELECTIONS))
+def test_lane_enqueue_is_warp_aggregated_in_sass(sel, tpb, sched, tmp_path):
+    """Every rear ticket of the per-lane binary is Numba's warp
+    aggregation in SASS: a VOTE(U).ANY of the active lanes, the POPC of
+    that mask as the operand of one predicated (leader-only) 32-bit
+    ATOMG.E.ADD, and a SHFL.IDX broadcast of the old rear. The program
+    binary has one rear atomic per site in the PTX too, none of its SASS
+    atomics is a per-lane aggregation (in a one-warp program ptxas splits
+    each into a partial-warp and a full-warp path, so the SASS holds two),
+    and it has at least one more CTA barrier per site (7 per site at 256
+    and 512 lanes on Triton 3.7). Checked for every twin binary at
+    one-warp programs, the benchmark's 256 lanes and the widest program,
+    and in the lockstep schedule at 256 lanes."""
+    sites = _SASS_SELECTIONS[sel][1 if sched == "independent" else 2]
+    lane = _sass_report(sel, tpb, sched, "lane", tmp_path)
+    assert lane["ptx_atom32"] == sites, lane
+    assert lane["enqueue_atomics"] == lane["warp_aggregated"] == sites, lane
+    prog = _sass_report(sel, tpb, sched, "program", tmp_path)
+    assert prog["ptx_atom32"] == sites, prog
+    assert prog["enqueue_atomics"] >= sites, prog
+    assert prog["warp_aggregated"] == 0, prog
+    assert prog["bar_sync"] - lane["bar_sync"] >= sites, (lane, prog)
+    # the PTX barrier count is the SASS one (no disassembler needed)
+    assert lane["ptx_bar"] == lane["bar_sync"]
+    assert prog["ptx_bar"] == prog["bar_sync"]
+
+
+# ---- compare.py: the enqueue experiment's rows
+
+def test_compare_marks_enqueue_rows():
+    """compare.py, quick mode: the enqueue experiment has a per_lane and a
+    first_translation row per cell on the same grid; only the program rows
+    are first translations of the enqueue (label, first_translation=true,
+    comparable=False), every row names its enqueue mode, and exactly the
+    per_lane rows whose cell an earlier experiment measures with the
+    defaults carry duplicate_of=<that experiment>."""
+    from flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock import (
+        compare,
+    )
+
+    cases, meta = compare.build(True, ["benchmark", "seeding",
+                                       "lane_schedule", "enqueue"])
+    enq = [c for c in cases if c.experiment == "enqueue"]
+    n_cfg = len(compare.ENQ_CONFIGS) * len(compare.QUICK_SCENES)
+    assert len(enq) == 2 * n_cfg
+    for c in cases:
+        assert c.config["enqueue"] in twin_driver.ENQ_MODES
+        program = c.config["enqueue"] == "program"
+        assert program == (c.experiment == "enqueue"
+                           and c.config["label"] == "first_translation")
+        if c.experiment == "enqueue":
+            assert program == bool(c.extra.get("first_translation"))
+            assert c.comparable == (not program)
+            assert c.config["lane_sched"] == "independent"
+    pairs = {}
+    for c in enq:
+        pairs.setdefault(compare._cell_key(c), []).append(c)
+    assert len(pairs) == n_cfg
+    for rows in pairs.values():
+        assert sorted(r.config["enqueue"] for r in rows) == ["lane",
+                                                              "program"]
+        assert len({r.config["blocks"] for r in rows}) == 1
+    earlier = {}
+    for c in cases:
+        if (c.experiment != "enqueue" and compare._is_default(c)
+                and not c.extra.get("duplicate_of")):
+            earlier.setdefault(compare._cell_key(c), c.experiment)
+    tagged = 0
+    for c in enq:
+        dup = c.extra.get("duplicate_of")
+        if c.config["enqueue"] == "lane":
+            assert dup == earlier.get(compare._cell_key(c))
+            tagged += dup is not None
+        else:
+            assert dup is None
+    assert tagged == meta["experiment_detail"]["enqueue"]["duplicate_rows"]
+    assert tagged > 0
+    assert meta["enqueue_default"] == "lane"

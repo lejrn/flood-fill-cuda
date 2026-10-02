@@ -14,10 +14,21 @@ This file only changes how each CUDA construct is spelled:
   co-resident, exactly like Numba). Same barrier placement: two per level,
   the fence sandwich around the discovery rear read, the instrumented-only
   closing barrier after the seed_merge flatten.
-- The warp-aggregated enqueue becomes program-aggregated: ranks from one
-  exclusive tl.cumsum, ONE atomic on the rear per program instead of one
-  per warp. Queue order inside a level differs; the per-level SET (and so
-  depth, labels and every level count) does not.
+- _warp_enqueue_global (activemask, popc, leader atomic, shfl), at every
+  append site (the P1 candidate scan, the ccl seed append, every fill
+  claim), is spelled two ways, picked by the ENQ constexpr:
+  ENQ="lane" (the default): _lane_enqueue, one relaxed tl.atomic_add of 1
+  on the rear per winning lane, the item stored at the slot it returned.
+  ptxas warp-aggregates that atomic (VOTEU.ANY, POPC, one leader
+  ATOMG.E.ADD, SHFL.IDX): the machine code of Numba's hand-written helper,
+  with no CTA barrier.
+  ENQ="program" (the first translation, kept to measure its cost):
+  _cta_enqueue, ranks from one exclusive tl.cumsum over the program and
+  ONE atomic per program; the scan and the sum add CTA barriers Numba
+  never had and hold the program's warps together at every site.
+  Queue order inside a level differs between the two and from Numba;
+  the per-level SET (and so depth, labels and every level count) does
+  not.
 - The visited CAS(0 -> 1) becomes a masked atomic_xchg(1): visited only
   ever holds 0 or 1, so "old == 0 wins" is the same exactly-once claim
   (Triton's atomic_cas takes no mask).
@@ -94,6 +105,12 @@ _UNION_DONE = tl.constexpr(UNION_DONE)
 _UNION_CYCLES = tl.constexpr(UNION_CYCLES)
 _BS_PROCESSED = tl.constexpr(BS_PROCESSED)
 _BS_SMID = tl.constexpr(BS_SMID)
+
+# The ENQ constexpr: how an append reserves its queue slot (_enqueue).
+# "lane" (the default) is the faithful twin of _warp_enqueue_global (same
+# SASS pattern); "program" is the first translation.
+ENQ_MODES = ("lane", "program")
+DEFAULT_ENQ = "lane"
 
 # Runtime ints that change between calls: never specialize on them, or a
 # new scene size could trigger a compile inside the timed window.
@@ -173,11 +190,38 @@ def _union(parent_ptr, a, b, act):
 
 
 @triton.jit
+def _lane_enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap):
+    """Per-lane append on the global rear (ENQ="lane", the default; twin
+    of _warp_enqueue_global).
+
+    Every winning lane takes its own ticket with one relaxed atomic_add of
+    1 on the rear and writes its item at the slot the atomic returned. The
+    address is uniform and the operand the constant 1, so ptxas compiles
+    the atomic warp-aggregated: VOTEU.ANY collects the active lanes, POPC
+    counts them, one leader lane issues the ATOMG.E.ADD of that count,
+    SHFL.IDX broadcasts the old rear and each lane adds its rank (the POPC
+    of the active lanes below it). That is the machine code of Numba's
+    hand-written activemask / popc / leader atomic / shfl helper, with no
+    CTA barrier and no lockstep across the program's warps (README:
+    "Enqueue: per lane vs per program"). The tickets are the same set of
+    slots as Numba's (one per winner, in some order); the bound check is
+    the same structurally unreachable OVERFLOW tripwire."""
+    same = item * 0   # keeps the rear address a per-lane tensor
+    idx = tl.atomic_add(q_state_ptr + _Q_REAR + same, 1, mask=won,
+                        sem="relaxed", scope="gpu")
+    tl.store(queue_ptr + idx, item, mask=won & (idx < q_cap))
+    tl.store(counters_ptr + _OVERFLOW + same, 1, mask=won & (idx >= q_cap))
+
+
+@triton.jit
 def _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap):
-    """Program-aggregated append on the global rear (twin of
-    _warp_enqueue_global): exclusive tl.cumsum ranks, ONE atomic per
-    program that has anything to append. The bound check stays the
-    structurally unreachable OVERFLOW tripwire."""
+    """Program-aggregated append on the global rear (ENQ="program", the
+    first translation of _warp_enqueue_global): exclusive tl.cumsum
+    ranks, ONE atomic per program that has anything to append. The scan
+    and the sum are CTA-wide reductions: about 7 BAR.SYNC per call site in
+    SASS, and every warp of the program waits for the others at each
+    site, which Numba's per-warp helper never does. The bound check stays
+    the structurally unreachable OVERFLOW tripwire."""
     w = won.to(tl.int32)
     cnt = tl.sum(w, 0)
     rank = tl.cumsum(w, 0) - w   # outside the if: Triton 3.7 miscompiles
@@ -188,6 +232,20 @@ def _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap):
     idx = base + rank
     tl.store(queue_ptr + idx, item, mask=won & (idx < q_cap))
     tl.store(counters_ptr + _OVERFLOW + idx * 0, 1, mask=won & (idx >= q_cap))
+
+
+@triton.jit
+def _enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap,
+             ENQ: tl.constexpr):
+    """Append item on the lanes in won to the global queue, in the
+    spelling ENQ picks: "lane" (_lane_enqueue, the default) or "program"
+    (_cta_enqueue, the first translation, kept to measure its cost)."""
+    tl.static_assert((ENQ == "lane") or (ENQ == "program"),
+                     "ENQ must be 'lane' or 'program'")
+    if ENQ == "lane":
+        _lane_enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap)
+    else:
+        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap)
 
 
 @triton.jit
@@ -230,7 +288,7 @@ def _iota(parent_ptr, n, pid, nprog, BLOCK: tl.constexpr):
 @triton.jit
 def _corner_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
                  counters_ptr, width, height, n, q_cap, pid, nprog,
-                 BLOCK: tl.constexpr):
+                 BLOCK: tl.constexpr, ENQ: tl.constexpr):
     """seed_merge P1: a red pixel with no red lex-predecessor is a
     candidate; pre-visit it, label it with its own index, enqueue it.
     One lane per pixel, so the stores need no atomics."""
@@ -250,7 +308,7 @@ def _corner_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
         cand = red & ~found
         tl.store(visited_ptr + i, 1, mask=cand)
         tl.store(label_ptr + i, i, mask=cand)
-        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, i, cand, q_cap)
+        _enqueue(queue_ptr, q_state_ptr, counters_ptr, i, cand, q_cap, ENQ)
 
 
 @triton.jit
@@ -283,7 +341,7 @@ def _ccl_merge(img_ptr, parent_ptr, width, height, n, pid, nprog,
 @triton.jit
 def _ccl_flatten_seed(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
                       q_state_ptr, counters_ptr, n, q_cap, pid, nprog,
-                      BLOCK: tl.constexpr):
+                      BLOCK: tl.constexpr, ENQ: tl.constexpr):
     """ccl_fill P2: flatten every red pixel to its root; the root pixel is
     the blob's canonical seed - pre-visit and enqueue it."""
     lanes = tl.arange(0, BLOCK)
@@ -295,7 +353,7 @@ def _ccl_flatten_seed(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
         tl.store(label_ptr + i, root, mask=red)
         seed = red & (root == i)
         tl.store(visited_ptr + i, 1, mask=seed)
-        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, i, seed, q_cap)
+        _enqueue(queue_ptr, q_state_ptr, counters_ptr, i, seed, q_cap, ENQ)
 
 
 @triton.jit
@@ -317,11 +375,12 @@ def _fill_batch(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                 width, height, q_cap, base, rear, level, pid, processed,
                 cas_attempts, union_attempts, union_done, union_cycles,
                 BLOCK: tl.constexpr, MERGE: tl.constexpr,
-                INSTR: tl.constexpr):
+                INSTR: tl.constexpr, ENQ: tl.constexpr):
     """One grid-stride batch of a level, the per-direction body: BLOCK
     queue slots dequeued together, the 8 directions probed in lockstep,
-    each direction's unions with the lockstep _union. Returns the counter
-    registers and, per lane, how many of its probes collided (MERGE)."""
+    each direction's claims appended (_enqueue), its unions with the
+    lockstep _union. Returns the counter registers and, per lane, how
+    many of its probes collided (MERGE)."""
     lanes = tl.arange(0, BLOCK)
     offs = base + pid * BLOCK + lanes
     m = offs < rear
@@ -351,7 +410,7 @@ def _fill_batch(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
             # win: stamp the inherited label BEFORE the entry becomes
             # dequeueable
             tl.store(label_ptr + nlin, lbl, mask=won)
-        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, nlin, won, q_cap)
+        _enqueue(queue_ptr, q_state_ptr, counters_ptr, nlin, won, q_cap, ENQ)
         if MERGE:
             lost = probe & (old != 0)
             other = tl.load(label_ptr + nlin, mask=lost, other=-1)
@@ -377,7 +436,7 @@ def _fill_levels(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                  level_sizes_ptr, palette_ptr, bar_ptr, width, height, q_cap,
                  trace_cap, rear, epoch, pid, nprog, BLOCK: tl.constexpr,
                  MERGE: tl.constexpr, INSTR: tl.constexpr,
-                 LANE: tl.constexpr):
+                 LANE: tl.constexpr, ENQ: tl.constexpr):
     """The level-synchronous multisource fill, two barriers per level.
 
     MERGE=False is ccl_fill P3: labels are final, paint at dequeue.
@@ -399,6 +458,9 @@ def _fill_levels(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
     slow. Programs never meet inside a level, so each decides alone; the
     slot -> (program, lane) map, the barriers and the level bookkeeping
     are the same in every case, and so are the outputs.
+
+    ENQ picks the enqueue spelling of every claim (_enqueue), in both
+    bodies.
 
     Returns the grid-uniform level bookkeeping and the per-lane counter
     registers (the Numba my_* registers, one per thread)."""
@@ -437,7 +499,7 @@ def _fill_levels(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                     label_ptr, queue_ptr, q_state_ptr, counters_ptr,
                     palette_ptr, width, height, q_cap, base, rear, level,
                     pid, processed, cas_attempts, union_attempts, union_done,
-                    union_cycles, BLOCK, MERGE, INSTR)
+                    union_cycles, BLOCK, MERGE, INSTR, ENQ)
                 base += stride
                 # dense, and slots left for every lane to move on to
                 dense = ((tl.sum(ncoll, 0) >= _DENSE_COLL * BLOCK)
@@ -449,7 +511,7 @@ def _fill_levels(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                 label_ptr, queue_ptr, q_state_ptr, counters_ptr, width,
                 height, q_cap, base, rear, level, pid, nprog, processed,
                 cas_attempts, union_attempts, union_done, union_cycles,
-                BLOCK, INSTR)
+                BLOCK, INSTR, ENQ)
         else:
             for base in range(front, rear, stride):
                 (processed, cas_attempts, union_attempts, union_done,
@@ -458,7 +520,7 @@ def _fill_levels(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                     label_ptr, queue_ptr, q_state_ptr, counters_ptr,
                     palette_ptr, width, height, q_cap, base, rear, level,
                     pid, processed, cas_attempts, union_attempts, union_done,
-                    union_cycles, BLOCK, MERGE, INSTR)
+                    union_cycles, BLOCK, MERGE, INSTR, ENQ)
 
         epoch = _sync(bar_ptr, epoch, nprog)   # enqueues + final rear visible
         new_rear = tl.load(q_state_ptr + _Q_REAR)
@@ -572,8 +634,8 @@ def _exit_counters(counters_ptr, block_stats_ptr, q_state_ptr, pid, level,
 #              and the plain-store epilogue of compress
 #   full step  the link atomic_min (retry or retire), the pixel reads of
 #              a found item, the fill's dequeue and direction probe with
-#              the program's enqueue, the ccl flatten's label + seed
-#              append (one _cta_enqueue)
+#              its enqueue, the ccl flatten's label + seed append (one
+#              _enqueue each; per lane or per program as ENQ picks)
 # Per item the operations are Numba's: the same read-only find (the
 # first load is parent[start], no compression), the same atomic_min of
 # the smaller root into the larger root's slot, the same retry from the
@@ -773,11 +835,12 @@ def _ccl_merge_lanes(img_ptr, parent_ptr, width, height, n, pid, nprog,
 @triton.jit
 def _ccl_flatten_seed_lanes(img_ptr, visited_ptr, label_ptr, parent_ptr,
                             queue_ptr, q_state_ptr, counters_ptr, n, q_cap,
-                            pid, nprog, BLOCK: tl.constexpr):
+                            pid, nprog, BLOCK: tl.constexpr,
+                            ENQ: tl.constexpr):
     """ccl_fill P2, lane-independent: per red pixel, find (from the pixel
     itself), store the label; the root pixel is the blob's seed. The
-    epilogue waits for the full step, where the program's seeds append
-    with one _cta_enqueue (the lockstep body's construct)."""
+    epilogue waits for the full step, where the step's seeds append with
+    one _enqueue (the lockstep body's construct)."""
     lanes = tl.arange(0, BLOCK)
     stride = nprog * BLOCK
     i = pid * BLOCK + lanes
@@ -801,7 +864,7 @@ def _ccl_flatten_seed_lanes(img_ptr, visited_ptr, label_ptr, parent_ptr,
         tl.store(label_ptr + i, c, mask=fin)
         seed = fin & (c == i)
         tl.store(visited_ptr + i, 1, mask=seed)
-        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, i, seed, q_cap)
+        _enqueue(queue_ptr, q_state_ptr, counters_ptr, i, seed, q_cap, ENQ)
         i = tl.where(fin, i + stride, i)
         st = tl.where(fin, tl.where(i < n, _ST_SCAN, _ST_DONE), st)
 
@@ -841,7 +904,7 @@ def _merge_level_lanes(img_ptr, visited_ptr, depth_ptr, owner_ptr,
                        counters_ptr, width, height, q_cap, start, rear, level,
                        pid, nprog, processed, cas_attempts, union_attempts,
                        union_done, union_cycles, BLOCK: tl.constexpr,
-                       INSTR: tl.constexpr):
+                       INSTR: tl.constexpr, ENQ: tl.constexpr):
     """The rest of a seed_merge level from slot `start`, lane-independent.
     A lane's items are its grid-stride queue slots (Numba's slot ->
     (block, thread) map, so processed_per_block is unchanged); per item:
@@ -849,9 +912,9 @@ def _merge_level_lanes(img_ptr, visited_ptr, depth_ptr, owner_ptr,
     probe running its _union to the end before the next probe.
 
     Full step: one hop for the lanes in a union, the links, the next
-    slot's dequeue, one direction probe per probing lane with the
-    program's enqueue (the per-direction _cta_enqueue of the batch
-    body). Then _LANE_HOPS hop mini-steps, when at least a quarter of the
+    slot's dequeue, one direction probe per probing lane with its
+    enqueue (the batch body's per-direction _enqueue). Then _LANE_HOPS
+    hop mini-steps, when at least a quarter of the
     live lanes are in a union (fewer: they climb one hop per full step).
     A lane takes its next slot only while it is fewer than _LANE_WINDOW
     slots ahead of the program's slowest live lane: free-running lanes
@@ -922,8 +985,8 @@ def _merge_level_lanes(img_ptr, visited_ptr, depth_ptr, owner_ptr,
         claimed = probe & (old == 0)
         # win: stamp the inherited label BEFORE the entry is dequeueable
         tl.store(label_ptr + nlin, lbl, mask=claimed)
-        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, nlin, claimed,
-                     q_cap)
+        _enqueue(queue_ptr, q_state_ptr, counters_ptr, nlin, claimed, q_cap,
+                 ENQ)
         lost = probe & (old != 0)
         other = tl.load(label_ptr + nlin, mask=lost, other=-1)
         coll = lost & (other >= 0) & (other != lbl)
@@ -974,15 +1037,15 @@ def _ccl_merge_sched(img_ptr, parent_ptr, width, height, n, pid, nprog,
 def _ccl_flatten_seed_sched(img_ptr, visited_ptr, label_ptr, parent_ptr,
                             queue_ptr, q_state_ptr, counters_ptr, n, q_cap,
                             pid, nprog, BLOCK: tl.constexpr,
-                            LANE: tl.constexpr):
+                            LANE: tl.constexpr, ENQ: tl.constexpr):
     if LANE:
         _ccl_flatten_seed_lanes(img_ptr, visited_ptr, label_ptr, parent_ptr,
                                 queue_ptr, q_state_ptr, counters_ptr, n,
-                                q_cap, pid, nprog, BLOCK)
+                                q_cap, pid, nprog, BLOCK, ENQ)
     else:
         _ccl_flatten_seed(img_ptr, visited_ptr, label_ptr, parent_ptr,
                           queue_ptr, q_state_ptr, counters_ptr, n, q_cap,
-                          pid, nprog, BLOCK)
+                          pid, nprog, BLOCK, ENQ)
 
 
 @triton.jit
@@ -1003,10 +1066,11 @@ def ccl_fill_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                     block_stats_ptr, level_sizes_ptr, phase_ptr, palette_ptr,
                     bar_ptr, width, height, n, q_cap, trace_cap,
                     BLOCK: tl.constexpr, INSTR: tl.constexpr,
-                    LANE: tl.constexpr):
+                    LANE: tl.constexpr, ENQ: tl.constexpr = DEFAULT_ENQ):
     """Twin of ccl_fill_kernel (INSTR=True) and ccl_fill_bare_kernel
     (INSTR=False; owner/block_stats/level_sizes/phase are None). LANE
-    picks the union-find spelling of P1 and P2 (module doc).
+    picks the union-find spelling of P1 and P2, ENQ the enqueue spelling
+    of the seed append and the fill (module doc).
 
     Host contract as the Numba kernel, plus palette (PALETTE_HOST as 18
     uint8, the const array) and bar (int64[1] zeroed: the grid barrier).
@@ -1030,7 +1094,7 @@ def ccl_fill_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
 
     _ccl_flatten_seed_sched(img_ptr, visited_ptr, label_ptr, parent_ptr,
                             queue_ptr, q_state_ptr, counters_ptr, n, q_cap,
-                            pid, nprog, BLOCK, LANE)
+                            pid, nprog, BLOCK, LANE, ENQ)
     rear, epoch = _fence_sandwich(bar_ptr, q_state_ptr, phase_ptr, epoch, pid,
                                   nprog, 3, INSTR)
     n_seeds = rear
@@ -1040,7 +1104,7 @@ def ccl_fill_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
         img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr, label_ptr,
         queue_ptr, q_state_ptr, counters_ptr, level_sizes_ptr, palette_ptr,
         bar_ptr, width, height, q_cap, trace_cap, rear, epoch, pid, nprog,
-        BLOCK, False, INSTR, False)
+        BLOCK, False, INSTR, False, ENQ)
     # loop exit is post-barrier: this stamp closes the fill for the grid
     if INSTR:
         _stamp(phase_ptr, 4, pid)
@@ -1060,10 +1124,12 @@ def seed_merge_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
                       counters_ptr, block_stats_ptr, level_sizes_ptr,
                       phase_ptr, palette_ptr, bar_ptr, width, height, n,
                       q_cap, trace_cap, BLOCK: tl.constexpr,
-                      INSTR: tl.constexpr, LANE: tl.constexpr):
+                      INSTR: tl.constexpr, LANE: tl.constexpr,
+                      ENQ: tl.constexpr = DEFAULT_ENQ):
     """Twin of seed_merge_kernel (INSTR=True) and seed_merge_bare_kernel
     (INSTR=False; owner/prov/block_stats/level_sizes/phase are None). LANE
-    picks the union-find spelling of the fill's unions and of P3.
+    picks the union-find spelling of the fill's unions and of P3, ENQ the
+    enqueue spelling of P1 and the fill.
 
     Host contract as ccl_fill_kernel plus prov_label filled with -1."""
     pid = tl.program_id(0)
@@ -1078,7 +1144,8 @@ def seed_merge_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
         _stamp(phase_ptr, 1, pid)
 
     _corner_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
-                 counters_ptr, width, height, n, q_cap, pid, nprog, BLOCK)
+                 counters_ptr, width, height, n, q_cap, pid, nprog, BLOCK,
+                 ENQ)
     rear, epoch = _fence_sandwich(bar_ptr, q_state_ptr, phase_ptr, epoch, pid,
                                   nprog, 2, INSTR)
     n_candidates = rear
@@ -1089,7 +1156,7 @@ def seed_merge_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
         img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr, label_ptr,
         queue_ptr, q_state_ptr, counters_ptr, level_sizes_ptr, palette_ptr,
         bar_ptr, width, height, q_cap, trace_cap, rear, epoch, pid, nprog,
-        BLOCK, True, INSTR, LANE)
+        BLOCK, True, INSTR, LANE, ENQ)
     if INSTR:
         _stamp(phase_ptr, 3, pid)
 
@@ -1118,7 +1185,8 @@ def seed_merge_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr,
 @triton.jit
 def _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
                   counters_ptr, width, height, n, q_cap, lat_stride,
-                  lat_interior, pid, nprog, BLOCK: tl.constexpr):
+                  lat_interior, pid, nprog, BLOCK: tl.constexpr,
+                  ENQ: tl.constexpr):
     """seed_merge_lat P1: corner rule OR (lattice point [AND interior]).
 
     Numba short-circuits `lat_stride > 0 and x % lat_stride == 0 and ...`;
@@ -1154,7 +1222,7 @@ def _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
         cand = cand | (rest & ~found)
         tl.store(visited_ptr + i, 1, mask=cand)
         tl.store(label_ptr + i, i, mask=cand)
-        _cta_enqueue(queue_ptr, q_state_ptr, counters_ptr, i, cand, q_cap)
+        _enqueue(queue_ptr, q_state_ptr, counters_ptr, i, cand, q_cap, ENQ)
 
 
 @triton.jit
@@ -1181,7 +1249,8 @@ def seed_merge_lat_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
                           level_sizes_ptr, phase_ptr, palette_ptr, bar_ptr,
                           width, height, n, q_cap, trace_cap, lat_stride,
                           lat_interior, BLOCK: tl.constexpr,
-                          INSTR: tl.constexpr, LANE: tl.constexpr):
+                          INSTR: tl.constexpr, LANE: tl.constexpr,
+                          ENQ: tl.constexpr = DEFAULT_ENQ):
     """Twin of seed_merge_lat_kernel (INSTR=True), seed_merge_lat_bare_kernel
     (INSTR=False; owner/prov/block_stats/level_sizes/phase are None) and,
     launched with maxnreg=128, seed_merge_lat_r128_kernel (Numba compiles
@@ -1202,7 +1271,7 @@ def seed_merge_lat_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
 
     _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
                   counters_ptr, width, height, n, q_cap, lat_stride,
-                  lat_interior, pid, nprog, BLOCK)
+                  lat_interior, pid, nprog, BLOCK, ENQ)
     rear, epoch = _fence_sandwich(bar_ptr, q_state_ptr, phase_ptr, epoch, pid,
                                   nprog, 2, INSTR)
     n_candidates = rear
@@ -1214,7 +1283,7 @@ def seed_merge_lat_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
         img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr, label_ptr,
         queue_ptr, q_state_ptr, counters_ptr, level_sizes_ptr, palette_ptr,
         bar_ptr, width, height, q_cap, trace_cap, rear, epoch, pid, nprog,
-        BLOCK, True, INSTR, LANE)
+        BLOCK, True, INSTR, LANE, ENQ)
     if INSTR:
         _stamp(phase_ptr, 3, pid)
 
@@ -1250,7 +1319,8 @@ def seed_merge_lat_core_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
                                counters_ptr, block_stats_ptr, level_sizes_ptr,
                                phase_ptr, bar_ptr, width, height, n, q_cap,
                                trace_cap, lat_stride, lat_interior,
-                               BLOCK: tl.constexpr, LANE: tl.constexpr):
+                               BLOCK: tl.constexpr, LANE: tl.constexpr,
+                               ENQ: tl.constexpr = DEFAULT_ENQ):
     """Twin of seed_merge_lat_core_kernel: no prov_label and no palette
     (nothing is painted here). The host must follow this launch with
     lat_compress_kernel then lat_finish_kernel on the same stream."""
@@ -1265,7 +1335,7 @@ def seed_merge_lat_core_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
 
     _lattice_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
                   counters_ptr, width, height, n, q_cap, lat_stride,
-                  lat_interior, pid, nprog, BLOCK)
+                  lat_interior, pid, nprog, BLOCK, ENQ)
     rear, epoch = _fence_sandwich(bar_ptr, q_state_ptr, phase_ptr, epoch, pid,
                                   nprog, 2, True)
     n_candidates = rear
@@ -1276,7 +1346,7 @@ def seed_merge_lat_core_kernel(img_ptr, visited_ptr, depth_ptr, owner_ptr,
         img_ptr, visited_ptr, depth_ptr, owner_ptr, parent_ptr, label_ptr,
         queue_ptr, q_state_ptr, counters_ptr, level_sizes_ptr, None,
         bar_ptr, width, height, q_cap, trace_cap, rear, epoch, pid, nprog,
-        BLOCK, True, True, LANE)
+        BLOCK, True, True, LANE, ENQ)
     _stamp(phase_ptr, 3, pid)
 
     _exit_counters(counters_ptr, block_stats_ptr, q_state_ptr, pid, level,
@@ -1313,7 +1383,8 @@ def lat_finish_kernel(img_ptr, parent_ptr, label_ptr, prov_ptr, palette_ptr,
 @triton.jit(do_not_specialize=["width", "height", "n", "q_cap"])
 def seed_scan_kernel(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
                      q_state_ptr, counters_ptr, bar_ptr, width, height, n,
-                     q_cap, BLOCK: tl.constexpr):
+                     q_cap, BLOCK: tl.constexpr,
+                     ENQ: tl.constexpr = DEFAULT_ENQ):
     """Twin of seed_scan_kernel: seed_merge P0-P1, then the rear count."""
     pid = tl.program_id(0)
     nprog = tl.num_programs(0)
@@ -1321,7 +1392,8 @@ def seed_scan_kernel(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
     _iota(parent_ptr, n, pid, nprog, BLOCK)
     epoch = _sync(bar_ptr, epoch, nprog)
     _corner_scan(img_ptr, visited_ptr, label_ptr, queue_ptr, q_state_ptr,
-                 counters_ptr, width, height, n, q_cap, pid, nprog, BLOCK)
+                 counters_ptr, width, height, n, q_cap, pid, nprog, BLOCK,
+                 ENQ)
     epoch = _sync(bar_ptr, epoch, nprog)
     if pid == 0:
         tl.store(counters_ptr + _CANDIDATES,
@@ -1331,7 +1403,8 @@ def seed_scan_kernel(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
 @triton.jit(do_not_specialize=["width", "height", "n", "q_cap"])
 def ccl_kernel(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
                q_state_ptr, counters_ptr, bar_ptr, width, height, n, q_cap,
-               BLOCK: tl.constexpr, LANE: tl.constexpr):
+               BLOCK: tl.constexpr, LANE: tl.constexpr,
+               ENQ: tl.constexpr = DEFAULT_ENQ):
     """Twin of ccl_kernel: ccl_fill P0-P2, then the rear count (n_blobs)."""
     pid = tl.program_id(0)
     nprog = tl.num_programs(0)
@@ -1343,7 +1416,7 @@ def ccl_kernel(img_ptr, visited_ptr, label_ptr, parent_ptr, queue_ptr,
     epoch = _sync(bar_ptr, epoch, nprog)
     _ccl_flatten_seed_sched(img_ptr, visited_ptr, label_ptr, parent_ptr,
                             queue_ptr, q_state_ptr, counters_ptr, n, q_cap,
-                            pid, nprog, BLOCK, LANE)
+                            pid, nprog, BLOCK, LANE, ENQ)
     epoch = _sync(bar_ptr, epoch, nprog)
     if pid == 0:
         tl.store(counters_ptr + _CANDIDATES,
