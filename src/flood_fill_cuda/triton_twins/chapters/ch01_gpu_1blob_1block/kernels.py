@@ -30,11 +30,26 @@ atomic_cas has no mask; on a 0/1 flag "old == 0 wins" is the same
 exactly-once claim as cas(0, 1), and inactive lanes issue nothing.
 
 v1 keeps one ticket atomic per winning lane (not aggregated), as in Numba.
-v2's warp-aggregated two-tier enqueue becomes program-aggregated: one
-cumsum gives each winner its rank, one scalar atomic per tier reserves the
-slab. The spill ranks need no second scan: the lanes that miss the ring
-window are the top of the slab in ticket order, so rank2 = rank - k, the
-same value Numba's second ballot/popc computes.
+
+v2's enqueue has two Triton forms, picked by the constexpr ENQ:
+
+- ENQ="lane" (default): one masked tl.atomic_add per winning lane on the
+  ring rear, then one per spilling lane on the spill rear. ptxas
+  warp-aggregates each of these (VOTEU.ANY, FLO, POPC, one leader ATOMG,
+  SHFL.IDX broadcast of the base, per-lane rank from the vote mask), which
+  is the machine code of Numba's hand-written _warp_enqueue_two_tier. No
+  CTA barrier is added.
+- ENQ="program": the first translation. One cumsum gives each winner its
+  rank, one scalar atomic per tier reserves a program-wide slab. Its
+  tl.cumsum, tl.sum and scalar-atomic broadcast cost 9 CTA barriers per
+  direction per chunk (40 bar.sync in the kernel instead of Numba's 4) and
+  keep the warps of the program in lockstep.
+  The spill ranks need no second scan: the lanes that miss the ring
+  window are the top of the slab in ticket order, so rank2 = rank - k.
+
+Both forms hand out the same multiset of tickets per level (a contiguous
+range starting at the level's rear), so the ring/spill split, spilled,
+peak occupancy and every other counter are the same values.
 
 Triton has no break: v1's uniform overflow exit is folded into the while
 condition, with level += 1 kept before the exit so LEVELS matches.
@@ -86,6 +101,10 @@ _DY = tl.constexpr((0, 1, 0, -1))
 
 # Every runtime int that varies between calls: no recompiles per scene.
 _RUNTIME_INTS = ["seed_x", "seed_y", "width", "height", "trace_cap"]
+
+# v2 enqueue forms (the constexpr ENQ of the spill kernel); the first is the
+# default. "program" is the first translation, kept to measure its cost.
+ENQ_MODES = ("lane", "program")
 
 
 @triton.jit
@@ -214,19 +233,48 @@ def single_block_bfs_kernel(img_ptr, visited_ptr, depth_ptr, seed_x, seed_y,
 
 
 @triton.jit
+def _lane_enqueue_two_tier(ring_ptr, spill_ptr, state_ptr, front, item, won,
+                           zero_offs):
+    """Two-tier enqueue, one atomic per winning lane per tier (ENQ="lane").
+
+    Twin of Numba's _warp_enqueue_two_tier. In the source every winning
+    lane takes its own virtual ticket from the ring rear; ptxas turns the
+    masked same-address atomic into Numba's pattern (vote the active mask,
+    popc it, one leader atomic for the whole warp, shuffle the base, add the
+    lane's rank). Tickets inside the ring window [front, front +
+    RING_CAPACITY) go to ring slots (front is frozen per level, so the v1
+    distinct-slot argument holds). The others, exactly the lanes of
+    Numba's else branch, append to the spill tier with a second per-lane
+    atomic, aggregated the same way. The ring rear overshoots by the
+    level's spill count, as in Numba: those tickets write nothing to the
+    ring, and the level-end clamp pulls the rear back to front + CAP.
+    """
+    ticket = tl.atomic_add(state_ptr + _REAR + zero_offs, 1, mask=won,
+                           sem="relaxed", scope="gpu")
+    in_ring = won & (ticket - front < _CAP)
+    tl.store(ring_ptr + (ticket & _MASK), item, mask=in_ring)
+    to_spill = won & (ticket - front >= _CAP)
+    slot = tl.atomic_add(state_ptr + _SPILL_REAR + zero_offs, 1,
+                         mask=to_spill, sem="relaxed", scope="gpu")
+    tl.store(spill_ptr + slot, item, mask=to_spill)
+
+
+@triton.jit
 def _program_enqueue_two_tier(ring_ptr, spill_ptr, state_ptr, front, item,
                               won):
-    """Two-tier enqueue with one atomic per program per tier.
+    """Two-tier enqueue with one atomic per program per tier (ENQ="program").
 
-    Twin of Numba's _warp_enqueue_two_tier, aggregated over the program
-    instead of the warp. The winners reserve one slab of virtual tickets
-    [base, base + count) with a single atomic on the rear; each takes
-    base + its rank. Tickets inside the ring window [front, front +
-    RING_CAPACITY) go to ring slots (front is frozen per level, so the v1
-    distinct-slot argument holds). The rest, the top of the slab, append to
-    the global spill tier with a second single atomic; their spill rank is
-    rank - k, where k is the number of slab tickets that fit the ring. The
-    cumsum stays outside every if (Triton 3.7 miscompiles scans in ifs).
+    The first translation of Numba's _warp_enqueue_two_tier, aggregated
+    over the program instead of the warp. The winners reserve one slab of
+    virtual tickets [base, base + count) with a single atomic on the rear;
+    each takes base + its rank. Tickets inside the ring window [front,
+    front + RING_CAPACITY) go to ring slots. The rest, the top of the slab,
+    append to the global spill tier with a second single atomic; their
+    spill rank is rank - k, where k is the number of slab tickets that fit
+    the ring. The cumsum stays outside every if (Triton 3.7 miscompiles
+    scans in ifs). Same tickets and counters as the lane form, but the
+    scan, the reduction and the scalar-atomic broadcast add CTA barriers
+    Numba never had (9 per call, see the README).
     """
     w = won.to(tl.int32)
     rank = tl.cumsum(w, 0) - w
@@ -253,12 +301,15 @@ def single_block_bfs_spill_kernel(img_ptr, visited_ptr, depth_ptr, seed_x,
                                   seed_y, spill_ptr, counters_ptr,
                                   level_sizes_ptr, ring_ptr, state_ptr,
                                   width, height, trace_cap,
-                                  BLOCK: tl.constexpr):
+                                  BLOCK: tl.constexpr,
+                                  ENQ: tl.constexpr = "lane"):
     """v2: two-tier frontier, ring fast path + global spill tier.
 
     Same host contract as single_block_bfs_kernel, plus `spill`: an int32
     array of width*height entries (every pixel is enqueued at most once and
     the seed lives in the ring, so the tier cannot overflow; no tripwire).
+    ENQ picks the enqueue form: "lane" (default, warp-aggregated by ptxas
+    like Numba's) or "program" (the first translation).
 
     Each level's frontier is the fused window: n_shared ring entries at
     virtual tickets [sf, sr) followed by the spill slice [gf, gr). Levels
@@ -266,6 +317,8 @@ def single_block_bfs_spill_kernel(img_ptr, visited_ptr, depth_ptr, seed_x,
     the rear clamp (tickets past the ring window went to spill, so the rear
     is pulled back to the last ticket the ring stores).
     """
+    tl.static_assert((ENQ == "lane") | (ENQ == "program"),
+                     'ENQ must be "lane" or "program"')
     offs = tl.arange(0, BLOCK)
     zero_offs = offs * 0
 
@@ -326,8 +379,12 @@ def single_block_bfs_spill_kernel(img_ptr, visited_ptr, depth_ptr, seed_x,
                 old = tl.atomic_xchg(visited_ptr + nidx, 1, mask=cand,
                                      sem="relaxed")
                 won = cand & (old == 0)
-                _program_enqueue_two_tier(ring_ptr, spill_ptr, state_ptr, sf,
-                                          nidx, won)
+                if ENQ == "lane":
+                    _lane_enqueue_two_tier(ring_ptr, spill_ptr, state_ptr, sf,
+                                           nidx, won, zero_offs)
+                else:
+                    _program_enqueue_two_tier(ring_ptr, spill_ptr, state_ptr,
+                                              sf, nidx, won)
 
         cta_sync()  # all enqueues + final tier counters visible
         sr_raw = tl.load(state_ptr + _REAR, volatile=True)
@@ -363,7 +420,7 @@ def single_block_bfs_spill_kernel(img_ptr, visited_ptr, depth_ptr, seed_x,
 
 
 __all__ = [
-    "single_block_bfs_kernel", "single_block_bfs_spill_kernel",
+    "single_block_bfs_kernel", "single_block_bfs_spill_kernel", "ENQ_MODES",
     "RING_CAPACITY", "RING_MASK", "NUM_COUNTERS", "STATE_SLOTS",
     "REAR", "OVF", "SPILL_REAR",
     "FILLED", "LEVELS", "OVERFLOW", "PEAK_LEVEL", "PEAK_OCC",
