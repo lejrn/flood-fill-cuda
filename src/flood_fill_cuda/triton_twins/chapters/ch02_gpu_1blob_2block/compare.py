@@ -19,11 +19,13 @@ placement scenes imported from it:
   enqueue    the twin's two enqueue translations against Numba, same
              harness: on ENQUEUE_SCENES, {split, global, dirsplit} at tpb
              256 (instrumented), plus the matched pinned 2 x 512 spread row
-             on sq_2000_center. Two rows per cell: enqueue="lane" (the
-             default everywhere else, a per-lane atomic that ptxas
-             warp-aggregates like Numba's hand-written ballot) and
-             enqueue="program" (config label "first_translation": the
-             program-wide tl.sum/tl.cumsum the twin started with).
+             on sq_2000_center. Two rows per cell: enqueue="lane" (label
+             "per_lane", the default everywhere else, a per-lane atomic
+             that ptxas warp-aggregates like Numba's hand-written ballot)
+             and enqueue="program" (label "first_translation": the
+             program-wide tl.sum/tl.cumsum the twin started with). Both
+             rows are like-for-like (comparable=True); the program rows
+             also carry first_translation=true for filtering.
 
 Every other experiment runs the twin's default, enqueue="lane".
 
@@ -91,6 +93,8 @@ ENQUEUE_SCENES = ["sq_2000_center", "sq_4000_corner", "serpentine_256",
                   "seam_serpentine_256"]
 ENQUEUE_PINNED_SCENE = "sq_2000_center"
 FIRST_TRANSLATION = "first_translation"
+# same config labels as the ch03 / ch04 twins' enqueue experiments
+ENQ_LABELS = {"lane": "per_lane", "program": FIRST_TRANSLATION}
 
 
 @dataclass
@@ -412,12 +416,10 @@ def _enqueue_cases(quick, lookup):
             for enqueue in ("lane", "program"):
                 cases.append(_make_case(
                     "enqueue", name, builder, note, kernel, False, TPB, TPB,
-                    enqueue=enqueue,
-                    label=FIRST_TRANSLATION if enqueue == "program" else None))
+                    enqueue=enqueue, label=ENQ_LABELS[enqueue]))
     for enqueue in ("lane", "program"):
-        label = f"pinned 2x{tff.PINNED_TPB} spread (matched)"
-        if enqueue == "program":
-            label = f"{label} {FIRST_TRANSLATION}"
+        label = (f"pinned 2x{tff.PINNED_TPB} spread (matched) "
+                 f"{ENQ_LABELS[enqueue]}")
         cases.append(_make_case(
             "enqueue", pinned_name, pinned_builder, pinned_note, "pinned",
             False, tff.PINNED_TPB, tff.PINNED_TPB, "spread", label,
@@ -448,7 +450,8 @@ def main(argv=None):
                          "matched at 2 x 512",
             "enqueue": "ENQUEUE_SCENES x {split, global, dirsplit} at tpb "
                        "256 plus pinned 2 x 512 spread on sq_2000_center, "
-                       "each twice: enqueue=lane (the twin's default, a "
+                       "each twice: enqueue=lane (label per_lane, the "
+                       "twin's default, a "
                        "per-lane atomic that ptxas warp-aggregates: VOTEU.ANY"
                        ", POPC, one leader ATOMG, SHFL.IDX, as in Numba's "
                        "SASS) and enqueue=program (label first_translation, "

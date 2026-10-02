@@ -247,8 +247,9 @@ What this shows:
 `compare.py` repeats this in the harness: its `enqueue` experiment runs
 each kernel on `sq_2000_center`, `sq_4000_corner`, `serpentine_256` and
 `seam_serpentine_256` (and the matched pinned row) twice, once per
-enqueue mode. The program rows carry the config label `first_translation`
-and `first_translation: true`.
+enqueue mode. The lane rows carry the config label `per_lane`, the
+program rows `first_translation` and `first_translation: true` (the
+labels the ch03 and ch04 twins use).
 
 ## Running
 
