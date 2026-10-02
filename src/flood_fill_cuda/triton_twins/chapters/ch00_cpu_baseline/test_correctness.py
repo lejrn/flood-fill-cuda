@@ -108,6 +108,37 @@ SCENES = {
 }
 
 
+def checkerboard_scene(side, sx, sy):
+    """Red where x + y is even: red pixels touch each other only diagonally,
+    so the whole board is one blob under 8-connectivity alone."""
+    img = np.full((side, side, 3), 255, dtype=np.uint8)
+    xs, ys = np.indices((side, side))
+    img[(xs + ys) % 2 == 0] = (255, 0, 0)
+    return img, sx, sy
+
+
+def white_seed_beside_square(diagonal):
+    """A white seed next to a red square (left side, or its corner only
+    diagonally): the prototype fills the seed and the square."""
+    img, _, _ = scenes.square_scene(64, 64, 20, 20)
+    xs, ys = np.nonzero((img[..., 0] == 255) & (img[..., 1] == 0))
+    x0 = int(xs.min())
+    y0 = int(ys[xs == x0].min())
+    return img, x0 - 1, y0 - 1 if diagonal else y0
+
+
+EDGE_SCENES = {
+    "one_pixel_1x1": lambda: scenes.full_red_scene(1, 1),
+    "line_1x6000": lambda: scenes.full_red_scene(1, 6000),   # queue exactly full
+    "line_6000x1": lambda: scenes.full_red_scene(6000, 1),
+    "checkerboard_64_from_0_0": lambda: checkerboard_scene(64, 0, 0),
+    "checkerboard_64_from_63_63": lambda: checkerboard_scene(64, 63, 63),
+    "full_red_64_from_far_corner": lambda: (scenes.full_red_scene(64, 64)[0], 63, 63),
+    "white_seed_beside_square": lambda: white_seed_beside_square(False),
+    "white_seed_diagonal_to_square": lambda: white_seed_beside_square(True),
+}
+
+
 # ---------------------------------------------------------------------------
 # Twin tests
 # ---------------------------------------------------------------------------
@@ -124,6 +155,35 @@ def test_shared_scenes_meet_contract(name):
     scene = as_scene(*SCENES[name]())
     r = run_flood_fill(*scene)
     assert_contract(scene, r.img, r.visited, r.front)
+
+
+@pytest.mark.parametrize("name", EDGE_SCENES.keys())
+def test_edge_scenes_meet_contract(name):
+    scene = as_scene(*EDGE_SCENES[name]())
+    r = run_flood_fill(*scene)
+    assert_contract(scene, r.img, r.visited, r.front)
+
+
+def test_fortran_ordered_inputs():
+    """Numba follows the strides of a Fortran-ordered array; the twin makes
+    the upload C-contiguous, so the result is the same."""
+    img, sx, sy = scenes.square_scene(90, 70, 30, 20)
+    scene = as_scene(np.asfortranarray(img), sx, sy)
+    scene = (scene[0], np.asfortranarray(scene[1])) + scene[2:]
+    r = run_flood_fill(*scene)
+    assert_contract(scene, r.img, r.visited, r.front)
+    assert r.front == 600
+
+
+def test_device_new_color_stays_on_device():
+    """A CuPy new_color is used in place (no implicit round trip)."""
+    import cupy as cp
+
+    scene = setup_scene(2)
+    d_color = cp.asarray(scene[6])
+    r = run_flood_fill(*scene[:6], d_color, *scene[7:])
+    assert_contract(scene, r.img, r.visited, r.front)
+    np.testing.assert_array_equal(d_color.get(), scene[6])
 
 
 @pytest.mark.parametrize("tpb", [32, 64, 128, 256, 512, 1024])
@@ -244,10 +304,11 @@ def test_no_recompile_inside_timing():
 _libc = ctypes.CDLL(None)
 
 
-def run_numba(scene):
+def run_numba(scene, device_color=False):
     """The prototype's launch, as profile_kernel does it, with its device
     print (queue_front) captured: CUDA printf writes through the C stdout,
     so fd 1 is redirected and the C buffer flushed around the launch.
+    device_color passes new_color as a device array instead of the host one.
 
     Refuses scenes that overflow the queue: Numba then reads its shared
     queue out of bounds, which can kill the CUDA context."""
@@ -259,6 +320,8 @@ def run_numba(scene):
     d_img = cuda.to_device(img)
     d_visited = cuda.to_device(visited)
     color = np.array(new_color, copy=True)
+    if device_color:
+        color = cuda.to_device(color)
     sys.stdout.flush()
     _libc.fflush(None)
     saved = os.dup(1)
@@ -277,8 +340,8 @@ def run_numba(scene):
     return d_img.copy_to_host(), d_visited.copy_to_host(), int(printed[0])
 
 
-def assert_same_as_numba(scene, tri, tpb=THREADS_PER_BLOCK):
-    nb_img, nb_visited, nb_front = run_numba(scene)
+def assert_same_as_numba(scene, tri, tpb=THREADS_PER_BLOCK, device_color=False):
+    nb_img, nb_visited, nb_front = run_numba(scene, device_color)
     assert_contract(scene, nb_img, nb_visited, nb_front, tpb)
     assert_contract(scene, tri.img, tri.visited, tri.front, tpb)
     np.testing.assert_array_equal(tri.visited, nb_visited)
@@ -312,6 +375,45 @@ def test_cross_backend_block_sizes(tpb):
 def test_cross_backend_queue_exactly_full():
     scene = as_scene(*scenes.full_red_scene(60, 100))
     assert_same_as_numba(scene, run_flood_fill(*scene))
+
+
+@pytest.mark.parametrize("name", EDGE_SCENES.keys())
+@pytest.mark.parametrize("tpb", [32, 64, 1024])
+def test_cross_backend_edge_scenes(name, tpb):
+    scene = as_scene(*EDGE_SCENES[name](), threads_per_block=tpb)
+    assert_same_as_numba(scene, run_flood_fill(*scene), tpb)
+
+
+def test_cross_backend_device_new_color():
+    """new_color already on the device on both sides (the compare's
+    like-for-like rows): same outputs."""
+    import cupy as cp
+
+    scene = setup_scene(3)
+    tri = run_flood_fill(*scene[:6], cp.asarray(scene[6]), *scene[7:])
+    assert_same_as_numba(scene, tri, device_color=True)
+
+
+def test_cross_backend_numba_noprint_build_matches():
+    """compare.py's print-less Numba build (the prototype's source minus its
+    exit print) gives the same outputs as the twin and the original."""
+    from numba import cuda
+
+    from .compare import numba_noprint_kernel
+
+    scene = setup_scene(4)
+    img, visited, sx, sy, w, h, new_color, tpb, bpg = scene
+    d_img = cuda.to_device(img)
+    d_visited = cuda.to_device(visited)
+    numba_noprint_kernel()[bpg, tpb](d_img, d_visited, sx, sy, w, h,
+                                     cuda.to_device(new_color))
+    cuda.synchronize()
+    tri = run_flood_fill(*scene)
+    nb_img, nb_visited = d_img.copy_to_host(), d_visited.copy_to_host()
+    assert_contract(scene, nb_img, nb_visited, tri.front)
+    np.testing.assert_array_equal(tri.visited, nb_visited)
+    np.testing.assert_array_equal(tri.img[..., :2], nb_img[..., :2])
+    assert_same_as_numba(scene, tri)
 
 
 def test_cross_backend_96_threads_numba_accepts_triton_rejects():
