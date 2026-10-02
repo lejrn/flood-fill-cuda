@@ -6,13 +6,30 @@ PHASE_BLOCKS, PACK_ROW_BLOCKS, the single 1024-lane scan, and the run
 capacity sized from the host run count exactly as the benchmark sizes
 it (max(8192, runs * 1.05)).
 
-  benchmark   benchmarks/benchmark.py: input_blobs.png, input_blocks.png
-              and the four synthetic scenes (blob_grid_100, random_4000,
-              disk_r2000, serpentine_2048), each in both contracts
-  scaling     benchmarks/scaling.py: centered crops of input_blobs.png,
-              1000 to 9000 px a side, both contracts
+  benchmark      benchmarks/benchmark.py: input_blobs.png, input_blocks.png
+                 and the four synthetic scenes (blob_grid_100, random_4000,
+                 disk_r2000, serpentine_2048), each in both contracts
+  scaling        benchmarks/scaling.py: centered crops of input_blobs.png,
+                 1000 to 9000 px a side, both contracts
+  lane_schedule  the twin's two spellings of merge and flatten against the
+                 same Numba pipeline, two rows per cell (config.lane_sched):
+                 "independent" (label lane_independent, the default every
+                 other experiment runs) and "lockstep" (label
+                 first_translation: the lockstep loops of the first
+                 translation). The cells are the benchmark scenes in the
+                 "mask" contract, where merge and flatten weigh most (the
+                 two contracts run the same merge and flatten).
+                 first_translation rows are comparable=False and carry
+                 first_translation=true (as in ch01-ch05): they measure the
+                 first translation's cost and stay out of the averages.
+                 lane_independent rows repeat a benchmark cell and carry
+                 duplicate_of="benchmark" (when that experiment runs).
 
-One case is one scene in one contract. Each backend runs the pipeline
+The twin runs its default lane schedule ("independent", see kernels.py)
+everywhere except the lane_schedule experiment's first_translation rows.
+
+One case is one scene in one contract (and, in lane_schedule, one
+schedule). Each backend runs the pipeline
 the way _bench_ch06 does: restore the pristine image (device to
 device), pack off the clock for the "mask" contract, synchronize,
 run(), synchronize. Each scene is packed before its clock spin, as
@@ -63,9 +80,10 @@ figures' one GPU call is recolor()), and overview/bench_ch06.py (the
 overview phase).
 
 Run:
-    .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch06_gpu_nblob_runs.compare [--quick] [--repeats N]
+    .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch06_gpu_nblob_runs.compare [--quick] [--repeats N] [--experiments a,b]
 
---quick is a smoke test: small scenes, one round, no JSON.
+--quick is a smoke test: small scenes, one round, no JSON. --experiments
+runs a subset (default: all three).
 """
 
 import os
@@ -111,11 +129,16 @@ from .kernels import (
 )
 
 CHAPTER = "ch06_gpu_nblob_runs"
+EXPERIMENTS = ("benchmark", "scaling", "lane_schedule")
 ROUNDS = nb_benchmark.ROUNDS            # 9, as in benchmark.py and scaling.py
 SCENE_SPIN_SECONDS = 3.0                # per scene, both backends alternating
 PEAK_BYTES = 256 * 2 ** 20
 QUEUE_US = 3000                         # device spin ahead of a GPU-only run
 LAUNCH_BOUND = 0.8                      # enqueue_ms / kernel_ms threshold
+DEFAULT_SCHED = tr_recolor.DEFAULT_LANE_SCHEDULE
+LANE_LABELS = {"independent": "lane_independent",
+               "lockstep": "first_translation"}
+LANE_CONTRACTS = ("mask",)
 
 
 # ------------------------------------------------------- GPU-only timing
@@ -248,15 +271,19 @@ class _NumbaSide:
 
 
 class _TritonSide:
-    """The Triton twin's engine on the same scene, run the same way."""
+    """The Triton twin's engine on the same scene, run the same way, in
+    one lane schedule. img: the host image, or another side's pristine
+    device copy (copied, never shared)."""
 
     name = "triton"
 
-    def __init__(self, img, capacity):
+    def __init__(self, img, capacity, lane_schedule=DEFAULT_SCHED):
+        self.lane_schedule = lane_schedule
         self.engine = tr_recolor.RunRecolor(img.shape[0], img.shape[1],
-                                            run_capacity=capacity)
-        self.pristine = cp.asarray(img)
-        self.dev = cp.asarray(img)
+                                            run_capacity=capacity,
+                                            lane_schedule=lane_schedule)
+        self.pristine = cp.array(img)
+        self.dev = cp.array(img)
         self.views = {k: getattr(self.engine, k) for k in _VIEWS}
         self.views["img"] = self.dev
 
@@ -422,7 +449,9 @@ def _scene_list(quick):
 
 class _Pair:
     """Both backends on the current scene. Built at the first call for a
-    scene, released when the next scene starts."""
+    scene, released when the next scene starts. The twin in a lane
+    schedule other than the default is built at its first use
+    (triton(sched))."""
 
     def __init__(self, spin_seconds):
         self.key = None
@@ -448,7 +477,7 @@ class _Pair:
             self.cur = SimpleNamespace(
                 width=img.shape[0], height=img.shape[1], red_px=red_px,
                 capacity=capacity, numba=_NumbaSide(img, capacity),
-                triton=_TritonSide(img, capacity))
+                triton=_TritonSide(img, capacity), other_scheds={})
             del img
             self.key = key
             # Pack before the spin, as benchmark._scene_row does: the
@@ -460,6 +489,20 @@ class _Pair:
                 side.sync()
             self._spin()
         return self.cur
+
+    def triton(self, sched):
+        """The twin side in lane schedule `sched` on the current scene."""
+        if sched == DEFAULT_SCHED:
+            return self.cur.triton
+        side = self.cur.other_scheds.get(sched)
+        if side is None:
+            side = _TritonSide(self.cur.triton.pristine, self.cur.capacity,
+                               lane_schedule=sched)
+            side.restore()
+            side.pack()
+            side.sync()
+            self.cur.other_scheds[sched] = side
+        return side
 
     def _spin(self):
         """The chapter's clock rule, per scene: back-to-back pipeline
@@ -587,65 +630,134 @@ def _scaling_crossings(rows):
     return out
 
 
-def build_cases(quick, spin_seconds):
-    pair = _Pair(spin_seconds)
-    cases, samples = [], []
-    for experiment, scene, build, note in _scene_list(quick):
-        key = (experiment, scene)
-        for contract in nb_recolor.CONTRACTS:
-            smp = {"numba": [], "triton": []}
+def _info_fn(pair, contract, sched):
+    """The case's info(): the scene's facts from the warm-up results, the
+    grids, and both backends' kernel resources (the twin's in `sched`)."""
+    def info(rn, rt):
+        cur = pair.cur
+        tside = pair.triton(sched)
+        c = rn.counters
+        n_px = cur.width * cur.height
+        tpb = tside.engine.grid[1]
+        return {
+            "width": cur.width, "height": cur.height,
+            "red_px": cur.red_px, "n_runs": int(c[N_RUNS]),
+            "n_blobs": int(c[N_BLOBS]),
+            "union_attempts": int(c[UNION_ATTEMPTS]),
+            "union_done": int(c[UNION_DONE]),
+            "mean_run_px": (cur.red_px / int(c[N_RUNS])
+                            if c[N_RUNS] else 0.0),
+            "run_capacity": cur.capacity,
+            "model_bytes": int(nb_recolor.model_bytes_ch06(
+                contract, n_px, cur.red_px, int(c[N_RUNS]),
+                int(c[UNION_ATTEMPTS]))),
+            "lane_schedule": tside.lane_schedule,
+            "grid": {
+                "threads_per_block": tpb,
+                "num_warps": tpb // 32,
+                "pack": {"numba": list(cur.numba.engine.pack_grid[0]),
+                         "triton": list(tside.engine.pack_grid[0])},
+                "phase_blocks": {
+                    "numba": {k: v[0] for k, v in
+                              cur.numba.engine.phase_grid.items()},
+                    "triton": {k: v[0] for k, v in
+                               tside.engine.phase_grid.items()}},
+                "scan": {"numba": [1, nb_kernels.SCAN_TPB],
+                         "triton": [1, SCAN_TPB]},
+            },
+            "numba_resources": cur.numba.resources(),
+            "triton_kernel_resources": tside.resources(),
+        }
+    return info
 
-            def run_numba(key=key, build=build, contract=contract, smp=smp):
-                return _measure(pair.get(key, build).numba, contract,
-                                smp["numba"])
 
-            def run_triton(key=key, build=build, contract=contract, smp=smp):
-                return _measure(pair.get(key, build).triton, contract,
-                                smp["triton"])
+def _case(pair, experiment, scene, build, note, contract, sched, config):
+    key = (experiment, scene)
+    smp = {"numba": [], "triton": []}
 
-            def info(rn, rt, contract=contract):
-                cur = pair.cur
-                c = rn.counters
-                n_px = cur.width * cur.height
-                tpb = cur.triton.engine.grid[1]
-                return {
-                    "width": cur.width, "height": cur.height,
-                    "red_px": cur.red_px, "n_runs": int(c[N_RUNS]),
-                    "n_blobs": int(c[N_BLOBS]),
-                    "union_attempts": int(c[UNION_ATTEMPTS]),
-                    "union_done": int(c[UNION_DONE]),
-                    "mean_run_px": (cur.red_px / int(c[N_RUNS])
-                                    if c[N_RUNS] else 0.0),
-                    "run_capacity": cur.capacity,
-                    "model_bytes": int(nb_recolor.model_bytes_ch06(
-                        contract, n_px, cur.red_px, int(c[N_RUNS]),
-                        int(c[UNION_ATTEMPTS]))),
-                    "grid": {
-                        "threads_per_block": tpb,
-                        "num_warps": tpb // 32,
-                        "pack": {"numba": list(cur.numba.engine.pack_grid[0]),
-                                 "triton": list(cur.triton.engine.pack_grid[0])},
-                        "phase_blocks": {
-                            "numba": {k: v[0] for k, v in
-                                      cur.numba.engine.phase_grid.items()},
-                            "triton": {k: v[0] for k, v in
-                                       cur.triton.engine.phase_grid.items()}},
-                        "scan": {"numba": [1, nb_kernels.SCAN_TPB],
-                                 "triton": [1, SCAN_TPB]},
-                    },
-                    "numba_resources": cur.numba.resources(),
-                    "triton_kernel_resources": cur.triton.resources(),
-                }
+    def run_numba():
+        return _measure(pair.get(key, build).numba, contract, smp["numba"])
 
-            cases.append(Case(
-                experiment=experiment, scene=scene,
-                config={"contract": contract,
-                        "tpb": nb_recolor.DEFAULT_GRID[1],
-                        "grid": list(nb_recolor.DEFAULT_GRID)},
+    def run_triton():
+        pair.get(key, build)
+        return _measure(pair.triton(sched), contract, smp["triton"])
+
+    extra = {}
+    if sched != DEFAULT_SCHED:
+        extra["first_translation"] = True
+    return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=run_numba, run_triton=run_triton, same=_same,
-                pixels=0, info=info, notes=note))
+                pixels=0, info=_info_fn(pair, contract, sched), notes=note,
+                extra=extra, comparable=sched == DEFAULT_SCHED), smp
+
+
+def _cell_key(case):
+    cfg = {k: v for k, v in case.config.items()
+           if k not in ("lane_sched", "label")}
+    return case.scene, json.dumps(cfg, sort_keys=True)
+
+
+def mark_repeated_cells(earlier, lane_cases):
+    """Tag each lane_independent row whose cell (scene and config, the
+    schedule keys aside) an earlier experiment already measures with
+    duplicate_of=<that experiment>, so a unit-wide average counts each
+    cell once. Returns the tagged count."""
+    seen = {}
+    for c in earlier:
+        seen.setdefault(_cell_key(c), c.experiment)
+    tagged = 0
+    for c in lane_cases:
+        if c.config["lane_sched"] == DEFAULT_SCHED:
+            hit = seen.get(_cell_key(c))
+            if hit is not None:
+                c.extra["duplicate_of"] = hit
+                tagged += 1
+    return tagged
+
+
+def build_cases(quick, spin_seconds, experiments=EXPERIMENTS):
+    """(cases, samples, pair, lane_meta) in experiment then scene order.
+    lane_schedule takes the benchmark experiment's scenes, the default
+    schedule's row first."""
+    pair = _Pair(spin_seconds)
+    cases, samples, lane = [], [], []
+    base = {"tpb": nb_recolor.DEFAULT_GRID[1],
+            "grid": list(nb_recolor.DEFAULT_GRID)}
+    scene_list = _scene_list(quick)
+    for experiment, scene, build, note in scene_list:
+        if experiment not in experiments:
+            continue
+        for contract in nb_recolor.CONTRACTS:
+            case, smp = _case(pair, experiment, scene, build, note, contract,
+                              DEFAULT_SCHED, {"contract": contract, **base})
+            cases.append(case)
             samples.append(smp)
-    return cases, samples, pair
+    if "lane_schedule" in experiments:
+        order = (DEFAULT_SCHED,) + tuple(
+            x for x in tr_recolor.LANE_SCHEDULES if x != DEFAULT_SCHED)
+        for experiment, scene, build, note in scene_list:
+            if experiment != "benchmark":
+                continue
+            for contract in LANE_CONTRACTS:
+                for sched in order:
+                    config = {"contract": contract, **base,
+                              "lane_sched": sched,
+                              "label": LANE_LABELS[sched]}
+                    case, smp = _case(pair, "lane_schedule", scene, build,
+                                      note, contract, sched, config)
+                    lane.append(case)
+                    samples.append(smp)
+    tagged = mark_repeated_cells(cases, lane)
+    lane_meta = None
+    if "lane_schedule" in experiments:
+        lane_meta = {
+            "schedules": list(tr_recolor.LANE_SCHEDULES),
+            "default": DEFAULT_SCHED,
+            "contracts": list(LANE_CONTRACTS),
+            "cells": [c.scene for c in lane
+                      if c.config["lane_sched"] == DEFAULT_SCHED],
+            "duplicate_rows": tagged}
+    return cases + lane, samples, pair, lane_meta
 
 
 def main(argv=None):
@@ -654,7 +766,13 @@ def main(argv=None):
                     help="small scenes, 1 round, no JSON (smoke test)")
     ap.add_argument("--repeats", type=int, default=None,
                     help=f"timed rounds per case (default {ROUNDS})")
+    ap.add_argument("--experiments", default=",".join(EXPERIMENTS),
+                    help=f"comma-separated subset of {EXPERIMENTS}")
     args = ap.parse_args(argv)
+    experiments = tuple(e for e in args.experiments.split(",") if e)
+    bad = [e for e in experiments if e not in EXPERIMENTS]
+    if bad:
+        ap.error(f"unknown experiments {bad}; choose from {EXPERIMENTS}")
     quick = args.quick
     repeats = args.repeats or (1 if quick else ROUNDS)
     spin = 0.0 if quick else SCENE_SPIN_SECONDS
@@ -662,6 +780,9 @@ def main(argv=None):
     print("Warming up both backends...")
     nb_recolor._warmup()
     tr_recolor._warmup(nb_recolor.DEFAULT_GRID[1])
+    if "lane_schedule" in experiments:
+        for sched in tr_recolor.LANE_SCHEDULES:
+            tr_recolor._warmup(nb_recolor.DEFAULT_GRID[1], sched)
     _queue(1)                           # compile the GPU-only spin
     sync()
 
@@ -681,7 +802,7 @@ def main(argv=None):
     print(f"Peaks GB/s (copy/read/write): numba {nb_copy:.0f}/{nb_rw[0]:.0f}/"
           f"{nb_rw[1]:.0f}  triton {tr_copy:.0f}/{tr_rw[0]:.0f}/{tr_rw[1]:.0f}")
 
-    cases, samples, pair = build_cases(quick, spin)
+    cases, samples, pair, lane_meta = build_cases(quick, spin, experiments)
     caps = [
         "ch05 head-to-head column of benchmark.py not run: a Numba-only "
         "baseline (split_L8, ~55 ms/run at 81 Mpx), outside Numba-vs-Triton",
@@ -698,6 +819,8 @@ def main(argv=None):
         "meta.scaling_crossings, per backend",
         "figures.py / visualize.py not mirrored (no kernels of their own)",
         "overview/bench_ch06.py not mirrored (overview phase)",
+        "lane_schedule: the benchmark scenes in the mask contract only "
+        "(merge and flatten are the same launches in both contracts)",
     ]
     if quick:
         caps.insert(0, "QUICK smoke run: small stand-in scenes, 1 round, "
@@ -706,6 +829,15 @@ def main(argv=None):
         "mirrors": ["chapters/ch06_gpu_nblob_runs/benchmarks/benchmark.py",
                     "chapters/ch06_gpu_nblob_runs/benchmarks/scaling.py"],
         "quick": quick,
+        "experiments": list(experiments),
+        "lane_schedule_default": DEFAULT_SCHED,
+        "lane_schedule_note": (
+            "the twin runs its default lane schedule ('independent') "
+            "everywhere except the lane_schedule experiment's "
+            "first_translation rows (lane_sched 'lockstep', "
+            "comparable=false, first_translation=true). Its "
+            "lane_independent rows that repeat a benchmark cell carry "
+            "duplicate_of=<experiment>"),
         "config": {
             "grid": list(nb_recolor.DEFAULT_GRID),
             "threads_per_block": nb_recolor.DEFAULT_GRID[1],
@@ -751,6 +883,8 @@ def main(argv=None):
     for row, smp in zip(doc["rows"], samples):
         _finish_row(row, smp, peaks)
     doc["meta"]["scaling_crossings"] = _scaling_crossings(doc["rows"])
+    if lane_meta is not None:
+        doc["meta"]["lane_schedule"] = lane_meta
     doc["meta"]["peak_host_rss_mb"] = round(
         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)
 
@@ -758,9 +892,15 @@ def main(argv=None):
         if "error" in row:
             continue
         g = row.get("speedup_gpu_kernel")
-        print(f"  {row['experiment']:9s} {row['scene']:18s} "
-              f"{row['config']['contract']:4s} span x{row['speedup_kernel']:.2f}"
+        gp = row.get("speedup_gpu_phase") or {}
+        sched = row["config"].get("lane_sched")
+        print(f"  {row['experiment']:13s} {row['scene']:18s} "
+              f"{row['config']['contract']:4s}"
+              + (f" {sched:11s}" if sched else "")
+              + f" span x{row['speedup_kernel']:.2f}"
               f"  gpu-only " + (f"x{g:.2f}" if g else "n/a")
+              + "".join(f" {k} x{gp[k]:.2f}" for k in ("merge", "flatten")
+                        if gp.get(k))
               + ("  (launch-bound)" if row["launch_bound"] else ""))
 
     if not quick:

@@ -1,10 +1,19 @@
 """Host driver for the Triton twin of the run-table recolor.
 
-Public API (the Numba driver's, unchanged):
-    recolor(img_host, **kw) -> RunRecolorResult        one-shot, allocates
-    RunRecolor(width, height, ...)                     reusable buffers
+Public API (the Numba driver's, plus one twin-only keyword):
+    recolor(img_host, ..., *, lane_schedule=None) -> RunRecolorResult
+                                                       one-shot, allocates
+    RunRecolor(width, height, ..., *, lane_schedule="independent")
+                                                       reusable buffers
         .pack(img_dev)                                 RGB -> 1 bit/px
         .run(img_dev, contract=...) -> (names, events)
+
+lane_schedule picks how merge and flatten spell Numba's per-thread
+union-find loops (the kernels' LANE constexpr, see kernels.py):
+"independent" (the default: per-lane state machines, each lane moving on
+as a SIMT thread does) or "lockstep" (the first translation, kept to
+measure its cost). Both give identical outputs and counters; each is its
+own compile.
 
 Same contracts ("rgb" includes the pack, "mask" does not), defaults,
 validation messages, result dataclass and timing decomposition as
@@ -26,9 +35,10 @@ threads-per-block of `grid` must be 32, 64, ..., 1024. A multiple of 32
 that Numba would accept (96, 160, ...) raises ValueError here.
 
 Compiles. Triton compiles one kernel per constexpr combination: the
-block size and, for merge and flatten, INSTRUMENTED. `_warmup(tpb)`
-compiles all of them for one block size, and `recolor()` calls it for
-the block size it is about to use, so no compile lands on the clock.
+block size and, for merge and flatten, INSTRUMENTED and LANE.
+`_warmup(tpb, lane_schedule)` compiles all of them for one block size
+and schedule, and `recolor()` calls it for the block size and schedule
+it is about to use, so no compile lands on the clock.
 """
 
 import os
@@ -59,9 +69,23 @@ from flood_fill_cuda.chapters.ch06_gpu_nblob_runs.recolor import (  # noqa: F401
 )
 
 __all__ = ["recolor", "RunRecolor", "RunRecolorResult", "CONTRACTS",
-           "model_bytes_ch06", "MODEL_NOTE"]
+           "model_bytes_ch06", "MODEL_NOTE", "LANE_SCHEDULES",
+           "DEFAULT_LANE_SCHEDULE"]
 
 SCAN_WARPS = SCAN_TPB // 32
+
+# lane_schedule -> the merge / flatten kernels' LANE constexpr
+LANE_SCHEDULES = ("independent", "lockstep")
+DEFAULT_LANE_SCHEDULE = "independent"
+_LANE = {"independent": 1, "lockstep": 0}
+
+
+def _lane(lane_schedule):
+    try:
+        return _LANE[lane_schedule]
+    except (KeyError, TypeError):
+        raise ValueError(f"lane_schedule must be one of {LANE_SCHEDULES}, "
+                         f"got {lane_schedule!r}") from None
 
 
 @dataclass
@@ -123,9 +147,14 @@ class RunRecolor:
 
     width/height are the image dimensions in the repo's img[x, y]
     convention (x is the first axis; y is contiguous in memory).
+    lane_schedule (twin-only, keyword-only): the merge / flatten
+    spelling, see the module doc.
     """
 
-    def __init__(self, width, height, run_capacity=None, grid=DEFAULT_GRID):
+    def __init__(self, width, height, run_capacity=None, grid=DEFAULT_GRID,
+                 *, lane_schedule=DEFAULT_LANE_SCHEDULE):
+        self.lane = _lane(lane_schedule)
+        self.lane_schedule = lane_schedule
         if width < 1 or height < 1:
             raise ValueError(f"bad shape {width}x{height}")
         n = width * height
@@ -250,7 +279,8 @@ class RunRecolor:
             (self.phase_grid["merge"][0],)](
             self._run_x, self._run_y0, self._run_y1, self._row_off,
             self._parent, self._counters, self.run_capacity, self.width,
-            INSTRUMENTED=instrumented, BLOCK=nw * 32, num_warps=nw)
+            INSTRUMENTED=instrumented, BLOCK=nw * 32, LANE=self.lane,
+            num_warps=nw)
         names.append("merge")
         events.append(cp.cuda.Event())
         events[-1].record()
@@ -259,7 +289,8 @@ class RunRecolor:
             (self.phase_grid["flatten"][0],)](
             self._parent, self._run_x, self._run_y0, self._run_label,
             self.height, self._counters,
-            INSTRUMENTED=instrumented, BLOCK=nw * 32, num_warps=nw)
+            INSTRUMENTED=instrumented, BLOCK=nw * 32, LANE=self.lane,
+            num_warps=nw)
         names.append("flatten")
         events.append(cp.cuda.Event())
         events[-1].record()
@@ -285,17 +316,20 @@ class RunRecolor:
 _warmed = set()
 
 
-def _warmup(tpb=DEFAULT_GRID[1]):
-    """Compile every kernel once for block size `tpb`, off the clock, on
-    a tiny scene: both contracts, both INSTRUMENTED variants, the label
-    map and unpack. (Numba compiles once for every block size; Triton's
-    block size is a compile-time constant, hence the argument.)"""
-    if tpb in _warmed:
+def _warmup(tpb=DEFAULT_GRID[1], lane_schedule=DEFAULT_LANE_SCHEDULE):
+    """Compile every kernel once for block size `tpb` and one lane
+    schedule, off the clock, on a tiny scene: both contracts, both
+    INSTRUMENTED variants, the label map and unpack. (Numba compiles once
+    for every block size; Triton's block size is a compile-time
+    constant, hence the argument.)"""
+    key = (tpb, _lane(lane_schedule))
+    if key in _warmed:
         return
     tiny = np.full((8, 8, 3), 255, dtype=np.uint8)
     tiny[1, 1] = (255, 0, 0)
     tiny[5, 5] = (255, 0, 0)
-    rc = RunRecolor(8, 8, run_capacity=64, grid=(2, tpb))
+    rc = RunRecolor(8, 8, run_capacity=64, grid=(2, tpb),
+                    lane_schedule=lane_schedule)
     dev = cp.asarray(tiny)
     for contract in CONTRACTS:
         for instrumented in (True, False):
@@ -305,12 +339,12 @@ def _warmup(tpb=DEFAULT_GRID[1]):
     rc.emit_label_map(lab)
     rc.unpack_to(dev)
     sync()
-    _warmed.add(tpb)
+    _warmed.add(key)
 
 
 def recolor(img_host, contract="rgb", run_capacity=None, grid=DEFAULT_GRID,
             emit_label=False, emit_seeds=True, copy_img=True,
-            instrumented=True, engine=None):
+            instrumented=True, engine=None, *, lane_schedule=None):
     """Discover, label and recolor every red blob: one-shot convenience.
 
     img_host: (width, height, 3) uint8, not modified (a painted copy is
@@ -322,18 +356,34 @@ def recolor(img_host, contract="rgb", run_capacity=None, grid=DEFAULT_GRID,
 
     engine: reuse an existing RunRecolor (must match the shape); None
     builds one. Reuse is how the benchmark measures steady state.
+
+    lane_schedule (twin-only, keyword-only): None runs the engine's
+    schedule, or DEFAULT_LANE_SCHEDULE when this call builds the engine;
+    a name that differs from a given engine's schedule raises.
     """
     if (img_host.ndim != 3 or img_host.shape[2] != 3
             or img_host.dtype != np.uint8):
         raise ValueError("img must be a (width, height, 3) uint8 array")
     if contract not in CONTRACTS:
         raise ValueError(f"contract must be one of {CONTRACTS}")
-    _warmup((engine.grid if engine is not None else tuple(grid))[1])
+    if lane_schedule is not None:
+        _lane(lane_schedule)
+    if engine is not None:
+        if lane_schedule not in (None, engine.lane_schedule):
+            raise ValueError(
+                f"lane_schedule={lane_schedule!r} but the engine runs "
+                f"{engine.lane_schedule!r}")
+        lane_schedule = engine.lane_schedule
+    elif lane_schedule is None:
+        lane_schedule = DEFAULT_LANE_SCHEDULE
+    _warmup((engine.grid if engine is not None else tuple(grid))[1],
+            lane_schedule)
 
     width, height = img_host.shape[0], img_host.shape[1]
     t_total0 = time.perf_counter()
     rc = engine if engine is not None else RunRecolor(
-        width, height, run_capacity=run_capacity, grid=grid)
+        width, height, run_capacity=run_capacity, grid=grid,
+        lane_schedule=lane_schedule)
     if (rc.width, rc.height) != (width, height):
         raise ValueError(
             f"engine is {rc.width}x{rc.height}, image is {width}x{height}")
@@ -363,7 +413,7 @@ def recolor(img_host, contract="rgb", run_capacity=None, grid=DEFAULT_GRID,
                 f"run_capacity={needed} (worst case is "
                 f"width*ceil(height/2) = {width * ((height + 1) // 2)}).")
         rc = RunRecolor(width, height, run_capacity=needed + needed // 8,
-                        grid=grid)
+                        grid=grid, lane_schedule=lane_schedule)
 
     phase_ms = {n: cp.cuda.get_elapsed_time(events[i], events[i + 1])
                 for i, n in enumerate(names)}
