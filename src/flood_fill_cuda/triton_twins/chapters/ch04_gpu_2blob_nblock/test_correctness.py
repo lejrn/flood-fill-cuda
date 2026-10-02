@@ -22,7 +22,10 @@ at one program), sm_ids, timings, and cas_attempts at 8-conn / radius 2
 (same-level diagonal neighbors may or may not be painted yet when probed).
 
 Streams-mode tests stay OPT-IN (DUAL_BLOB_STREAMS=1), exactly as in Numba:
-two concurrent cooperative grids can wedge the GPU.
+two concurrent cooperative grids can wedge the GPU. The direct
+streams-vs-streams comparison is separately opt-in
+(DUAL_BLOB_STREAMS_NUMBA=1): it runs Numba's pair in a fresh process under
+a hard timeout.
 
 Run:
 
@@ -61,6 +64,19 @@ TEST_MODES = MODES if RUN_STREAMS else tuple(m for m in MODES
 requires_streams = pytest.mark.skipif(
     not RUN_STREAMS,
     reason="streams mode can deadlock the GPU; set DUAL_BLOB_STREAMS=1 to run")
+
+# Numba's OWN streams pair, for a direct streams-vs-streams comparison,
+# runs only in a fresh process under a hard timeout: the Numba README's
+# fresh-process probe (an 8+8 pair ran there, while the same pair wedged
+# after other fills in one process). Separately opt-in, because a wedge
+# still costs the timeout.
+RUN_NUMBA_STREAMS = os.environ.get("DUAL_BLOB_STREAMS_NUMBA") == "1"
+requires_numba_streams = pytest.mark.skipif(
+    not RUN_NUMBA_STREAMS,
+    reason="Numba's streams pair can wedge the GPU; set "
+           "DUAL_BLOB_STREAMS_NUMBA=1 to run it in a fresh process under a "
+           "hard timeout")
+NUMBA_STREAMS_TIMEOUT_S = 120
 
 
 def _kw(mode, kw):
@@ -911,3 +927,67 @@ def test_cross_backend_streams_matches_numba():
         assert getattr(rt, name) == getattr(rn, name), name
     assert_same_launches(rn, rt)
     assert rt.overlap_ratio > 0
+
+
+# The child: Numba's streams mode on a saved scene, its result pickled
+# back (DualBlobResult and LaunchStats hold only host data).
+_NUMBA_STREAMS_CHILD = """
+import os, pickle, sys
+os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
+import numpy as np
+from flood_fill_cuda.chapters.ch04_gpu_2blob_nblock.flood_fill import (
+    flood_fill)
+src, dst, blocks = sys.argv[1], sys.argv[2], int(sys.argv[3])
+data = np.load(src)
+seeds = [tuple(int(v) for v in s) for s in data["seeds"]]
+r = flood_fill(data["img"], seeds, mode="streams", blocks=blocks)
+with open(dst, "wb") as f:
+    pickle.dump(r, f)
+"""
+
+
+@requires_numba_streams
+def test_cross_backend_streams_matches_numba_streams(tmp_path):
+    """Both backends' streams mode, directly: Numba's concurrent pair runs
+    in a fresh process under a hard timeout (the Numba README's
+    fresh-process probe), Triton's here, at the same 8+8 grid. Every
+    deterministic output and per-launch statistic agrees; the overlap
+    ratio is timing and only has to be positive on both. A Numba wedge
+    (the timeout) skips with the reason: it is the documented Numba
+    behaviour, not a twin result."""
+    import pickle
+    import subprocess
+    import sys
+
+    img, seeds = SCENES["two_squares"]()
+    # the twin first, so a Numba wedge cannot leave the GPU busy under it
+    rt = flood_fill(img, seeds, mode="streams", blocks=STREAMS_TEST_BLOCKS)
+
+    src, dst = tmp_path / "scene.npz", tmp_path / "numba_streams.pkl"
+    np.savez(src, img=img, seeds=np.asarray(seeds, dtype=np.int64))
+    env = dict(os.environ, NUMBA_CUDA_USE_NVIDIA_BINDING="1")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _NUMBA_STREAMS_CHILD, str(src), str(dst),
+             str(STREAMS_TEST_BLOCKS)],
+            capture_output=True, text=True, env=env,
+            timeout=NUMBA_STREAMS_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        pytest.skip(f"Numba's {STREAMS_TEST_BLOCKS}+{STREAMS_TEST_BLOCKS} "
+                    f"streams pair did not finish in "
+                    f"{NUMBA_STREAMS_TIMEOUT_S} s and was killed: the wedge "
+                    f"the Numba README documents (Finding 2)")
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    with open(dst, "rb") as f:
+        rn = pickle.load(f)
+
+    assert rn.mode == rt.mode == "streams"
+    for name in ("img", "visited", "depth", "label"):
+        np.testing.assert_array_equal(getattr(rt, name), getattr(rn, name),
+                                      err_msg=name)
+    for name in ("blocks", "filled", "filled_a", "filled_b", "levels",
+                 "levels_a", "levels_b", "processed", "cas_attempts",
+                 "model_bytes"):
+        assert getattr(rt, name) == getattr(rn, name), name
+    assert_same_launches(rn, rt)
+    assert rn.overlap_ratio > 0 and rt.overlap_ratio > 0

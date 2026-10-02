@@ -107,6 +107,15 @@ programs.
 - **Enqueue aggregation is per program, not per warp.** One atomic per
   program per direction replaces one per warp. That changes queue order
   only, which is schedule-dependent in both backends anyway.
+- **The radius-2 ring-2 skip is per program, not per warp.** In Numba a
+  warp with no interior lane skips the 16 ring-2 probes. In the twin the
+  skip is decided for the whole program (256 lanes, 8 warps at the
+  benchmark's tpb). When any lane is interior, every warp steps through
+  the 16 probes and their 16 program-wide enqueue scans. Non-interior
+  lanes are masked off, so they cause no memory traffic and the outputs
+  and counters are unchanged. But the instructions still run, so the
+  Triton side of the radius-2 rows (`seq8r2`, `multi8r2`) includes masked
+  probe work that Numba skips. Read `r2_multi_vs_conn8` with that in mind.
 - **Streams pair rail.** In `streams` mode the twin refuses an explicit
   `blocks` whose pair (2 x blocks) exceeds the cooperative capacity, with
   a `RuntimeError` naming the cooperative-launch capacity. Numba checks
@@ -152,8 +161,19 @@ Tests (take the GPU lock when other GPU work may be running):
 ```
 
 Streams-mode tests are opt-in, as in Numba (`DUAL_BLOB_STREAMS=1`). The
-cross-backend streams test compares Triton's streams mode with Numba's
-sequential mode, because Numba's own concurrent pair can wedge.
+in-process cross-backend streams test compares Triton's streams mode with
+Numba's sequential mode, because Numba's own concurrent pair can wedge
+after other launches in the same process.
+
+A second, separately opt-in test (`DUAL_BLOB_STREAMS_NUMBA=1`) compares
+the two streams modes directly. It runs Numba's 8+8 streams pair in a
+fresh process under a 120 s timeout, which is the Numba README's own
+fresh-process probe, and skips with the reason if that pair wedges.
+
+During the port, Numba's 8+8 pair wedged in every fresh-process attempt
+on this GPU (tpb 256 and 64, stuck in the stream synchronize), so that
+test skipped. The twin's pair completed in every run. So the direct
+streams-vs-streams comparison is still unverified on this machine.
 
 Comparison (writes `results/triton_twins/ch04_gpu_2blob_nblock/compare_<UTC>.json`):
 
@@ -175,9 +195,20 @@ all at 256 lanes:
 - `radius2`: benchmark_radius2_barrier_work.py's four configs at one
   pinned grid.
 
-There are no caps. The default run (warm-up and 6 rounds) takes about 10
-minutes of GPU time with a 1.5 GB peak RSS. `--quick` runs tiny scenes
-and writes nothing. `speedup_kernel` is the Numba-vs-Triton number.
+There are no caps. A run at the big scenes spends about 0.9 s in the
+drivers, so the default (warm-up and 6 rounds) takes about 12 minutes of
+GPU time with a 1.5 GB peak RSS. `--quick` runs tiny scenes and writes
+nothing. Its copy peaks are a smoke test of the probes only, with no
+spin-up and 2 copies.
+
+`speedup_kernel` (the median ratio) is the Numba-vs-Triton number.
+Each row also stores `speedup_kernel_min`, the best-vs-best ratio of the
+two backends' fastest runs. This is the Numba benchmark's `(min)`
+column. Single runs on this GPU can be 1.4-2.8x slower than the median,
+on either backend, so a row's difference is real only when the two
+ratios agree. If they fall on opposite sides of 1, the row is noise. The
+script prints both ratios for every row at the end.
+
 `speedup_total` mostly compares CuPy's caching pool with Numba's
 per-array `cuMemAlloc`. `mode="streams"` and the @njit oracle timings are
 not run, as in the Numba benchmark and by scope.

@@ -36,9 +36,19 @@ blob), levels (and per blob), processed, interior, the per-launch peaks
 and level traces; per-program counts and thread utilisation when the grids
 match; cas_attempts and model_bytes at 4-conn radius 1 only.
 
-speedup_kernel is the metric to read. speedup_total mostly compares
-CuPy's caching pool with Numba's per-array cuMemAlloc. kernel_ms includes
-each runtime's Python launch path (twice for the sequential configs).
+speedup_kernel (median over median) is the metric to read, next to
+speedup_kernel_min (best run over best run), which this script adds to
+every row: benchmark.py's "(min)" column. Single runs on this GPU can be
+1.4-2.8x off the median on either backend, so a row's difference is real
+only when the two ratios agree; on opposite sides of 1 the row is noise.
+speedup_total mostly compares CuPy's caching pool with Numba's per-array
+cuMemAlloc. kernel_ms includes each runtime's Python launch path (twice
+for the sequential configs).
+
+The radius-2 rows carry one structural difference: Numba skips ring 2
+per warp, the twin per program (8 warps at tpb=256), so the Triton
+seq8r2 / multi8r2 times include masked ring-2 probe work Numba skips (see
+the README's Deviations).
 
 Not run here, by design: mode="streams" (the Numba benchmark excludes it:
 two concurrent cooperative grids can wedge the GPU), and the @njit oracle
@@ -52,9 +62,9 @@ GB/s = model_bytes / (median kernel_ms * 1e6).
 Caps: none. Every scene, config and grid is the Numba benchmarks' own.
 The harness holds one Numba and one Triton result at a time (about 0.3 GB
 each at the 22.9M-px asym scene); a probe of the seq, multi and mb_a cases
-on that scene peaked at 1.5 GB RSS. Each run spends about 0.75 s in the
-drivers' host work at the 18-23M-px scenes, so the default (68 cases,
-warm-up + 6 rounds) is about 10 minutes of GPU time.
+on that scene peaked at 1.5 GB RSS. Each run spends about 0.9 s in the
+drivers at the 18-23M-px scenes, so the default (68 cases, warm-up + 6
+rounds) is about 12 minutes of GPU time.
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch04_gpu_2blob_nblock.compare [--quick] [--repeats N]
@@ -66,6 +76,7 @@ os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
 
 import argparse
 import gc
+import json
 
 from ....chapters.ch03_gpu_1blob_nblock import flood_fill as numba_mb
 from ....chapters.ch04_gpu_2blob_nblock import flood_fill as numba_ff
@@ -125,6 +136,19 @@ METHOD_NOTES = [
     "blocks_none rows run each backend at its own co-resident maximum "
     "(different grids, see config.resolved_blocks), so they are marked "
     "comparable=false and stay out of the summary averages",
+    "speedup_kernel_min = numba.kernel_ms.min / triton.kernel_ms.min, the "
+    "best-vs-best ratio (benchmark.py's '(min)' column), added to every "
+    "row after the harness returns. Single runs reach 1.4-2.8x the median "
+    "on either backend, so a row's speedup_kernel is a real difference "
+    "only when speedup_kernel_min agrees with it; ratios on opposite sides "
+    "of 1 mean the row is noise",
+    "radius2 rows: Numba skips ring 2 per warp (divergent `if interior:`), "
+    "the twin per program (256 lanes = 8 warps): when any lane is "
+    "interior every warp runs the 16 masked ring-2 probes and their "
+    "program-wide enqueue scans. Outputs and counters are unchanged, but "
+    "the Triton seq8r2/multi8r2 times include masked probe work Numba "
+    "skips, so r2_multi_vs_conn8 is not a pure algorithm-vs-algorithm "
+    "ratio on the Triton side",
 ]
 SCOPE = (
     "benchmark.py also times the @njit two-blob oracle and cross-checks "
@@ -474,8 +498,15 @@ def build(quick):
 
 
 def measure_peaks(quick):
-    """Both copy probes, back to back, after the GPU is at boost."""
-    n_bytes = 16 * 2 ** 20 if quick else 256 * 2 ** 20
+    """Both copy probes, back to back, after the GPU is at boost.
+
+    Always 256 MiB per buffer: at 16 MiB both buffers fit the 32 MB L2 and
+    the copy is short enough for Numba's slower Python launch to land
+    inside its event bracket, which made the quick peaks look like a 4x
+    Triton advantage. --quick only cuts the copy count (and has no
+    spin-up), so its peaks are a smoke test of the probes, not a figure.
+    """
+    n_bytes = 256 * 2 ** 20
     repeats = 2 if quick else 10
     nb = bandwidth.measure_peak_bandwidth(n_bytes=n_bytes, repeats=repeats)
     tr = triton_peak(n_bytes=n_bytes, repeats=repeats)
@@ -501,18 +532,55 @@ def main(argv=None):
     if spin:
         spin_up(spin)
     peaks = measure_peaks(args.quick)
+    label = (" (quick: no spin-up, 2 copies; a smoke test, not a peak)"
+             if args.quick else "")
     print(f"copy peak: numba {peaks['numba']['gb_s']:.1f} GB/s | "
-          f"triton {peaks['triton']['gb_s']:.1f} GB/s")
+          f"triton {peaks['triton']['gb_s']:.1f} GB/s{label}")
     cases, meta = build(args.quick)
     meta["peak_gb_s"] = {k: v["gb_s"] for k, v in peaks.items()}
     meta["peak_runs_gb_s"] = {k: v["runs_gb_s"] for k, v in peaks.items()}
     print(f"{len(cases)} cases, repeats={repeats}")
     doc = run_cases(CHAPTER, cases, repeats=repeats, meta=meta,
                     write=not args.quick, spin_seconds=spin)
+    add_min_ratios(doc)
+    print_ratios(doc)
     bad = [r for r in doc["rows"]
            if "error" in r or not r.get("outputs_equal", False)]
     print(f"{len(doc['rows'])} rows, {len(bad)} with an error or a mismatch")
     return doc
+
+
+def add_min_ratios(doc):
+    """Add speedup_kernel_min (best run vs best run, benchmark.py's '(min)'
+    column) to every measured row, and rewrite the JSON the harness wrote
+    so the file carries it too."""
+    for row in doc["rows"]:
+        if "error" in row:
+            continue
+        row["speedup_kernel_min"] = (row["numba"]["kernel_ms"]["min"]
+                                     / row["triton"]["kernel_ms"]["min"])
+    path = doc.pop("path", None)
+    if path:
+        with open(path, "w") as f:
+            json.dump(doc, f, indent=1)
+        doc["path"] = path
+
+
+def print_ratios(doc):
+    """Both kernel ratios per row; 'split' marks rows whose median and
+    best-vs-best ratios fall on opposite sides of 1 (noise, not a
+    difference)."""
+    print("\nspeedup_kernel (median) vs speedup_kernel_min (best-vs-best), "
+          ">1: Triton faster")
+    for row in doc["rows"]:
+        name = (f"{row['experiment']:12s} {row['scene']:16s} "
+                f"{row['config'].get('config', ''):9s}")
+        if "error" in row:
+            print(f"  {name} error")
+            continue
+        med, best = row["speedup_kernel"], row["speedup_kernel_min"]
+        mark = "split" if (med - 1) * (best - 1) < 0 else ""
+        print(f"  {name} x{med:6.3f}  (min) x{best:6.3f}  {mark}")
 
 
 if __name__ == "__main__":
