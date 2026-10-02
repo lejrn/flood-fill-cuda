@@ -39,8 +39,8 @@ One Numba block of T threads = one program with T-lane tensors and
 | `_is_red`: `img[x,y,0]==255 and ...` | `_is_red`: chained masked uint8 loads | exact | Short-circuits like the `and` chain. Offsets are `pixel.to(int64) * 3 + c`. |
 | `cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0` | masked `tl.atomic_xchg(visited + nidx, 1, sem="relaxed")`, `old == 0` wins | close | `tl.atomic_cas` has no mask in Triton 3.7.1. On a 0/1 flag the exchange is the same exactly-once claim, with no traffic from inactive lanes. |
 | v1: `cuda.atomic.add(s_rear, 0, 1)` per winning lane | `tl.atomic_add(state + REAR + offs * 0, 1, mask=won, sem="relaxed")` | close | One atomic per winning lane in the source, as in Numba (deliberately not aggregated). ptxas warp-aggregates both sides (leader `ATOMS` per warp in Numba, leader `ATOMG` per warp in Triton), so the executed atomic counts match. L2 atomics instead of shared-memory atomics. |
-| v2: `_warp_enqueue_two_tier` (`activemask`, `popc`, `lanemask_lt`, `ffs`, `shfl_sync`) | `_lane_enqueue_two_tier` (default): masked `tl.atomic_add(rear + offs * 0, 1, mask=won, sem="relaxed", scope="gpu")` per winning lane, then the same on the spill rear for the lanes past the ring window | exact (machine code) | ptxas warp-aggregates each per-lane atomic: `VOTEU.ANY` (active mask), `FLO` (leader), `POPC` (count), one predicated leader `ATOMG.E.ADD`, `SR_LTMASK` + `POPC` (rank), `SHFL.IDX` (base). That is the idiom Numba's source compiles to (`VOTE.ANY`, `FLO`, `POPC`, leader `ATOMS.ADD`, `SHFL.IDX`), with no CTA barrier (tested). The atomics resolve at L2, not in shared memory. The spill atomic is skipped by a warp-uniform branch when no lane spills, like Numba's `else`. |
-| (first translation) | `_program_enqueue_two_tier` (`enqueue="program"`): `tl.cumsum` rank, `tl.sum` count, one scalar `tl.atomic_add` per tier | emulated | Aggregated per program instead of per warp, with the same tickets, slots and spill ranks (`rank - k`). The scan, the reduction and the scalar-atomic broadcast cost 9 `bar.sync` per direction and put the 8 warps in lockstep: x0.64-0.70 vs Numba where the lane form is x1.17-1.21. Kept to measure that cost. |
+| v2: `_warp_enqueue_two_tier` (`activemask`, `popc`, `lanemask_lt`, `ffs`, `shfl_sync`) | `_lane_enqueue_two_tier` (default): masked `tl.atomic_add(rear + offs * 0, 1, mask=won, sem="relaxed", scope="gpu")` per winning lane, then the same on the spill rear for the lanes past the ring window | close (same per-warp SASS idiom) | A per-lane atomic, warp-aggregated by ptxas: `VOTEU.ANY` (active mask), `FLO` (leader), `POPC` (count), one predicated leader `ATOMG.E.ADD`, `SR_LTMASK` + `POPC` (rank), `SHFL.IDX` (base). That is the idiom Numba's hand-written source compiles to (`VOTE.ANY`, `FLO`, `POPC`, leader `ATOMS.ADD`, `SHFL.IDX`), with no CTA barrier (tested). Not identical machine code: Numba aggregates by hand where Triton relies on ptxas, the atomics resolve at L2 (`ATOMG`) instead of shared memory (`ATOMS`), and Triton unrolls the 4 directions into 8 sites where Numba keeps 2 in a loop. The spill atomic is skipped by a warp-uniform branch when no lane spills, like Numba's `else`. |
+| (first translation) | `_program_enqueue_two_tier` (`enqueue="program"`): `tl.cumsum` rank, `tl.sum` count, one scalar `tl.atomic_add` per tier | emulated | Aggregated per program instead of per warp, with the same tickets, slots and spill ranks (`rank - k`). The scan, the reduction and the scalar-atomic broadcast cost 9 `bar.sync` per direction and put the 8 warps in lockstep: x0.64-0.70 vs Numba where the lane form is x1.17-1.21 (the chapter's six worst rows). Kept to measure that cost. |
 | ring store, `s_overflow[0] = 1`, `spill[gbase + rank2] = item` | masked `tl.store` | exact | A failing v1 enqueue writes nothing. |
 | `while front < rear: ... level += 1; if overflowed: break` | `while (front < rear) & (overflowed == 0)`, `level += 1` before the exit | exact | Triton has no `break`. LEVELS matches on abort. |
 | `if tid == 0:` scalar writes (seed, trace, rear clamp, counters) | scalar `tl.store`, guarded by scalar `if` | exact | |
@@ -49,7 +49,7 @@ One Numba block of T threads = one program with T-lane tensors and
 | int64 `counters`, slots 0..10 | int64 `counters`, same slots (imported) | exact | |
 | `device_array_like`, `copy_to_device`, `copy_to_host`, `cuda.synchronize` | `cp.empty`, `.set`, `.get`, `runtime.sync()` | close | CuPy's pool serves repeat allocations, and `.set`/`.get` cost less per call than `copy_to_device`/`copy_to_host`. So `alloc_ms`, `h2d_ms`, `d2h_ms`, `total_ms` and `speedup_total` compare host stacks, not backends. |
 | `device.MAX_THREADS_PER_MULTIPROCESSOR`, `MULTIPROCESSOR_COUNT` | `runtime.device_info()` | exact | 1536 and 24 on the RTX 4060 Laptop. |
-| lazy JIT, `_warmup(variant)` | `do_not_specialize` on every runtime int; `_warmup(variant, tpb)` | close | Compiles are per (kernel, BLOCK, num_warps); one warm-up per pair keeps every compile out of `kernel_ms` (tested). |
+| lazy JIT, `_warmup(variant)` | `do_not_specialize` on every runtime int; `_warmup(variant, tpb, enqueue)` | close | Compiles are per (kernel, BLOCK, num_warps, ENQ); one warm-up per (variant, tpb, enqueue) keeps every compile out of `kernel_ms` (tested for both enqueue forms). |
 
 ## Deviations
 
@@ -102,17 +102,23 @@ leader lane enters the branch.)
 
 The per-lane form is one masked `tl.atomic_add` per winning lane on the
 ring rear and one per spilling lane on the spill rear. ptxas recognizes a
-same-address atomic under a lane mask and emits, per warp:
+same-address atomic under a lane mask and emits, per warp (the ring-rear
+site of the first direction; `[R18.64]` is `state[REAR]`):
 
 ```
+S2R R21, SR_LANEID ;
 VOTEU.ANY UR5, UPT, PT ;                          // active mask
-FLO.U32 R22, UR5 ;                                // leader lane
+FLO.U32 R20, UR5 ;                                // leader lane
 POPC R23, UR5 ;                                   // count
-@P2 ATOMG.E.ADD.STRONG.GPU PT, R23, [R18.64+0x8], R23 ;  // leader only
-S2R R33, SR_LTMASK ; LOP3.LUT R33, R33, UR5 ... ; POPC R33, R33 ;  // rank
-SHFL.IDX PT, R22, R23, R22, 0x1f ;                // broadcast the base
-IMAD.IADD R24, R22, 0x1, R33 ;                    // ticket = base + rank
+ISETP.EQ.U32.AND P1, PT, R20, R21, PT ;           // lane == leader?
+@P1 ATOMG.E.ADD.STRONG.GPU PT, R23, [R18.64], R23 ;  // leader only: rear += count
+S2R R21, SR_LTMASK ; LOP3.LUT R22, R21, UR5 ... ; POPC R21, R22 ;  // rank
+SHFL.IDX PT, R20, R23, R20, 0x1f ;                // broadcast the base
+IMAD.IADD R21, R20, 0x1, R21 ;                    // ticket = base + rank
 ```
+
+The spill-rear sites (`[R18.64+0x8]`, `state[SPILL_REAR]`) have the same
+shape and end in spill slot = base + rank.
 
 That is the sequence Numba's hand-written enqueue compiles to (Numba:
 `VOTE.ANY`, `BREV` + `FLO.U32.SH` for `ffs`, `POPC`, leader `ATOMS.ADD`,
@@ -131,19 +137,23 @@ the level-end clamp retracts them.
 
 Before/after, kernel_ms medians of 6 interleaved rounds (each round runs
 Numba, the first translation and the default back to back, in rotating
-order), v2 at 256 threads, RTX 4060 Laptop. These are the chapter's four
-worst rows of the first comparison run:
+order), v2 at 256 threads, RTX 4060 Laptop. These are the chapter's six
+worst rows of the first comparison run (all v2 at 256 threads; "first
+run" is that run's speedup). sq_5000_center and sq_4000_center come from
+a second session of the same script.
 
-| scene | spilled | Numba ms | program ms | program vs Numba | lane ms | lane vs Numba | lane vs program |
-|---|---|---|---|---|---|---|---|
-| serpentine_256 | 0 | 52.3 | 82.3 | x0.64 | 43.5 | x1.20 | 1.89x |
-| sq_2600_full_center | 304,702 | 106.3 | 157.7 | x0.67 | 87.7 | x1.21 | 1.80x |
-| sq_4000_corner | 0 | 242.6 | 346.3 | x0.70 | 208.2 | x1.17 | 1.66x |
-| sq_6000_center | 15,618,302 | 562.8 | 886.2 | x0.64 | 480.3 | x1.17 | 1.84x |
+| scene | first run | spilled | Numba ms | program ms | program vs Numba | lane ms | lane vs Numba | lane vs program |
+|---|---|---|---|---|---|---|---|---|
+| sq_6000_center | x0.60 | 15,618,302 | 562.8 | 886.2 | x0.64 | 480.3 | x1.17 | 1.84x |
+| sq_5000_center | x0.65 | 8,714,302 | 370.6 | 575.4 | x0.64 | 317.9 | x1.17 | 1.81x |
+| sq_4000_center | x0.66 | 3,810,302 | 239.9 | 365.2 | x0.66 | 201.6 | x1.19 | 1.81x |
+| serpentine_256 | x0.67 | 0 | 52.3 | 82.3 | x0.64 | 43.5 | x1.20 | 1.89x |
+| sq_2600_full_center | x0.68 | 304,702 | 106.3 | 157.7 | x0.67 | 87.7 | x1.21 | 1.80x |
+| sq_4000_corner | x0.70 | 0 | 242.6 | 346.3 | x0.70 | 208.2 | x1.17 | 1.66x |
 
 Outputs and counters were identical to Numba in every run. The compare's
 `enqueue` experiment repeats this in the harness on five scenes, two rows
-each (`label: "default"` and `label: "first_translation"`).
+each (`label: "per_lane"` and `label: "first_translation"`).
 
 ## Determinism
 
@@ -160,7 +170,9 @@ level's tickets are the contiguous range `[sr, sr + size)`.
 
 ```bash
 # Tests: the Numba chapter's tests (same names) plus test_cross_backend_*
-# and test_enqueue_* (both v2 enqueue forms, SASS and barrier checks)
+# and test_enqueue_* (both v2 enqueue forms vs the oracle and Numba, also
+# at the ring/spill window edge at 32/256/1024 threads; SASS and barrier
+# checks)
 .venv/bin/python -m pytest -p no:cacheprovider src/flood_fill_cuda/triton_twins/chapters/ch01_gpu_1blob_1block/test_correctness.py -v
 
 # Numba vs Triton on the chapter's benchmark scenes, both kernels, the
@@ -184,10 +196,13 @@ The compare runs at full scene size (up to the 36M px `sq_6000_center`).
   the same as in the other rows. `total_ms` runs from the driver's first
   stamp to the `RuntimeError`.
 - **`enqueue` rows** run v2 twice per scene: `enqueue="lane"` (label
-  `default`) and `enqueue="program"` (label `first_translation`). Numba runs
-  its one v2 kernel in both. `info.*.bar_sync_in_ptx` records the CTA
-  barriers of each kernel (4, 4 and 40). The first-translation rows are not
-  the twin's default, so leave them out of default-setting averages.
+  `per_lane`, the default) and `enqueue="program"` (label
+  `first_translation`). Numba runs its one v2 kernel in both.
+  `info.*.bar_sync_in_ptx` records the CTA barriers of each kernel (4, 4
+  and 40). The first-translation rows are `comparable=false` and carry
+  `first_translation: true`, as in ch02-ch04, so the summary's
+  like-for-like averages and extremes leave them out. The `per_lane` rows
+  repeat the `scenes` spill rows of the same scenes.
 - **`--quick`** uses three small scenes plus the 2600x2600 tripwire scene.
   Overflowing the 8192-slot ring needs a frontier above 8192 pixels, so it
   is the only quick case for the spill tier and the tripwire (about 3 s).

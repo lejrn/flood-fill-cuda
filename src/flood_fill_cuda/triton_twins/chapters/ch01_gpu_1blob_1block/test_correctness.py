@@ -19,9 +19,12 @@ timings differ.
 
 The test_enqueue_* section runs both v2 enqueue forms (enqueue="lane",
 the default, and enqueue="program", the first translation) against the
-CPU oracle and Numba, including the spill scene, and checks the codegen
-claim: the default kernels carry Numba's CTA barrier count and every
-enqueue atomic is warp-aggregated by ptxas in the SASS.
+CPU oracle and Numba: the chapter's scenes, the spill scene, and
+center-seeded squares at the ring/spill window edge (0, 2, 14 and 2,702
+spilled pixels) at 32, 256 and 1024 threads. It also pins every default
+to "lane" (at the launch itself) and checks the codegen claim: the
+default kernels carry Numba's CTA barrier count and every enqueue atomic
+is warp-aggregated by ptxas in the SASS.
 
 Run:
 
@@ -463,11 +466,31 @@ def test_enqueue_modes_agree_with_each_other():
     assert_same_as_numba(lane, prog)
 
 
-def test_enqueue_default_is_lane():
-    from .flood_fill import compiled_kernel
+def test_enqueue_default_is_lane(monkeypatch):
+    """Every default is the lane form, and a call that names no enqueue
+    launches the spill kernel with ENQ="lane" (seen at the launch itself,
+    so flipping any one default to "program" fails here)."""
+    import inspect
+    import sys
+    from .kernels import single_block_bfs_spill_kernel
+
+    ff_mod = sys.modules[flood_fill.__module__]
+    for fn in (ff_mod.flood_fill, ff_mod.compiled_kernel, ff_mod._warmup):
+        assert inspect.signature(fn).parameters["enqueue"].default == "lane"
+    kernel_sig = inspect.signature(single_block_bfs_spill_kernel.fn)
+    assert kernel_sig.parameters["ENQ"].default == "lane"
+    assert ENQ_MODES[0] == "lane"
+
+    launches = []
+    real_launch = ff_mod._launch
+
+    def spy(variant, enqueue, *args):
+        launches.append((variant, enqueue))
+        return real_launch(variant, enqueue, *args)
+
+    monkeypatch.setattr(ff_mod, "_launch", spy)
     flood_fill(*scenes.square_scene(64, 64, 20, 20), variant="spill")
-    assert compiled_kernel("spill", 256) is compiled_kernel("spill", 256,
-                                                            "lane")
+    assert launches and set(launches) == {("spill", "lane")}, launches
 
 
 def test_bad_enqueue_raises():
@@ -481,6 +504,110 @@ def test_enqueue_program_on_ring_raises():
     img, sx, sy = scenes.square_scene(64, 64, 20, 20)
     with pytest.raises(ValueError, match='variant="spill" only'):
         flood_fill(img, sx, sy, variant="ring", enqueue="program")
+
+
+def test_compiled_kernel_refuses_what_flood_fill_refuses():
+    """compiled_kernel never caches a ring kernel under "program", nor any
+    kernel under an unknown enqueue value."""
+    from .flood_fill import _warmed_up, compiled_kernel
+    with pytest.raises(ValueError, match='variant="spill" only'):
+        compiled_kernel("ring", 256, "program")
+    with pytest.raises(ValueError, match="enqueue must be"):
+        compiled_kernel("spill", 256, "warp")
+    assert ("ring", 256, "program") not in _warmed_up
+    assert ("spill", 256, "warp") not in _warmed_up
+
+
+def test_kernel_static_assert_rejects_unknown_enqueue():
+    """Below the host checks, the kernel's own tl.static_assert on ENQ
+    refuses to compile an unknown form."""
+    from triton.compiler.errors import CompileTimeAssertionFailure
+    from .flood_fill import _warmup
+    with pytest.raises(CompileTimeAssertionFailure):
+        _warmup("spill", 256, "warp")
+
+
+def _full_red_center(side):
+    """Full-bleed red square of the given side, seeded at the center. Near
+    side 2049 the two-level ring occupancy (~4 * side) crosses the 8192-slot
+    window, so a few more pixels of side move the scene from "fills the
+    ring exactly" to a handful of spills to thousands."""
+    img = np.zeros((side, side, 3), dtype=np.uint8)
+    img[:, :] = scenes.RED
+    return img, side // 2, side // 2
+
+
+# side -> (spilled, peak_occupancy) of Numba v2 at every block size.
+BOUNDARY_SCENES = {
+    2049: (0, 8192),      # peak occupancy exactly RING_CAPACITY: no spill
+    2050: (2, 8194),      # 2 tickets past the window
+    2052: (14, 8202),     # slabs straddle the window edge
+    2100: (2702, 8394),   # light spill, still cheap (4.4M px)
+}
+
+
+@functools.lru_cache(maxsize=1)
+def _boundary_oracle(side):
+    img, sx, sy = _full_red_center(side)
+    return img, sx, sy, cpu_flood_fill(img, sx, sy)
+
+
+@functools.lru_cache(maxsize=1)
+def _boundary_numba(side, tpb):
+    img, sx, sy, _ = _boundary_oracle(side)
+    return numba_flood_fill(img, sx, sy, threads_per_block=tpb,
+                            variant="spill")
+
+
+# enqueue varies fastest, then tpb, then side: each one-slot cache is
+# computed once per (side) and once per (side, tpb).
+@pytest.mark.parametrize("enqueue", ENQ_MODES)
+@pytest.mark.parametrize("tpb", [32, 256, 1024])
+@pytest.mark.parametrize("side", list(BOUNDARY_SCENES))
+def test_enqueue_modes_ring_spill_boundary(side, tpb, enqueue):
+    """The ring/spill split at the window edge, at the smallest and largest
+    block sizes too (1 warp, where every slab straddles inside one warp, and
+    32 warps): both forms match the oracle and every Numba counter."""
+    img, sx, sy, (ref_visited, ref_depth, ref_levels, ref_filled) = \
+        _boundary_oracle(side)
+    tri = flood_fill(img, sx, sy, threads_per_block=tpb, variant="spill",
+                     enqueue=enqueue)
+    np.testing.assert_array_equal(tri.visited, ref_visited)
+    np.testing.assert_array_equal(tri.depth, ref_depth)
+    assert tri.levels == ref_levels and tri.filled == ref_filled
+    assert tri.processed == tri.filled
+    assert (tri.spilled, tri.peak_occupancy) == BOUNDARY_SCENES[side]
+    assert_same_as_numba(tri, _boundary_numba(side, tpb))
+
+
+@pytest.mark.parametrize("tpb", [32, 1024])
+def test_enqueue_lane_spill_repeat_runs_identical(tpb):
+    """Per-lane tickets land in a schedule-dependent order, but every
+    deterministic output of a spilling run repeats exactly."""
+    img, sx, sy = _full_red_center(2052)
+    a = flood_fill(img, sx, sy, threads_per_block=tpb, variant="spill")
+    b = flood_fill(img, sx, sy, threads_per_block=tpb, variant="spill")
+    assert a.spilled == 14
+    assert_same_as_numba(a, b)
+
+
+def test_enqueue_program_no_recompile_inside_timing():
+    """The first translation, like the default, compiles once per (tpb,
+    ENQ): other scene sizes and seeds reuse it."""
+    from flood_fill_cuda.triton_twins.runtime import bridge  # noqa: F401
+    from triton.runtime.driver import driver
+    from .kernels import single_block_bfs_spill_kernel
+
+    cache = single_block_bfs_spill_kernel.device_caches[
+        driver.active.get_current_device()][0]
+    flood_fill(*scenes.square_scene(64, 64, 32, 32), variant="spill",
+               enqueue="program")
+    before = len(cache)
+    for build in (lambda: scenes.square_scene(97, 33, 51, 17),
+                  lambda: scenes.serpentine_scene(48, 80),
+                  lambda: scenes.full_red_scene(129, 1)):
+        flood_fill(*build(), variant="spill", enqueue="program")
+    assert len(cache) == before
 
 
 def _nvdisasm():

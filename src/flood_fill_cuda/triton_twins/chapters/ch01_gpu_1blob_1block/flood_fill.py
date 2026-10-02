@@ -84,8 +84,23 @@ def _launch(variant, enqueue, threads_per_block, d_img, d_visited, d_depth,
         width, height, trace_cap, ENQ=enqueue, **opts)
 
 
+def _check_enqueue(variant, enqueue):
+    """The Triton-only enqueue rules, shared by flood_fill and
+    compiled_kernel (so neither caches a ring kernel under "program")."""
+    if enqueue not in ENQ_MODES:
+        raise ValueError(
+            f'enqueue must be "lane" or "program", got {enqueue!r}')
+    if variant == "ring" and enqueue != "lane":
+        raise ValueError(
+            'enqueue="program" exists for variant="spill" only: the v1 ring '
+            'kernel issues one ticket atomic per winning lane, as Numba does')
+
+
 def _warmup(variant, threads_per_block, enqueue="lane"):
-    """Compile the kernel on a tiny scene so timings never include compile."""
+    """Compile the kernel on a tiny scene so timings never include compile.
+
+    No enqueue check here: the public entry points check first, and the
+    tests reach the kernel's own static_assert through this function."""
     key = (variant, threads_per_block, enqueue)
     if key in _warmed_up:
         return
@@ -107,7 +122,9 @@ def _warmup(variant, threads_per_block, enqueue="lane"):
 
 def compiled_kernel(variant, threads_per_block, enqueue="lane"):
     """The CompiledKernel for (variant, tpb, enqueue), for
-    runtime.kernel_resources() and the SASS check."""
+    runtime.kernel_resources() and the SASS check. Raises ValueError for
+    the enqueue values flood_fill refuses."""
+    _check_enqueue(variant, enqueue)
     _warmup(variant, threads_per_block, enqueue)
     return _warmed_up[(variant, threads_per_block, enqueue)]
 
@@ -146,13 +163,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, variant="ring",
             f"threads_per_block must be a power of 2 for the Triton twin "
             f"(num_warps = threads_per_block // 32 and tl.arange lengths must "
             f"be powers of 2), got {threads_per_block}")
-    if enqueue not in ENQ_MODES:
-        raise ValueError(
-            f'enqueue must be "lane" or "program", got {enqueue!r}')
-    if variant == "ring" and enqueue != "lane":
-        raise ValueError(
-            'enqueue="program" exists for variant="spill" only: the v1 ring '
-            'kernel issues one ticket atomic per winning lane, as Numba does')
+    _check_enqueue(variant, enqueue)
     # Numba types NumPy integer seeds (np.int32, np.int64, ...) as kernel
     # args; Triton's launcher cannot specialize NumPy scalars. The seeds
     # already indexed img_host above, so they are integers.
