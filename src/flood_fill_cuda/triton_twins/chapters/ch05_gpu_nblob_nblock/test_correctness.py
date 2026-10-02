@@ -21,6 +21,7 @@ Run:
         src/flood_fill_cuda/triton_twins/chapters/ch05_gpu_nblob_nblock -v
 """
 
+import functools
 import os
 
 os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
@@ -934,6 +935,9 @@ _SCHED_CONFIGS = (
     dict(variant="seed_merge"),
     dict(variant="seed_merge", bare=True),
     dict(variant="seed_merge", lattice=1),
+    # lattice 3 on full_red: the window binds in levels that also claim
+    # pixels (at lattice 1 every red pixel is pre-visited, so no claims)
+    dict(variant="seed_merge", lattice=3),
     dict(variant="seed_merge", lattice=4),
     dict(variant="seed_merge", lattice=1, interior=True, bare=True),
     dict(variant="seed_merge", lattice=1, build="r128"),
@@ -941,8 +945,9 @@ _SCHED_CONFIGS = (
 )
 _SCHED_SCENES = ("full_red", "two_disks", "comb", "random", "serpentine")
 # (tpb, blocks) with many slots per lane (the lane bodies walk several
-# items, the fill's lattice-1 levels switch to the lane-independent body
-# and its window binds) and the default grid
+# items, the fill's dense levels switch to the lane-independent body and
+# its window binds) and the default grid (scenes this small never switch
+# there: a level needs 2 slots per lane left after a dense batch)
 _SCHED_GRIDS = ((32, 2), (64, 1), (256, None))
 
 
@@ -1021,3 +1026,179 @@ def test_lane_schedules_are_separate_compiles(variant):
     for sched in twin_driver.LANE_SCHEDULES:
         info = twin_driver.kernel_info(variant, 256, lane_schedule=sched)
         assert info["coop_max_blocks"] >= 1
+
+
+# ============================== lane schedules: edge shapes, odd grids
+# The lane bodies' own edge cases, both schedules against Numba and the
+# CPU oracle: images one pixel wide or tall and odd sizes (_step_index's
+# carry, _pred_pairs at the borders, a grid-stride walk that ends inside a
+# program), densities from scattered pixels through the percolation range
+# to near-solid (many roots, long chains, link retries), a checkerboard
+# (one blob joined only through diagonals), and grids of few programs
+# (every lane walks many items) at tpb 32, 128 and 512. A counting copy
+# of the kernels showed the seed_merge fill's lane body running here:
+# lattice 1 switches on the five 2D scenes of >= 42% density at every
+# grid below (on the two near-solid ones even with _DENSE_COLL raised
+# to 7), lattice 16 in some programs only, and at lattice 2 and 3 the
+# window binds in levels that also claim pixels.
+
+def _kw_id(kw):
+    return "-".join(f"{k}={v}" for k, v in kw.items())
+
+
+def _mask_scene(mask):
+    img = np.full(mask.shape + (3,), 255, np.uint8)
+    img[mask] = scenes.RED
+    return img
+
+
+def _noise(width, height, density, seed):
+    return np.random.default_rng(seed).random((width, height)) < density
+
+
+def _xy(width, height):
+    return np.meshgrid(np.arange(width), np.arange(height), indexing="ij")
+
+
+def _rings(width, height):
+    """Square rings one pixel wide and one pixel apart around the centre
+    pixel (odd sizes): many nested blobs."""
+    x, y = _xy(width, height)
+    return np.maximum(np.abs(x - width // 2), np.abs(y - height // 2)) % 2 == 0
+
+
+def _sawtooth(width, height):
+    """Zigzag diagonal lines: long thin blobs whose lex-min pixel is far
+    from most of their pixels (long find chains)."""
+    x, y = _xy(width, height)
+    return (x + y % 7) % 5 == 0
+
+
+# 8-connected site percolation sets in near density 0.41: 0.42 is one
+# spanning, ragged cluster among many small ones
+_EDGE_MASKS = {
+    "noise_61x67_d05": lambda: _noise(61, 67, 0.05, 1),
+    "noise_97x131_d42": lambda: _noise(97, 131, 0.42, 2),
+    "noise_131x97_d62": lambda: _noise(131, 97, 0.62, 3),
+    "noise_33x257_d97": lambda: _noise(33, 257, 0.97, 4),
+    "noise_1x517_d80": lambda: _noise(1, 517, 0.8, 5),
+    "noise_517x1_d80": lambda: _noise(517, 1, 0.8, 6),
+    "full_77x91": lambda: np.ones((77, 91), bool),
+    "full_1x300": lambda: np.ones((1, 300), bool),
+    "full_300x1": lambda: np.ones((300, 1), bool),
+    "full_3x5": lambda: np.ones((3, 5), bool),
+    "full_1x1": lambda: np.ones((1, 1), bool),
+    "checker_97x131": lambda: np.add(*_xy(97, 131)) % 2 == 0,
+    "rings_45x45": lambda: _rings(45, 45),
+    "sawtooth_97x131": lambda: _sawtooth(97, 131),
+    "blank_17x19": lambda: np.zeros((17, 19), bool),
+}
+_EDGE_CONFIGS = (
+    dict(variant="ccl_fill"),
+    dict(variant="seed_merge"),
+    dict(variant="seed_merge", lattice=0),
+    dict(variant="seed_merge", lattice=1),
+    dict(variant="seed_merge", lattice=2),
+    dict(variant="seed_merge", lattice=3, interior=True),
+    dict(variant="seed_merge", lattice=16),
+)
+_EDGE_GRIDS = ((32, 1), (32, 3), (128, 7))
+
+
+@functools.lru_cache(maxsize=None)
+def _edge_scene(name):
+    return _mask_scene(_EDGE_MASKS[name]())
+
+
+@functools.lru_cache(maxsize=None)
+def _edge_oracle(name, variant, lattice, interior):
+    """(the oracle's (visited, depth, label, levels, filled), roots):
+    roots are the union-find roots a run starts with, every red pixel
+    (ccl_fill) or every candidate (seed_merge)."""
+    img = _edge_scene(name)
+    if variant == "ccl_fill":
+        return cpu_fill_canonical(img), int(_red_mask(img).sum())
+    lattice = 0 if lattice is None else lattice
+    return (cpu_fill_from_candidates(img, lattice, interior),
+            int(cpu_candidates(img, lattice, interior).sum()))
+
+
+def _edge_reference(name, kw):
+    return _edge_oracle(name, kw["variant"], kw.get("lattice"),
+                        int(kw.get("interior", False)))
+
+
+def assert_edge_contract(img, r, ref, roots):
+    """The oracle contract (as assert_matches_oracle) plus the union
+    accounting: each successful link retires exactly one root, so
+    union_done == roots - n_blobs."""
+    ref_v, ref_d, ref_l, ref_levels, ref_filled = ref
+    np.testing.assert_array_equal(r.visited, ref_v, err_msg="visited")
+    np.testing.assert_array_equal(r.label, ref_l, err_msg="label")
+    np.testing.assert_array_equal(r.depth, ref_d, err_msg="depth")
+    assert (r.levels, r.filled) == (ref_levels, ref_filled)
+    vis = ref_v.astype(bool)
+    np.testing.assert_array_equal(r.img[vis],
+                                  PALETTE_HOST[ref_l[vis] % N_PALETTE])
+    np.testing.assert_array_equal(r.img[~vis], img[~vis])
+    height = img.shape[1]
+    labels = np.unique(ref_l[vis])
+    assert r.n_blobs == labels.size
+    assert r.seeds == [(int(l) // height, int(l) % height) for l in labels]
+    assert r.processed == int(_red_mask(img).sum())
+    assert int(r.processed_per_block.sum()) == r.processed
+    assert r.candidates == (r.n_blobs if r.variant == "ccl_fill" else roots)
+    assert r.union_done == roots - r.n_blobs
+
+
+@pytest.mark.parametrize("name", _EDGE_MASKS.keys())
+@pytest.mark.parametrize("tpb, blocks", _EDGE_GRIDS)
+@pytest.mark.parametrize("kw", _EDGE_CONFIGS, ids=_kw_id)
+def test_lane_schedules_edge_shapes(kw, tpb, blocks, name):
+    img = _edge_scene(name)
+    ref, roots = _edge_reference(name, kw)
+    a = numba_driver.flood_fill(img, threads_per_block=tpb, blocks=blocks,
+                                **kw)
+    for sched in twin_driver.LANE_SCHEDULES:
+        b = flood_fill(img, threads_per_block=tpb, blocks=blocks,
+                       lane_schedule=sched, **kw)
+        assert_backends_agree(a, b, pinned=True)
+        assert_edge_contract(img, b, ref, roots)
+
+
+_TPB512_CONFIGS = (
+    dict(variant="ccl_fill"),
+    dict(variant="seed_merge"),
+    dict(variant="seed_merge", lattice=1),
+    dict(variant="seed_merge", lattice=3),
+    dict(variant="seed_merge", lattice=1, build="r128"),
+    dict(variant="seed_merge", lattice=4, build="r128"),
+)
+_TPB512_SCENES = ("full_77x91", "noise_131x97_d62", "sawtooth_97x131",
+                  "noise_1x517_d80")
+
+
+@pytest.mark.parametrize("blocks", (1, 3, None))
+@pytest.mark.parametrize("kw", _TPB512_CONFIGS, ids=_kw_id)
+def test_lane_schedules_at_tpb_512(kw, blocks):
+    """The widest program flood_fill takes, its own compiles and
+    capacities (README). Every run against the oracle; against Numba
+    where Numba can launch the grid: its fused lattice kernel needs 129
+    registers, too many for a 512-thread block (max_blocks 0 on the RTX
+    4060), so there only its r128 build runs."""
+    numba_cap = numba_driver.max_blocks(
+        threads_per_block=512,
+        **{k: v for k, v in kw.items() if k != "interior"})
+    for name in _TPB512_SCENES:
+        img = _edge_scene(name)
+        ref, roots = _edge_reference(name, kw)
+        a = None
+        if numba_cap >= (blocks or 1):
+            a = numba_driver.flood_fill(img, threads_per_block=512,
+                                        blocks=blocks, **kw)
+        for sched in twin_driver.LANE_SCHEDULES:
+            b = flood_fill(img, threads_per_block=512, blocks=blocks,
+                           lane_schedule=sched, **kw)
+            assert_edge_contract(img, b, ref, roots)
+            if a is not None:
+                assert_backends_agree(a, b, pinned=blocks is not None)
