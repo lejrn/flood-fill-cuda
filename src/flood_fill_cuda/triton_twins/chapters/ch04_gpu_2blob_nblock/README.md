@@ -287,12 +287,12 @@ The headline numbers are the stable ones:
   run vs best run. That is the cost of the first translation's enqueue,
   measured between two Triton binaries in the same rounds. On bare_xy
   (4 enqueue sites per tile, not 8 or 24) it is 1.11.
-- **lane vs Numba: x1.00-1.12 best vs best.** With the per-lane
+- **lane vs Numba: x1.00-1.11 best vs best.** With the per-lane
   enqueue the twin runs at Numba's speed or slightly faster on these
   rows, at the same grid.
-- **program vs Numba: x0.67-0.90 best vs best** on four rows, and x1.00
-  on bare_xy. The first translation was slower than Numba on every row
-  by median.
+- **program vs Numba: x0.67-0.90 best vs best** on four rows, and x0.99
+  (about parity) on bare_xy. The first translation was slower than
+  Numba on every row by median.
 
 Kernel time medians in ms, then numba_ms / triton_ms (above 1: Triton
 faster) as median / best:
@@ -300,9 +300,9 @@ faster) as median / best:
 | row (grid) | Numba | Triton `program` | Triton `lane` | x program | x lane | program / lane |
 |---|---|---|---|---|---|---|
 | radius2 two_disks_r1400 seq8r2 (48) | 40.36 | 52.91 | 38.17 | 0.76 / 0.76 | 1.06 / 1.05 | 1.39 / 1.39 |
-| modes two_disks_r1400 bare_xy (72) | 27.53 | 32.08 | 30.02 | 0.86 / 1.00 | 0.92 / 1.11 | 1.07 / 1.11 |
+| modes two_disks_r1400 bare_xy (72) | 27.53 | 32.08 | 30.02 | 0.86 / 0.99 | 0.92 / 1.11 | 1.07 / 1.11 |
 | modes two_disks_r1400 seq8 (48) | 33.92 | 41.69 | 29.04 | 0.81 / 0.81 | 1.17 / 1.11 | 1.44 / 1.36 |
-| modes two_sq_2800 multi8 (48) | 30.29 | 32.99 | 26.36 | 0.92 / 0.90 | 1.15 / 1.12 | 1.25 / 1.24 |
+| modes two_sq_2800 multi8 (48) | 30.29 | 32.99 | 26.36 | 0.92 / 0.90 | 1.15 / 1.11 | 1.25 / 1.24 |
 | radius2 two_sq_300 multi8r2 (48) | 1.56 | 2.24 | 1.50 | 0.70 / 0.67 | 1.04 / 1.00 | 1.49 / 1.49 |
 
 The SM clock moved between 870 and 2070 MHz (of a 3105 MHz boost)
@@ -400,8 +400,9 @@ config records its `enqueue`:
   `info.triton_enqueue`, the setting the timed Triton result reports.
   `meta.enqueue` holds registers, capacity and barriers per binary.
 
-  The `first_translation` rows are `comparable=false`. They measure a
-  superseded twin, so they stay out of the unit's averages, as in ch03.
+  The `first_translation` rows are `comparable=false` and carry the
+  row-level key `first_translation=true`, as in ch01-ch03. They measure
+  a superseded twin, so they stay out of the unit's averages.
   The cost of the first translation is the Triton `kernel_ms` of a
   `first_translation` row over that of its `per_lane` pair.
 

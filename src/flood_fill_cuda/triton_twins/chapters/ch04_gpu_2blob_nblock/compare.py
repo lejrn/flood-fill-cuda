@@ -41,8 +41,9 @@ enqueue      the cost of the first translation. multi, bare_xy, multi8 and
              barrier count of the binary it ran (equal to the SASS
              BAR.SYNC count; see sass.py), and info.triton_enqueue is the
              setting the timed Triton result reports. first_translation rows
-             are comparable=False: they measure a superseded twin, so they
-             stay out of the unit's averages (as in ch03). The per_lane rows
+             are comparable=False and carry first_translation=true (as in
+             ch01-ch03): they measure a superseded twin, so they stay out
+             of the unit's averages. The per_lane rows
              repeat a modes or radius2 cell (same config, same grid);
              config.duplicate_of names it, so a summary can drop them.
 
@@ -187,7 +188,8 @@ METHOD_NOTES = [
     "7 BAR.SYNC per enqueue site), at the same grid, so the cost of that "
     "translation choice is measured in the same harness. Those rows "
     "measure a superseded twin, not the default one, so they are "
-    "comparable=false and stay out of the summary averages (as in ch03); "
+    "comparable=false, carry first_translation=true and stay out of the "
+    "summary averages (as in ch01-ch03); "
     "the cost of the first translation is the triton kernel_ms of a "
     "first_translation row over that of its per_lane pair",
     "enqueue per_lane rows repeat a cell that a modes or radius2 row "
@@ -381,8 +383,9 @@ def make_case(experiment, slot, scene, name, kw, blocks, notes="",
     blocks=None lets each backend resolve its own grid: both resolved sizes
     go into the config, and the row is comparable only if they agree.
     ``enqueue`` is the Triton side's ENQ (Numba has one enqueue); an
-    ENQ="program" row is the first translation and never comparable, so
-    it stays out of the unit's averages. ``duplicate_of`` names the
+    ENQ="program" row is the first translation: never comparable, so it
+    stays out of the unit's averages, and it carries the row-level key
+    first_translation=true, as in ch01-ch03. ``duplicate_of`` names the
     experiments whose rows already measure this exact cell."""
     c = caps(kw, enqueue)
 
@@ -418,6 +421,8 @@ def make_case(experiment, slot, scene, name, kw, blocks, notes="",
     row_extra = {"caps": c, **resources(kw, enqueue), **(extra or {})}
     if grid_of:
         row_extra["grid_of"] = grid_of
+    if enqueue == ENQ_PROGRAM:
+        row_extra["first_translation"] = True
     return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=run_numba, run_triton=run_triton,
                 same=make_same(kw, pinned=equal_grid, enqueue=enqueue),
