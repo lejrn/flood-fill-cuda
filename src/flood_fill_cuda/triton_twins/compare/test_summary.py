@@ -48,3 +48,14 @@ def test_newest_file_wins_and_extremes_are_named(tmp_path):
     assert ch01["triton_faster_rows"] == 1
     assert not doc["units"]["ch02"]["all_outputs_equal"]
     assert doc["overall"]["rows"] == 3
+
+
+def test_not_comparable_rows_are_counted_but_not_averaged(tmp_path):
+    root = str(tmp_path)
+    odd = _row("placement", "pinned", 1.0, 10.0)
+    odd["comparable"] = False
+    _write(root, "ch02", "20260101T000000Z", [_row("s", "a", 2.0, 1.0), odd])
+    u = summarize(root)["units"]["ch02"]
+    assert u["geomean_speedup_kernel"] == pytest.approx(2.0)
+    assert u["not_comparable_rows"] == 1
+    assert u["best_for_numba"]["scene"] == "a"

@@ -47,17 +47,20 @@ def _extreme(rows, key, pick):
 
 
 def summarize_rows(rows):
-    ok = [r for r in rows if "error" not in r]
+    measured = [r for r in rows if "error" not in r]
+    # Not like-for-like rows are reported but never averaged.
+    ok = [r for r in measured if r.get("comparable", True)]
     out = {
         "rows": len(rows),
         "errors": [{"experiment": r["experiment"], "scene": r["scene"],
                     "config": r["config"], "error": r["error"]}
                    for r in rows if "error" in r],
-        "all_outputs_equal": all(r.get("outputs_equal") for r in ok),
+        "not_comparable_rows": len(measured) - len(ok),
+        "all_outputs_equal": all(r.get("outputs_equal") for r in measured),
         "unequal_rows": [{"experiment": r["experiment"], "scene": r["scene"],
                           "config": r["config"],
                           "detail": r.get("mismatch_detail", "")}
-                         for r in ok if not r.get("outputs_equal")],
+                         for r in measured if not r.get("outputs_equal")],
     }
     if ok:
         out["geomean_speedup_kernel"] = geomean(r["speedup_kernel"] for r in ok)
