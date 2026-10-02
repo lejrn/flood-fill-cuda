@@ -285,13 +285,13 @@ What this shows:
 - **`pinned` is level with Numba or ahead.** On the large matched row
   (`sq_6000_center`) the lane build leads, x1.03-1.06, up from x0.625.
   The short `sq_2000_center` row moved from x0.58-0.78 to x0.85-1.10
-  across four passes. It is barrier-bound and clock-sensitive, so it
-  shows no stable gap either way.
-- **The pair barrier is the one cost the appends do not explain.** In
-  the twin every scalar atomic of the barrier is broadcast to the whole
-  16-warp program through shared memory, so each barrier step costs more
-  than Numba's thread-0 spin. That cost is per level, so it shows most on
-  the short row. It was left as it is, since it is not an enqueue.
+  across four passes. Its kernels run 10-25 ms and are clock-sensitive,
+  so it shows no stable gap either way.
+- **The pair barrier differs, but it was not measured.** In the twin
+  every scalar atomic of the barrier is broadcast to the whole 16-warp
+  program through shared memory. That is a per-level cost Numba's
+  thread-0 spin does not pay. It was not ablated, and no gap is
+  attributed to it. It was left as it is, since it is not an enqueue.
 - **Placement rows are not all like-for-like.** The chapter's own rows
   pit 2 x 768 Numba threads against 2 x 512 Triton lanes, so their ratio
   mixes a config change with the backend change (`comparable=false` in
@@ -313,8 +313,8 @@ averages and extremes of `summary.py` and `figures.py`, and still show in
 the experiment's own block and in the JSON.
 
 The lane rows repeat cells that `scenes` and `placement` already time.
-They carry `duplicate_of` naming that experiment, so a unit-wide average
-can count each cell once.
+They carry `duplicate_of` naming that experiment. A unit-wide average
+should skip rows with that tag, so each cell counts once.
 
 ## Running
 
