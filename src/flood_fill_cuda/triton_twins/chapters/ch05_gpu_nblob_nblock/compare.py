@@ -53,8 +53,9 @@ enqueue                The twin's two enqueue spellings against the same
                        Numba kernel, two rows per cell: config.enqueue
                        "lane" (label per_lane, the default every other
                        experiment runs: one relaxed atomic per winning
-                       lane, which ptxas warp-aggregates into the SASS of
-                       Numba's _warp_enqueue_global) and "program" (label
+                       lane, which ptxas warp-aggregates into the pattern
+                       of Numba's _warp_enqueue_global: one leader atomic
+                       per warp) and "program" (label
                        first_translation: tl.cumsum ranks and one atomic
                        per program, 7 CTA barriers per enqueue site). The
                        cells: the six benchmark runners on two_disks_r1400

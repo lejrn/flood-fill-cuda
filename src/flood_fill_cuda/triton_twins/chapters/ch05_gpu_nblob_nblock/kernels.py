@@ -20,8 +20,9 @@ This file only changes how each CUDA construct is spelled:
   ENQ="lane" (the default): _lane_enqueue, one relaxed tl.atomic_add of 1
   on the rear per winning lane, the item stored at the slot it returned.
   ptxas warp-aggregates that atomic (VOTEU.ANY, POPC, one leader
-  ATOMG.E.ADD, SHFL.IDX): the machine code of Numba's hand-written helper,
-  with no CTA barrier.
+  ATOMG.E.ADD, SHFL.IDX): the pattern of Numba's hand-written helper (one
+  leader atomic per warp; the instructions around it differ, README), with
+  no CTA barrier.
   ENQ="program" (the first translation, kept to measure its cost):
   _cta_enqueue, ranks from one exclusive tl.cumsum over the program and
   ONE atomic per program; the scan and the sum add CTA barriers Numba
@@ -200,8 +201,9 @@ def _lane_enqueue(queue_ptr, q_state_ptr, counters_ptr, item, won, q_cap):
     the atomic warp-aggregated: VOTEU.ANY collects the active lanes, POPC
     counts them, one leader lane issues the ATOMG.E.ADD of that count,
     SHFL.IDX broadcasts the old rear and each lane adds its rank (the POPC
-    of the active lanes below it). That is the machine code of Numba's
-    hand-written activemask / popc / leader atomic / shfl helper, with no
+    of the active lanes below it). That is the pattern of Numba's
+    hand-written activemask / popc / leader atomic / shfl helper (one
+    leader atomic per warp; the instructions around it differ), with no
     CTA barrier and no lockstep across the program's warps (README:
     "Enqueue: per lane vs per program"). The tickets are the same set of
     slots as Numba's (one per winner, in some order); the bound check is

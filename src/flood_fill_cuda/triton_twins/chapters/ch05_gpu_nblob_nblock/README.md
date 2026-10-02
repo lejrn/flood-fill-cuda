@@ -68,7 +68,7 @@ flatten helpers with no barrier, on the Numba driver's `_PLAIN_GRID`.
 | cooperative launch, `grid.sync()` | `launch_cooperative_grid=True`, `runtime.device.grid_sync` on a monotonic int64 counter | emulated | same placement and count: 2 per level, the fence sandwich, seed_merge's instrumented closing barrier. An oversized grid raises like Numba |
 | `max_cooperative_grid_blocks(tpb)` | `max_coresident_programs(compiled)` | close | per compiled twin and block size; its own registers, so its own number (table below) |
 | grid-stride loops | `range(start, end, nprog * BLOCK)` + `pid * BLOCK + lanes` | exact | same element to (block, lane) map: `processed_per_block` matches Numba when blocks and tpb are pinned (tested) |
-| `_warp_enqueue_global` (activemask, popc, leader atomic, shfl), at every append (P1 scan, ccl seed append, every fill claim) | `enqueue="lane"` (default): `_lane_enqueue`, one relaxed `tl.atomic_add(rear, 1)` per winning lane, the item stored at the returned slot. ptxas warp-aggregates it: `VOTEU.ANY`, `FLO`, `POPC`, one leader `ATOMG.E.ADD`, `SHFL.IDX` | exact (same SASS pattern) | verified on every twin binary (tested); the leader is the highest active lane (FLO), Numba's the lowest (ffs), ranks are the same. The first translation, `enqueue="program"` (`_cta_enqueue`: `tl.cumsum` ranks, one atomic per program), adds 7 `BAR.SYNC` per site and holds the program's warps together; it cost the fill-heavy rows 12-28% (section below). Queue order inside a level differs between the modes and from Numba; the level's set does not |
+| `_warp_enqueue_global` (activemask, popc, leader atomic, shfl), at every append (P1 scan, ccl seed append, every fill claim) | `enqueue="lane"` (default): `_lane_enqueue`, one relaxed `tl.atomic_add(rear, 1)` per winning lane, the item stored at the returned slot. ptxas warp-aggregates it: `VOTEU.ANY`, `FLO`, `POPC`, one leader `ATOMG.E.ADD`, `SHFL.IDX` | exact (same SASS pattern) | verified on every twin binary (tested); the leader is the highest active lane (FLO), Numba's the lowest (ffs), ranks are the same. The first translation, `enqueue="program"` (`_cta_enqueue`: `tl.cumsum` ranks, one atomic per program), adds 7 `BAR.SYNC` per site and holds the program's warps together. Against the per-lane spelling it took 8-18% longer on the fill-bound rows (ccl_fill, lattice 1, seed_merge bare on `comb_2000`) and 19-36% on the P1 scan probe; the seed_merge v1 rows on `two_disks_r1400` are flat within run-to-run spread (section below). Queue order inside a level differs between the modes and from Numba; the level's set does not |
 | `atomic.cas(visited, 0, 1) == 0` | masked `tl.atomic_xchg(visited, 1, sem="relaxed") == 0` | close | visited holds only 0/1, so the winner is the same exactly-once claimant; Triton's `atomic_cas` has no mask |
 | `atomic.min(parent, a, b)` | masked `tl.atomic_min(..., sem="relaxed")` | exact | |
 | `_find` per-thread while loop | independent (default): one parent hop per lane per mini-step, inside each lane's state machine; lockstep: a loop over a lane mask, exit checked every 8 hops | emulated | independent: a lane at its root moves on to its next union or item; lockstep: finished lanes run masked no-ops and the slowest of the program's lanes sets the pace |
@@ -308,9 +308,9 @@ lockstep one, or against Numba where stated):
 ### What it does not recover
 
 - `ccl_fill` on `asym_4000_800` stayed at x0.65 (the table above;
-  development runs gave up to x0.74), x0.74 with the per-lane enqueue,
-  whose gain is in the fill and the seed append: the union merge is
-  still 1.9x Numba's. SIMT warps keep 32
+  development runs gave up to x0.74), x0.71-0.77 with the per-lane
+  enqueue (three runs), whose gain is in the fill phase: the union
+  merge is still 1.9x Numba's. SIMT warps keep 32
   neighbouring pixels on the same item, so their chases share cache lines
   (Numba's merge sustains 17 G parent loads/s there). Free lanes drift
   apart and reach about 8 G/s. Coupling the lanes (a window on the item
@@ -371,8 +371,23 @@ atomic per warp. The P1 scan site of `seed_merge_kernel` at tpb 256:
     SHFL.IDX PT, R11, R13, R14, 0x1f     base from the leader (Numba: shfl_sync)
     IMAD.IADD R11, R11, 0x1, R16         slot = base + rank
 
-That is Numba's sequence instruction for instruction, with no CTA
-barrier. Only the leader differs: Numba's is the lowest active lane.
+That is the same pattern as Numba's: one leader atomic per warp that
+adds the `POPC` of the active mask, the rank from `SR_LTMASK`, a
+`SHFL.IDX` broadcast of the base, and no CTA barrier.
+
+The instructions around it differ. Numba's `seed_scan_kernel` at tpb
+256 (disassembled with the same nvdisasm):
+
+- Its leader is the lowest active lane: `ffs` compiles to `BREV` +
+  `FLO.U32.SH`, and `laneid == leader` is a 64-bit compare.
+- Its base is 64-bit, so two `SHFL.IDX` broadcast it.
+- ptxas wraps Numba's leader atomic in its own aggregation: a second
+  `VOTE.ANY`, a full-warp test (`ISETP` mask == -1), and a `SHFL.UP`
+  scan path with a second `ATOMG`. Only the leader reaches that code,
+  so the scan path never runs; the leader takes the plain atomic.
+
+The twin's sequence is shorter, but each warp still issues one rear
+atomic per site, as Numba's does.
 
 `sass.py` checks this on the compiled binaries. A rear atomic passes
 the strict test when its operand is the `POPC` of a `VOTE(U).ANY` mask,
@@ -412,27 +427,43 @@ the register table this page had before the change.
 
 ### Measured
 
-Interleaved script, 12 rounds, Numba then each mode in rotating order,
-the same pinned grid for all three, default lane schedule. kernel_ms
-medians, x = numba_ms / twin_ms:
+Interleaved script: per round, Numba and both modes in rotating order,
+the same pinned grid for all three, default lane schedule, 8 or 12
+rounds per run. Each cell is the median over a run's rounds of the
+paired per-round ratio, given as the range over runs. x = numba_ms /
+twin_ms; program / lane above 1 means the per-lane spelling is faster.
 
-| row | blocks | Numba | program (first translation) | lane (default) | program / lane |
-|---|---|---|---|---|---|
-| scan `comb_2000` | 120 | 0.88 ms | 1.20 ms (x0.74) | 0.94 ms (x0.94) | 1.28 |
-| ccl `two_disks_r1400` | 48 | 55.9 ms | 67.7 ms (x0.83) | 56.7 ms (x0.99) | 1.19 |
-| S1 `two_disks_r1400` | 24 | 59.8 ms | 98.1 ms (x0.61) | 83.4 ms (x0.72) | 1.18 |
-| ccl_bare `two_disks_r1400` | 72 | 53.8 ms | 78.1 ms (x0.69) | 67.8 ms (x0.79) | 1.15 |
-| ccl `asym_4000_800` | 48 | 78.5 ms | 120 ms (x0.65) | 106 ms (x0.74) | 1.13 |
-| merge_bare `comb_2000` | 72 | 40.2 ms | 77.9 ms (x0.52) | 69.8 ms (x0.58) | 1.12 |
-| cclp `asym_4000_800` | 120 | 40.7 ms | 50.6 ms (x0.80) | 50.5 ms (x0.81) | 1.00 |
-| cclp `two_disks_r1400` | 120 | 22.1 ms | 34.0 ms (x0.65) | 34.7 ms (x0.64) | 0.98 |
-| merge_bare `two_disks_r1400` | 72 | 71.2 ms | 134 ms (x0.53) | 137 ms (x0.52) | 0.98 |
-| merge `two_disks_r1400` | 48 | 73.5 ms | 122 ms (x0.60) | 132 ms (x0.56) | 0.93 |
+| row | blocks | runs | Numba | x program (first translation) | x lane (default) | program / lane |
+|---|---|---|---|---|---|---|
+| scan `comb_2000` | 120 | 3 | 0.86-0.94 ms | x0.73-0.75 | x0.84-0.97 | 1.19-1.36 |
+| S1 `two_disks_r1400` | 24 | 3 | 60-61 ms | x0.60-0.62 | x0.70-0.72 | 1.15-1.17 |
+| ccl_bare `two_disks_r1400` | 72 | 2 | 54 ms | x0.67-0.69 | x0.79-0.80 | 1.14-1.17 |
+| ccl `asym_4000_800` | 48 | 3 | 79-83 ms | x0.65-0.66 | x0.71-0.77 | 1.10-1.18 |
+| ccl `two_disks_r1400` | 48 | 2 | 56-61 ms | x0.82-0.84 | x0.92-0.97 | 1.09-1.15 |
+| merge_bare `comb_2000` | 72 | 3 | 37-40 ms | x0.46-0.54 | x0.50-0.64 | 1.08-1.10 |
+| cclp `asym_4000_800` | 120 | 1 | 41 ms | x0.79 | x0.81 | 1.03 |
+| merge_bare `two_disks_r1400` | 72 | 3 | 71-78 ms | x0.53-0.54 | x0.52-0.54 | 0.97-1.01 |
+| cclp `two_disks_r1400` | 120 | 1 | 22 ms | x0.66 | x0.64 | 0.98 |
+| merge `two_disks_r1400` | 48 | 3 | 74-78 ms | x0.57-0.60 | x0.56-0.57 | 0.95-0.98 |
+
+The rows are noisy. Inside one run, the interquartile range of a row's
+per-round program / lane ratios is up to 17% wide (ccl
+`asym_4000_800`: 1.00-1.17; S1: under 2%). In one run ccl
+`two_disks_r1400` took 49-65 ms per lane. Two independent review runs
+of that row gave x lane 0.92 and 0.96 and program / lane 1.09 and
+1.13: the per-lane spelling is reliably faster there, but not at
+parity with Numba.
 
 Outputs were identical on every run. The gain sits where the fill is a
-plain BFS. In `ccl_fill` on `asym_4000_800` (4000 levels, 48 programs)
-the fill phase went from 47.7 to 34.1 ms, now under Numba's 41.8. The
-seed append went from 14.0 to 10.4 ms (Numba 6.1).
+plain BFS. In `ccl_fill` the fill phase dropped in every run:
+
+- `asym_4000_800` (4000 levels, 48 programs): 46-48 ms to 33-34 ms
+  over three runs, under Numba's 40-42.
+- `two_disks_r1400`: 32 to 23 ms in one run (Numba 29).
+
+The ccl seed append (in `flatten_seed`) did not move beyond noise: 11-14
+ms in the program mode, 10-11 ms per lane over three runs, Numba 6. The
+union merge has no enqueue and stays at about 75 ms (Numba 40).
 
 The `enqueue` experiment of `compare.py` repeats this through the
 harness: the six benchmark runners on `two_disks_r1400` and
@@ -443,19 +474,22 @@ harness: the six benchmark runners on `two_disks_r1400` and
 
 - The cclp probe is the union merge plus one append per blob, so the
   enqueue barely shows.
-- `seed_merge` v1 on `two_disks_r1400` (program / lane 0.93-0.96
-  instrumented, 0.98-1.02 bare, over two runs of 8 and 12 rounds):
-  there 7.2 M of the fill's 98 M probes collide. Each direction then runs the lockstep
-  `_union`, whose loop test is itself a program-wide reduction, so
-  removing the enqueue barriers does not free the warps.
-- The union work is the same in both modes (`union_done` 498,
-  `union_attempts` within 0.6%). Yet the lockstep unions take longer
-  with per-warp tickets: `union_thread_ms` is 11-18% higher.
-- A likely cause, not measured: per-warp tickets spread a program's
-  next-level slots over more regions of the front. More batches then
-  hold a collision, and each pays the lockstep loop. Numba is not
-  exposed (its unions run per thread). The lead is the per-direction
-  lockstep `_union`, a separate construct.
+- `seed_merge` v1 on `two_disks_r1400`: program / lane 0.95-0.98 over
+  three runs here, 0.97-1.01 bare. Three independent review runs gave
+  0.95, 0.98 and 1.10 (the program timings were bimodal in one). So
+  the per-lane spelling costs 0-5% there or nothing; the effect is
+  within the run-to-run spread, not an established regression.
+- Why it does not gain there: 7.2 M of the fill's 98 M probes collide.
+  Each direction then runs the lockstep `_union`, whose loop test is
+  itself a program-wide reduction. Removing the enqueue barriers alone
+  does not free the warps.
+- One tentative observation, from a 2-round diagnostic: the union work
+  is the same in both modes (`union_done` 498, `union_attempts` within
+  0.6%), yet `union_thread_ms` read 11-18% higher per lane.
+- A possible cause, not measured: per-warp tickets spread a program's
+  next-level slots over more regions of the front, so more batches hold
+  a collision. Numba is not exposed (its unions run per thread). The
+  lead is the per-direction lockstep `_union`, a separate construct.
 
 ## Run
 
@@ -517,16 +551,20 @@ both modes:
 
 - Against Numba and the CPU oracle: nine configurations (both
   variants, both bare twins, lattice 1, 4 and 8 interior bare, r128,
-  split) on five scenes at 32 x 2 and 256 x 3, union accounting
-  included. The lockstep schedule in both modes (the full first
+  split) on five scenes at 32 x 2, 128 x 13, 256 x 3 and 512 x 3,
+  union accounting included. At tpb 512 Numba's fused lattice kernel
+  cannot launch, so there the two modes are checked against each other
+  and the oracle. The lockstep schedule in both modes (the full first
   translation among them) on three scenes. The program mode on eight
   edge scenes, and the phase kernels' counts.
 - The OVERFLOW tripwire, forced: six twins launched with a queue
-  capacity below the fill (and at exactly the fill) in both modes. The
-  flag fires iff the rear passed the capacity, nothing is stored at or
-  past it, the rear counts one ticket per claimed pixel, and stored
-  slots hold distinct claimed pixels. The driver turns it into Numba's
-  `RuntimeError`.
+  capacity below the fill, in both modes and both lane schedules, at
+  32 x 3 and 256 x 2. The capacities are the fill's size, one slot
+  short (only the last ticket overshoots), 7 short, half, and 1 (the
+  discovery site already overflows). The flag fires iff the rear passed
+  the capacity, nothing is stored at or past it, the rear counts one
+  ticket per claimed pixel, and stored slots hold distinct claimed
+  pixels. The driver turns it into Numba's `RuntimeError`.
 - SASS: `test_lane_enqueue_is_warp_aggregated_in_sass`, every binary
   (section above).
 - `test_compare_marks_enqueue_rows`: the enqueue experiment's labels,
@@ -567,8 +605,20 @@ Every row's `config.enqueue` names the twin's enqueue mode. The two
 ablations follow ch01-ch04. The `lockstep` rows of `lane_schedule` and
 the `program` rows of `enqueue` are first translations: label
 `first_translation`, `first_translation=true`, `comparable=false`. They
-stay out of every average and get the summary's paired
-first-translation figures.
+stay out of every average.
+
+The summary pairs each first-translation row with its default row
+(same experiment, scene and config apart from the ablated setting). Its
+unit figure, `first_translation_ablation`, then takes one geometric mean
+over all those pairs. For this chapter that pools two unrelated
+ablations: 14 lockstep pairs (the twin about 3.7x slower) and 16
+program-enqueue pairs (about 1.0-1.2x slower). The mixed figure is
+neither cost.
+
+Read the two costs per experiment instead. In the JSON, pair the rows
+of `lane_schedule`, and separately of `enqueue`, by scene and config
+apart from `label`, `enqueue` and `lane_sched` (summary.py's
+`_pair_key`), or use the tables above.
 
 The default rows of the ablations (labels `lane_independent` and
 `per_lane`) repeat benchmark and seeding cells and carry

@@ -1231,9 +1231,10 @@ _ENQ_CONFIGS = (
     dict(variant="seed_merge", lattice=4, build="split"),
 )
 _ENQ_SCENES = ("full_red", "two_disks", "comb", "random", "serpentine")
-# a small grid (lanes walk many items, the fill's lane body runs) and the
-# benchmark's block size, both pinned so the per-block split is compared
-_ENQ_GRIDS = ((32, 2), (256, 3))
+# one-warp programs (lanes walk many items, the fill's lane body runs),
+# four warps on an odd grid, the benchmark's block size and the widest
+# program, all pinned so the per-block split is compared
+_ENQ_GRIDS = ((32, 2), (128, 13), (256, 3), (512, 3))
 
 
 def _scene_reference(img, kw):
@@ -1253,16 +1254,26 @@ def test_enqueue_modes_match_numba_and_oracle(kw, tpb, blocks):
     """Both enqueue modes, default lane schedule: identical deterministic
     outputs and counters to Numba (pinned grid: blocks, processed_per_block
     and thread_util_pct too) and the CPU oracle contract, union accounting
-    included."""
+    included. Numba's fused lattice kernel cannot launch a 512-thread
+    block (129 registers, max_blocks 0); there the two modes are checked
+    against each other and the oracle."""
+    numba_cap = numba_driver.max_blocks(
+        threads_per_block=tpb,
+        **{k: v for k, v in kw.items() if k != "interior"})
     for name in _ENQ_SCENES:
         img = _sched_scene(name)
         ref, roots = _scene_reference(img, kw)
-        a = numba_driver.flood_fill(img, threads_per_block=tpb,
-                                    blocks=blocks, **kw)
+        a = None
+        if numba_cap >= blocks:
+            a = numba_driver.flood_fill(img, threads_per_block=tpb,
+                                        blocks=blocks, **kw)
         for enq in twin_driver.ENQ_MODES:
             b = flood_fill(img, threads_per_block=tpb, blocks=blocks,
                            enqueue=enq, **kw)
-            assert_backends_agree(a, b, pinned=True)
+            if a is None:
+                a = b   # the lane result: the program one must equal it
+            else:
+                assert_backends_agree(a, b, pinned=True)
             if not kw.get("bare"):
                 assert_edge_contract(img, b, ref, roots)
 
@@ -1355,13 +1366,14 @@ _TRIP_KEYS = (("seed_merge", False, None), ("seed_merge", True, None),
 _TRIP_SCENES = ("two_disks", "random")
 
 
-def _trip_launch(img, key, bare, lattice, tpb, blocks, enq, q_cap):
-    """One launch of the twin `key` with the queue capacity argument set
-    to q_cap (the buffer keeps one slot per pixel). Returns the queue,
-    the rear, the counters, visited and the sentinel."""
+def _trip_launch(img, key, bare, lattice, tpb, blocks, sched, enq, q_cap):
+    """One launch of the twin `key` in lane schedule `sched` with the
+    queue capacity argument set to q_cap (the buffer keeps one slot per
+    pixel). Returns the queue, the rear, the counters, visited and the
+    sentinel."""
     import cupy as cp
 
-    lane = 1
+    lane = twin_driver._lane(sched)
     twin_driver._warmup(key, bare, tpb, lane, enq)
     spec = twin_driver._spec(key, bare)
     n = img.shape[0] * img.shape[1]
@@ -1381,25 +1393,31 @@ def _trip_launch(img, key, bare, lattice, tpb, blocks, enq, q_cap):
 
 
 @pytest.mark.parametrize("tpb, blocks", ((32, 3), (256, 2)))
+@pytest.mark.parametrize("sched", ("independent", "lockstep"))
 @pytest.mark.parametrize("enq", ("lane", "program"))
 @pytest.mark.parametrize("key, bare, lattice", _TRIP_KEYS,
                          ids=lambda v: str(v))
-def test_enqueue_overflow_tripwire(key, bare, lattice, enq, tpb, blocks):
-    """Forced overflow in both modes: OVERFLOW is set iff the rear passed
-    the capacity, nothing is stored at or past it, the rear counts one
-    ticket per claimed pixel, and the stored slots hold distinct claimed
-    pixels. At exactly the fill's size nothing fires and the queue is a
-    permutation of the filled pixels."""
+def test_enqueue_overflow_tripwire(key, bare, lattice, enq, sched, tpb,
+                                   blocks):
+    """Forced overflow in both modes and both lane schedules (each has its
+    own ccl seed append): OVERFLOW is set iff the rear passed the
+    capacity, nothing is stored at or past it, the rear counts one ticket
+    per claimed pixel, and the stored slots hold distinct claimed pixels.
+    The capacities: the fill's size (nothing fires, the queue is a
+    permutation of the filled pixels), one slot short (only the last
+    ticket overshoots), 7 short, half, and 1 (the discovery site, P1 scan
+    or ccl seed append, already overflows)."""
     from flood_fill_cuda.chapters.ch05_gpu_nblob_nblock.kernels import (
         FILLED, OVERFLOW,
     )
     for name in _TRIP_SCENES:
         img = _cross_scene(name)
         n_red = int(_red_mask(img).sum())
-        for q_cap, must in ((n_red, False), (n_red - 7, True),
-                            (n_red // 2, True)):
+        for q_cap, must in ((n_red, False), (n_red - 1, True),
+                            (n_red - 7, True), (n_red // 2, True),
+                            (1, True)):
             queue, rear, counters, visited, sentinel = _trip_launch(
-                img, key, bare, lattice, tpb, blocks, enq, q_cap)
+                img, key, bare, lattice, tpb, blocks, sched, enq, q_cap)
             tag = (name, q_cap)
             claimed = np.flatnonzero(visited.reshape(-1))
             assert rear == claimed.size == counters[FILLED], tag
