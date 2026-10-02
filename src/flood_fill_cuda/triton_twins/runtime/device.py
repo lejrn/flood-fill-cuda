@@ -25,6 +25,13 @@ program counts its own barriers in a loop variable ``epoch`` and waits for
 A monotonic counter needs no sense reversal and no reset race. An int32
 counter allows 2**31 / num_programs barriers per launch (about 3.7 M
 barriers at 576 programs); pass an int64 counter for longer runs.
+
+Visibility: after ``grid_sync`` returns, plain ``tl.load`` (L1-cached)
+sees every write made before the barrier by any program. The gpu-scope
+acquire invalidates L1; this was stress-tested at 288 programs x 2,000
+phases rewriting the same addresses. Data another program publishes
+WITHOUT a barrier in between (a flag you spin on, an inbox you poll) must
+be read with ``load_acquire``, an atomic, or ``cache_modifier=".cg"``.
 """
 
 import triton
