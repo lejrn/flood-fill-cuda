@@ -1,0 +1,9047 @@
+{
+ "schema": 1,
+ "chapter": "ch04_gpu_2blob_nblock",
+ "created_utc": "20261002T141051Z",
+ "gpu": {
+  "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "sm_count": 24,
+  "max_threads_per_sm": 1536
+ },
+ "versions": {
+  "python": "3.10.12",
+  "numba": "0.65.1",
+  "triton": "3.7.1",
+  "cupy": "14.1.1",
+  "cuda_driver": "13.3"
+ },
+ "git_commit": "2e76ba3",
+ "clocks_idle": {
+  "sm_mhz": 210,
+  "max_sm_mhz": 3105,
+  "power_w": 9.2,
+  "temp_c": 63
+ },
+ "spin_up_seconds": 8.0,
+ "repeats": 6,
+ "method": "Both backends warmed per case; repeats rounds with the run order flipping each round (N,T then T,N); outputs compared on every run. kernel_ms/total_ms are each driver's own perf_counter + synchronize measurements, launch overhead included. speedup = numba_ms / triton_ms (>1: Triton faster). kernel_ms is primary; total_ms also compares the allocators (CuPy pool vs Numba cuMemAlloc). Rows with comparable=false are not like-for-like and stay out of the summary's averages.",
+ "meta": {
+  "caps": [],
+  "method_notes": [
+   "every experiment runs at the harness's repeats (default 6: the Numba benchmarks' GPU_REPEATS=5 rounded up to even, so each backend runs first in half the rounds)",
+   "the Numba benchmarks interleave their configs per round; the harness interleaves the two backends per case instead",
+   "modes rows run each config on its own kernel's grid, like the Numba benchmark (blocks=None there: lin 48, xy 48, bare 72, bare_xy 72, lin8 48 at tpb=256), pinned to min(Numba cap, Triton cap) on both backends; the Numba benchmark docstring says the bare twins are pinned to the instrumented grid, its code does not pin them",
+   "seq_a/seq_b rows time the full sequential call but report one launch's kernel_ms (perf_counter + synchronize around that launch, as the drivers measure it); total_ms is the whole call",
+   "speedup_kernel is the Numba-vs-Triton metric. kernel_ms includes each runtime's Python launch path (twice for sequential configs), which matters only on two_sq_300 (2-6 ms kernels). speedup_total mostly compares host memory management (CuPy's caching pool vs Numba's cuMemAlloc per array), not the kernels",
+   "blocks_none rows run each backend at its own co-resident maximum (different grids, see config.resolved_blocks), so they are marked comparable=false and stay out of the summary averages",
+   "speedup_kernel_min = numba.kernel_ms.min / triton.kernel_ms.min, the best-vs-best ratio (benchmark.py's '(min)' column), added to every row after the harness returns. Single runs reach 1.4-2.8x the median on either backend, so a row's speedup_kernel is a real difference only when speedup_kernel_min agrees with it; ratios on opposite sides of 1 mean the row is noise",
+   "radius2 rows: Numba skips ring 2 per warp (divergent `if interior:`), the twin per program (256 lanes = 8 warps): when any lane is interior every warp runs the 16 masked ring-2 probes and their program-wide enqueue scans. Outputs and counters are unchanged, but the Triton seq8r2/multi8r2 times include masked probe work Numba skips, so r2_multi_vs_conn8 is not a pure algorithm-vs-algorithm ratio on the Triton side"
+  ],
+  "quick": false,
+  "scope": "benchmark.py also times the @njit two-blob oracle and cross-checks filled against it; that is CPU-only and not a Numba-vs-Triton comparison, so it is not run (same() checks the backends against each other on every run). mode='streams' is excluded, as in the Numba benchmark. wavefront.py (GIF renderer) and visualize.py (dashboard) have no timing to compare.",
+  "tpb": 256,
+  "coop_max_by_kernel": {
+   "dual_blob_lin_kernel": {
+    "numba": 48,
+    "triton": 144
+   },
+   "dual_blob_xy_kernel": {
+    "numba": 48,
+    "triton": 144
+   },
+   "dual_blob_lin_bare_kernel": {
+    "numba": 72,
+    "triton": 144
+   },
+   "dual_blob_xy_bare_kernel": {
+    "numba": 72,
+    "triton": 144
+   },
+   "dual_blob_lin8_kernel": {
+    "numba": 48,
+    "triton": 96
+   },
+   "dual_blob_lin8r2_kernel": {
+    "numba": 48,
+    "triton": 48
+   }
+  },
+  "modes": {
+   "configs": {
+    "seq": {
+     "mode": "sequential"
+    },
+    "seq_half": {
+     "mode": "sequential"
+    },
+    "multi": {
+     "mode": "multisource"
+    },
+    "multi_xy": {
+     "mode": "multisource",
+     "entry_format": "xy"
+    },
+    "bare": {
+     "mode": "multisource",
+     "bare": true
+    },
+    "bare_xy": {
+     "mode": "multisource",
+     "bare": true,
+     "entry_format": "xy"
+    },
+    "seq8": {
+     "mode": "sequential",
+     "connectivity": 8
+    },
+    "multi8": {
+     "mode": "multisource",
+     "connectivity": 8
+    }
+   },
+   "seq_half_blocks": 24
+  },
+  "radius2": {
+   "pinned_blocks": 48,
+   "coop_max_by_kernel": {
+    "lin8": {
+     "numba": 48,
+     "triton": 96
+    },
+    "lin8r2": {
+     "numba": 48,
+     "triton": 48
+    }
+   }
+  },
+  "packing_tax": {
+   "pinned_blocks": 48,
+   "coop_max": {
+    "numba": 48,
+    "triton": 144
+   }
+  },
+  "bandwidth_model": "model_bytes = processed*(4 queue-read + 3 img-recolor + 4 depth-write [+ 2 owner-write if instrumented]) + probe_reads*3 img-read (probe_reads defaults to processed*n_dirs, n_dirs = connectivity; the radius-2 twins pass the exact 8*processed + 16*interior) + cas_attempts*8 (visited CAS RMW) + (filled-1)*4 (enqueue writes). Derived lower-bound model of algorithmic traffic: ~61 B/pixel on solid interiors at 4-conn, ~105 B/pixel at 8-conn (double the probes, roughly double the interior CAS attempts). NOT modeled: the radius-2 guard's visited loads on non-red ring-1 neighbors (up to 8x4 B per processed pixel, zero on solid interiors where all ring-1 is red). L2 caching deflates real DRAM bytes, 32B sectors inflate them. Compare only against the measured copy peak; ncu is ground truth.",
+  "derived": "per backend, from the kernel_ms medians: speedup_multi_vs_seq = seq / multi; ideal_max = max(seq_a, seq_b); multi_vs_ideal = multi / ideal_max; xy_vs_lin = multi / multi_xy; multi_overhead_pct = 100 * (multi - bare) / bare; packing_tax_pct = 100 * (seq_a - mb_a) / mb_a; r2_multi_vs_conn8 = multi8 / multi8r2 (radius2 rows); model GB/s = info.<backend>_model_bytes / (kernel_ms * 1e6), against meta.peak_gb_s of the same backend's copy probe",
+  "pixels": "scene width * height; info.filled is both blobs' size",
+  "peak_gb_s": {
+   "numba": 214.79922876339646,
+   "triton": 205.18115125897583
+  },
+  "peak_runs_gb_s": {
+   "numba": [
+    213.90778953717884,
+    214.8033471936336,
+    193.82180371398414,
+    219.75815218933985,
+    223.29131642679206,
+    222.34435707938428,
+    208.96293238596732,
+    224.9197716846628,
+    214.79511033315927,
+    204.65011613338376
+   ],
+   "triton": [
+    196.65716104738576,
+    210.55742119456778,
+    189.8906146050205,
+    214.78410834830436,
+    195.48397207397312,
+    150.13974596958613,
+    221.31193562014306,
+    223.576979143462,
+    211.40644951065175,
+    199.80488132338385
+   ]
+  }
+ },
+ "rows": [
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 598,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     2.433295265780731,
+     2.433295265780731
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     2.433295265780731,
+     2.433295265780731
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1920,
+    "max_sm_mhz": 3105,
+    "power_w": 32.74,
+    "temp_c": 68
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 4.133406499022385,
+     "min": 4.008733998489333,
+     "max": 4.429685999639332,
+     "samples": [
+      4.146999,
+      4.429686,
+      4.124209,
+      4.008734,
+      4.023038,
+      4.142604
+     ]
+    },
+    "total_ms": {
+     "median": 18.066680500851362,
+     "min": 17.29889899797854,
+     "max": 19.62915699914447,
+     "samples": [
+      18.271754,
+      18.458906,
+      17.861607,
+      17.669348,
+      17.298899,
+      19.629157
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 4.286334502467071,
+     "min": 4.213810003420804,
+     "max": 4.338572998676682,
+     "samples": [
+      4.254653,
+      4.318016,
+      4.338573,
+      4.21381,
+      4.330453,
+      4.241267
+     ]
+    },
+    "total_ms": {
+     "median": 13.908615001128055,
+     "min": 13.715770000999328,
+     "max": 14.480983001703862,
+     "samples": [
+      13.911269,
+      14.206435,
+      14.480983,
+      13.905961,
+      13.826401,
+      13.71577
+     ]
+    }
+   },
+   "speedup_kernel": 0.9643219624234494,
+   "speedup_total": 1.2989561145654018,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9513324035101278
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq_half",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 24,
+    "resolved_blocks": {
+     "numba": 24,
+     "triton": 24
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "lin // 2",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 598,
+    "numba_blocks": 24,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     4.866590531561462,
+     4.866590531561462
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 24,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     4.866590531561462,
+     4.866590531561462
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 26.37,
+    "temp_c": 68
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 3.8916209978197003,
+     "min": 3.7127610012248624,
+     "max": 3.973503000452183,
+     "samples": [
+      3.87839,
+      3.973503,
+      3.904852,
+      3.929786,
+      3.811392,
+      3.712761
+     ]
+    },
+    "total_ms": {
+     "median": 17.810675999498926,
+     "min": 17.23363299970515,
+     "max": 18.14119000118808,
+     "samples": [
+      17.233633,
+      17.68616,
+      17.82874,
+      17.792612,
+      18.14119,
+      17.955155
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 3.8417925006797304,
+     "min": 3.7937150009383913,
+     "max": 3.9445890033675823,
+     "samples": [
+      3.793715,
+      3.944589,
+      3.872608,
+      3.801389,
+      3.810977,
+      3.873517
+     ]
+    },
+    "total_ms": {
+     "median": 13.51453200004471,
+     "min": 12.859984999522567,
+     "max": 13.876378998247674,
+     "samples": [
+      12.859985,
+      13.300174,
+      13.754531,
+      13.456249,
+      13.572815,
+      13.876379
+     ]
+    }
+   },
+   "speedup_kernel": 1.0129701167179523,
+   "speedup_total": 1.3178906971724957,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9786610223241586
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 1196,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     4.866590531561462
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     4.866590531561462
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 20.04,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.106980999087682,
+     "min": 2.0801440005016048,
+     "max": 2.2379459987860173,
+     "samples": [
+      2.237946,
+      2.107978,
+      2.131279,
+      2.080144,
+      2.105984,
+      2.088684
+     ]
+    },
+    "total_ms": {
+     "median": 14.44770449961652,
+     "min": 14.215041999705136,
+     "max": 16.019044000131544,
+     "samples": [
+      15.915207,
+      14.215042,
+      14.377226,
+      14.231506,
+      14.518183,
+      16.019044
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.2172674998728326,
+     "min": 2.1776239991595503,
+     "max": 2.3230489969137125,
+     "samples": [
+      2.257697,
+      2.192593,
+      2.177624,
+      2.191928,
+      2.323049,
+      2.241942
+     ]
+    },
+    "total_ms": {
+     "median": 12.28352799989807,
+     "min": 11.973238000791753,
+     "max": 12.898061999294441,
+     "samples": [
+      12.140116,
+      12.42694,
+      11.973238,
+      12.060477,
+      12.898062,
+      12.655772
+     ]
+    }
+   },
+   "speedup_kernel": 0.9502601734831382,
+   "speedup_total": 1.1761852539218707,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9552356151954755
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi_xy",
+    "mode": "multisource",
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_xy_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 1196,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     4.866590531561462
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     4.866590531561462
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.77,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.0388209995871875,
+     "min": 1.9828000004054047,
+     "max": 2.2274840011959895,
+     "samples": [
+      2.203541,
+      2.227484,
+      2.035355,
+      2.03982,
+      1.9828,
+      2.037822
+     ]
+    },
+    "total_ms": {
+     "median": 14.373563499248121,
+     "min": 12.914959002955584,
+     "max": 15.831755998078734,
+     "samples": [
+      15.831756,
+      14.440476,
+      14.103523,
+      14.306651,
+      14.795487,
+      12.914959
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.3449024993169587,
+     "min": 2.1241950016701594,
+     "max": 2.5127340013568755,
+     "samples": [
+      2.435094,
+      2.367231,
+      2.512734,
+      2.322574,
+      2.240619,
+      2.124195
+     ]
+    },
+    "total_ms": {
+     "median": 12.08778599902871,
+     "min": 11.286141001619399,
+     "max": 12.73058900187607,
+     "samples": [
+      12.333176,
+      12.144148,
+      12.730589,
+      12.031424,
+      11.838565,
+      11.286141
+     ]
+    }
+   },
+   "speedup_kernel": 0.8694694129845787,
+   "speedup_total": 1.1890981111349157,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9334359599031247
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "bare",
+    "mode": "multisource",
+    "bare": true,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 2,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 79,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_lin_bare_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.31,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.31454099957773,
+     "min": 2.2740860003978014,
+     "max": 2.3841699985496234,
+     "samples": [
+      2.317806,
+      2.311276,
+      2.334572,
+      2.38417,
+      2.274086,
+      2.282244
+     ]
+    },
+    "total_ms": {
+     "median": 13.046616499195807,
+     "min": 12.555375997180818,
+     "max": 13.424733999272576,
+     "samples": [
+      13.107226,
+      13.010065,
+      12.881976,
+      13.424734,
+      12.555376,
+      13.083168
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.416464500129223,
+     "min": 2.395244999206625,
+     "max": 2.470090999850072,
+     "samples": [
+      2.470091,
+      2.411858,
+      2.437536,
+      2.407141,
+      2.421071,
+      2.395245
+     ]
+    },
+    "total_ms": {
+     "median": 11.102936499810312,
+     "min": 10.92984999922919,
+     "max": 11.769060998631176,
+     "samples": [
+      11.277137,
+      10.92985,
+      11.01085,
+      11.769061,
+      11.074529,
+      11.131344
+     ]
+    }
+   },
+   "speedup_kernel": 0.957821229922458,
+   "speedup_total": 1.1750599942113242,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9494168659786557
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "bare_xy",
+    "mode": "multisource",
+    "bare": true,
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 72,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_xy_bare_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.35,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.380912499575061,
+     "min": 2.3111079972295556,
+     "max": 2.7919389976887032,
+     "samples": [
+      2.791939,
+      2.363289,
+      2.386724,
+      2.582923,
+      2.375101,
+      2.311108
+     ]
+    },
+    "total_ms": {
+     "median": 13.820468999256263,
+     "min": 13.07479499882902,
+     "max": 14.380843000253662,
+     "samples": [
+      14.147396,
+      13.074795,
+      13.673885,
+      14.380843,
+      13.944762,
+      13.696176
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.4282149988721358,
+     "min": 2.3998690012376755,
+     "max": 2.9578659996332135,
+     "samples": [
+      2.403317,
+      2.399869,
+      2.412093,
+      2.934464,
+      2.957866,
+      2.444337
+     ]
+    },
+    "total_ms": {
+     "median": 11.781344499468105,
+     "min": 11.30203499997151,
+     "max": 12.743791998218512,
+     "samples": [
+      11.302035,
+      11.38177,
+      11.691866,
+      12.743792,
+      12.719631,
+      11.870823
+     ]
+    }
+   },
+   "speedup_kernel": 0.9805196412512706,
+   "speedup_total": 1.1730807973470447,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.963014229542386
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 151,
+    "levels_a": 151,
+    "levels_b": 151,
+    "interior": 0,
+    "peak_frontier": 1192,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 536716,
+    "numba_model_bytes": 11673724,
+    "numba_thread_util_pct": [
+     4.850475993377484,
+     4.850475993377484
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 535943,
+    "triton_model_bytes": 11667540,
+    "triton_thread_util_pct": [
+     4.850475993377484,
+     4.850475993377484
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1290,
+    "max_sm_mhz": 3105,
+    "power_w": 14.87,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 4.029646501294337,
+     "min": 3.982116002589464,
+     "max": 4.127255004277686,
+     "samples": [
+      4.003056,
+      4.08763,
+      4.032716,
+      4.026577,
+      3.982116,
+      4.127255
+     ]
+    },
+    "total_ms": {
+     "median": 18.016051000813604,
+     "min": 16.16171800196753,
+     "max": 19.726402999367565,
+     "samples": [
+      19.712652,
+      19.726403,
+      18.172223,
+      16.69735,
+      16.161718,
+      17.859879
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 5.100067501189187,
+     "min": 4.961640999681549,
+     "max": 5.211112002143636,
+     "samples": [
+      5.117235,
+      4.961641,
+      4.973548,
+      5.211112,
+      5.184093,
+      5.0829
+     ]
+    },
+    "total_ms": {
+     "median": 15.246463499352103,
+     "min": 14.09334699928877,
+     "max": 15.72692500121775,
+     "samples": [
+      15.25408,
+      15.412162,
+      15.726925,
+      15.238847,
+      14.374444,
+      14.093347
+     ]
+    }
+   },
+   "speedup_kernel": 0.7901163073537244,
+   "speedup_total": 1.1816544211435782,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8025804371668661
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 151,
+    "levels_a": 151,
+    "levels_b": 151,
+    "interior": 0,
+    "peak_frontier": 2384,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 536469,
+    "numba_model_bytes": 11671748,
+    "numba_thread_util_pct": [
+     9.700951986754967
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 537022,
+    "triton_model_bytes": 11676172,
+    "triton_thread_util_pct": [
+     9.700951986754967
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 13.88,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.151704500647611,
+     "min": 2.1374890020524617,
+     "max": 2.2405669988074806,
+     "samples": [
+      2.140093,
+      2.137489,
+      2.174411,
+      2.163316,
+      2.13936,
+      2.240567
+     ]
+    },
+    "total_ms": {
+     "median": 13.552535499911755,
+     "min": 13.009688998863567,
+     "max": 14.61814700087416,
+     "samples": [
+      13.189251,
+      13.511505,
+      13.622166,
+      13.593566,
+      13.009689,
+      14.618147
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.716811997743207,
+     "min": 2.6665940022212453,
+     "max": 2.7358459992683493,
+     "samples": [
+      2.666594,
+      2.726998,
+      2.735846,
+      2.732271,
+      2.706626,
+      2.687088
+     ]
+    },
+    "total_ms": {
+     "median": 12.338640000962187,
+     "min": 11.931609002203913,
+     "max": 12.409827002556995,
+     "samples": [
+      11.931609,
+      12.328153,
+      12.409827,
+      12.359901,
+      12.349127,
+      12.258496
+     ]
+    }
+   },
+   "speedup_kernel": 0.7919960977921852,
+   "speedup_total": 1.0983816286766537,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8015802181629282
+  },
+  {
+   "experiment": "seq_a",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "a",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 598,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     2.433295265780731,
+     2.433295265780731
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     2.433295265780731,
+     2.433295265780731
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 11.66,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 3.4957029984070687,
+     "min": 3.37257600040175,
+     "max": 3.507105000608135,
+     "samples": [
+      3.499562,
+      3.372576,
+      3.4761,
+      3.506402,
+      3.491844,
+      3.507105
+     ]
+    },
+    "total_ms": {
+     "median": 21.05679899796087,
+     "min": 19.36193999790703,
+     "max": 21.910828996624332,
+     "samples": [
+      19.968972,
+      20.531442,
+      19.36194,
+      21.582156,
+      21.910829,
+      21.686015
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 3.7839204996998888,
+     "min": 3.67263299995102,
+     "max": 3.8133950001792982,
+     "samples": [
+      3.672633,
+      3.687082,
+      3.781279,
+      3.813395,
+      3.786562,
+      3.794244
+     ]
+    },
+    "total_ms": {
+     "median": 17.622258499613963,
+     "min": 17.455148001317866,
+     "max": 17.85964499867987,
+     "samples": [
+      17.669536,
+      17.455148,
+      17.574981,
+      17.82212,
+      17.517271,
+      17.859645
+     ]
+    }
+   },
+   "speedup_kernel": 0.9238309839449113,
+   "speedup_total": 1.1948978616119008,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9182992148811843
+  },
+  {
+   "experiment": "seq_b",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "b",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 598,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     2.433295265780731,
+     2.433295265780731
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     2.433295265780731,
+     2.433295265780731
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1125,
+    "max_sm_mhz": 3105,
+    "power_w": 10.52,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 3.8376909997168696,
+     "min": 3.4609549984452315,
+     "max": 4.06799199845409,
+     "samples": [
+      3.580291,
+      4.067992,
+      3.98668,
+      3.688702,
+      3.997247,
+      3.460955
+     ]
+    },
+    "total_ms": {
+     "median": 21.744256000602036,
+     "min": 20.06041999993613,
+     "max": 22.749903000658378,
+     "samples": [
+      21.720396,
+      22.749903,
+      22.211676,
+      21.768116,
+      21.464972,
+      20.06042
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 3.7669835019187303,
+     "min": 3.6993709982198197,
+     "max": 4.153644000325585,
+     "samples": [
+      3.760212,
+      3.773755,
+      4.153644,
+      3.700774,
+      4.099975,
+      3.699371
+     ]
+    },
+    "total_ms": {
+     "median": 19.06930800214468,
+     "min": 18.27831300033722,
+     "max": 20.27731300040614,
+     "samples": [
+      18.743967,
+      20.277313,
+      18.970938,
+      19.2118,
+      19.167678,
+      18.278313
+     ]
+    }
+   },
+   "speedup_kernel": 1.018770323194175,
+   "speedup_total": 1.140275042920095,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9355522871619751
+  },
+  {
+   "experiment": "packing_tax",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "mb_a",
+    "kernel": "ch03 conn4 instrumented, blob A",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "multi_block_global_kernel",
+   "triton_resources": {
+    "n_regs": 38,
+    "n_spills": 0,
+    "shared_bytes": 64,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 90000,
+    "levels": 301,
+    "numba_model_bytes": 4045196,
+    "triton_model_bytes": 4045196
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 10.35,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 3.272483001637738,
+     "min": 3.2438759990327526,
+     "max": 3.3642540001892485,
+     "samples": [
+      3.243876,
+      3.272574,
+      3.25749,
+      3.364254,
+      3.303872,
+      3.272392
+     ]
+    },
+    "total_ms": {
+     "median": 8.225370998843573,
+     "min": 7.89589300256921,
+     "max": 8.990574002382345,
+     "samples": [
+      8.990574,
+      8.279263,
+      7.963007,
+      8.58311,
+      7.895893,
+      8.171479
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 3.463494998868555,
+     "min": 3.4346400025242474,
+     "max": 3.487083999061724,
+     "samples": [
+      3.43464,
+      3.443281,
+      3.474799,
+      3.452191,
+      3.477069,
+      3.487084
+     ]
+    },
+    "total_ms": {
+     "median": 6.266850001338753,
+     "min": 6.198361999850022,
+     "max": 6.311564000498038,
+     "samples": [
+      6.198362,
+      6.285795,
+      6.262738,
+      6.237293,
+      6.270962,
+      6.311564
+     ]
+    }
+   },
+   "speedup_kernel": 0.9448499283835502,
+   "speedup_total": 1.312520803447734,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9444588069342653
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 144
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 301,
+    "levels_a": 301,
+    "levels_b": 301,
+    "interior": 0,
+    "peak_frontier": 1196,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 358800,
+    "numba_model_bytes": 8090396,
+    "numba_thread_util_pct": [
+     4.866590531561462
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 144,
+    "triton_cas_attempts": 358800,
+    "triton_model_bytes": 8090396,
+    "triton_thread_util_pct": [
+     1.6221968438538206
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 10.29,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 3.3787060019676574,
+     "min": 3.3612730003369506,
+     "max": 3.421777000767179,
+     "samples": [
+      3.421777,
+      3.361273,
+      3.379457,
+      3.377955,
+      3.398476,
+      3.376404
+     ]
+    },
+    "total_ms": {
+     "median": 15.683503999753157,
+     "min": 15.044465002574725,
+     "max": 16.840170999785187,
+     "samples": [
+      16.840171,
+      15.691662,
+      15.044465,
+      15.613645,
+      15.675346,
+      16.744912
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 5.169558498892002,
+     "min": 5.125823998241685,
+     "max": 5.207398000493413,
+     "samples": [
+      5.148624,
+      5.125824,
+      5.207398,
+      5.150607,
+      5.205611,
+      5.18851
+     ]
+    },
+    "total_ms": {
+     "median": 15.24720149973291,
+     "min": 15.031851002277108,
+     "max": 16.688875999534503,
+     "samples": [
+      15.202225,
+      15.152162,
+      15.031851,
+      16.688876,
+      15.292178,
+      15.646646
+     ]
+    }
+   },
+   "speedup_kernel": 0.6535772837645265,
+   "speedup_total": 1.0286152511349633,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.6557527143908902
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 96
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 151,
+    "levels_a": 151,
+    "levels_b": 151,
+    "interior": 0,
+    "peak_frontier": 2384,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 536655,
+    "numba_model_bytes": 11673236,
+    "numba_thread_util_pct": [
+     9.700951986754967
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 96,
+    "triton_cas_attempts": 539604,
+    "triton_model_bytes": 11696828,
+    "triton_thread_util_pct": [
+     4.850475993377484
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 10.35,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.1918065012869192,
+     "min": 2.145179998478852,
+     "max": 2.660851998371072,
+     "samples": [
+      2.197423,
+      2.25095,
+      2.660852,
+      2.177818,
+      2.18619,
+      2.14518
+     ]
+    },
+    "total_ms": {
+     "median": 15.784223998707603,
+     "min": 13.882400999136735,
+     "max": 16.03002700358047,
+     "samples": [
+      14.733844,
+      13.882401,
+      15.823763,
+      15.990462,
+      15.744685,
+      16.030027
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 3.736364498763578,
+     "min": 3.4740730006888043,
+     "max": 3.9576789968123194,
+     "samples": [
+      3.866928,
+      3.474073,
+      3.845193,
+      3.957679,
+      3.487617,
+      3.627536
+     ]
+    },
+    "total_ms": {
+     "median": 14.80931799778773,
+     "min": 13.951542998256627,
+     "max": 15.794140999787487,
+     "samples": [
+      14.243686,
+      13.951543,
+      14.59733,
+      15.096754,
+      15.794141,
+      15.021306
+     ]
+    }
+   },
+   "speedup_kernel": 0.5866147432918343,
+   "speedup_total": 1.0658305805213655,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.6174827063373531
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 151,
+    "levels_a": 151,
+    "levels_b": 151,
+    "interior": 0,
+    "peak_frontier": 1192,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 536863,
+    "numba_model_bytes": 11674900,
+    "numba_thread_util_pct": [
+     4.850475993377484,
+     4.850475993377484
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 536062,
+    "triton_model_bytes": 11668492,
+    "triton_thread_util_pct": [
+     4.850475993377484,
+     4.850475993377484
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 10.76,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 4.160163000051398,
+     "min": 4.101565999008017,
+     "max": 4.204491000564303,
+     "samples": [
+      4.156511,
+      4.163815,
+      4.204491,
+      4.135309,
+      4.101566,
+      4.178152
+     ]
+    },
+    "total_ms": {
+     "median": 17.00210350099951,
+     "min": 16.49156199709978,
+     "max": 18.045017997792456,
+     "samples": [
+      18.045018,
+      17.16065,
+      16.529455,
+      16.843557,
+      16.491562,
+      17.667855
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 5.3826915009267395,
+     "min": 5.274453997117234,
+     "max": 5.426387000625255,
+     "samples": [
+      5.376296,
+      5.274454,
+      5.389087,
+      5.415497,
+      5.426387,
+      5.279727
+     ]
+    },
+    "total_ms": {
+     "median": 14.682310002172017,
+     "min": 14.199566998286173,
+     "max": 14.962486999138491,
+     "samples": [
+      14.962487,
+      14.59256,
+      14.767709,
+      14.596911,
+      14.95979,
+      14.199567
+     ]
+    }
+   },
+   "speedup_kernel": 0.7728778436094919,
+   "speedup_total": 1.1579992180034557,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7776285471917543
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 151,
+    "levels_a": 151,
+    "levels_b": 151,
+    "interior": 0,
+    "peak_frontier": 2384,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 536712,
+    "numba_model_bytes": 11673692,
+    "numba_thread_util_pct": [
+     9.700951986754967
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 536802,
+    "triton_model_bytes": 11674412,
+    "triton_thread_util_pct": [
+     9.700951986754967
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 11.08,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.134834499884164,
+     "min": 2.1191239975451026,
+     "max": 2.1853590005775914,
+     "samples": [
+      2.142007,
+      2.185359,
+      2.119124,
+      2.123587,
+      2.127662,
+      2.147429
+     ]
+    },
+    "total_ms": {
+     "median": 13.637847499921918,
+     "min": 12.820554999052547,
+     "max": 14.623498998844298,
+     "samples": [
+      13.5405,
+      13.469128,
+      13.735195,
+      13.971595,
+      12.820555,
+      14.623499
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.6965234992530895,
+     "min": 2.668335997441318,
+     "max": 2.741430998867145,
+     "samples": [
+      2.700418,
+      2.704544,
+      2.692629,
+      2.741431,
+      2.668336,
+      2.692235
+     ]
+    },
+    "total_ms": {
+     "median": 11.872797000251012,
+     "min": 11.511653003253741,
+     "max": 12.027755998133216,
+     "samples": [
+      11.890256,
+      12.027756,
+      11.778371,
+      11.856569,
+      11.511653,
+      11.889025
+     ]
+    }
+   },
+   "speedup_kernel": 0.7916988301698435,
+   "speedup_total": 1.1486634109581415,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7941743467003939
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "seq8r2",
+    "mode": "sequential",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 76,
+    "levels_a": 76,
+    "levels_b": 76,
+    "interior": 177608,
+    "peak_frontier": 2360,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 1361774,
+    "numba_model_bytes": 26799372,
+    "numba_thread_util_pct": [
+     9.637129934210526,
+     9.637129934210526
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 1337951,
+    "triton_model_bytes": 26608788,
+    "triton_thread_util_pct": [
+     9.637129934210526,
+     9.637129934210526
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1185,
+    "max_sm_mhz": 3105,
+    "power_w": 11.28,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 4.586673499943572,
+     "min": 4.448789997695712,
+     "max": 5.284791001031408,
+     "samples": [
+      4.589936,
+      4.559403,
+      4.44879,
+      4.64428,
+      4.583411,
+      5.284791
+     ]
+    },
+    "total_ms": {
+     "median": 18.372111500866595,
+     "min": 16.548236999369692,
+     "max": 22.470507999969414,
+     "samples": [
+      17.898823,
+      17.017628,
+      16.548237,
+      18.8454,
+      19.192725,
+      22.470508
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 7.107658000677475,
+     "min": 6.918995997693855,
+     "max": 8.4133300006215,
+     "samples": [
+      6.922761,
+      7.048467,
+      6.918996,
+      7.166849,
+      7.211106,
+      8.41333
+     ]
+    },
+    "total_ms": {
+     "median": 17.611614497582195,
+     "min": 16.98583500183304,
+     "max": 21.211868999671424,
+     "samples": [
+      17.381292,
+      16.985835,
+      17.359048,
+      17.841937,
+      20.650098,
+      21.211869
+     ]
+    }
+   },
+   "speedup_kernel": 0.6453143214693768,
+   "speedup_total": 1.043181560860806,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.6429820163472448
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_300",
+   "pixels": 280000,
+   "config": {
+    "config": "multi8r2",
+    "mode": "multisource",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "small pair: launch/barrier overhead dominates",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 180000,
+    "filled_a": 90000,
+    "filled_b": 90000,
+    "levels": 76,
+    "levels_a": 76,
+    "levels_b": 76,
+    "interior": 177608,
+    "peak_frontier": 4720,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 1352500,
+    "numba_model_bytes": 26725180,
+    "numba_thread_util_pct": [
+     19.27425986842105
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 1337083,
+    "triton_model_bytes": 26601844,
+    "triton_thread_util_pct": [
+     19.27425986842105
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 975,
+    "max_sm_mhz": 3105,
+    "power_w": 10.91,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 2.7549869992071763,
+     "min": 2.7090699986729305,
+     "max": 2.7892870020878036,
+     "samples": [
+      2.70907,
+      2.752475,
+      2.751778,
+      2.757499,
+      2.787873,
+      2.789287
+     ]
+    },
+    "total_ms": {
+     "median": 16.049287500209175,
+     "min": 14.830624997557607,
+     "max": 16.840194999531377,
+     "samples": [
+      16.812802,
+      16.447381,
+      14.830625,
+      15.651194,
+      15.460581,
+      16.840195
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 4.257974000211107,
+     "min": 4.111916998226661,
+     "max": 4.646045999834314,
+     "samples": [
+      4.111917,
+      4.233943,
+      4.2785,
+      4.290404,
+      4.646046,
+      4.237448
+     ]
+    },
+    "total_ms": {
+     "median": 15.007938500275486,
+     "min": 14.40508000086993,
+     "max": 15.363073998742038,
+     "samples": [
+      15.312324,
+      15.287097,
+      14.40508,
+      14.511591,
+      15.363074,
+      14.72878
+     ]
+    }
+   },
+   "speedup_kernel": 0.6470182765490317,
+   "speedup_total": 1.069386544988479,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.6588338236985976
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 5598,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     22.778323217898368,
+     22.778323217898368
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     22.778323217898368,
+     22.778323217898368
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.25,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 52.246999000999494,
+     "min": 44.480765998741845,
+     "max": 88.42949500103714,
+     "samples": [
+      88.429495,
+      47.827298,
+      46.918714,
+      57.095661,
+      56.6667,
+      44.480766
+     ]
+    },
+    "total_ms": {
+     "median": 726.8530359997385,
+     "min": 648.8251530026901,
+     "max": 789.0199389985355,
+     "samples": [
+      789.019939,
+      741.303154,
+      717.099049,
+      736.607023,
+      670.2544,
+      648.825153
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 48.91010649771488,
+     "min": 46.32730599769275,
+     "max": 79.83021199834184,
+     "samples": [
+      50.512972,
+      49.153178,
+      48.667035,
+      79.830212,
+      46.327306,
+      47.379485
+     ]
+    },
+    "total_ms": {
+     "median": 719.4954134974978,
+     "min": 651.7939250006748,
+     "max": 764.6007439980167,
+     "samples": [
+      748.502962,
+      764.600744,
+      676.858968,
+      701.816362,
+      737.174465,
+      651.793925
+     ]
+    }
+   },
+   "speedup_kernel": 1.0682250099668158,
+   "speedup_total": 1.0102260867327493,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9601414336710434
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq_half",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 24,
+    "resolved_blocks": {
+     "numba": 24,
+     "triton": 24
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "lin // 2",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 5598,
+    "numba_blocks": 24,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     45.556646435796736,
+     45.556646435796736
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 24,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     45.556646435796736,
+     45.556646435796736
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1755,
+    "max_sm_mhz": 3105,
+    "power_w": 15.12,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 41.75668649986619,
+     "min": 41.560882000339916,
+     "max": 42.66200299753109,
+     "samples": [
+      41.77186,
+      41.560882,
+      41.587951,
+      42.662003,
+      41.741513,
+      42.315733
+     ]
+    },
+    "total_ms": {
+     "median": 668.3890635013086,
+     "min": 648.9701840000635,
+     "max": 796.012366998184,
+     "samples": [
+      668.505134,
+      668.272993,
+      648.970184,
+      796.012367,
+      743.837105,
+      658.578157
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 44.49270850091125,
+     "min": 44.12670099918614,
+     "max": 45.026900999801,
+     "samples": [
+      44.667125,
+      44.613964,
+      44.298585,
+      44.371453,
+      45.026901,
+      44.126701
+     ]
+    },
+    "total_ms": {
+     "median": 660.5514409984607,
+     "min": 643.9634350026608,
+     "max": 793.809725997562,
+     "samples": [
+      701.402932,
+      661.529114,
+      643.963435,
+      659.188623,
+      793.809726,
+      659.573768
+     ]
+    }
+   },
+   "speedup_kernel": 0.9385062835410656,
+   "speedup_total": 1.011865271977911,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9418533690317445
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 11196,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     45.556646435796736
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     45.556646435796736
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1545,
+    "max_sm_mhz": 3105,
+    "power_w": 12.75,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 35.556745000576484,
+     "min": 28.75620600025286,
+     "max": 80.59032399978605,
+     "samples": [
+      80.590324,
+      29.431644,
+      28.756206,
+      39.560721,
+      32.085167,
+      39.028323
+     ]
+    },
+    "total_ms": {
+     "median": 760.5209040011687,
+     "min": 653.4870880022936,
+     "max": 844.3982999997388,
+     "samples": [
+      833.492997,
+      756.977299,
+      653.487088,
+      764.064509,
+      744.204338,
+      844.3983
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 31.351350498880493,
+     "min": 29.01851699789404,
+     "max": 68.37089100008598,
+     "samples": [
+      31.288734,
+      29.040708,
+      29.018517,
+      68.370891,
+      31.413967,
+      46.573274
+     ]
+    },
+    "total_ms": {
+     "median": 749.9632110011589,
+     "min": 729.7635889990488,
+     "max": 778.7529570014158,
+     "samples": [
+      760.452554,
+      739.473868,
+      736.204075,
+      778.752957,
+      729.763589,
+      777.685249
+     ]
+    }
+   },
+   "speedup_kernel": 1.1341375868910706,
+   "speedup_total": 1.0140776145351393,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.990960565019218
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi_xy",
+    "mode": "multisource",
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_xy_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 11196,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     45.556646435796736
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     45.556646435796736
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2025,
+    "max_sm_mhz": 3105,
+    "power_w": 14.55,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 34.45501699934539,
+     "min": 29.423694999422878,
+     "max": 45.468444001016906,
+     "samples": [
+      32.045302,
+      37.753681,
+      33.66805,
+      45.468444,
+      35.241984,
+      29.423695
+     ]
+    },
+    "total_ms": {
+     "median": 687.3785779989703,
+     "min": 664.82551000081,
+     "max": 761.5140790003352,
+     "samples": [
+      732.262779,
+      683.176193,
+      672.279711,
+      761.514079,
+      691.580963,
+      664.82551
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 44.10633949919429,
+     "min": 33.46517899990431,
+     "max": 82.3059420035861,
+     "samples": [
+      44.635647,
+      43.577032,
+      33.465179,
+      54.417313,
+      35.073019,
+      82.305942
+     ]
+    },
+    "total_ms": {
+     "median": 700.2819504996296,
+     "min": 670.9098380015348,
+     "max": 775.2490560014849,
+     "samples": [
+      690.806719,
+      706.277103,
+      694.286798,
+      706.868689,
+      670.909838,
+      775.249056
+     ]
+    }
+   },
+   "speedup_kernel": 0.7811806055674784,
+   "speedup_total": 0.9815740324429993,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8792331575309074
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "bare",
+    "mode": "multisource",
+    "bare": true,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 2,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 79,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_lin_bare_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2025,
+    "max_sm_mhz": 3105,
+    "power_w": 12.91,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 51.711852498556254,
+     "min": 29.14852999674622,
+     "max": 89.41339300145046,
+     "samples": [
+      29.14853,
+      89.413393,
+      30.384467,
+      55.241688,
+      48.182017,
+      87.74075
+     ]
+    },
+    "total_ms": {
+     "median": 747.3695520002366,
+     "min": 657.9267329980212,
+     "max": 780.4057419998571,
+     "samples": [
+      657.926733,
+      754.215615,
+      663.133989,
+      773.523863,
+      740.523489,
+      780.405742
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 42.22069949901197,
+     "min": 30.586430002585985,
+     "max": 55.95264799922006,
+     "samples": [
+      40.829179,
+      55.952648,
+      30.58643,
+      42.690664,
+      41.750735,
+      42.770584
+     ]
+    },
+    "total_ms": {
+     "median": 666.9821169998613,
+     "min": 639.6857429972442,
+     "max": 761.8671179989178,
+     "samples": [
+      702.170506,
+      639.685743,
+      656.509842,
+      677.454392,
+      761.867118,
+      653.199735
+     ]
+    }
+   },
+   "speedup_kernel": 1.224798573026162,
+   "speedup_total": 1.120524123438218,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9529889560266368
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "bare_xy",
+    "mode": "multisource",
+    "bare": true,
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 72,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_xy_bare_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1470,
+    "max_sm_mhz": 3105,
+    "power_w": 12.05,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 44.24469000150566,
+     "min": 37.39331600081641,
+     "max": 54.95035200146958,
+     "samples": [
+      51.683243,
+      41.691624,
+      37.612851,
+      37.393316,
+      54.950352,
+      46.797756
+     ]
+    },
+    "total_ms": {
+     "median": 690.6773665014043,
+     "min": 644.7535849983979,
+     "max": 830.8409900018887,
+     "samples": [
+      684.514203,
+      696.84053,
+      644.753585,
+      679.061872,
+      746.814776,
+      830.84099
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 37.4781714999699,
+     "min": 35.046222001255956,
+     "max": 45.45537300145952,
+     "samples": [
+      45.347086,
+      45.455373,
+      37.589265,
+      37.367078,
+      35.046222,
+      35.794627
+     ]
+    },
+    "total_ms": {
+     "median": 697.8559014987695,
+     "min": 635.6801519978035,
+     "max": 733.0238210015523,
+     "samples": [
+      691.283222,
+      635.680152,
+      704.428581,
+      711.380562,
+      733.023821,
+      668.918159
+     ]
+    }
+   },
+   "speedup_kernel": 1.180545587757428,
+   "speedup_total": 0.989713442299552,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 1.0669713842329807
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 11192,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 47213215,
+    "numba_model_bytes": 1020585716,
+    "numba_thread_util_pct": [
+     45.54038781822508,
+     45.54038781822508
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 47524188,
+    "triton_model_bytes": 1023073500,
+    "triton_thread_util_pct": [
+     45.54038781822508,
+     45.54038781822508
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1935,
+    "max_sm_mhz": 3105,
+    "power_w": 16.29,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 33.52349550186773,
+     "min": 31.00285999607877,
+     "max": 37.81324599913205,
+     "samples": [
+      37.813246,
+      33.784086,
+      35.318898,
+      31.060684,
+      31.00286,
+      33.262905
+     ]
+    },
+    "total_ms": {
+     "median": 761.2844590003078,
+     "min": 689.463695998711,
+     "max": 847.3084879988164,
+     "samples": [
+      847.308488,
+      781.923355,
+      782.232231,
+      736.612258,
+      689.463696,
+      740.645563
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 43.21768599947973,
+     "min": 37.5099910015706,
+     "max": 55.832903999544214,
+     "samples": [
+      42.266268,
+      55.832904,
+      37.509991,
+      37.581828,
+      46.586176,
+      44.169104
+     ]
+    },
+    "total_ms": {
+     "median": 761.5814934997616,
+     "min": 678.637916000298,
+     "max": 893.5991550024482,
+     "samples": [
+      893.599155,
+      800.523342,
+      705.722841,
+      678.637916,
+      786.447292,
+      736.715695
+     ]
+    }
+   },
+   "speedup_kernel": 0.7756892745778036,
+   "speedup_total": 0.9996099767365817,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8265227254994711
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 22384,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 48425305,
+    "numba_model_bytes": 1030282436,
+    "numba_thread_util_pct": [
+     72.54899773970973
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 48448348,
+    "triton_model_bytes": 1030466780,
+    "triton_thread_util_pct": [
+     72.54899773970973
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1020,
+    "max_sm_mhz": 3105,
+    "power_w": 11.89,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 27.312323998557986,
+     "min": 23.131813999498263,
+     "max": 37.920129998383345,
+     "samples": [
+      37.92013,
+      29.499975,
+      27.885312,
+      25.168209,
+      23.131814,
+      26.739336
+     ]
+    },
+    "total_ms": {
+     "median": 700.3673229992273,
+     "min": 633.3678280025197,
+     "max": 722.3605010003666,
+     "samples": [
+      702.131028,
+      698.603618,
+      712.07751,
+      633.367828,
+      663.16459,
+      722.360501
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 36.176853498545825,
+     "min": 32.45599900037632,
+     "max": 70.3037699968263,
+     "samples": [
+      36.037231,
+      36.316476,
+      32.455999,
+      70.30377,
+      57.681651,
+      33.617604
+     ]
+    },
+    "total_ms": {
+     "median": 731.1779085011949,
+     "min": 667.1115400022245,
+     "max": 803.2021569997596,
+     "samples": [
+      743.345086,
+      674.377699,
+      719.010731,
+      803.202157,
+      789.06769,
+      667.11154
+     ]
+    }
+   },
+   "speedup_kernel": 0.7549668187603944,
+   "speedup_total": 0.9578617117069023,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7127130488027823
+  },
+  {
+   "experiment": "seq_a",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "a",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 5598,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     22.778323217898368,
+     22.778323217898368
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     22.778323217898368,
+     22.778323217898368
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 15.04,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 22.2653260025254,
+     "min": 21.59463899806724,
+     "max": 27.02807199966628,
+     "samples": [
+      22.354773,
+      27.028072,
+      23.830977,
+      21.594639,
+      22.175879,
+      21.640503
+     ]
+    },
+    "total_ms": {
+     "median": 604.2084260006959,
+     "min": 582.0395549999375,
+     "max": 640.4789580010402,
+     "samples": [
+      607.96639,
+      600.450462,
+      582.039555,
+      617.072944,
+      594.602228,
+      640.478958
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 23.302819499804173,
+     "min": 22.99766699798056,
+     "max": 23.7019539999892,
+     "samples": [
+      23.035796,
+      23.3348,
+      23.701954,
+      23.662521,
+      23.270839,
+      22.997667
+     ]
+    },
+    "total_ms": {
+     "median": 588.8956574999611,
+     "min": 578.1224689999362,
+     "max": 654.6070959993813,
+     "samples": [
+      654.607096,
+      589.195163,
+      578.122469,
+      578.895719,
+      590.841055,
+      588.596152
+     ]
+    }
+   },
+   "speedup_kernel": 0.9554777696627014,
+   "speedup_total": 1.0260025155657322,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9389925943341766
+  },
+  {
+   "experiment": "seq_b",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "b",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 5598,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     22.778323217898368,
+     22.778323217898368
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     22.778323217898368,
+     22.778323217898368
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1890,
+    "max_sm_mhz": 3105,
+    "power_w": 14.01,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 21.911567000643117,
+     "min": 21.645876997354208,
+     "max": 27.685285000188742,
+     "samples": [
+      21.672013,
+      22.077562,
+      21.902468,
+      21.645877,
+      21.920666,
+      27.685285
+     ]
+    },
+    "total_ms": {
+     "median": 600.7480520020181,
+     "min": 586.6852289982489,
+     "max": 652.9411640003673,
+     "samples": [
+      594.084211,
+      652.941164,
+      607.411893,
+      628.035923,
+      586.685229,
+      590.72657
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 23.376789500616724,
+     "min": 23.108861001674086,
+     "max": 23.884545000328217,
+     "samples": [
+      23.153224,
+      23.884545,
+      23.376104,
+      23.599046,
+      23.377475,
+      23.108861
+     ]
+    },
+    "total_ms": {
+     "median": 604.9485960011225,
+     "min": 587.1086600018316,
+     "max": 683.0035059974762,
+     "samples": [
+      597.881091,
+      611.91904,
+      597.978152,
+      654.073182,
+      683.003506,
+      587.10866
+     ]
+    }
+   },
+   "speedup_kernel": 0.9373214829206999,
+   "speedup_total": 0.9930563620994062,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9366916437718893
+  },
+  {
+   "experiment": "packing_tax",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "mb_a",
+    "kernel": "ch03 conn4 instrumented, blob A",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "multi_block_global_kernel",
+   "triton_resources": {
+    "n_regs": 38,
+    "n_spills": 0,
+    "shared_bytes": 64,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 7840000,
+    "levels": 2801,
+    "numba_model_bytes": 352755196,
+    "triton_model_bytes": 352755196
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.86,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 22.28027650016884,
+     "min": 21.90480300123454,
+     "max": 22.777575999498367,
+     "samples": [
+      22.777576,
+      21.904803,
+      21.952488,
+      22.644496,
+      22.597182,
+      21.963371
+     ]
+    },
+    "total_ms": {
+     "median": 117.96075149868557,
+     "min": 114.48924800060922,
+     "max": 123.63150399687584,
+     "samples": [
+      117.713414,
+      118.208089,
+      123.631504,
+      114.489248,
+      121.167006,
+      116.706784
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 22.918845499589224,
+     "min": 22.88156800204888,
+     "max": 24.39258999947924,
+     "samples": [
+      22.920775,
+      23.13466,
+      22.908794,
+      24.39259,
+      22.916916,
+      22.881568
+     ]
+    },
+    "total_ms": {
+     "median": 115.197202499985,
+     "min": 105.58828099965467,
+     "max": 120.46075300168013,
+     "samples": [
+      120.460753,
+      113.399029,
+      116.995376,
+      117.745816,
+      110.605157,
+      105.588281
+     ]
+    }
+   },
+   "speedup_kernel": 0.9721378199686441,
+   "speedup_total": 1.0239897231766626,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9573121474574261
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 144
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 2801,
+    "levels_a": 2801,
+    "levels_b": 2801,
+    "interior": 0,
+    "peak_frontier": 11196,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 31348800,
+    "numba_model_bytes": 705510396,
+    "numba_thread_util_pct": [
+     45.556646435796736
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 144,
+    "triton_cas_attempts": 31348800,
+    "triton_model_bytes": 705510396,
+    "triton_thread_util_pct": [
+     15.185548811932247
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1755,
+    "max_sm_mhz": 3105,
+    "power_w": 14.93,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 31.240645999787375,
+     "min": 28.42828000211739,
+     "max": 40.74441600096179,
+     "samples": [
+      28.42828,
+      29.103018,
+      29.281164,
+      40.744416,
+      33.200128,
+      34.245316
+     ]
+    },
+    "total_ms": {
+     "median": 598.9946635017986,
+     "min": 579.7306099993875,
+     "max": 671.0366029983561,
+     "samples": [
+      579.73061,
+      580.801683,
+      605.534635,
+      593.608424,
+      604.380903,
+      671.036603
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 43.30145099993388,
+     "min": 36.44091600290267,
+     "max": 58.79197700051009,
+     "samples": [
+      55.91539,
+      43.076164,
+      36.440916,
+      36.892445,
+      43.526738,
+      58.791977
+     ]
+    },
+    "total_ms": {
+     "median": 601.8350440008362,
+     "min": 573.7967490022129,
+     "max": 628.3825339996838,
+     "samples": [
+      612.195963,
+      585.610986,
+      628.382534,
+      573.796749,
+      594.191984,
+      609.478104
+     ]
+    }
+   },
+   "speedup_kernel": 0.7214688025081442,
+   "speedup_total": 0.9952804667535551,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7801197972041362
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 96
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 22384,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 48407456,
+    "numba_model_bytes": 1030139644,
+    "numba_thread_util_pct": [
+     72.54899773970973
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 96,
+    "triton_cas_attempts": 48238238,
+    "triton_model_bytes": 1028785900,
+    "triton_thread_util_pct": [
+     45.54038781822508
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1425,
+    "max_sm_mhz": 3105,
+    "power_w": 13.06,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 26.164714499827824,
+     "min": 25.200992000463884,
+     "max": 30.719706999661867,
+     "samples": [
+      30.197498,
+      26.36369,
+      25.965739,
+      25.200992,
+      25.679224,
+      30.719707
+     ]
+    },
+    "total_ms": {
+     "median": 576.464521998787,
+     "min": 566.3381779995689,
+     "max": 624.5598860004975,
+     "samples": [
+      581.085179,
+      624.559886,
+      571.774995,
+      617.312215,
+      571.843865,
+      566.338178
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 38.39821849760483,
+     "min": 34.23537100024987,
+     "max": 55.126800001744414,
+     "samples": [
+      43.400888,
+      35.57979,
+      34.774144,
+      34.235371,
+      41.216647,
+      55.1268
+     ]
+    },
+    "total_ms": {
+     "median": 584.1663735009206,
+     "min": 569.6782039995014,
+     "max": 605.0174640004116,
+     "samples": [
+      578.053701,
+      590.279046,
+      569.678204,
+      571.431315,
+      594.698944,
+      605.017464
+     ]
+    }
+   },
+   "speedup_kernel": 0.6814043860253544,
+   "speedup_total": 0.9868156541500732,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7361097970949388
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 11192,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 47208264,
+    "numba_model_bytes": 1020546108,
+    "numba_thread_util_pct": [
+     45.54038781822508,
+     45.54038781822508
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 47521131,
+    "triton_model_bytes": 1023049044,
+    "triton_thread_util_pct": [
+     45.54038781822508,
+     45.54038781822508
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1635,
+    "max_sm_mhz": 3105,
+    "power_w": 12.27,
+    "temp_c": 60
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 37.786450497151236,
+     "min": 29.876528999011498,
+     "max": 61.109440997825004,
+     "samples": [
+      29.876529,
+      35.667937,
+      35.85698,
+      39.715921,
+      50.472608,
+      61.109441
+     ]
+    },
+    "total_ms": {
+     "median": 590.5076090020884,
+     "min": 570.0436879997142,
+     "max": 621.8499070018879,
+     "samples": [
+      590.680705,
+      570.043688,
+      590.334513,
+      581.046875,
+      596.317451,
+      621.849907
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 40.48154750125832,
+     "min": 35.624554999230895,
+     "max": 47.72971100101131,
+     "samples": [
+      35.624555,
+      47.729711,
+      36.749947,
+      36.655575,
+      44.388026,
+      44.213148
+     ]
+    },
+    "total_ms": {
+     "median": 588.8140999995812,
+     "min": 576.4505029983411,
+     "max": 653.2983649995003,
+     "samples": [
+      578.892817,
+      586.951126,
+      641.936832,
+      576.450503,
+      653.298365,
+      590.677074
+     ]
+    }
+   },
+   "speedup_kernel": 0.9334240618142547,
+   "speedup_total": 1.0028761352734392,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8386498862836745
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 22384,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 48410053,
+    "numba_model_bytes": 1030160420,
+    "numba_thread_util_pct": [
+     72.54899773970973
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 48441463,
+    "triton_model_bytes": 1030411700,
+    "triton_thread_util_pct": [
+     72.54899773970973
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1545,
+    "max_sm_mhz": 3105,
+    "power_w": 12.28,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 29.64906550005253,
+     "min": 25.42592400277499,
+     "max": 42.13213599723531,
+     "samples": [
+      25.425924,
+      29.586774,
+      29.604435,
+      42.132136,
+      35.153193,
+      29.693696
+     ]
+    },
+    "total_ms": {
+     "median": 610.3263309996692,
+     "min": 567.6001229985559,
+     "max": 694.1458820001571,
+     "samples": [
+      567.600123,
+      570.652424,
+      606.673477,
+      694.145882,
+      613.979185,
+      656.22277
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 33.38942650043464,
+     "min": 29.7277989993745,
+     "max": 41.84369900031015,
+     "samples": [
+      29.727799,
+      41.843699,
+      33.282082,
+      32.58744,
+      40.688077,
+      33.496771
+     ]
+    },
+    "total_ms": {
+     "median": 608.552552999754,
+     "min": 586.6955789970234,
+     "max": 634.1087859982508,
+     "samples": [
+      600.710765,
+      586.695579,
+      617.018083,
+      616.394341,
+      589.977916,
+      634.108786
+     ]
+    }
+   },
+   "speedup_kernel": 0.8879776805889906,
+   "speedup_total": 1.0029147490897403,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.855291170507106
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "seq8r2",
+    "mode": "sequential",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 701,
+    "levels_a": 701,
+    "levels_b": 701,
+    "interior": 15657608,
+    "peak_frontier": 22360,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 124786577,
+    "numba_model_bytes": 2392737796,
+    "numba_thread_util_pct": [
+     72.50357794296838,
+     72.50357794296838
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 126805094,
+    "triton_model_bytes": 2408885932,
+    "triton_thread_util_pct": [
+     72.50357794296838,
+     72.50357794296838
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1890,
+    "max_sm_mhz": 3105,
+    "power_w": 15.72,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 45.456116498826304,
+     "min": 41.56566500387271,
+     "max": 58.41128199972445,
+     "samples": [
+      53.604344,
+      41.565665,
+      45.043263,
+      42.974956,
+      45.86897,
+      58.411282
+     ]
+    },
+    "total_ms": {
+     "median": 646.4299370018125,
+     "min": 607.5752450014988,
+     "max": 715.3333720016235,
+     "samples": [
+      676.845176,
+      607.575245,
+      657.56692,
+      635.292954,
+      634.973014,
+      715.333372
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 60.491319998618565,
+     "min": 57.98676500126021,
+     "max": 61.27539600129239,
+     "samples": [
+      60.786474,
+      57.986765,
+      61.275396,
+      59.813542,
+      60.613752,
+      60.368888
+     ]
+    },
+    "total_ms": {
+     "median": 659.0175069995894,
+     "min": 606.4756449995912,
+     "max": 759.4182659995568,
+     "samples": [
+      696.241449,
+      606.475645,
+      759.418266,
+      650.208161,
+      659.156957,
+      658.878057
+     ]
+    }
+   },
+   "speedup_kernel": 0.7514485797278747,
+   "speedup_total": 0.980899490735707,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7168129659064335
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_sq_2800",
+   "pixels": 19200000,
+   "config": {
+    "config": "multi8r2",
+    "mode": "multisource",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 7.8M px equal squares",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 15680000,
+    "filled_a": 7840000,
+    "filled_b": 7840000,
+    "levels": 701,
+    "levels_a": 701,
+    "levels_b": 701,
+    "interior": 15657608,
+    "peak_frontier": 44720,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 135318742,
+    "numba_model_bytes": 2476995116,
+    "numba_thread_util_pct": [
+     86.19831137809082
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 137120912,
+    "triton_model_bytes": 2491412476,
+    "triton_thread_util_pct": [
+     86.19831137809082
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.94,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 39.141004999692086,
+     "min": 38.76029000093695,
+     "max": 40.85724100150401,
+     "samples": [
+      39.134519,
+      40.857241,
+      38.824238,
+      38.76029,
+      40.561458,
+      39.147491
+     ]
+    },
+    "total_ms": {
+     "median": 690.7651544988767,
+     "min": 616.4044819997798,
+     "max": 726.8709899981332,
+     "samples": [
+      692.740095,
+      726.87099,
+      673.807181,
+      710.833381,
+      688.790214,
+      616.404482
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 48.85662249944289,
+     "min": 48.54687699844362,
+     "max": 50.94940399794723,
+     "samples": [
+      48.673381,
+      48.897695,
+      48.81555,
+      49.099482,
+      50.949404,
+      48.546877
+     ]
+    },
+    "total_ms": {
+     "median": 655.0424759989255,
+     "min": 631.2188369993237,
+     "max": 741.9538559988723,
+     "samples": [
+      648.354076,
+      647.218284,
+      719.550514,
+      661.730876,
+      741.953856,
+      631.218837
+     ]
+    }
+   },
+   "speedup_kernel": 0.8011402139011637,
+   "speedup_total": 1.0545349039319547,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7984095455240009
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 5600,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     25.307917225641834,
+     25.307917225641834
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     25.307917225641834,
+     25.307917225641834
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 15.72,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 33.659837499726564,
+     "min": 33.321989998512436,
+     "max": 35.73918400070397,
+     "samples": [
+      33.607659,
+      35.739184,
+      33.698926,
+      33.32199,
+      34.069115,
+      33.620749
+     ]
+    },
+    "total_ms": {
+     "median": 594.9644505017204,
+     "min": 562.9463110017241,
+     "max": 646.6212369996356,
+     "samples": [
+      562.946311,
+      621.549236,
+      581.142266,
+      646.621237,
+      564.46442,
+      608.786635
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 35.38466350073577,
+     "min": 34.99581000141916,
+     "max": 37.06010300084017,
+     "samples": [
+      35.359258,
+      37.060103,
+      35.653304,
+      34.99581,
+      35.410069,
+      35.010948
+     ]
+    },
+    "total_ms": {
+     "median": 570.0729794989456,
+     "min": 552.7629470016109,
+     "max": 582.2062650004227,
+     "samples": [
+      552.762947,
+      571.9054,
+      568.240559,
+      577.921778,
+      566.603908,
+      582.206265
+     ]
+    }
+   },
+   "speedup_kernel": 0.9512549836464224,
+   "speedup_total": 1.0436636569315259,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.952170845514396
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq_half",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 24,
+    "resolved_blocks": {
+     "numba": 24,
+     "triton": 24
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "lin // 2",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 5600,
+    "numba_blocks": 24,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     50.61583445128367,
+     50.61583445128367
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 24,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     50.61583445128367,
+     50.61583445128367
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1950,
+    "max_sm_mhz": 3105,
+    "power_w": 14.79,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 36.00956799891719,
+     "min": 31.302133000281174,
+     "max": 45.10226300044451,
+     "samples": [
+      31.302133,
+      38.128434,
+      38.226574,
+      33.890702,
+      45.102263,
+      33.207191
+     ]
+    },
+    "total_ms": {
+     "median": 585.1571559996955,
+     "min": 549.9326229983126,
+     "max": 629.3294240022078,
+     "samples": [
+      550.849701,
+      619.563301,
+      549.932623,
+      629.329424,
+      590.426104,
+      579.888208
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 35.18772200004605,
+     "min": 33.52891800022917,
+     "max": 60.32519600194064,
+     "samples": [
+      33.528918,
+      46.121134,
+      35.705919,
+      34.588962,
+      60.325196,
+      34.669525
+     ]
+    },
+    "total_ms": {
+     "median": 559.059924000394,
+     "min": 541.181021999364,
+     "max": 595.0690579993534,
+     "samples": [
+      566.290815,
+      566.821342,
+      546.383424,
+      551.829033,
+      595.069058,
+      541.181022
+     ]
+    }
+   },
+   "speedup_kernel": 1.0233560444427197,
+   "speedup_total": 1.0466805629932494,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9335861360055587
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 11200,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     50.61583445128367
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     50.61583445128367
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1335,
+    "max_sm_mhz": 3105,
+    "power_w": 11.53,
+    "temp_c": 60
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 35.449252998660086,
+     "min": 23.443037000106415,
+     "max": 38.40521199890645,
+     "samples": [
+      23.443037,
+      38.225958,
+      34.593852,
+      38.405212,
+      32.513256,
+      36.304654
+     ]
+    },
+    "total_ms": {
+     "median": 558.5223915004462,
+     "min": 542.1957430007751,
+     "max": 610.4530170014186,
+     "samples": [
+      542.195743,
+      610.453017,
+      561.237971,
+      549.100689,
+      559.469769,
+      557.575014
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 31.277480999051477,
+     "min": 23.154054000769975,
+     "max": 46.90217199822655,
+     "samples": [
+      23.154054,
+      39.156043,
+      30.178948,
+      30.739258,
+      31.815704,
+      46.902172
+     ]
+    },
+    "total_ms": {
+     "median": 558.6266944992531,
+     "min": 535.1341669993417,
+     "max": 619.0810990010505,
+     "samples": [
+      535.134167,
+      566.810903,
+      550.442486,
+      538.785527,
+      576.291066,
+      619.081099
+     ]
+    }
+   },
+   "speedup_kernel": 1.133379411204346,
+   "speedup_total": 0.99981328676228,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 1.0124808812887294
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi_xy",
+    "mode": "multisource",
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_xy_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 11200,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     50.61583445128367
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     50.61583445128367
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1230,
+    "max_sm_mhz": 3105,
+    "power_w": 11.04,
+    "temp_c": 60
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 36.06780449990765,
+     "min": 20.529712001007283,
+     "max": 59.80868999904487,
+     "samples": [
+      29.489968,
+      58.38646,
+      25.421341,
+      59.80869,
+      20.529712,
+      42.645641
+     ]
+    },
+    "total_ms": {
+     "median": 581.4008204997663,
+     "min": 538.4499130013864,
+     "max": 699.5587659985176,
+     "samples": [
+      553.315071,
+      659.173052,
+      538.449913,
+      699.558766,
+      551.78613,
+      609.48657
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 29.17607100062014,
+     "min": 20.76247800141573,
+     "max": 34.6638669980166,
+     "samples": [
+      29.295153,
+      29.056989,
+      24.932583,
+      33.623792,
+      20.762478,
+      34.663867
+     ]
+    },
+    "total_ms": {
+     "median": 547.4955395002326,
+     "min": 524.7456689976389,
+     "max": 593.6385710010654,
+     "samples": [
+      524.745669,
+      549.795454,
+      538.352406,
+      586.521425,
+      593.638571,
+      545.195625
+     ]
+    }
+   },
+   "speedup_kernel": 1.2362118428879965,
+   "speedup_total": 1.0619279584094572,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9887891030929653
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "bare",
+    "mode": "multisource",
+    "bare": true,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 2,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 79,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_lin_bare_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 945,
+    "max_sm_mhz": 3105,
+    "power_w": 11.02,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 32.16181050083833,
+     "min": 28.700756000034744,
+     "max": 38.72245100137661,
+     "samples": [
+      31.756972,
+      34.336769,
+      32.566649,
+      28.700756,
+      28.856312,
+      38.722451
+     ]
+    },
+    "total_ms": {
+     "median": 555.3719925010228,
+     "min": 524.536678000004,
+     "max": 625.6208140002855,
+     "samples": [
+      554.079182,
+      524.536678,
+      556.664803,
+      527.504729,
+      587.800241,
+      625.620814
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 28.94675550123793,
+     "min": 23.21232900067116,
+     "max": 60.57605699970736,
+     "samples": [
+      23.319818,
+      23.212329,
+      33.335892,
+      60.576057,
+      28.825382,
+      29.068129
+     ]
+    },
+    "total_ms": {
+     "median": 576.4592840005207,
+     "min": 511.1915029992815,
+     "max": 603.9550679997774,
+     "samples": [
+      577.038118,
+      511.191503,
+      582.531391,
+      603.955068,
+      575.88045,
+      555.880226
+     ]
+    }
+   },
+   "speedup_kernel": 1.1110678880561555,
+   "speedup_total": 0.963419287216339,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 1.236444477381175
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "bare_xy",
+    "mode": "multisource",
+    "bare": true,
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 72,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_xy_bare_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1860,
+    "max_sm_mhz": 3105,
+    "power_w": 14.53,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 25.781073500183993,
+     "min": 22.093085000960855,
+     "max": 66.73999600025127,
+     "samples": [
+      22.093085,
+      66.739996,
+      30.951096,
+      25.667557,
+      25.89459,
+      23.043666
+     ]
+    },
+    "total_ms": {
+     "median": 591.6751524982828,
+     "min": 535.1695139979711,
+     "max": 758.0725860025268,
+     "samples": [
+      535.169514,
+      753.044031,
+      607.99686,
+      758.072586,
+      566.30157,
+      575.353445
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 40.190961999542196,
+     "min": 30.707137997524114,
+     "max": 67.22114800140844,
+     "samples": [
+      32.046938,
+      40.776657,
+      30.707138,
+      67.221148,
+      39.605267,
+      66.646324
+     ]
+    },
+    "total_ms": {
+     "median": 630.3776939985255,
+     "min": 581.8083049998677,
+     "max": 847.7202069989289,
+     "samples": [
+      597.14636,
+      581.808305,
+      717.689901,
+      847.720207,
+      627.852479,
+      632.902909
+     ]
+    }
+   },
+   "speedup_kernel": 0.6414644541346798,
+   "speedup_total": 0.9386042021018384,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7194771783271433
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 7916,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 37101128,
+    "numba_model_bytes": 801722134,
+    "numba_thread_util_pct": [
+     35.76707787778075,
+     35.76707787778075
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 37213497,
+    "triton_model_bytes": 802621086,
+    "triton_thread_util_pct": [
+     35.76707787778075,
+     35.76707787778075
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.33,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 32.93271699840261,
+     "min": 27.12905099906493,
+     "max": 48.35105799793382,
+     "samples": [
+      48.351058,
+      38.357676,
+      32.4954,
+      31.752112,
+      27.129051,
+      33.370034
+     ]
+    },
+    "total_ms": {
+     "median": 613.3244299981016,
+     "min": 580.6512650015065,
+     "max": 700.5770849973487,
+     "samples": [
+      591.756006,
+      580.651265,
+      628.401641,
+      642.578921,
+      598.247219,
+      700.577085
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 44.32616150006652,
+     "min": 32.57961400231579,
+     "max": 51.86881000190624,
+     "samples": [
+      51.86881,
+      51.113887,
+      38.908246,
+      37.934233,
+      32.579614,
+      49.744077
+     ]
+    },
+    "total_ms": {
+     "median": 633.4825285011902,
+     "min": 572.9015939978126,
+     "max": 668.9872979986831,
+     "samples": [
+      668.987298,
+      572.901594,
+      627.055853,
+      588.031847,
+      639.909204,
+      661.102983
+     ]
+    }
+   },
+   "speedup_kernel": 0.7429634302612282,
+   "speedup_total": 0.968178919550027,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8327001970353782
+  },
+  {
+   "experiment": "modes",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 15832,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 37396199,
+    "numba_model_bytes": 804082702,
+    "numba_thread_util_pct": [
+     67.25256931432905
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 37549347,
+    "triton_model_bytes": 805307886,
+    "triton_thread_util_pct": [
+     67.25256931432905
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1875,
+    "max_sm_mhz": 3105,
+    "power_w": 12.52,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 26.75948350042745,
+     "min": 19.43671200206154,
+     "max": 43.83782900185906,
+     "samples": [
+      29.647473,
+      19.436712,
+      19.455411,
+      33.372912,
+      23.871494,
+      43.837829
+     ]
+    },
+    "total_ms": {
+     "median": 627.7894595004909,
+     "min": 570.2705160001642,
+     "max": 833.6402899985842,
+     "samples": [
+      622.840767,
+      632.738152,
+      570.270516,
+      680.215948,
+      582.162656,
+      833.64029
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 33.21958100059419,
+     "min": 21.665036998456344,
+     "max": 53.6906720008119,
+     "samples": [
+      53.690672,
+      32.114488,
+      21.665037,
+      34.324674,
+      27.488336,
+      36.656501
+     ]
+    },
+    "total_ms": {
+     "median": 648.787063501004,
+     "min": 587.8337619978993,
+     "max": 740.6309680009144,
+     "samples": [
+      740.630968,
+      738.875714,
+      619.752065,
+      677.822062,
+      587.833762,
+      612.579837
+     ]
+    }
+   },
+   "speedup_kernel": 0.8055334442643576,
+   "speedup_total": 0.9676356000577366,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8971464947623411
+  },
+  {
+   "experiment": "seq_a",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "a",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 5600,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     25.307917225641834,
+     25.307917225641834
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     25.307917225641834,
+     25.307917225641834
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1845,
+    "max_sm_mhz": 3105,
+    "power_w": 14.51,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 16.920212998229545,
+     "min": 16.591180999967037,
+     "max": 27.792476998001803,
+     "samples": [
+      16.924938,
+      16.591181,
+      18.890992,
+      16.915488,
+      16.682325,
+      27.792477
+     ]
+    },
+    "total_ms": {
+     "median": 651.656425498004,
+     "min": 595.0786649991642,
+     "max": 697.5028269989707,
+     "samples": [
+      603.667031,
+      661.423169,
+      595.078665,
+      660.196311,
+      643.11654,
+      697.502827
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 17.600519000552595,
+     "min": 17.471046001446666,
+     "max": 19.7584170018672,
+     "samples": [
+      19.758417,
+      19.526809,
+      17.471046,
+      17.688119,
+      17.512919,
+      17.497173
+     ]
+    },
+    "total_ms": {
+     "median": 583.2771959994716,
+     "min": 563.4509789997537,
+     "max": 603.5739149992878,
+     "samples": [
+      601.679864,
+      567.646679,
+      582.962253,
+      563.450979,
+      603.573915,
+      583.592139
+     ]
+    }
+   },
+   "speedup_kernel": 0.9613473896819923,
+   "speedup_total": 1.1172328182338098,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9496386763902531
+  },
+  {
+   "experiment": "seq_b",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "b",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 5600,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     25.307917225641834,
+     25.307917225641834
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     25.307917225641834,
+     25.307917225641834
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 15.48,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 19.137297498673433,
+     "min": 18.66925400099717,
+     "max": 20.76778300033766,
+     "samples": [
+      18.669254,
+      20.432453,
+      18.907507,
+      19.367088,
+      18.823691,
+      20.767783
+     ]
+    },
+    "total_ms": {
+     "median": 701.7411175002053,
+     "min": 643.1032079999568,
+     "max": 786.6518769988033,
+     "samples": [
+      643.103208,
+      786.651877,
+      648.724974,
+      698.20245,
+      705.279785,
+      766.796347
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 19.68808949823142,
+     "min": 18.31672600019374,
+     "max": 27.289841000310844,
+     "samples": [
+      18.316726,
+      19.575893,
+      27.289841,
+      19.800286,
+      19.562669,
+      21.01849
+     ]
+    },
+    "total_ms": {
+     "median": 663.5171149991947,
+     "min": 632.8613529985887,
+     "max": 744.094617999508,
+     "samples": [
+      675.092862,
+      744.094618,
+      733.431577,
+      642.577887,
+      632.861353,
+      651.941368
+     ]
+    }
+   },
+   "speedup_kernel": 0.9720241011903433,
+   "speedup_total": 1.0576081635830252,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 1.019246234332473
+  },
+  {
+   "experiment": "packing_tax",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "mb_a",
+    "kernel": "ch03 conn4 instrumented, blob A",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "multi_block_global_kernel",
+   "triton_resources": {
+    "n_regs": 38,
+    "n_spills": 0,
+    "shared_bytes": 64,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 6157477,
+    "levels": 1980,
+    "numba_model_bytes": 277041645,
+    "triton_model_bytes": 277041645
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.93,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 16.527462999874842,
+     "min": 16.514361999725224,
+     "max": 21.64253899900359,
+     "samples": [
+      16.522078,
+      16.530142,
+      21.642539,
+      16.514362,
+      16.524784,
+      16.832454
+     ]
+    },
+    "total_ms": {
+     "median": 110.71885350065713,
+     "min": 106.45490800015978,
+     "max": 156.11736299979384,
+     "samples": [
+      107.301609,
+      106.454908,
+      156.117363,
+      109.818641,
+      111.619066,
+      122.899076
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 18.33707200057688,
+     "min": 17.076427000574768,
+     "max": 22.392869999748655,
+     "samples": [
+      17.084362,
+      17.076427,
+      20.464661,
+      17.158918,
+      19.515226,
+      22.39287
+     ]
+    },
+    "total_ms": {
+     "median": 118.13223899844161,
+     "min": 100.14346100069815,
+     "max": 158.651010999165,
+     "samples": [
+      100.143461,
+      100.836532,
+      158.651011,
+      113.334802,
+      122.929676,
+      130.096403
+     ]
+    }
+   },
+   "speedup_kernel": 0.9013141792405511,
+   "speedup_total": 0.937245026754447,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9670853275787362
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 144
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1980,
+    "levels_a": 1980,
+    "levels_b": 1980,
+    "interior": 0,
+    "peak_frontier": 11200,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 24618704,
+    "numba_model_bytes": 554083294,
+    "numba_thread_util_pct": [
+     50.61583445128367
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 144,
+    "triton_cas_attempts": 24618704,
+    "triton_model_bytes": 554083294,
+    "triton_thread_util_pct": [
+     16.87194481709456
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.47,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 22.766617501474684,
+     "min": 20.943891002389137,
+     "max": 32.12940200319281,
+     "samples": [
+      22.881442,
+      21.63674,
+      32.129402,
+      23.040424,
+      20.943891,
+      22.651793
+     ]
+    },
+    "total_ms": {
+     "median": 630.2638220004155,
+     "min": 606.4956190020894,
+     "max": 734.0977430030762,
+     "samples": [
+      618.457469,
+      734.097743,
+      688.240958,
+      609.798266,
+      642.070175,
+      606.495619
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 31.404208501044195,
+     "min": 27.08143899872084,
+     "max": 32.0130030013388,
+     "samples": [
+      31.071494,
+      31.407681,
+      32.013003,
+      31.904549,
+      31.400736,
+      27.081439
+     ]
+    },
+    "total_ms": {
+     "median": 602.7212600001803,
+     "min": 578.698846999032,
+     "max": 667.4450449972937,
+     "samples": [
+      589.221164,
+      625.130379,
+      607.690245,
+      597.752275,
+      667.445045,
+      578.698847
+     ]
+    }
+   },
+   "speedup_kernel": 0.7249543481001182,
+   "speedup_total": 1.045697014238766,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7733669914430469
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 96
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 15832,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 37396496,
+    "numba_model_bytes": 804085078,
+    "numba_thread_util_pct": [
+     67.25256931432905
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 96,
+    "triton_cas_attempts": 37817274,
+    "triton_model_bytes": 807451302,
+    "triton_thread_util_pct": [
+     35.76707787778075
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.33,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 21.044892500867718,
+     "min": 19.281703000160633,
+     "max": 22.63554899764131,
+     "samples": [
+      19.281703,
+      20.884814,
+      21.127317,
+      20.966609,
+      22.635549,
+      21.123176
+     ]
+    },
+    "total_ms": {
+     "median": 586.2966389995563,
+     "min": 566.9104320004408,
+     "max": 617.4670950022119,
+     "samples": [
+      570.58581,
+      609.014323,
+      578.691051,
+      617.467095,
+      593.902227,
+      566.910432
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 28.016393498546677,
+     "min": 24.54148700053338,
+     "max": 35.23586400115164,
+     "samples": [
+      27.065824,
+      28.770799,
+      24.541487,
+      28.621303,
+      35.235864,
+      27.411484
+     ]
+    },
+    "total_ms": {
+     "median": 606.1976630026038,
+     "min": 569.8016300011659,
+     "max": 689.7261519989115,
+     "samples": [
+      689.726152,
+      599.001209,
+      569.80163,
+      625.993933,
+      608.617101,
+      603.778225
+     ]
+    }
+   },
+   "speedup_kernel": 0.7511635108194565,
+   "speedup_total": 0.9671707345348806,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7856778605037897
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 7916,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 37111085,
+    "numba_model_bytes": 801801790,
+    "numba_thread_util_pct": [
+     35.76707787778075,
+     35.76707787778075
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 37214529,
+    "triton_model_bytes": 802629342,
+    "triton_thread_util_pct": [
+     35.76707787778075,
+     35.76707787778075
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.51,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 31.475275003685965,
+     "min": 27.63392599808867,
+     "max": 33.77412000190816,
+     "samples": [
+      32.721224,
+      31.291152,
+      33.77412,
+      29.371704,
+      31.659398,
+      27.633926
+     ]
+    },
+    "total_ms": {
+     "median": 608.5714510008984,
+     "min": 569.2568819977168,
+     "max": 686.8337019986939,
+     "samples": [
+      606.991886,
+      629.861326,
+      610.151016,
+      597.181081,
+      686.833702,
+      569.256882
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 36.5063219996955,
+     "min": 32.25662399927387,
+     "max": 36.834468999586534,
+     "samples": [
+      36.403648,
+      32.256624,
+      36.707959,
+      36.834469,
+      32.599166,
+      36.608996
+     ]
+    },
+    "total_ms": {
+     "median": 625.3927565012418,
+     "min": 580.563739000354,
+     "max": 666.7315929989854,
+     "samples": [
+      588.40514,
+      580.563739,
+      666.731593,
+      611.333706,
+      641.720641,
+      639.451807
+     ]
+    }
+   },
+   "speedup_kernel": 0.8621869659712227,
+   "speedup_total": 0.9731028136711237,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8566899623069897
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 1401,
+    "levels_a": 1401,
+    "levels_b": 1401,
+    "interior": 0,
+    "peak_frontier": 15832,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 37392573,
+    "numba_model_bytes": 804053694,
+    "numba_thread_util_pct": [
+     67.25256931432905
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 37561641,
+    "triton_model_bytes": 805406238,
+    "triton_thread_util_pct": [
+     67.25256931432905
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1290,
+    "max_sm_mhz": 3105,
+    "power_w": 13.27,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 23.440080500222393,
+     "min": 18.978809002874186,
+     "max": 25.522258998535108,
+     "samples": [
+      25.522259,
+      24.077618,
+      22.802543,
+      18.978809,
+      22.260716,
+      24.554902
+     ]
+    },
+    "total_ms": {
+     "median": 632.6389035002649,
+     "min": 562.9608540002664,
+     "max": 673.7099189995206,
+     "samples": [
+      610.875994,
+      624.813608,
+      655.169435,
+      640.464199,
+      673.709919,
+      562.960854
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 23.611440999957267,
+     "min": 21.567455001786584,
+     "max": 29.403952998109162,
+     "samples": [
+      29.403953,
+      27.637682,
+      21.567455,
+      25.57531,
+      21.604129,
+      21.647572
+     ]
+    },
+    "total_ms": {
+     "median": 574.8094470000069,
+     "min": 558.0602580012055,
+     "max": 657.7264799998375,
+     "samples": [
+      657.72648,
+      590.42822,
+      565.636603,
+      581.848702,
+      558.060258,
+      567.770192
+     ]
+    }
+   },
+   "speedup_kernel": 0.9927424802351037,
+   "speedup_total": 1.1006063084072055,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8799744337615188
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "seq8r2",
+    "mode": "sequential",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 701,
+    "levels_a": 701,
+    "levels_b": 701,
+    "interior": 12292562,
+    "peak_frontier": 15828,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 95305590,
+    "numba_model_bytes": 1857400806,
+    "numba_thread_util_pct": [
+     67.20460029199359,
+     67.20460029199359
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 96477056,
+    "triton_model_bytes": 1866772534,
+    "triton_thread_util_pct": [
+     67.20460029199359,
+     67.20460029199359
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1365,
+    "max_sm_mhz": 3105,
+    "power_w": 16.39,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 37.5622330011538,
+     "min": 37.106643001607154,
+     "max": 37.890495997999096,
+     "samples": [
+      37.627568,
+      37.496898,
+      37.106643,
+      37.890496,
+      37.845428,
+      37.230279
+     ]
+    },
+    "total_ms": {
+     "median": 615.3009550016577,
+     "min": 577.2760710024158,
+     "max": 644.1669330015429,
+     "samples": [
+      577.276071,
+      642.462074,
+      601.680623,
+      611.374363,
+      644.166933,
+      619.227547
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 59.06255949957995,
+     "min": 49.05299199890578,
+     "max": 67.97815399841056,
+     "samples": [
+      58.873135,
+      49.052992,
+      67.978154,
+      67.491484,
+      59.251984,
+      49.063147
+     ]
+    },
+    "total_ms": {
+     "median": 655.5114824986958,
+     "min": 559.8274340009084,
+     "max": 709.5580210007029,
+     "samples": [
+      635.878443,
+      613.594079,
+      691.320593,
+      675.144522,
+      709.558021,
+      559.827434
+     ]
+    }
+   },
+   "speedup_kernel": 0.6359736746833828,
+   "speedup_total": 0.9386577831653496,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7564603399204454
+  },
+  {
+   "experiment": "radius2",
+   "scene": "two_disks_r1400",
+   "pixels": 18000000,
+   "config": {
+    "config": "multi8r2",
+    "mode": "multisource",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "2 x 6.2M px equal disks",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 12314954,
+    "filled_a": 6157477,
+    "filled_b": 6157477,
+    "levels": 701,
+    "levels_a": 701,
+    "levels_b": 701,
+    "interior": 12292562,
+    "peak_frontier": 31656,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 103464685,
+    "numba_model_bytes": 1922673566,
+    "numba_thread_util_pct": [
+     84.8941848326795
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 103455936,
+    "triton_model_bytes": 1922603574,
+    "triton_thread_util_pct": [
+     84.8941848326795
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.67,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 33.783574999688426,
+     "min": 29.02897600142751,
+     "max": 48.18217600040953,
+     "samples": [
+      32.6641,
+      36.366544,
+      48.182176,
+      34.90305,
+      30.96994,
+      29.028976
+     ]
+    },
+    "total_ms": {
+     "median": 593.1954884999868,
+     "min": 563.7675610014412,
+     "max": 626.109123997594,
+     "samples": [
+      598.90405,
+      599.881487,
+      575.709014,
+      626.109124,
+      563.767561,
+      587.486927
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 40.2253419997578,
+     "min": 37.1797459993104,
+     "max": 53.1769000008353,
+     "samples": [
+      42.27191,
+      38.697135,
+      53.1769,
+      41.753549,
+      37.179746,
+      37.37197
+     ]
+    },
+    "total_ms": {
+     "median": 604.296648001764,
+     "min": 569.3163479991199,
+     "max": 610.1819690011325,
+     "samples": [
+      610.181969,
+      569.316348,
+      605.131865,
+      608.563701,
+      574.857993,
+      603.461431
+     ]
+    }
+   },
+   "speedup_kernel": 0.8398579930008262,
+   "speedup_total": 0.9816296192631789,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7807739192722277
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     32.54394734649671,
+     6.502288805659592
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     32.54394734649671,
+     6.502288805659592
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.71,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 45.969283499289304,
+     "min": 41.47802899751696,
+     "max": 49.361473000317346,
+     "samples": [
+      41.478029,
+      43.807643,
+      49.361473,
+      41.523483,
+      48.130924,
+      48.787708
+     ]
+    },
+    "total_ms": {
+     "median": 797.6012800008903,
+     "min": 727.2589089989197,
+     "max": 958.4526889993867,
+     "samples": [
+      727.258909,
+      926.777279,
+      789.371922,
+      797.571351,
+      797.631209,
+      958.452689
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 46.57624399987981,
+     "min": 42.917555998428725,
+     "max": 61.24010100029409,
+     "samples": [
+      61.240101,
+      43.633791,
+      42.917556,
+      43.350734,
+      49.518697,
+      49.799466
+     ]
+    },
+    "total_ms": {
+     "median": 791.6957204997743,
+     "min": 710.3135739998834,
+     "max": 871.8977809985518,
+     "samples": [
+      871.897781,
+      710.313574,
+      787.3538,
+      790.048076,
+      808.274481,
+      793.343365
+     ]
+    }
+   },
+   "speedup_kernel": 0.9869684532614509,
+   "speedup_total": 1.0074593803505567,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9664583183402972
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq_half",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 24,
+    "resolved_blocks": {
+     "numba": 24,
+     "triton": 24
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "lin // 2",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 24,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     61.58461198502458,
+     13.004577611319185
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 24,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     61.58461198502458,
+     13.004577611319185
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.1,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 47.233518000211916,
+     "min": 42.37997200107202,
+     "max": 49.76480299956165,
+     "samples": [
+      44.099196,
+      47.237886,
+      47.22915,
+      42.379972,
+      48.026288,
+      49.764803
+     ]
+    },
+    "total_ms": {
+     "median": 834.1518280030868,
+     "min": 764.7180290005053,
+     "max": 914.1914009996981,
+     "samples": [
+      764.718029,
+      914.191401,
+      785.907196,
+      827.62778,
+      840.675876,
+      847.19524
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 55.1909279965912,
+     "min": 48.88995099827298,
+     "max": 66.82064800043008,
+     "samples": [
+      66.820648,
+      52.812699,
+      50.695162,
+      57.569157,
+      48.889951,
+      62.534952
+     ]
+    },
+    "total_ms": {
+     "median": 851.4844170003926,
+     "min": 785.3386989991122,
+     "max": 934.6651699997892,
+     "samples": [
+      934.66517,
+      785.338699,
+      857.985325,
+      871.556374,
+      844.983509,
+      795.875074
+     ]
+    }
+   },
+   "speedup_kernel": 0.8558203261798613,
+   "speedup_total": 0.9796442675270971,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8668442314979836
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     33.84570524035658
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     33.84570524035658
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1920,
+    "max_sm_mhz": 3105,
+    "power_w": 14.98,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 39.02139900128532,
+     "min": 35.63973500058637,
+     "max": 58.88445100208628,
+     "samples": [
+      35.951431,
+      39.825697,
+      38.217101,
+      39.96027,
+      35.639735,
+      58.884451
+     ]
+    },
+    "total_ms": {
+     "median": 802.444139500949,
+     "min": 754.1454520032858,
+     "max": 897.385722000763,
+     "samples": [
+      754.145452,
+      897.385722,
+      789.916798,
+      892.990427,
+      814.971481,
+      775.051618
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 40.28235549958481,
+     "min": 36.343757001304766,
+     "max": 48.80419999972219,
+     "samples": [
+      40.661856,
+      39.902855,
+      48.8042,
+      47.651969,
+      36.343757,
+      36.792339
+     ]
+    },
+    "total_ms": {
+     "median": 850.9231910011295,
+     "min": 723.8968709971232,
+     "max": 888.281329000165,
+     "samples": [
+      850.83433,
+      744.986098,
+      888.281329,
+      854.562132,
+      851.012052,
+      723.896871
+     ]
+    }
+   },
+   "speedup_kernel": 0.9686970515338288,
+   "speedup_total": 0.9430276997819934,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9806288050876765
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi_xy",
+    "mode": "multisource",
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_xy_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     33.84570524035658
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     33.84570524035658
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.87,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 40.271282001413056,
+     "min": 35.57311500117066,
+     "max": 41.40151400133618,
+     "samples": [
+      36.855237,
+      41.401514,
+      40.789568,
+      39.752996,
+      35.573115,
+      41.293099
+     ]
+    },
+    "total_ms": {
+     "median": 845.6957375001366,
+     "min": 767.0953090018884,
+     "max": 959.2773410004156,
+     "samples": [
+      771.573927,
+      842.068977,
+      849.322498,
+      959.277341,
+      767.095309,
+      924.250588
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 42.11384049995104,
+     "min": 36.714165999001125,
+     "max": 48.86795199854532,
+     "samples": [
+      42.032893,
+      36.714166,
+      38.543984,
+      48.867952,
+      42.194788,
+      42.493019
+     ]
+    },
+    "total_ms": {
+     "median": 864.1515479994268,
+     "min": 781.1332019991823,
+     "max": 963.4220699990692,
+     "samples": [
+      906.096425,
+      856.678699,
+      783.658315,
+      963.42207,
+      871.624397,
+      781.133202
+     ]
+    }
+   },
+   "speedup_kernel": 0.9562481484313898,
+   "speedup_total": 0.9786428543210774,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9689206886011926
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "bare",
+    "mode": "multisource",
+    "bare": true,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 2,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 79,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_lin_bare_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.5,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 43.901834500502446,
+     "min": 37.931520000711316,
+     "max": 60.06260700087296,
+     "samples": [
+      44.059149,
+      43.74452,
+      44.612776,
+      43.611594,
+      60.062607,
+      37.93152
+     ]
+    },
+    "total_ms": {
+     "median": 817.3671004988137,
+     "min": 716.9101520012191,
+     "max": 868.0102550024458,
+     "samples": [
+      716.910152,
+      761.387227,
+      833.728724,
+      822.310449,
+      812.423752,
+      868.010255
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 43.139399498613784,
+     "min": 38.29742800007807,
+     "max": 52.266975999373244,
+     "samples": [
+      42.709136,
+      44.394228,
+      42.378508,
+      38.297428,
+      43.569663,
+      52.266976
+     ]
+    },
+    "total_ms": {
+     "median": 785.2637444993888,
+     "min": 722.1855790012341,
+     "max": 824.0413550010999,
+     "samples": [
+      803.589991,
+      722.185579,
+      766.937498,
+      763.798235,
+      818.801261,
+      824.041355
+     ]
+    }
+   },
+   "speedup_kernel": 1.0176737509272276,
+   "speedup_total": 1.0408822592718716,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9904456247201245
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "bare_xy",
+    "mode": "multisource",
+    "bare": true,
+    "entry_format": "xy",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 72,
+    "resolved_blocks": {
+     "numba": 72,
+     "triton": 72
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 72,
+    "triton": 144
+   },
+   "kernel": "dual_blob_xy_bare_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 72,
+    "shared_bytes": 0,
+    "local_bytes": 16
+   },
+   "grid_of": "dual_blob_xy_bare_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 0,
+    "numba_blocks": 72,
+    "numba_cas_attempts": 0,
+    "numba_model_bytes": 0,
+    "numba_thread_util_pct": [
+     0.0
+    ],
+    "numba_distinct_sms": [
+     0
+    ],
+    "triton_blocks": 72,
+    "triton_cas_attempts": 0,
+    "triton_model_bytes": 0,
+    "triton_thread_util_pct": [
+     0.0
+    ],
+    "triton_distinct_sms": [
+     0
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1200,
+    "max_sm_mhz": 3105,
+    "power_w": 14.36,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 38.771896999605815,
+     "min": 37.81099500338314,
+     "max": 44.61640400040778,
+     "samples": [
+      37.911841,
+      39.012071,
+      37.810995,
+      44.616404,
+      41.141436,
+      38.531723
+     ]
+    },
+    "total_ms": {
+     "median": 689.2902540002979,
+     "min": 665.3319530014414,
+     "max": 841.2527219988988,
+     "samples": [
+      841.252722,
+      688.189113,
+      690.391395,
+      747.701659,
+      665.331953,
+      683.558745
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 43.381282999689574,
+     "min": 37.541999998211395,
+     "max": 64.8562660026073,
+     "samples": [
+      51.626628,
+      47.781068,
+      37.542,
+      64.856266,
+      38.211304,
+      38.981498
+     ]
+    },
+    "total_ms": {
+     "median": 717.468678500154,
+     "min": 673.9886889990885,
+     "max": 762.5326390007103,
+     "samples": [
+      758.900046,
+      686.447531,
+      673.988689,
+      746.976515,
+      762.532639,
+      687.960842
+     ]
+    }
+   },
+   "speedup_kernel": 0.8937471259179508,
+   "speedup_total": 0.9607252200071474,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 1.0071651751420958
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 2001,
+    "levels_a": 2001,
+    "levels_b": 401,
+    "interior": 0,
+    "peak_frontier": 15992,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 50523613,
+    "numba_model_bytes": 1086428900,
+    "numba_thread_util_pct": [
+     61.57676370148259,
+     12.988362427265171
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 50827670,
+    "triton_model_bytes": 1088861356,
+    "triton_thread_util_pct": [
+     61.57676370148259,
+     12.988362427265171
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.19,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 29.892157501308247,
+     "min": 29.805190999468323,
+     "max": 50.687965001998236,
+     "samples": [
+      31.595108,
+      29.816027,
+      50.687965,
+      29.869271,
+      29.915044,
+      29.805191
+     ]
+    },
+    "total_ms": {
+     "median": 758.865189000062,
+     "min": 706.77129500109,
+     "max": 767.243842001335,
+     "samples": [
+      767.243842,
+      763.460185,
+      758.189404,
+      716.520041,
+      706.771295,
+      759.540974
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 34.94017149932915,
+     "min": 34.74436899705324,
+     "max": 93.68422599800397,
+     "samples": [
+      34.744369,
+      34.77116,
+      43.783107,
+      93.684226,
+      35.018218,
+      34.862125
+     ]
+    },
+    "total_ms": {
+     "median": 751.3734655003645,
+     "min": 696.8737030001648,
+     "max": 910.0767210002232,
+     "samples": [
+      798.394022,
+      696.873703,
+      910.076721,
+      826.387696,
+      703.179899,
+      704.352909
+     ]
+    }
+   },
+   "speedup_kernel": 0.8555240635233337,
+   "speedup_total": 1.0099707054396823,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8578423456761058
+  },
+  {
+   "experiment": "modes",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "grid_of": "dual_blob_lin8_kernel",
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 2001,
+    "levels_a": 2001,
+    "levels_b": 401,
+    "interior": 0,
+    "peak_frontier": 15992,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 50563957,
+    "numba_model_bytes": 1086751652,
+    "numba_thread_util_pct": [
+     64.17962893553224
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 50804705,
+    "triton_model_bytes": 1088677636,
+    "triton_thread_util_pct": [
+     64.17962893553224
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1785,
+    "max_sm_mhz": 3105,
+    "power_w": 13.99,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 28.935027999978047,
+     "min": 26.165243001742056,
+     "max": 49.49329000010039,
+     "samples": [
+      26.720059,
+      26.165243,
+      49.49329,
+      30.321399,
+      27.548657,
+      37.181347
+     ]
+    },
+    "total_ms": {
+     "median": 708.2963295015361,
+     "min": 681.3134540025203,
+     "max": 764.9514709992218,
+     "samples": [
+      710.622839,
+      699.693688,
+      705.96982,
+      764.951471,
+      681.313454,
+      711.949992
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 30.370424499778892,
+     "min": 29.946929000288947,
+     "max": 39.667135002673604,
+     "samples": [
+      29.972333,
+      29.946929,
+      39.667135,
+      36.5709,
+      30.359282,
+      30.381567
+     ]
+    },
+    "total_ms": {
+     "median": 703.4737815010885,
+     "min": 671.7708319993108,
+     "max": 775.5283380029141,
+     "samples": [
+      709.913958,
+      689.989686,
+      697.033605,
+      671.770832,
+      775.528338,
+      743.384597
+     ]
+    }
+   },
+   "speedup_kernel": 0.9527370287560092,
+   "speedup_total": 1.0068553343809874,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8737204072407424
+  },
+  {
+   "experiment": "seq_a",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "a",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     32.54394734649671,
+     6.502288805659592
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     32.54394734649671,
+     6.502288805659592
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.0,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 36.535126500893966,
+     "min": 35.45656599817448,
+     "max": 42.46442400108208,
+     "samples": [
+      35.900969,
+      42.00377,
+      35.662137,
+      35.456566,
+      42.464424,
+      37.169284
+     ]
+    },
+    "total_ms": {
+     "median": 771.3405509985023,
+     "min": 732.8575669998827,
+     "max": 870.2196670019475,
+     "samples": [
+      774.011222,
+      861.924669,
+      732.857567,
+      755.322831,
+      768.66988,
+      870.219667
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 36.69972500028962,
+     "min": 36.21050499714329,
+     "max": 36.98195800097892,
+     "samples": [
+      36.710308,
+      36.725915,
+      36.210505,
+      36.689142,
+      36.404737,
+      36.981958
+     ]
+    },
+    "total_ms": {
+     "median": 746.0122929987847,
+     "min": 718.7170409997634,
+     "max": 796.9832150010916,
+     "samples": [
+      764.412251,
+      748.926414,
+      796.983215,
+      718.717041,
+      743.098172,
+      732.183559
+     ]
+    }
+   },
+   "speedup_kernel": 0.9955149936574633,
+   "speedup_total": 1.0339515289994812,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9791789979447045
+  },
+  {
+   "experiment": "seq_b",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq",
+    "mode": "sequential",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "launch": "b",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     32.54394734649671,
+     6.502288805659592
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     32.54394734649671,
+     6.502288805659592
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.77,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 6.211638001332176,
+     "min": 6.0044809979444835,
+     "max": 6.413710998458555,
+     "samples": [
+      6.290491,
+      6.004481,
+      6.33324,
+      6.413711,
+      6.132785,
+      6.122377
+     ]
+    },
+    "total_ms": {
+     "median": 726.828700500846,
+     "min": 717.8045489999931,
+     "max": 798.9217890026339,
+     "samples": [
+      721.624788,
+      732.032613,
+      748.722684,
+      798.921789,
+      717.804549,
+      721.197547
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 6.7793184989568545,
+     "min": 6.505397999717388,
+     "max": 7.383153999398928,
+     "samples": [
+      6.505398,
+      6.792967,
+      7.383154,
+      6.779499,
+      6.779138,
+      6.674013
+     ]
+    },
+    "total_ms": {
+     "median": 741.5003924998018,
+     "min": 689.2742400013958,
+     "max": 816.8421619993751,
+     "samples": [
+      816.842162,
+      689.27424,
+      759.624618,
+      723.376167,
+      809.766941,
+      709.914886
+     ]
+    }
+   },
+   "speedup_kernel": 0.9162628960843145,
+   "speedup_total": 0.9802135074406455,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9229997915892824
+  },
+  {
+   "experiment": "packing_tax",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "mb_a",
+    "kernel": "ch03 conn4 instrumented, blob A",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "multi_block_global_kernel",
+   "triton_resources": {
+    "n_regs": 38,
+    "n_spills": 0,
+    "shared_bytes": 64,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16000000,
+    "levels": 4001,
+    "numba_model_bytes": 719935996,
+    "triton_model_bytes": 719935996
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 21.14,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 35.54140899905178,
+     "min": 35.22451900062151,
+     "max": 37.26920400004019,
+     "samples": [
+      35.55346,
+      37.269204,
+      35.534339,
+      35.224519,
+      35.548479,
+      35.324487
+     ]
+    },
+    "total_ms": {
+     "median": 151.8641579987161,
+     "min": 150.852869002847,
+     "max": 231.58092299854616,
+     "samples": [
+      152.79011,
+      150.852869,
+      150.862952,
+      231.580923,
+      150.938206,
+      166.912006
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 35.43184000045585,
+     "min": 35.40748600062216,
+     "max": 41.57693500019377,
+     "samples": [
+      35.426555,
+      35.432793,
+      41.576935,
+      35.480236,
+      35.430887,
+      35.407486
+     ]
+    },
+    "total_ms": {
+     "median": 152.49040900016553,
+     "min": 137.69253700229456,
+     "max": 169.2018059984548,
+     "samples": [
+      150.314829,
+      162.544564,
+      169.201806,
+      154.665989,
+      137.692537,
+      141.431441
+     ]
+    }
+   },
+   "speedup_kernel": 1.0030923880496898,
+   "speedup_total": 0.9958931777706181,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.9948325334366459
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi",
+    "mode": "multisource",
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 144
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 144
+   },
+   "kernel": "dual_blob_lin_kernel",
+   "triton_resources": {
+    "n_regs": 40,
+    "n_spills": 4,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 4001,
+    "levels_a": 4001,
+    "levels_b": 801,
+    "interior": 0,
+    "peak_frontier": 7998,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 33270400,
+    "numba_model_bytes": 748723196,
+    "numba_thread_util_pct": [
+     33.84570524035658
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 144,
+    "triton_cas_attempts": 33270400,
+    "triton_model_bytes": 748723196,
+    "triton_thread_util_pct": [
+     11.281901746785525
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.5,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 36.61842849942332,
+     "min": 35.50590400118381,
+     "max": 49.90485899907071,
+     "samples": [
+      49.904859,
+      35.505904,
+      37.740717,
+      37.383676,
+      35.853181,
+      35.540032
+     ]
+    },
+    "total_ms": {
+     "median": 707.7834300016548,
+     "min": 697.5526560017897,
+     "max": 750.5911480002396,
+     "samples": [
+      746.799219,
+      700.88407,
+      714.68279,
+      750.591148,
+      700.578006,
+      697.552656
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 50.56258349941345,
+     "min": 49.67128799762577,
+     "max": 93.21326999997837,
+     "samples": [
+      93.21327,
+      52.472955,
+      49.672622,
+      49.841413,
+      49.671288,
+      51.283754
+     ]
+    },
+    "total_ms": {
+     "median": 713.034049498674,
+     "min": 698.843879999913,
+     "max": 803.2822260029207,
+     "samples": [
+      803.282226,
+      721.761839,
+      774.068733,
+      700.909111,
+      698.84388,
+      704.30626
+     ]
+    }
+   },
+   "speedup_kernel": 0.7242198868229925,
+   "speedup_total": 0.9926362289420668,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7148174616064104
+  },
+  {
+   "experiment": "blocks_none",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": "None",
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 96
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": false,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 2001,
+    "levels_a": 2001,
+    "levels_b": 401,
+    "interior": 0,
+    "peak_frontier": 15992,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 50560618,
+    "numba_model_bytes": 1086724940,
+    "numba_thread_util_pct": [
+     64.17962893553224
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 96,
+    "triton_cas_attempts": 51098258,
+    "triton_model_bytes": 1091026060,
+    "triton_thread_util_pct": [
+     33.83724804264534
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.05,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 30.01036100067722,
+     "min": 26.175505001447164,
+     "max": 50.03543999919202,
+     "samples": [
+      26.175505,
+      32.916173,
+      33.100639,
+      26.64672,
+      50.03544,
+      27.104549
+     ]
+    },
+    "total_ms": {
+     "median": 723.4906969988515,
+     "min": 677.6820720006071,
+     "max": 791.0626220000267,
+     "samples": [
+      677.682072,
+      702.580223,
+      732.540067,
+      791.062622,
+      714.441327,
+      742.810285
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 48.24749499857717,
+     "min": 38.586989998293575,
+     "max": 90.78526300072554,
+     "samples": [
+      46.740575,
+      67.572816,
+      40.755246,
+      38.58699,
+      90.785263,
+      49.754415
+     ]
+    },
+    "total_ms": {
+     "median": 728.3809964992543,
+     "min": 688.6837220008601,
+     "max": 845.9110910007439,
+     "samples": [
+      760.76746,
+      727.76232,
+      688.683722,
+      728.999673,
+      845.911091,
+      709.366235
+     ]
+    }
+   },
+   "speedup_kernel": 0.6220086867009829,
+   "speedup_total": 0.9932860693457043,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.6783505270197213
+  },
+  {
+   "experiment": "radius2",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq8",
+    "mode": "sequential",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 2001,
+    "levels_a": 2001,
+    "levels_b": 401,
+    "interior": 0,
+    "peak_frontier": 15992,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 50561649,
+    "numba_model_bytes": 1086733188,
+    "numba_thread_util_pct": [
+     61.57676370148259,
+     12.988362427265171
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 50820638,
+    "triton_model_bytes": 1088805100,
+    "triton_thread_util_pct": [
+     61.57676370148259,
+     12.988362427265171
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.13,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 34.123814999475144,
+     "min": 29.348446001677075,
+     "max": 67.97469299999648,
+     "samples": [
+      29.879143,
+      54.658218,
+      67.974693,
+      34.492289,
+      33.755341,
+      29.348446
+     ]
+    },
+    "total_ms": {
+     "median": 752.4411430003966,
+     "min": 679.0032620010606,
+     "max": 815.541387997655,
+     "samples": [
+      769.110628,
+      738.685176,
+      815.541388,
+      766.19711,
+      679.003262,
+      691.411251
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 37.84221799833176,
+     "min": 33.83148899956723,
+     "max": 50.47608099630452,
+     "samples": [
+      34.825451,
+      50.476081,
+      41.142994,
+      40.858985,
+      33.943627,
+      33.831489
+     ]
+    },
+    "total_ms": {
+     "median": 723.2415919988853,
+     "min": 688.9366879986483,
+     "max": 791.5121740006725,
+     "samples": [
+      791.512174,
+      728.642343,
+      783.291945,
+      717.840841,
+      689.959787,
+      688.936688
+     ]
+    }
+   },
+   "speedup_kernel": 0.9017392955396922,
+   "speedup_total": 1.0403731634415687,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8674890425914301
+  },
+  {
+   "experiment": "radius2",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi8",
+    "mode": "multisource",
+    "connectivity": 8,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 96
+   },
+   "kernel": "dual_blob_lin8_kernel",
+   "triton_resources": {
+    "n_regs": 64,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 104,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 2001,
+    "levels_a": 2001,
+    "levels_b": 401,
+    "interior": 0,
+    "peak_frontier": 15992,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 50571777,
+    "numba_model_bytes": 1086814212,
+    "numba_thread_util_pct": [
+     64.17962893553224
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 50803158,
+    "triton_model_bytes": 1088665260,
+    "triton_thread_util_pct": [
+     64.17962893553224
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 1485,
+    "max_sm_mhz": 3105,
+    "power_w": 14.88,
+    "temp_c": 61
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 29.36741299890855,
+     "min": 25.986321998061612,
+     "max": 43.56416600057855,
+     "samples": [
+      43.564166,
+      28.800493,
+      25.986322,
+      32.383973,
+      29.934333,
+      26.304624
+     ]
+    },
+    "total_ms": {
+     "median": 684.4938239992189,
+     "min": 673.2297620001191,
+     "max": 740.5287779984064,
+     "samples": [
+      710.84322,
+      683.851682,
+      673.229762,
+      740.528778,
+      685.135966,
+      677.087105
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 34.69930649953312,
+     "min": 29.91988199937623,
+     "max": 49.61537000053795,
+     "samples": [
+      39.380453,
+      39.624073,
+      29.968431,
+      49.61537,
+      30.01816,
+      29.919882
+     ]
+    },
+    "total_ms": {
+     "median": 713.4140894995653,
+     "min": 672.0562299997255,
+     "max": 752.9987179987074,
+     "samples": [
+      749.014492,
+      677.774545,
+      709.814556,
+      717.013623,
+      752.998718,
+      672.05623
+     ]
+    }
+   },
+   "speedup_kernel": 0.8463400557963222,
+   "speedup_total": 0.9594621610001661,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.8685302301193358
+  },
+  {
+   "experiment": "radius2",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "seq8r2",
+    "mode": "sequential",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 1001,
+    "levels_a": 1001,
+    "levels_b": 201,
+    "interior": 16620808,
+    "peak_frontier": 31960,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 137561689,
+    "numba_model_bytes": 2580532292,
+    "numba_thread_util_pct": [
+     80.74426387414668,
+     25.912106135986733
+    ],
+    "numba_distinct_sms": [
+     24,
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 138818422,
+    "triton_model_bytes": 2590586156,
+    "triton_thread_util_pct": [
+     80.74426387414668,
+     25.912106135986733
+    ],
+    "triton_distinct_sms": [
+     24,
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.41,
+    "temp_c": 62
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 44.466536501204246,
+     "min": 44.0693439959432,
+     "max": 73.00323900199146,
+     "samples": [
+      44.546175,
+      46.425883,
+      44.386898,
+      44.069344,
+      73.003239,
+      44.303442
+     ]
+    },
+    "total_ms": {
+     "median": 756.6624419996515,
+     "min": 711.0983200000192,
+     "max": 776.4672369994514,
+     "samples": [
+      743.176994,
+      776.467237,
+      711.09832,
+      724.542118,
+      774.740917,
+      770.14789
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 57.3249519966339,
+     "min": 56.86908299685456,
+     "max": 59.09833400073694,
+     "samples": [
+      57.407484,
+      57.24242,
+      58.843414,
+      57.018351,
+      59.098334,
+      56.869083
+     ]
+    },
+    "total_ms": {
+     "median": 719.9605525020161,
+     "min": 701.5623299994331,
+     "max": 775.3359870002896,
+     "samples": [
+      775.335987,
+      709.585472,
+      730.335633,
+      701.56233,
+      771.941024,
+      704.976707
+     ]
+    }
+   },
+   "speedup_kernel": 0.775692520489425,
+   "speedup_total": 1.050977639497176,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7749262283406378
+  },
+  {
+   "experiment": "radius2",
+   "scene": "asym_4000_800",
+   "pixels": 22880000,
+   "config": {
+    "config": "multi8r2",
+    "mode": "multisource",
+    "connectivity": 8,
+    "radius": 2,
+    "tpb": 256,
+    "num_warps": 8,
+    "blocks": 48,
+    "resolved_blocks": {
+     "numba": 48,
+     "triton": 48
+    }
+   },
+   "notes": "16M + 0.6M px: the max-vs-sum story",
+   "comparable": true,
+   "caps": {
+    "numba": 48,
+    "triton": 48
+   },
+   "kernel": "dual_blob_lin8r2_kernel",
+   "triton_resources": {
+    "n_regs": 106,
+    "n_spills": 0,
+    "shared_bytes": 32,
+    "num_warps": 8
+   },
+   "numba_resources": {
+    "n_regs": 106,
+    "shared_bytes": 0,
+    "local_bytes": 24
+   },
+   "info": {
+    "filled": 16640000,
+    "filled_a": 16000000,
+    "filled_b": 640000,
+    "levels": 1001,
+    "levels_a": 1001,
+    "levels_b": 201,
+    "interior": 16620808,
+    "peak_frontier": 31960,
+    "numba_blocks": 48,
+    "numba_cas_attempts": 137256056,
+    "numba_model_bytes": 2578087228,
+    "numba_thread_util_pct": [
+     85.93373586049367
+    ],
+    "numba_distinct_sms": [
+     24
+    ],
+    "triton_blocks": 48,
+    "triton_cas_attempts": 138856716,
+    "triton_model_bytes": 2590892508,
+    "triton_thread_util_pct": [
+     85.93373586049367
+    ],
+    "triton_distinct_sms": [
+     24
+    ]
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.8,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 44.437307500629686,
+     "min": 40.823696999723325,
+     "max": 80.1793649989122,
+     "samples": [
+      41.2775,
+      42.854069,
+      46.020546,
+      80.179365,
+      40.823697,
+      50.950865
+     ]
+    },
+    "total_ms": {
+     "median": 780.3209770008834,
+     "min": 714.5878730007098,
+     "max": 845.4058280003665,
+     "samples": [
+      714.587873,
+      801.698081,
+      752.040575,
+      827.77591,
+      845.405828,
+      758.943873
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 52.458095000474714,
+     "min": 51.186269000027096,
+     "max": 116.3667959990562,
+     "samples": [
+      53.510202,
+      51.335938,
+      116.366796,
+      51.186269,
+      59.644513,
+      51.405988
+     ]
+    },
+    "total_ms": {
+     "median": 762.5488074991154,
+     "min": 725.601430000097,
+     "max": 893.9021340011095,
+     "samples": [
+      725.60143,
+      731.268857,
+      893.902134,
+      767.262814,
+      840.357329,
+      757.834801
+     ]
+    }
+   },
+   "speedup_kernel": 0.8471010527589222,
+   "speedup_total": 1.0233062714504195,
+   "outputs_equal": true,
+   "mismatched_runs": 0,
+   "speedup_kernel_min": 0.7975517223125154
+  }
+ ]
+}
