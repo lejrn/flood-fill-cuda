@@ -5,19 +5,21 @@ with one class (`Cpu`, `OneBlock`, `TwoBlocks`, `NBlocks`, `Conn8`,
 `TwoBlobs`, `NBlobs`, `Runs`, `Outro`) that subclasses
 `scenes.stage.StageScene` and sets `k`. Everything a stage shows is
 declared in `scenes/panes/config.py` (`STAGES`); the narration text and
-per-beat timing live in `narration/script.md` and `out/kokoro/timing.json`.
+per-beat timing live in `narration/script.md` and `out/<voice>/timing.json`
+(`out/kokoro/`, `out/elevenlabs/`).
 
 ## The intro (`scenes/s_intro.py`, beats `intro_problem` + `intro_budget`)
 
 Before the three panes: the problem. Four vertical (9:16) panels in a
-row stream the same footage: a drone light show (YouTube Short
+row (two rows of two in the 9:16 cut) stream the same footage: a drone light show (YouTube Short
 `p2cDTfSIwqs`, downloaded with yt-dlp into `assets/source/`, frames
-1020-1260, the steadiest 8 s of the clip by phase correlation), its
+200-439, 8 s at 30 fps), its
 filter output (a white top-hat: gray minus its 9x9 opening, threshold
 60, blobs under 4 px or wider than 26 px dropped; the camera moves the
 whole time, so no background model holds), and the blobs labelled by the
 real ch06 kernel and coloured by a centroid tracker with velocity
-prediction so a drone keeps its colour across frames
+prediction so a drone keeps its colour across frames (on the GPU,
+straight from the ch06 run table: `assets/gpu_tracker.py`)
 (`assets/make_drone_frames.py --source ...`; without `--source` it
 renders a simulated sky with drones and a missile instead). Left to
 right: the camera, the motion filter, then the frame budget line (30
@@ -33,7 +35,10 @@ second wav at the first beat's length + 0.4 s inside the clip.
 
 ## The picture (all stages)
 
-After the intro, three panes for the rest of the video, landscape 1920x1080 at 30 fps:
+After the intro, three panes for the rest of the video, at 30 fps. In
+landscape (1920x1080) they stand side by side as described here; in the
+9:16 cut (1080x1920) the blob and the GPU share the top row and the
+matrix takes the bottom row:
 
 - **Left, the benchmark matrix.** Rows are the 17 scenes of the overview
   benchmark, in JSON order (three squares, three disks, two snakes, two
@@ -56,8 +61,11 @@ After the intro, three panes for the rest of the video, landscape 1920x1080 at 3
   three mono caption lines. The CPU stage shows a CPU box instead.
 
 Pane boxes come from `scenes/panes/geometry.py` (widths 5.3 / 4.1 / 3.3
-units, margins 0.5 x 0.45, gaps 0.26). Nothing is placed in absolute
-frame coordinates.
+units, margins 0.5 x 0.45, gaps 0.26; in 9:16 the same widths in two rows
+6.4 and 7.0 units tall, on a frame 8 units wide so text keeps its size).
+Nothing is placed in absolute frame coordinates. `build/layout_check.py
+[--layout vertical]` builds every pane state and fails when anything
+leaves the frame or touches another pane's content.
 
 ## Rules (all scenes)
 
