@@ -26,7 +26,8 @@ One Numba block of T threads = one program with T-lane tensors and
 
 | Numba construct | Triton construct | Fidelity | Note |
 |---|---|---|---|
-| `kernel[1, tpb]` | `kernel[(1,)](..., BLOCK=tpb, num_warps=tpb // 32)` | exact | Only for power-of-2 tpb. 96, 768, ... raise `ValueError` naming the power-of-2 rule. |
+| `kernel[1, tpb]` | `kernel[(1,)](..., BLOCK=tpb, num_warps=tpb // 32)` | exact | Only for power-of-2 tpb. 96, 768, ... raise `ValueError` naming the power-of-2 rule. That check runs after every check shared with Numba, so a combined bad input raises Numba's error. |
+| seeds passed to the kernel as given (Numba types `np.int32`/`np.int64`) | `operator.index(seed)` after validation, then the launch | exact | Triton's launcher cannot specialize NumPy scalars. The seeds already indexed the image, so they are integers. |
 | block-stride `for i in range(front + tid, rear, nthreads)` | `for base in range(front, rear, BLOCK)`, `i = base + tl.arange(0, BLOCK)` | exact | Same lane-to-entry assignment. |
 | `cuda.shared.array(8192, int32)` ring | `ring`: 8192 int32 of global scratch, allocated per call (alloc phase) | emulated | No user-addressable shared memory in Triton. Same capacity, `ticket & 8191` slots, `ticket - front < 8192` window, tripwire. The ring is served by L1/L2, not shared memory. |
 | shared scalars `s_rear`, `s_overflow`, `s_spill_rear` | `state`: int32[4] global scratch | emulated | Updated by the same atomics (at L2), re-read after the barrier with volatile loads. |
@@ -34,7 +35,7 @@ One Numba block of T threads = one program with T-lane tensors and
 | `cuda.const.array_like(DX/DY)`, `for d in range(4)` | constexpr tuples, `tl.static_range(4)` | exact | Same order: right, down, left, up. |
 | `_is_red`: `img[x,y,0]==255 and ...` | `_is_red`: chained masked uint8 loads | exact | Short-circuits like the `and` chain. Offsets are `pixel.to(int64) * 3 + c`. |
 | `cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0` | masked `tl.atomic_xchg(visited + nidx, 1, sem="relaxed")`, `old == 0` wins | close | `tl.atomic_cas` has no mask in Triton 3.7.1. On a 0/1 flag the exchange is the same exactly-once claim, with no traffic from inactive lanes. |
-| v1: `cuda.atomic.add(s_rear, 0, 1)` per winning lane | `tl.atomic_add(state + REAR + offs * 0, 1, mask=won, sem="relaxed")` | close | One atomic per winning lane, as in Numba (deliberately not aggregated). L2 atomics instead of shared-memory atomics. |
+| v1: `cuda.atomic.add(s_rear, 0, 1)` per winning lane | `tl.atomic_add(state + REAR + offs * 0, 1, mask=won, sem="relaxed")` | close | One atomic per winning lane in the source, as in Numba (deliberately not aggregated). ptxas warp-aggregates both sides (leader `ATOMS` per warp in Numba, leader `ATOMG` per warp in Triton), so the executed atomic counts match. L2 atomics instead of shared-memory atomics. |
 | v2: `_warp_enqueue_two_tier` (`activemask`, `popc`, `lanemask_lt`, `ffs`, `shfl_sync`) | `_program_enqueue_two_tier`: `tl.cumsum` rank, `tl.sum` count, one scalar `tl.atomic_add` per tier | emulated | No warp intrinsics in Triton: aggregated per program (per chunk and direction) instead of per warp. The spill rank is `rank - k` (k = slab tickets that fit the ring), the value Numba's second ballot computes, since the spilled lanes are the top of the slab. |
 | ring store, `s_overflow[0] = 1`, `spill[gbase + rank2] = item` | masked `tl.store` | exact | A failing v1 enqueue writes nothing. |
 | `while front < rear: ... level += 1; if overflowed: break` | `while (front < rear) & (overflowed == 0)`, `level += 1` before the exit | exact | Triton has no `break`. LEVELS matches on abort. |
@@ -42,7 +43,7 @@ One Numba block of T threads = one program with T-lane tensors and
 | per-thread `my_processed`, `my_cas_attempts`; per-thread `atomic.add` at exit | `[BLOCK]` int64 lane tensors; per-lane `tl.atomic_add` at exit | exact | Per-lane registers, no per-level reductions. |
 | uniform per-level scalars (front, rear, peaks, active sums) | program scalars | exact | |
 | int64 `counters`, slots 0..10 | int64 `counters`, same slots (imported) | exact | |
-| `device_array_like`, `copy_to_device`, `copy_to_host`, `cuda.synchronize` | `cp.empty`, `.set`, `.get`, `runtime.sync()` | close | CuPy's pool serves repeat allocations, so `alloc_ms` is not comparable with Numba's fresh allocations. |
+| `device_array_like`, `copy_to_device`, `copy_to_host`, `cuda.synchronize` | `cp.empty`, `.set`, `.get`, `runtime.sync()` | close | CuPy's pool serves repeat allocations, and `.set`/`.get` cost less per call than `copy_to_device`/`copy_to_host`. So `alloc_ms`, `h2d_ms`, `d2h_ms`, `total_ms` and `speedup_total` compare host stacks, not backends. |
 | `device.MAX_THREADS_PER_MULTIPROCESSOR`, `MULTIPROCESSOR_COUNT` | `runtime.device_info()` | exact | 1536 and 24 on the RTX 4060 Laptop. |
 | lazy JIT, `_warmup(variant)` | `do_not_specialize` on every runtime int; `_warmup(variant, tpb)` | close | Compiles are per (kernel, BLOCK, num_warps); one warm-up per pair keeps every compile out of `kernel_ms` (tested). |
 
@@ -93,6 +94,18 @@ level's tickets are the contiguous range `[sr, sr + size)`.
 ```
 
 The compare runs at full scene size (up to the 36M px `sq_6000_center`).
-On the 4 scenes where v1 trips, the `ring_tripwire` rows time the whole
-call up to the `RuntimeError` on both backends and check that both report
-the same occupancy.
+
+- **Read `speedup_kernel`.** `total_ms` and `speedup_total` add the host
+  libraries' allocation and copy costs (CuPy pool, `.set`/`.get` vs Numba's
+  fresh `cuMemAlloc`, `copy_to_device`). On small scenes `speedup_total`
+  exceeds `speedup_kernel` and can flip its direction on spill rows. Each
+  row's `phases_ms` keeps alloc / H2D / D2H per backend: the cold warm-up
+  call and the medians of the timed rounds.
+- **`ring_tripwire` rows** (the 4 scenes where v1 trips): both backends
+  must raise with the same occupancy. `kernel_ms` is the driver's own kernel
+  bracket up to the abort, read from its `perf_counter` stamps, so it means
+  the same as in the other rows. `total_ms` runs from the driver's first
+  stamp to the `RuntimeError`.
+- **`--quick`** uses three small scenes plus the 2600x2600 tripwire scene.
+  Overflowing the 8192-slot ring needs a frontier above 8192 pixels, so it
+  is the only quick case for the spill tier and the tripwire (about 3 s).
