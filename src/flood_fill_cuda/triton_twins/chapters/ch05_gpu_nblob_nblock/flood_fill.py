@@ -31,6 +31,15 @@ its docstring for what the chapter does. What differs is the launch:
   max_registers=128); build="split" launches the cooperative core, then
   lat_compress_kernel and lat_finish_kernel on _PLAIN_GRID (256 programs
   of 256 lanes), timed with CuPy CUDA events where Numba uses cuda.event.
+- The image is checked with cuda.to_device's own contiguity rule (Numba's
+  sentry_contiguous, same ValueError), then uploaded in C order: the
+  kernels index img[x, y, c] as C-contiguous bytes, so an F-ordered image
+  is copied to C order on the host (Numba uploads it as is and indexes
+  through its strides; the results are equal).
+- Twin-only guard: the grid-stride indices are int32 (Numba's are int64),
+  so width*height + blocks*threads_per_block must stay below 2**31 (the
+  split build also counts its _PLAIN_GRID). Unreachable on an 8 GB GPU,
+  where such an image does not fit in device memory.
 """
 
 import os
@@ -43,6 +52,8 @@ from dataclasses import dataclass, field
 
 import cupy as cp
 import numpy as np
+# cuda.to_device's host-side contiguity rule and message (no device code)
+from numba.cuda.cudadrv.devicearray import sentry_contiguous
 
 from flood_fill_cuda.chapters.ch05_gpu_nblob_nblock.flood_fill import (
     BUILDS, LEVEL_TRACE_CAPACITY, MODEL_NOTE, VARIANTS, SeedDiscoveryResult,
@@ -139,6 +150,25 @@ def _check_tpb_pow2(threads_per_block):
             f"and num_warps are powers of 2; got {threads_per_block}")
 
 
+def _check_int32_grid_stride(n, grid_threads):
+    """Triton's extra rule: every grid-stride loop runs on int32 indices
+    (base + pid * BLOCK + lane, and the loop counter itself), which wrap
+    past 2**31 - 1. Numba's range loops are int64. So the last stride
+    must still fit: n + grid_threads < 2**31."""
+    if n + grid_threads >= 2 ** 31:
+        raise ValueError(
+            f"image too large for the Triton twin: width*height + "
+            f"blocks*threads_per_block must be < 2**31 (its grid-stride "
+            f"indices are int32), got {n} + {grid_threads}")
+
+
+def _upload_img(img_host):
+    """cuda.to_device(img_host)'s contiguity check (same ValueError), then
+    a C-order upload: the kernels index img as C-contiguous bytes."""
+    sentry_contiguous(img_host)
+    return cp.asarray(np.ascontiguousarray(img_host))
+
+
 def _spec(kernel_key, bare):
     try:
         return _KERNELS[(kernel_key, bare)]
@@ -189,7 +219,7 @@ def _device_buffers(img_host, variant, instrumented, launch_blocks,
     width, height = img_host.shape[0], img_host.shape[1]
     n = width * height
     bufs = {
-        "img": cp.asarray(np.ascontiguousarray(img_host)),
+        "img": _upload_img(img_host),
         "visited": cp.asarray(np.zeros((width, height), dtype=np.int32)),
         "depth": cp.asarray(np.full((width, height), -1, dtype=np.int32)),
         "label": cp.asarray(np.full((width, height), -1, dtype=np.int32)),
@@ -411,6 +441,10 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
             f"(grid.sync would deadlock)")
     else:
         launch_blocks = int(blocks)
+    widest_stride = launch_blocks * threads_per_block
+    if kernel_key == "seed_merge_lat_core":
+        widest_stride = max(widest_stride, _PLAIN_GRID[0] * _PLAIN_GRID[1])
+    _check_int32_grid_stride(n, widest_stride)
 
     instrumented = not bare
     trace_capacity = min(n, LEVEL_TRACE_CAPACITY)
@@ -559,7 +593,7 @@ def discovery_only(img_host, variant="seed_merge", threads_per_block=256,
 
     def _bufs(img):
         w, h = img.shape[0], img.shape[1]
-        return (cp.asarray(np.ascontiguousarray(img)),
+        return (_upload_img(img),
                 cp.asarray(np.zeros((w, h), dtype=np.int32)),
                 cp.asarray(np.full((w, h), -1, dtype=np.int32)),
                 cp.empty(w * h, dtype=np.int32),
@@ -583,6 +617,8 @@ def discovery_only(img_host, variant="seed_merge", threads_per_block=256,
     if launch_blocks > coop_max:
         raise RuntimeError(
             f"blocks={launch_blocks} exceeds cooperative capacity {coop_max}")
+    _check_int32_grid_stride(img_host.shape[0] * img_host.shape[1],
+                             launch_blocks * threads_per_block)
 
     bufs = _bufs(img_host)
     args = _args(bufs)

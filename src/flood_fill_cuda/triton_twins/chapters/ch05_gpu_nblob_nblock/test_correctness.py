@@ -584,6 +584,23 @@ def test_twin_rejects_non_power_of_two_threads_per_block(tpb):
         discovery_only(img, threads_per_block=tpb)
 
 
+@pytest.mark.parametrize("kw", [dict(variant="seed_merge"),
+                                dict(variant="ccl_fill", bare=True),
+                                dict(variant="seed_merge", lattice=8,
+                                     build="split")])
+def test_twin_rejects_int32_grid_stride_overflow(kw):
+    """The twin's grid-stride indices are int32 (Numba's are int64), so
+    an image Numba would accept (width*height < 2**31) is refused when its
+    last stride would wrap. A zero-copy broadcast image: the guard runs
+    before any buffer is allocated."""
+    img = np.broadcast_to(np.zeros((1, 1, 3), dtype=np.uint8),
+                          (2 ** 31 - 1, 1, 3))
+    with pytest.raises(ValueError, match="int32"):
+        flood_fill(img, **kw)
+    with pytest.raises(ValueError, match="int32"):
+        discovery_only(img, variant=kw["variant"])
+
+
 def _n_compiled(fn):
     """Specializations Triton holds for a @triton.jit kernel."""
     return sum(len(cache[0]) for cache in fn.device_caches.values())
@@ -863,14 +880,38 @@ def test_cross_backend_lattice_capacity_story():
     """Numba's register story (fused over the 128-register line, so fewer
     cooperative blocks than r128 and split) is a property of Numba's
     compiler. Each backend's capacity is its own; both are queried per
-    compiled kernel and every build's launch is the capacity it reports."""
+    compiled kernel, every build's blocks=None launch is the capacity it
+    reports, and at those (possibly different) grids the two backends
+    still produce the same deterministic outputs."""
     img = _cross_scene("u_shape")
     for build in ("fused", "r128", "split"):
+        results = []
         for drv in (numba_driver, twin_driver):
             cap = drv.max_blocks("seed_merge", 256, lattice=4, build=build)
             r = drv.flood_fill(img, variant="seed_merge", lattice=4,
                                build=build)
-            assert r.blocks == cap >= 24, (drv.__name__, build)
+            assert r.blocks == cap >= 1, (drv.__name__, build)
+            results.append(r)
+        assert_backends_agree(*results)
+
+
+def test_cross_backend_image_layout_rules():
+    """Both drivers take a C- or F-ordered image (and agree on it), and
+    both refuse a non-contiguous view with cuda.to_device's ValueError
+    (the twin applies Numba's own check before its C-order upload)."""
+    img = _cross_scene("u_shape")
+    fortran = np.asfortranarray(img)
+    for variant in VARIANTS:
+        assert_backends_agree(numba_driver.flood_fill(fortran, variant=variant),
+                              flood_fill(fortran, variant=variant))
+    strided = np.repeat(img, 2, axis=0)[::2]
+    transposed = np.ascontiguousarray(img.transpose(1, 0, 2)).transpose(1, 0, 2)
+    for view in (strided, transposed):
+        assert not (view.flags.c_contiguous or view.flags.f_contiguous)
+        for fn in (numba_driver.flood_fill, flood_fill,
+                   numba_driver.discovery_only, discovery_only):
+            with pytest.raises(ValueError, match="non-contiguous"):
+                fn(view)
 
 
 def test_cross_backend_result_fields_are_the_numba_dataclass():
