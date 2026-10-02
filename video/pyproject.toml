@@ -1,6 +1,6 @@
 [project]
 name = "flood-fill-video"
-version = "0.3.1"
+version = "0.4.0"
 description = "Explainer video for flood-fill-cuda: CPU to GPU, chapter by chapter. Manim scenes, local TTS, ffmpeg assembly."
 readme = "README.md"
 requires-python = ">=3.10"

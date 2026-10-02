@@ -30,11 +30,14 @@ to the previous frame's tracks by nearest centroid within GATE pixels
 (greedy, closest pairs first), unmatched blobs open new tracks, and a
 track survives MISS_LIMIT frames without a match. Each track keeps one
 colour for its life. This is the classic centroid tracker; the labelling
-itself is still the ch06 kernel's.
+itself is still the ch06 kernel's. By default it runs on the GPU
+(gpu_tracker.py), straight from ch06's run table; `--tracker host` is
+the numpy version, and `--tracker both` runs the two and checks that
+they agree exactly on every frame.
 
 Run from the repo root with the ROOT venv (numba + CUDA):
     .venv/bin/python video/assets/make_drone_frames.py
-    .venv/bin/python video/assets/make_drone_frames.py --source video/assets/source/drones_short.mp4 --start 1020 --frames 240
+    .venv/bin/python video/assets/make_drone_frames.py --source video/assets/source/drones_short.mp4 --start 200 --frames 240 --tracker both
 Writes video/assets/drones_*/frame_NNN.png + meta.json (gitignored).
 """
 from __future__ import annotations
@@ -54,6 +57,7 @@ REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 from flood_fill_cuda.chapters.ch06_gpu_nblob_runs.recolor import RunRecolor, recolor  # noqa: E402
+from gpu_tracker import GpuTracker  # noqa: E402
 
 W, H, N, FPS, SS = 640, 360, 240, 30, 2
 THRESH = 24
@@ -185,9 +189,18 @@ class Tracker:
             b = pred.astype(np.float32)
             d2 = (a * a).sum(axis=1)[:, None] + (b * b).sum(axis=1)[None, :] - 2.0 * (a @ b.T)
             # only pairs inside the gate are candidates: a few per blob instead of
-            # the whole blobs x tracks matrix (sorting that matrix cost 70 ms a frame)
-            cb, ct = np.nonzero(d2 <= GATE * GATE)
-            order = np.argsort(d2[cb, ct], kind="stable")
+            # the whole blobs x tracks matrix (sorting that matrix cost 70 ms a frame).
+            # That expansion cancels badly in float32 at these coordinates (|a|^2 is
+            # ~1e6, so d2 is off by up to ~0.5 px^2), so it only pre-selects with a
+            # wider gate; the candidates then get the exact dx^2 + dy^2, which the
+            # GPU tracker (gpu_tracker.py) reproduces bit for bit.
+            cb, ct = np.nonzero(d2 <= (GATE + 1) ** 2)
+            dx = a[cb, 0] - b[ct, 0]
+            dy = a[cb, 1] - b[ct, 1]
+            e2 = dx * dx + dy * dy
+            inside = e2 <= GATE * GATE
+            cb, ct, e2 = cb[inside], ct[inside], e2[inside]
+            order = np.argsort(e2, kind="stable")
             cb, ct = cb[order], ct[order]                     # candidate pairs, closest first
             # greedy closest-first assignment, vectorised: in each round a pair is
             # accepted when it is both its blob's and its track's closest remaining
@@ -351,6 +364,52 @@ def source_frames(path: Path, start: int, count: int, stabilised: bool = True, f
         yield f, bg_gray
 
 
+def host_track(r, tracker: Tracker, min_area: int, max_bbox: int, timing: dict, t2: float) -> dict:
+    """The host path after the kernel: label map, dense labels, size filter,
+    centroids, the numpy tracker, painting. Appends its stage timings."""
+    for k in ("label_map", "blob_prep", "track", "paint"):
+        timing.setdefault(k, [])
+    timing["label_map"].append(r.label_ms + r.d2h_ms)                   # label map to the host
+    label_hw = np.ascontiguousarray(r.label.T)                          # (H, W), -1 off-blob
+    # the kernel's labels are canonical run indices (sparse); make them dense 0..n-1
+    on = label_hw >= 0
+    uniq, inv = np.unique(label_hw[on], return_inverse=True)
+    label_hw = np.full(label_hw.shape, -1, dtype=np.int64)
+    label_hw[on] = inv
+    n_blobs = len(uniq)
+    if n_blobs and (min_area > 0 or max_bbox < label_hw.size):
+        # real footage: drop specks under MIN_AREA px (noise) and blobs wider
+        # than MAX_BBOX px (court lines, reflections: not point targets)
+        lab = label_hw[on]
+        ys, xs = np.nonzero(on)
+        area = np.bincount(lab, minlength=n_blobs)
+        x0 = np.full(n_blobs, 10 ** 9); x1 = np.full(n_blobs, -1)
+        y0 = np.full(n_blobs, 10 ** 9); y1 = np.full(n_blobs, -1)
+        np.minimum.at(x0, lab, xs); np.maximum.at(x1, lab, xs)
+        np.minimum.at(y0, lab, ys); np.maximum.at(y1, lab, ys)
+        small = (area < min_area) | (x1 - x0 + 1 > max_bbox) | (y1 - y0 + 1 > max_bbox)
+        if small.any():
+            drop = small[lab]
+            idx = np.nonzero(on)
+            label_hw[idx[0][drop], idx[1][drop]] = -1
+            on = label_hw >= 0
+            uniq, inv = np.unique(label_hw[on], return_inverse=True)
+            label_hw = np.full(label_hw.shape, -1, dtype=np.int64)
+            label_hw[on] = inv
+            n_blobs = len(uniq)
+    # the kernel's labels are canonical per frame; the tracker makes them persistent
+    cents = blob_centroids(label_hw, n_blobs)
+    t3 = time.perf_counter()
+    ids = tracker.update(cents)
+    t4 = time.perf_counter()
+    painted = paint_tracks(label_hw, ids)
+    t5 = time.perf_counter()
+    timing["blob_prep"].append((t3 - t2) * 1000)
+    timing["track"].append((t4 - t3) * 1000)
+    timing["paint"].append((t5 - t4) * 1000)
+    return {"n_blobs": n_blobs, "cents": cents, "ids": ids, "painted": painted}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", type=Path, default=None, help="real footage instead of the simulation")
@@ -360,6 +419,9 @@ def main() -> int:
     ap.add_argument("--fps", type=float, default=FPS)
     ap.add_argument("--no-stabilise", action="store_true", help="median filter: skip alignment")
     ap.add_argument("--filter", choices=["tophat", "median"], default="tophat")
+    ap.add_argument("--tracker", choices=["gpu", "host", "both"], default="gpu",
+                    help="gpu: blob prep, tracking and paint on the device (gpu_tracker.py); host: the numpy "
+                         "path; both: run the two and check they agree exactly on every frame")
     args = ap.parse_args()
 
     if args.source:
@@ -377,10 +439,11 @@ def main() -> int:
         p.mkdir(parents=True, exist_ok=True)
         for old in p.glob("frame_*.png"):
             old.unlink()
-    engine = None
+    engine = gpu = None
     tracker = Tracker()
-    blobs, tracks_alive, size = [], [], None
-    timing = {"filter": [], "kernel": [], "label_map": [], "blob_prep": [], "track": [], "paint": []}
+    min_area, max_bbox = (MIN_AREA, MAX_BBOX) if args.source else (0, 1 << 30)
+    blobs, size, mismatched = [], None, []
+    timing = {k: [] for k in ("filter", "kernel")}
     for f, (arr, bg_gray) in enumerate(gen):
         h, w = arr.shape[:2]
         if engine is None:
@@ -395,54 +458,35 @@ def main() -> int:
         img = np.full((w, h, 3), 255, dtype=np.uint8)
         img[mask.T] = (255, 0, 0)
         t1 = time.perf_counter()
-        r = recolor(img, contract="rgb", engine=engine, emit_seeds=False, emit_label=True, copy_img=False)
+        r = recolor(img, contract="rgb", engine=engine, emit_seeds=False,
+                    emit_label=args.tracker != "gpu", copy_img=False)
         t2 = time.perf_counter()
         timing["filter"].append((t1 - t0) * 1000)
         timing["kernel"].append(r.kernel_ms)                            # CUDA events, GPU only
-        timing["label_map"].append(r.label_ms + r.d2h_ms)               # label map to the host
-        label_hw = np.ascontiguousarray(r.label.T)                      # (H, W), -1 off-blob
-        # the kernel's labels are canonical run indices (sparse); make them dense 0..n-1
-        on = label_hw >= 0
-        uniq, inv = np.unique(label_hw[on], return_inverse=True)
-        label_hw = np.full(label_hw.shape, -1, dtype=np.int64)
-        label_hw[on] = inv
-        n_blobs = len(uniq)
-        if args.source and n_blobs:
-            # real footage: drop specks under MIN_AREA px (noise) and blobs wider
-            # than MAX_BBOX px (court lines, reflections: not point targets)
-            lab = label_hw[on]
-            ys, xs = np.nonzero(on)
-            area = np.bincount(lab, minlength=n_blobs)
-            x0 = np.full(n_blobs, 10 ** 9); x1 = np.full(n_blobs, -1)
-            y0 = np.full(n_blobs, 10 ** 9); y1 = np.full(n_blobs, -1)
-            np.minimum.at(x0, lab, xs); np.maximum.at(x1, lab, xs)
-            np.minimum.at(y0, lab, ys); np.maximum.at(y1, lab, ys)
-            small = (area < MIN_AREA) | (x1 - x0 + 1 > MAX_BBOX) | (y1 - y0 + 1 > MAX_BBOX)
-            if small.any():
-                drop = small[lab]
-                idx = np.nonzero(on)
-                label_hw[idx[0][drop], idx[1][drop]] = -1
-                mask = label_hw >= 0
-                on = mask
-                uniq, inv = np.unique(label_hw[on], return_inverse=True)
-                label_hw = np.full(label_hw.shape, -1, dtype=np.int64)
-                label_hw[on] = inv
-                n_blobs = len(uniq)
-        # the kernel's labels are canonical per frame; the tracker makes them persistent
-        cents = blob_centroids(label_hw, n_blobs)
-        t3 = time.perf_counter()
-        ids = tracker.update(cents)
-        t4 = time.perf_counter()
-        painted = paint_tracks(label_hw, ids)
-        t5 = time.perf_counter()
-        timing["blob_prep"].append((t3 - t2) * 1000)
-        timing["track"].append((t4 - t3) * 1000)
-        timing["paint"].append((t5 - t4) * 1000)
+        if args.tracker != "gpu":
+            host = host_track(r, tracker, min_area, max_bbox, timing, t2)
+            n_blobs, painted = host["n_blobs"], host["painted"]
+        if args.tracker != "host":
+            if gpu is None:
+                gpu = GpuTracker(engine, GATE, MISS_LIMIT, min_area, max_bbox, TRACK_PALETTE)
+            tg, t3 = {}, time.perf_counter()
+            painted = gpu.step(tg)
+            for k in ("prep_gpu", "track_gpu", "paint_gpu"):
+                timing.setdefault(k, []).append(tg[k])
+            timing.setdefault("gpu_wall", []).append((time.perf_counter() - t3) * 1000)
+            n_blobs = gpu.n_blobs
+        if args.tracker == "both":
+            cents, ids = gpu.host_view()
+            same = (n_blobs == host["n_blobs"] and np.array_equal(cents, host["cents"])
+                    and np.array_equal(ids, host["ids"]) and np.array_equal(painted, host["painted"]))
+            if not same:
+                mismatched.append(f)
+        mask = painted.any(axis=2)                                       # the blobs that were kept
         blobs.append(n_blobs)
-        tracks_alive.append(int((tracker.miss == 0).sum()))          # tracks matched in this frame
         Image.fromarray(arr).save(folders["sky"] / f"frame_{f:03d}.png")
         Image.fromarray((mask * 255).astype(np.uint8)).convert("RGB").save(folders["mask"] / f"frame_{f:03d}.png")
         Image.fromarray(painted).save(folders["labels"] / f"frame_{f:03d}.png")
+    n_tracks = gpu.next_id if gpu is not None else tracker.next_id
     n = len(blobs)
     for k, p in folders.items():
         meta = {"source": source, "frames": n, "size": size,
@@ -450,16 +494,22 @@ def main() -> int:
         if k == "labels":
             meta["blobs_min"], meta["blobs_max"] = min(blobs), max(blobs)
             meta["blobs_per_frame"] = blobs                  # what the kernel counted, per frame
-            meta["tracks_per_frame"] = tracks_alive          # tracks matched in each frame
-            meta["tracks"] = tracker.next_id
-            meta["tracking"] = f"centroid + constant velocity, gate {GATE} px, miss limit {MISS_LIMIT}"
+            meta["tracks"] = n_tracks
+            meta["tracking"] = (f"centroid + constant velocity, gate {GATE} px, miss limit {MISS_LIMIT}, "
+                                f"on the {'GPU' if args.tracker != 'host' else 'host'}")
         (p / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"{n} frames x 3 sets, {size[0]}x{size[1]}; blobs per frame {min(blobs)}..{max(blobs)}; "
-          f"{tracker.next_id} tracks; source: {source}")
+          f"{n_tracks} tracks; source: {source}")
+    if args.tracker == "both":
+        print(f"host and GPU trackers agree on {n - len(mismatched)} of {n} frames"
+              + (f"; first mismatch at frame {mismatched[0]}" if mismatched else
+                 " (blob count, centroids, track ids and painted pixels all identical)"))
     print("per-frame ms (median / p90), host numpy unless noted:")
+    notes = {"kernel": "GPU, CUDA events", "prep_gpu": "GPU, CUDA events", "track_gpu": "GPU, CUDA events",
+             "paint_gpu": "GPU, CUDA events", "gpu_wall": "host clock: the three above + launches + D2H"}
     for k, v in timing.items():
         a = np.array(v[1:]) if len(v) > 1 else np.array(v)             # drop the first frame (JIT, allocation)
-        note = " [GPU, CUDA events]" if k == "kernel" else ""
+        note = f" [{notes[k]}]" if k in notes else ""
         print(f"  {k:10s} {np.median(a):7.2f} / {np.percentile(a, 90):7.2f}{note}")
     (folders["labels"] / "timing.json").write_text(json.dumps(
         {k: {"median_ms": float(np.median(v[1:])), "p90_ms": float(np.percentile(v[1:], 90))}
