@@ -1348,3 +1348,27 @@ def test_twin_no_recompile_with_program_enqueue(variant):
             flood_fill(img, seeds, mode=mode, threads_per_block=256,
                        blocks=3, enqueue="program", **kw)
     assert compiled() == before
+
+
+def test_compare_marks_first_translation_rows():
+    """compare.py's enqueue experiment: every ENQ="program" row is the
+    first translation, so it is comparable=False, has config.label
+    first_translation and carries the row-level key first_translation=true
+    (as in ch01-ch03). No other row carries that key or label, and each
+    per_lane row has its program pair at the same grid."""
+    from . import compare as twin_compare
+
+    cases, _ = twin_compare.build(quick=True)
+    enq = [c for c in cases if c.experiment == "enqueue"]
+    assert enq
+    for c in cases:
+        program = c.config.get("enqueue") == "program"
+        assert program == (c.extra.get("first_translation") is True)
+        assert program == (c.config.get("label") == "first_translation")
+        if program:
+            assert c.experiment == "enqueue" and not c.comparable
+    lane = {(c.scene, c.config["config"], c.config["blocks"])
+            for c in enq if c.config["enqueue"] == "lane"}
+    prog = {(c.scene, c.config["config"], c.config["blocks"])
+            for c in enq if c.config["enqueue"] == "program"}
+    assert lane == prog and len(lane) * 2 == len(enq)
