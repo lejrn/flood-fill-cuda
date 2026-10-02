@@ -41,7 +41,7 @@ block-stride loops keep Numba's strides, so the item-to-program map of
 | `cuda.cg.this_grid()` (cooperative launch) | `launch_cooperative_grid=True` | exact | an oversized grid raises, as in Numba |
 | `grid.sync()` (2 per level) | `runtime.device.grid_sync(bar, epoch * nprog)` | emulated | same placement; a monotonic counter on a host-zeroed int32 |
 | `cuda.syncthreads()` | `cta_sync()` | exact | kept at the same places (split prologue and level end) |
-| `_pair_barrier` (pinned) | `_pair_barrier`, same sense-reversing algorithm | close | `threadfence()` becomes acq_rel / release / acquire on the barrier atomics; the reset is an atomic exchange |
+| `_pair_barrier` (pinned) | `_pair_barrier`, same sense-reversing algorithm | close | relaxed snapshot as in Numba, acq_rel arrival, relaxed reset then releasing bump on one thread; `threadfence()` after the spin becomes acquire spin reads (a separate trailing acquire costs one more program-wide broadcast per barrier, measured up to 5% slower) |
 | `cuda.atomic.cas(visited, (x, y), 0, 1) == 0` | masked `tl.atomic_xchg(visited, 1, sem="relaxed") == 0` | close | same exactly-once claim on a 0/1 flag; Triton's CAS has no mask |
 | `_warp_enqueue_global` (one atomic per warp) | `_enqueue_global` (`tl.cumsum` ranks, one atomic per program) | close | per call site, as in Numba; tickets keep their meaning, contiguity is per program |
 | `_warp_enqueue_two_tier` (shared ring, then spill) | `_enqueue_two_tier` | close | same tickets, ring window and spill rule; the second ballot is the closed form `rank - room` |
@@ -78,6 +78,16 @@ block-stride loops keep Numba's strides, so the item-to-program map of
   of one per warp. Only schedule-dependent outputs change (queue order,
   global's per-pixel owner speckle, split's seam-race inbox/spill counts,
   dirsplit's per-program split).
+- **Input layout.** Numba's kernels index `img[x, y, c]` through strides;
+  the twin's kernels address a flat C-order buffer. So the driver
+  allocates the device image in C order and copies the input with
+  `np.ascontiguousarray` inside the H2D bracket (a no-op for the
+  C-contiguous scenes). Fortran-ordered and strided inputs give the same
+  result on both backends. A permuted-axis view, which Numba's
+  `copy_to_device` rejects with a ValueError, is accepted by the twin.
+- **Seed types.** NumPy integer seeds are converted with `operator.index`
+  after validation: Triton's launcher cannot specialize NumPy scalars,
+  while Numba types them as kernel arguments.
 
 ## Determinism and what the cross-backend tests compare
 
@@ -97,16 +107,39 @@ per-program numbers are race-dependent (only the totals are exact). The
 pinned BFS outputs are compared between Numba 768 and Triton 512. `%smid`
 values are never compared.
 
-## Measured behaviour (smoke runs, RTX 4060 Laptop)
+## Measured behaviour (subset runs, RTX 4060 Laptop)
 
-At small and narrow-frontier scenes the twin matches or beats Numba: on the
-serpentines, `grid_sync` is a little cheaper than CG `grid.sync`. On
-large frontiers it trails: 36M px take ~300 ms in Numba and ~430-450 ms in
-the twin. A Triton program aggregates in lockstep: every aggregated append
-is a CTA-wide reduction, a scan and one atomic whose round trip stalls all
-of the program's warps, while Numba's warps overlap their own appends.
-The twin is also leaner in registers (global: 36 vs 106 per thread). Run
-`compare.py` for the full table.
+Kernel-time ratios, Numba / Triton (above 1: the twin is faster), from
+interleaved runs with equal outputs. Run `compare.py` for the full table.
+
+- **Narrow frontiers** (`serpentine_256`, `seam_serpentine_256`: ~33k
+  one-pixel levels, so per-level overhead dominates). `global` is 3-5%
+  faster in the twin and `dirsplit` 16-18% faster. `split` is 15-19%
+  slower. A likely cause (read from the code, not profiled): each split
+  chunk runs 8 program-wide aggregations (4 directions x ring and inbox)
+  against 4 in `global`, and `_enqueue_two_tier` runs its reductions even
+  when no lane claimed, because scans must stay outside conditionals.
+- **Small and medium blobs.** `sq_256_center` is within about 10% either
+  way (`dirsplit` ahead, `split` behind). On `sq_2000_center` every kernel
+  trails by 7-20%.
+- **Large frontiers.** The twin trails: on 36M px, `global` takes ~280 ms
+  in Numba and ~420 ms in the twin, `split` ~305 vs ~430 ms. A Triton
+  program aggregates in lockstep: every aggregated append is a CTA-wide
+  reduction, a scan and one atomic whose round trip stalls all of the
+  program's warps, while Numba's warps overlap their own appends.
+- **pinned** trails by 25-45%. The matched row (`pinned 2x512 spread`,
+  both backends at 512) is the backend comparison: `sq_2000_center`
+  9.5 vs 12.9 ms, `serpentine_256` 108 vs 169 ms. In the twin every
+  scalar atomic of the pair barrier is broadcast to the whole 16-warp
+  program through shared memory, so each barrier step costs more than
+  Numba's thread-0 spin.
+- **Placement rows are not all like-for-like.** The chapter's own rows
+  pit 2 x 768 Numba threads against 2 x 512 Triton lanes, so their ratio
+  mixes a config change with the backend change (`comparable=false` in
+  the JSON). On `sq_6000_center` spread: Numba 2x768 168 ms, Numba 2x512
+  183 ms, twin 2x512 296 ms, so about 9% of that gap is the thread count.
+
+The twin is leaner in registers (global: 36 vs 106 per thread).
 
 ## Running
 
@@ -124,6 +157,21 @@ The full comparison writes
 not use the `dual_block_*.json` names, so the chapter dashboard never picks
 it up by mistake. Its `same()` compares the deterministic outputs above;
 big arrays are compared by BLAKE2 digest, so no two 36M-pixel results are
-alive at once (peak host RSS ~1.45 GB). The benchmark's single-block "v2"
-rows belong to chapter 1's comparison and its @njit rows have no GPU
-backend, so neither is repeated here.
+alive at once (peak host RSS ~1.45 GB).
+
+It mirrors every GPU row of the benchmark:
+- the scenes, each with the single-block v2 baseline (chapter 1's `spill`
+  kernel on both backends, cross-imported as the benchmark does);
+- the tpb sweep;
+- the placement experiment: v2 1x1024; v2 1x512 on both backends in
+  place of 1x768 (no 768-lane program in Triton); pinned same SM and
+  spread as the chapter runs them (Numba 768, twin 512,
+  `comparable=false`); and a matched pinned spread row at 2 x 512.
+  Same SM has no matched row: Numba's pinned kernel at 512 threads fits 3
+  blocks per SM and has no `rank < 2` guard, so it is not a valid same-SM
+  experiment.
+
+The @njit rows have no GPU backend and are not repeated. Read
+`speedup_kernel`: `total_ms` also compares the host stacks (CuPy's pooled
+allocation vs Numba's `cuMemAlloc` on every run), which dominates on small
+scenes.

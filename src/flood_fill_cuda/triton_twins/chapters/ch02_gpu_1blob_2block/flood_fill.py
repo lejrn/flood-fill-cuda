@@ -24,12 +24,21 @@ Differences from the Numba driver, all forced by Triton:
   tl.arange lengths are powers of 2): 96, 160, ... raise ValueError.
 - Each (kernel, bare, tpb) is a separate compile (TPB is a constexpr), so
   the warm-up is keyed on tpb too.
-- grid.sync has no buffer; its Triton twin needs a zeroed int32 counter.
+- grid.sync has no buffer; its Triton twin needs a zeroed int32 counter
+  (split/global/dirsplit only: pinned has its own pair barrier).
   The split kernel's shared ring lives in a (2, 8192) global scratch array.
   Both are allocated with the other device arrays and zeroed / left
   uninitialized exactly where Numba's shared memory would be.
+- The kernels address img as a flat C-order (width, height, 3) buffer, so
+  the device copy is always C order: a Fortran-ordered or strided input is
+  made contiguous on the host inside the H2D bracket (Numba's kernels index
+  through strides instead). A permuted-axis view, which Numba's
+  copy_to_device rejects, is accepted here the same way.
+- NumPy integer seeds are converted to Python ints after validation:
+  Triton's launcher cannot specialize NumPy scalars.
 """
 
+import operator
 import time
 from dataclasses import dataclass, field
 
@@ -287,6 +296,10 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
                 f"threads_per_block must be a power of 2 in the Triton twin "
                 f"(num_warps = threads_per_block // 32 and tl.arange lengths "
                 f"are powers of 2), got {threads_per_block}")
+    # Numba types NumPy integer seeds (np.int32, np.int64, ...) as kernel
+    # args; Triton's launcher cannot specialize NumPy scalars. The seeds
+    # already indexed img_host above, so they are integers.
+    seed_x, seed_y = operator.index(seed_x), operator.index(seed_y)
 
     _warmup(kernel, bare, threads_per_block)
     sm_count = device_info().sm_count
@@ -316,11 +329,13 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     visited_host[seed_x, seed_y] = 1
     depth_host = np.full((width, height), -1, dtype=np.int32)
     counters_host = np.zeros(int(NUM_COUNTERS), dtype=np.int64)
-    d_img = cp.empty_like(img_host)
+    # C order whatever the input layout: the kernels index img + lin * 3
+    d_img = cp.empty(img_host.shape, dtype=cp.uint8)
     d_visited = cp.empty_like(visited_host)
     d_depth = cp.empty_like(depth_host)
     d_counters = cp.empty_like(counters_host)
-    d_bar = cp.empty(1, dtype=cp.int32)   # grid_sync's arrival counter
+    if kernel != "pinned":
+        d_bar = cp.empty(1, dtype=cp.int32)   # grid_sync's arrival counter
     if kernel == "split":
         d_spill0 = cp.empty(max(half * height, 1), dtype=cp.int32)
         d_spill1 = cp.empty(max((width - half) * height, 1), dtype=cp.int32)
@@ -340,11 +355,13 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256,
     sync()
     t_h2d0 = time.perf_counter()
 
-    d_img.set(img_host)
+    # a no-op for C-contiguous input (every scene builder's output)
+    d_img.set(np.ascontiguousarray(img_host))
     d_visited.set(visited_host)
     d_depth.set(depth_host)
     d_counters.set(counters_host)
-    d_bar.fill(0)
+    if kernel != "pinned":
+        d_bar.fill(0)
     if instrumented:
         d_owner.set(owner_host)
     if kernel == "split":
