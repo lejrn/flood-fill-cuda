@@ -29,7 +29,7 @@ import os
 
 from flood_fill_cuda.shared.results_paths import results_dir
 from flood_fill_cuda.triton_twins.compare.summary import (
-    TWINS_ROOT, geomean, newest_per_unit,
+    TWINS_ROOT, _is_ablation, _is_duplicate, geomean, newest_per_unit,
 )
 
 FIG_DIR = results_dir("triton_twins", "figures")
@@ -95,9 +95,11 @@ def _load_units():
 
 def _comparable(rows):
     """The rows the summary averages: like-for-like, not an ablation of
-    the first translation, not a cell another experiment already has."""
+    the first translation, not a cell another experiment already has.
+    The summary's own predicates, so the two cannot disagree (ch04 keeps
+    duplicate_of inside config)."""
     return [r for r in rows if "error" not in r and r.get("comparable", True)
-            and not r.get("first_translation") and not r.get("duplicate_of")
+            and not _is_ablation(r) and not _is_duplicate(r)
             and r.get("speedup_kernel")]
 
 
