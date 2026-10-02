@@ -1505,10 +1505,11 @@ def _sass_report(sel, tpb, sched, enq, tmp_path):
                                         (256, "lockstep")))
 @pytest.mark.parametrize("sel", list(_SASS_SELECTIONS))
 def test_lane_enqueue_is_warp_aggregated_in_sass(sel, tpb, sched, tmp_path):
-    """Every rear ticket of the per-lane binary is Numba's warp
-    aggregation in SASS: a VOTE(U).ANY of the active lanes, the POPC of
-    that mask as the operand of one predicated (leader-only) 32-bit
-    ATOMG.E.ADD, and a SHFL.IDX broadcast of the old rear. The program
+    """Every rear ticket of the per-lane binary follows Numba's
+    warp-aggregation pattern in SASS (one leader atomic per warp; the
+    instructions around it differ): a VOTE(U).ANY of the active lanes,
+    the POPC of that mask as the operand of one predicated (leader-only)
+    32-bit ATOMG.E.ADD, and a SHFL.IDX broadcast of the old rear. The program
     binary has one rear atomic per site in the PTX too, none of its SASS
     atomics is a per-lane aggregation (in a one-warp program ptxas splits
     each into a partial-warp and a full-warp path, so the SASS holds two),
