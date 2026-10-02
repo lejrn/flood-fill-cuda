@@ -3,15 +3,21 @@
 Cases mirror the chapter's benchmark, with the scene list, sweep axes and
 placement scenes imported from it:
 
-  scenes     every SCENES row x {split, global, dirsplit} x {instrumented,
-             bare}, tpb 256, 2 blocks / 2 programs
+  scenes     every SCENES row: the single-block v2 baseline (chapter 1's
+             "spill" kernel at tpb 256, cross-imported as the benchmark
+             does) and {split, global, dirsplit} x {instrumented, bare}
+             at tpb 256, 2 blocks / 2 programs
   tpb_sweep  TPB_SWEEP {64, 128, 256, 512} x 3 kernels on sq_2000_center
-  placement  pinned same_sm / spread on PLACEMENT_SCENES. Numba runs its
-             2 x 768 experiment, the twin 2 x 512 (768 is not a power of
-             2); the row records both configurations.
+  placement  on PLACEMENT_SCENES, the benchmark's configurations:
+             - v2 1x1024 (1 SM), both backends at 1024;
+             - v2 1x768 has no Triton twin (768 is not a power of 2): both
+               backends run 1x512 instead, the twin's pinned worker width;
+             - pinned same SM and spread as the chapter runs them: Numba
+               2 x 768 threads, the twin 2 x 512 lanes. Not like-for-like,
+               so these rows carry comparable=False;
+             - pinned spread at 2 x 512 on both backends: the matched row.
 
-Not mirrored: the benchmark's "v2" single-block rows (chapter 1's kernel,
-compared in chapter 1's twin) and its @njit rows (CPU, no GPU backend).
+Not mirrored: the benchmark's @njit rows (CPU, no GPU backend).
 
 Every run is reduced to its deterministic outputs right after the driver
 returns: scalars plus BLAKE2 digests of img / visited / depth (and the
@@ -27,15 +33,27 @@ import os
 os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
 
 import argparse
+import contextlib
+import dataclasses
 import hashlib
 from dataclasses import dataclass, field
 
 import numpy as np
 
+from flood_fill_cuda.chapters.ch01_gpu_1blob_1block.flood_fill import (
+    flood_fill as v2_numba_flood_fill,
+)
 from flood_fill_cuda.chapters.ch02_gpu_1blob_2block import flood_fill as nff
 from flood_fill_cuda.chapters.ch02_gpu_1blob_2block import scenes
 from flood_fill_cuda.chapters.ch02_gpu_1blob_2block.benchmarks import (
     benchmark as nbench,
+)
+from flood_fill_cuda.triton_twins.chapters.ch01_gpu_1blob_1block.compare import (
+    numba_resources as v2_numba_resources,
+)
+from flood_fill_cuda.triton_twins.chapters.ch01_gpu_1blob_1block.flood_fill import (
+    compiled_kernel as v2_compiled_kernel,
+    flood_fill as v2_triton_flood_fill,
 )
 from flood_fill_cuda.triton_twins.compare.harness import run_cases, Case
 from flood_fill_cuda.triton_twins.runtime import device_info, kernel_resources
@@ -44,6 +62,10 @@ from . import flood_fill as tff
 
 CHAPTER = "ch02_gpu_1blob_2block"
 TPB = 256  # the benchmark's default tpb for the scene rows
+V2_VARIANT = "spill"  # the benchmark's single-block baseline
+NUMBA_PINNED_TPB = nff.PINNED_TPB  # 768
+V2_PLACEMENT_TPBS = (1024, tff.PINNED_TPB)  # benchmark: (768, 1024)
+TIMING_FIELDS = {"alloc_ms", "h2d_ms", "kernel_ms", "d2h_ms", "total_ms"}
 
 QUICK_SCENES = [
     ("sq_128_center", lambda: scenes.square_scene(128, 128, 64, 64),
@@ -72,6 +94,10 @@ def _digest(a):
     h.update(str((a.dtype.str, a.shape)).encode())
     h.update(memoryview(a).cast("B"))
     return h.hexdigest()
+
+
+def _ascii_dashes(text):
+    return text.replace("\u2014", "-").replace("\u2013", "-")
 
 
 def _slim(r, kernel, bare):
@@ -124,6 +150,18 @@ def _slim(r, kernel, bare):
                 det, obs)
 
 
+def _slim_v2(r):
+    """Chapter 1's result: every field is deterministic (ch01 twin's
+    compare compares them all), arrays by digest."""
+    det = {}
+    for f in dataclasses.fields(r):
+        if f.name in TIMING_FIELDS:
+            continue
+        v = getattr(r, f.name)
+        det[f.name] = _digest(v) if isinstance(v, np.ndarray) else v
+    return Slim(r.kernel_ms, r.total_ms, r.alloc_ms, r.h2d_ms, r.d2h_ms, det)
+
+
 def _same(n, t):
     for key in n.det:
         if n.det[key] != t.det.get(key):
@@ -158,6 +196,20 @@ def _scene_pixels(name, builder):
     return _pixels[name]
 
 
+@contextlib.contextmanager
+def _numba_pinned_tpb(tpb):
+    """Run Numba's pinned experiment at another block size. Its driver
+    checks threads_per_block against the module constant PINNED_TPB (and
+    warms up with it), so the constant is swapped for the call and
+    restored. Valid for placement="spread" only (see meta)."""
+    old = nff.PINNED_TPB
+    nff.PINNED_TPB = tpb
+    try:
+        yield
+    finally:
+        nff.PINNED_TPB = old
+
+
 def _numba_resources(kernel, bare, tpb):
     fn = (nff.dual_block_pinned_kernel if kernel == "pinned"
           else nff._KERNELS[(kernel, bare)])
@@ -173,12 +225,19 @@ def _numba_resources(kernel, bare, tpb):
 
 
 def _make_case(experiment, scene_name, builder, note, kernel, bare,
-               tpb_numba, tpb_triton, placement=None):
+               tpb_numba, tpb_triton, placement=None, label=None):
+    numba_pinned_override = (kernel == "pinned"
+                             and tpb_numba != NUMBA_PINNED_TPB)
+    matched = tpb_numba == tpb_triton
+
     def run_numba():
         img, sx, sy = _cache.get(scene_name, builder)
-        return _slim(nff.flood_fill(img, sx, sy, threads_per_block=tpb_numba,
-                                    kernel=kernel, bare=bare,
-                                    placement=placement), kernel, bare)
+        ctx = (_numba_pinned_tpb(tpb_numba) if numba_pinned_override
+               else contextlib.nullcontext())
+        with ctx:
+            r = nff.flood_fill(img, sx, sy, threads_per_block=tpb_numba,
+                               kernel=kernel, bare=bare, placement=placement)
+        return _slim(r, kernel, bare)
 
     def run_triton():
         img, sx, sy = _cache.get(scene_name, builder)
@@ -209,15 +268,63 @@ def _make_case(experiment, scene_name, builder, note, kernel, bare,
 
     config = {"kernel": kernel, "bare": bare, "tpb": tpb_numba,
               "placement": placement}
-    notes = note
-    if tpb_triton != tpb_numba:
+    if label:
+        config["label"] = label
+    notes = _ascii_dashes(note)
+    if not matched:
         config["tpb_triton"] = tpb_triton
-        notes = (f"{note}; Numba pins 2 x {tpb_numba} threads, the twin "
-                 f"2 x {tpb_triton} lanes (768 is not a power of 2)")
+        notes = (f"{notes}; Numba pins 2 x {tpb_numba} threads, the twin "
+                 f"2 x {tpb_triton} lanes (768 is not a power of 2): not "
+                 f"like-for-like, speedup is not a backend ratio")
+    elif numba_pinned_override:
+        notes = (f"{notes}; matched: Numba's pinned kernel at 2 x "
+                 f"{tpb_numba} (PINNED_TPB swapped for the call)")
     return Case(experiment=experiment, scene=scene_name, config=config,
                 run_numba=run_numba, run_triton=run_triton, same=_same,
                 pixels=_scene_pixels(scene_name, builder), info=info,
-                notes=notes)
+                notes=notes, extra={"config_matched": matched},
+                comparable=matched)
+
+
+def _make_v2_case(experiment, scene_name, builder, note, tpb, label=None):
+    """Chapter 1's single-block spill kernel on both backends (the
+    benchmark cross-imports it as the "what does the 2nd block buy?"
+    baseline)."""
+
+    def run_numba():
+        img, sx, sy = _cache.get(scene_name, builder)
+        return _slim_v2(v2_numba_flood_fill(img, sx, sy, threads_per_block=tpb,
+                                            variant=V2_VARIANT))
+
+    def run_triton():
+        img, sx, sy = _cache.get(scene_name, builder)
+        return _slim_v2(v2_triton_flood_fill(img, sx, sy,
+                                             threads_per_block=tpb,
+                                             variant=V2_VARIANT))
+
+    def info(n, t):
+        return {
+            "filled": n.det["filled"],
+            "levels": n.det["levels"],
+            "numba": {"alloc_ms": n.alloc_ms, "h2d_ms": n.h2d_ms,
+                      "d2h_ms": n.d2h_ms, "grid": 1, "tpb": tpb,
+                      "resources": v2_numba_resources(V2_VARIANT)},
+            "triton": {"alloc_ms": t.alloc_ms, "h2d_ms": t.h2d_ms,
+                       "d2h_ms": t.d2h_ms, "grid": 1, "tpb": tpb,
+                       "num_warps": tpb // 32,
+                       "resources": kernel_resources(
+                           v2_compiled_kernel(V2_VARIANT, tpb))},
+        }
+
+    config = {"kernel": "v2", "variant": V2_VARIANT, "blocks": 1,
+              "tpb": tpb}
+    if label:
+        config["label"] = label
+    return Case(experiment=experiment, scene=scene_name, config=config,
+                run_numba=run_numba, run_triton=run_triton, same=_same,
+                pixels=_scene_pixels(scene_name, builder), info=info,
+                notes=_ascii_dashes(note) + "; chapter 1's v2 spill kernel",
+                extra={"config_matched": True})
 
 
 def build_cases(quick=False):
@@ -225,6 +332,7 @@ def build_cases(quick=False):
     lookup = {name: (builder, note) for name, builder, note in nbench.SCENES}
     cases = []
     for name, builder, note in scene_rows:
+        cases.append(_make_v2_case("scenes", name, builder, note, TPB))
         for kernel in nbench.KERNELS:
             for bare in (False, True):
                 cases.append(_make_case("scenes", name, builder, note, kernel,
@@ -239,10 +347,21 @@ def build_cases(quick=False):
     placement_scenes = ([(QUICK_SCENES[0][0],) + QUICK_SCENES[0][1:]] if quick
                         else [(n,) + lookup[n] for n in nbench.PLACEMENT_SCENES])
     for name, builder, note in placement_scenes:
-        for placement in ("same_sm", "spread"):
-            cases.append(_make_case("placement", name, builder, note,
-                                    "pinned", False, nff.PINNED_TPB,
-                                    tff.PINNED_TPB, placement))
+        for tpb in V2_PLACEMENT_TPBS:
+            label = f"v2 1x{tpb} (1 SM)"
+            if tpb != 1024:
+                label += " [stands in for v2 1x768]"
+            cases.append(_make_v2_case("placement", name, builder, note, tpb,
+                                       label))
+        for placement, where in (("same_sm", "same SM"), ("spread", "spread")):
+            cases.append(_make_case(
+                "placement", name, builder, note, "pinned", False,
+                NUMBA_PINNED_TPB, tff.PINNED_TPB, placement,
+                f"pinned 2x{NUMBA_PINNED_TPB} {where} (twin 2x{tff.PINNED_TPB})"))
+        cases.append(_make_case(
+            "placement", name, builder, note, "pinned", False,
+            tff.PINNED_TPB, tff.PINNED_TPB, "spread",
+            f"pinned 2x{tff.PINNED_TPB} spread (matched)"))
     return cases
 
 
@@ -259,35 +378,59 @@ def main(argv=None):
     meta = {
         "mirrors": "chapters/ch02_gpu_1blob_2block/benchmarks/benchmark.py",
         "experiments": {
-            "scenes": "SCENES x {split, global, dirsplit} x {instrumented, "
-                      "bare} at tpb 256",
+            "scenes": "SCENES x (v2 single-block spill at tpb 256, plus "
+                      "{split, global, dirsplit} x {instrumented, bare} at "
+                      "tpb 256)",
             "tpb_sweep": "TPB_SWEEP x 3 kernels on sq_2000_center",
-            "placement": "pinned same_sm / spread on PLACEMENT_SCENES",
+            "placement": "on PLACEMENT_SCENES: v2 1x1024, v2 1x512 (for "
+                         "1x768), pinned same_sm / spread as the chapter "
+                         "runs them (Numba 768, twin 512), pinned spread "
+                         "matched at 2 x 512",
         },
-        "not_mirrored": [
-            "v2 single-block baseline rows (chapter 1's kernel; see the "
-            "ch01 twin's compare)",
-            "@njit CPU rows (no GPU backend to compare)",
+        "not_mirrored": ["@njit CPU rows (no GPU backend to compare)"],
+        "placement_matching": [
+            "Rows labeled 'pinned 2x768 ... (twin 2x512)' compare 1,536 "
+            "Numba threads with 1,024 Triton lanes: comparable=false, "
+            "config_matched=false, their speedup is not a backend ratio.",
+            "'pinned 2x512 spread (matched)': Numba's pinned kernel run at "
+            "512 threads (PINNED_TPB swapped for the call) vs the twin at "
+            "512 lanes: the like-for-like spread row.",
+            "same_sm has no matched row: Numba's pinned kernel at 2 x 512 is "
+            "not a valid same_sm experiment. At max_registers 40, three "
+            "512-thread blocks fit per SM, so the 2 * sm_count launch does "
+            "not put exactly two on the chosen SM, and the kernel has no "
+            "rank < 2 guard: a third block would join the BFS and break "
+            "the 2-worker barrier.",
+            "v2 1x768 has no Triton twin (not a power of 2): both backends "
+            "run 1x512 instead, the twin's pinned worker width.",
         ],
-        # No cap needed: every scene of the benchmark runs at full size.
-        # Measured: the largest case (sq_6000_center, 36M px) peaks at
-        # ~1.45 GB host RSS and ~6 s wall per case at 1 repeat.
         "caps": [] if not args.quick else [
             "quick: scenes replaced by sq_128_center and seam_serpentine_64, "
             "tpb sweep and placement on sq_128_center"],
-        "budget": "no scene capped: largest case (sq_6000_center) measured "
-                  "at ~1.45 GB host RSS; default mode ~5 min of GPU time",
+        "budget": "no scene capped: the largest case (sq_6000_center) "
+                  "measured at ~1.45 GB host RSS; default mode ~8 min of "
+                  "GPU time",
+        "timing": "speedup_kernel is the backend comparison. total_ms adds "
+                  "the host stacks: CuPy's pooled allocation (warm after "
+                  "a case's first run) vs Numba's cuMemAlloc on every run, "
+                  "and CuPy .set/.get vs Numba copies. On small scenes "
+                  "speedup_total mostly measures that (quick sq_128_center "
+                  "split: alloc 0.62 ms Numba vs 0.13 ms Triton).",
         "deviations": [
-            "placement rows: Numba 2 x 768 threads (max_registers 40), Triton "
-            "2 x 512 lanes (maxnreg 64); both put exactly 2 programs per SM",
+            "placement: Numba's experiment is 2 x 768 threads at "
+            "max_registers 40, the twin's 2 x 512 lanes at maxnreg 64; both "
+            "put exactly 2 programs per SM in same_sm mode",
             "split: the 8192-slot ring is shared memory in Numba, global "
             "scratch in Triton",
+            "the twin's driver allocates an int32 grid_sync counter "
+            "(split/global/dirsplit), zeroed in the h2d bracket",
         ],
-        "same": "img, visited, depth, levels, filled; instrumented: "
-                "level_sizes, peak_level, peak_occupancy, processed, "
-                "cas_attempts; split/global: per-program processed, trace and "
-                "utilization; split: owner map; global: owner census. "
-                "Arrays compared by BLAKE2 digest.",
+        "same": "dual kernels: img, visited, depth, levels, filled; "
+                "instrumented: level_sizes, peak_level, peak_occupancy, "
+                "processed, cas_attempts; split/global: per-program "
+                "processed, trace and utilization; split: owner map; "
+                "global: owner census. v2: every result field. Arrays "
+                "compared by BLAKE2 digest.",
         "triton_tpb_rule": "num_warps = tpb // 32",
     }
     run_cases(CHAPTER, cases, repeats=repeats, meta=meta,

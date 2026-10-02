@@ -534,3 +534,97 @@ def test_cross_backend_non_power_of_2_tpb_rejected_by_twin_only(numba_ff):
     assert n.filled == 400
     with pytest.raises(ValueError, match="threads_per_block must be a power of 2"):
         flood_fill(img, sx, sy, threads_per_block=96)
+
+
+# ------------------------------------------- input layouts and seed types
+# Every scene builder returns a C-contiguous image and Python-int seeds, so
+# the tests above never vary either. The twin's kernels address img as a
+# flat C-order buffer; the driver must make any other layout contiguous.
+
+INPUT_VARIANTS = [(k, b) for k in KERNELS for b in (False, True)] + [("pinned", False)]
+
+
+def _run_both(numba_ff, img, sx, sy, kernel, bare, numba_img=None):
+    """Numba on numba_img (default img) and the twin on img, same config.
+    pinned runs its spread placement (2 workers, no occupancy forcing)."""
+    if kernel == "pinned":
+        nkw = dict(kernel="pinned", threads_per_block=numba_ff.PINNED_TPB,
+                   placement="spread")
+        tkw = dict(kernel="pinned", threads_per_block=PINNED_TPB,
+                   placement="spread")
+    else:
+        nkw = tkw = dict(kernel=kernel, bare=bare)
+    n = numba_ff.flood_fill(img if numba_img is None else numba_img, sx, sy,
+                            **nkw)
+    t = flood_fill(img, sx, sy, **tkw)
+    return n, t
+
+
+def _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, bare):
+    if kernel == "pinned":
+        _assert_same_bfs(n, t)
+    else:
+        _assert_same_deterministic(n, t, kernel, bare)
+    ref_visited, ref_depth, ref_levels, ref_filled = cpu_flood_fill(img, sx, sy)
+    np.testing.assert_array_equal(t.visited, ref_visited)
+    np.testing.assert_array_equal(t.depth, ref_depth)
+    assert (t.levels, t.filled) == (ref_levels, ref_filled)
+    filled_mask = t.visited == 1
+    assert (t.img[filled_mask] == BLUE).all()
+    np.testing.assert_array_equal(t.img[~filled_mask], img[~filled_mask])
+
+
+@pytest.mark.parametrize("kernel,bare", INPUT_VARIANTS)
+def test_cross_backend_fortran_order_input(kernel, bare, numba_ff):
+    """A Fortran-ordered image: Numba's kernels index it through strides,
+    the twin's driver copies it to a C-order device buffer. Same result,
+    input untouched."""
+    img_c, sx, sy = scenes.random_scene(97, 61, 0.65, rng_seed=21)
+    img = np.asfortranarray(img_c)
+    assert img.flags.f_contiguous and not img.flags.c_contiguous
+    n, t = _run_both(numba_ff, img, sx, sy, kernel, bare)
+    _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, bare)
+    np.testing.assert_array_equal(img, img_c)
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+def test_cross_backend_strided_input(kernel, numba_ff):
+    """A strided view (every other row of a larger buffer): both backends
+    copy it to a contiguous device buffer."""
+    img_c, sx, sy = scenes.random_scene(97, 61, 0.65, rng_seed=21)
+    buf = np.zeros((2 * 97, 61, 3), dtype=np.uint8)
+    buf[::2] = img_c
+    img = buf[::2]
+    assert not img.flags.c_contiguous and not img.flags.f_contiguous
+    n, t = _run_both(numba_ff, img, sx, sy, kernel, False)
+    _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, False)
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+def test_cross_backend_permuted_axis_input(kernel, numba_ff):
+    """A permuted-axis view (a transposed buffer, neither C nor F order):
+    Numba's copy_to_device rejects it; the twin copies it to C order and
+    returns what Numba returns for the contiguous copy (a documented
+    superset)."""
+    img_c, sx, sy = scenes.random_scene(97, 61, 0.65, rng_seed=21)
+    img = np.ascontiguousarray(img_c.transpose(1, 0, 2)).transpose(1, 0, 2)
+    assert not img.flags.c_contiguous and not img.flags.f_contiguous
+    with pytest.raises(ValueError, match="non-contiguous"):
+        numba_ff.flood_fill(img, sx, sy, kernel=kernel)
+    n, t = _run_both(numba_ff, img, sx, sy, kernel, False, numba_img=img_c)
+    _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, False)
+
+
+@pytest.mark.parametrize("kernel,bare", INPUT_VARIANTS)
+def test_cross_backend_numpy_int_seeds(kernel, bare, numba_ff):
+    """NumPy integer seeds (np.argwhere gives np.int64): Numba types them
+    as kernel args; the twin converts them, so the split kernel's scalar
+    seed args never reach Triton's launcher as NumPy scalars."""
+    img, _, _ = scenes.square_scene(64, 64, 20, 20)
+    ax, ay = np.argwhere((img == scenes.RED).all(axis=2))[0]
+    assert isinstance(ax, np.int64)
+    for cast in (np.int64, np.int32, np.uint16):
+        sx, sy = cast(ax), cast(ay)
+        n, t = _run_both(numba_ff, img, sx, sy, kernel, bare)
+        _assert_same_as_numba_and_reference(img, sx, sy, n, t, kernel, bare)
+        assert t.filled == 400

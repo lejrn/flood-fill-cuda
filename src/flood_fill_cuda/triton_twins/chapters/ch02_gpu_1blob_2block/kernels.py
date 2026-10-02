@@ -45,7 +45,7 @@ import triton
 import triton.language as tl
 
 from flood_fill_cuda.triton_twins.runtime.device import (
-    cta_sync, grid_sync, read_smid,
+    cta_sync, grid_sync, load_acquire, read_smid,
 )
 
 RING_CAPACITY = tl.constexpr(8192)
@@ -195,23 +195,30 @@ def _pair_barrier(barrier_state, n_workers):
 
     Scalar atomics run on one thread of the program, which matches Numba's
     "thread 0 does it, then syncthreads". threadfence() becomes the
-    atomics' release/acquire semantics: the arrival is acq_rel (publishes
-    this program's writes, and the last arriver acquires everyone's), the
-    generation bump releases, the spin acquires.
+    atomics' ordering:
+    - the generation snapshot is relaxed, as in Numba (the arrival's
+      release keeps it before the arrival);
+    - the arrival is acq_rel: it publishes this program's writes, and the
+      last arriver acquires everyone's;
+    - the last arriver's relaxed reset and releasing generation bump run on
+      the same thread, so the release orders the reset (Numba: store,
+      threadfence, atomic add);
+    - the spin reads acquire: the read that sees the new generation is the
+      acquire Numba gets from its threadfence after the spin. A relaxed
+      spin plus one trailing acquire read costs one more CTA-wide broadcast
+      of a scalar per barrier here, measured up to 5% slower.
     """
     cta_sync()
-    gen = tl.atomic_add(barrier_state + BAR_GEN, 0, sem="acquire", scope="gpu")
+    gen = tl.atomic_add(barrier_state + BAR_GEN, 0, sem="relaxed", scope="gpu")
     arrived = tl.atomic_add(barrier_state + BAR_ARRIVE, 1, sem="acq_rel",
                             scope="gpu")
     if arrived == n_workers - 1:
         tl.atomic_xchg(barrier_state + BAR_ARRIVE, 0, sem="relaxed", scope="gpu")
-        cta_sync()  # the reset is ordered before the release below
         tl.atomic_add(barrier_state + BAR_GEN, 1, sem="release", scope="gpu")
     else:
-        g = tl.atomic_add(barrier_state + BAR_GEN, 0, sem="acquire", scope="gpu")
+        g = load_acquire(barrier_state + BAR_GEN)
         while g == gen:
-            g = tl.atomic_add(barrier_state + BAR_GEN, 0, sem="acquire",
-                              scope="gpu")
+            g = load_acquire(barrier_state + BAR_GEN)
     cta_sync()
 
 
