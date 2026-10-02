@@ -17,6 +17,12 @@ here: the 4-connected grid is bipartite, so every claim attempt is one edge
 of the filled component) and the derived percentages. Only the *_ms
 timings differ.
 
+The test_enqueue_* section runs both v2 enqueue forms (enqueue="lane",
+the default, and enqueue="program", the first translation) against the
+CPU oracle and Numba, including the spill scene, and checks the codegen
+claim: the default kernels carry Numba's CTA barrier count and every
+enqueue atomic is warp-aggregated by ptxas in the SASS.
+
 Run:
 
     .venv/bin/python -m pytest -p no:cacheprovider src/flood_fill_cuda/triton_twins/chapters/ch01_gpu_1blob_1block/test_correctness.py -v
@@ -381,3 +387,159 @@ def test_cross_backend_no_recompile_inside_timing():
             flood_fill(*build(), variant=variant)
         sizes[variant] = (before, len(kernel.device_caches[dev][0]))
     assert all(b == a for b, a in sizes.values()), sizes
+
+
+# ---------------------------------------------------------------------------
+# v2 enqueue forms: enqueue="lane" (default, warp-aggregated by ptxas like
+# Numba's _warp_enqueue_two_tier) and enqueue="program" (the first
+# translation). Both must give outputs identical to Numba and to the CPU
+# oracle, and the same deterministic counters.
+# ---------------------------------------------------------------------------
+
+import functools  # noqa: E402
+import os.path  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+
+from .kernels import ENQ_MODES  # noqa: E402
+
+ENQ_SCENES = ["square_64", "square_nonsquare_img", "corner_seeded_square",
+              "disk_101", "serpentine_nonsquare", "random_supercritical",
+              "single_pixel", "full_red_128"]
+
+
+@pytest.mark.parametrize("enqueue", ENQ_MODES)
+@pytest.mark.parametrize("name", ENQ_SCENES)
+def test_enqueue_modes_match_reference_and_numba(name, enqueue):
+    img, sx, sy = SCENES[name]()
+    tri = assert_matches_reference(img, sx, sy, variant="spill",
+                                   enqueue=enqueue)
+    assert_same_as_numba(tri, numba_flood_fill(img, sx, sy, variant="spill"))
+
+
+@pytest.mark.parametrize("enqueue", ENQ_MODES)
+@pytest.mark.parametrize("tpb", [32, 128, 1024])
+def test_enqueue_modes_block_size_invariance(tpb, enqueue):
+    img, sx, sy = scenes.random_scene(256, 256, 0.65, rng_seed=3)
+    tri = assert_matches_reference(img, sx, sy, threads_per_block=tpb,
+                                   variant="spill", enqueue=enqueue)
+    assert_same_as_numba(tri, numba_flood_fill(img, sx, sy,
+                                               threads_per_block=tpb,
+                                               variant="spill"))
+
+
+@functools.lru_cache(maxsize=1)
+def _spill_scene_references():
+    """The 6.76M px scene that overflows the ring: CPU oracle and Numba v2,
+    computed once for both enqueue forms."""
+    img, sx, sy = scenes.overflow_scene()
+    return (img, sx, sy, cpu_flood_fill(img, sx, sy),
+            numba_flood_fill(img, sx, sy, variant="spill"))
+
+
+@pytest.mark.parametrize("enqueue", ENQ_MODES)
+def test_enqueue_modes_spill_scene(enqueue):
+    """The spill tier in use: slabs straddle the ring window, the ring rear
+    overshoots and is clamped, and 304,702 pixels spill. Both forms must
+    match the oracle and every Numba counter (spilled, peak_spill_window,
+    peak_occupancy, processed, cas_attempts, the level trace)."""
+    img, sx, sy, (ref_visited, ref_depth, ref_levels, ref_filled), nb = \
+        _spill_scene_references()
+    tri = flood_fill(img, sx, sy, variant="spill", enqueue=enqueue)
+    np.testing.assert_array_equal(tri.visited, ref_visited)
+    np.testing.assert_array_equal(tri.depth, ref_depth)
+    assert tri.levels == ref_levels and tri.filled == ref_filled
+    assert tri.spilled > 0 and tri.peak_occupancy > tri.ring_capacity
+    assert tri.processed == tri.filled
+    assert_same_as_numba(tri, nb)
+
+
+def test_enqueue_modes_agree_with_each_other():
+    """Same counters from both forms on a scene with every level width."""
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    lane = flood_fill(img, sx, sy, variant="spill", enqueue="lane")
+    prog = flood_fill(img, sx, sy, variant="spill", enqueue="program")
+    assert_same_as_numba(lane, prog)
+
+
+def test_enqueue_default_is_lane():
+    from .flood_fill import compiled_kernel
+    flood_fill(*scenes.square_scene(64, 64, 20, 20), variant="spill")
+    assert compiled_kernel("spill", 256) is compiled_kernel("spill", 256,
+                                                            "lane")
+
+
+def test_bad_enqueue_raises():
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="enqueue must be"):
+        flood_fill(img, sx, sy, variant="spill", enqueue="warp")
+
+
+def test_enqueue_program_on_ring_raises():
+    """v1 has one form only (one ticket per winning lane, as in Numba)."""
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match='variant="spill" only'):
+        flood_fill(img, sx, sy, variant="ring", enqueue="program")
+
+
+def _nvdisasm():
+    import triton
+    bundled = os.path.join(os.path.dirname(triton.__file__), "backends",
+                           "nvidia", "bin", "nvdisasm")
+    for path in (bundled, shutil.which("nvdisasm"),
+                 "/usr/local/cuda/bin/nvdisasm"):
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def _sass(compiled):
+    tool = _nvdisasm()
+    if tool is None:
+        pytest.skip("no nvdisasm to read the SASS")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "k.cubin")
+        with open(path, "wb") as f:
+            f.write(compiled.asm["cubin"])
+        out = subprocess.run([tool, "-c", path], capture_output=True,
+                             text=True, check=True).stdout
+    return [ln.split("*/", 1)[1].split(";")[0].strip()
+            for ln in out.splitlines() if re.match(r"\s+/\*[0-9a-f]{4}\*/", ln)]
+
+
+# (variant, enqueue) -> (CTA barriers = Numba's syncthreads count,
+#                        enqueue atomics = directions x tiers)
+CODEGEN = {("ring", "lane"): (3, 4), ("spill", "lane"): (4, 8)}
+
+
+@pytest.mark.parametrize("variant,enqueue", list(CODEGEN))
+def test_lane_enqueue_is_warp_aggregated_like_numba(variant, enqueue):
+    """The default kernels carry exactly Numba's barriers (1 + 2 per level
+    for v1, 1 + 3 for v2) and every enqueue atomic is warp-aggregated by
+    ptxas: VOTEU.ANY (active mask), POPC (count), one predicated leader
+    ATOMG.E.ADD, SHFL.IDX (base broadcast), the same idiom Numba's
+    activemask/popc/ffs/shfl_sync enqueue compiles to."""
+    from .flood_fill import compiled_kernel
+    ck = compiled_kernel(variant, 256, enqueue)
+    bars, atomics = CODEGEN[(variant, enqueue)]
+    assert len(re.findall(r"\bbar\.sync\b", ck.asm["ptx"])) == bars
+    sass = _sass(ck)
+    assert sum(i.startswith("BAR.SYNC") for i in sass) == bars
+    sites = [k for k, i in enumerate(sass)
+             if re.match(r"@!?U?P\d ATOMG\.E\.ADD", i)]
+    unpredicated = [i for i in sass if i.startswith("ATOMG.E.ADD")]
+    assert len(sites) == atomics and not unpredicated, (sites, unpredicated)
+    for k in sites:
+        before, after = sass[max(0, k - 8):k], sass[k + 1:k + 9]
+        assert any(i.startswith("VOTEU.ANY") for i in before), sass[k - 8:k + 9]
+        assert any(i.startswith("POPC") for i in before), sass[k - 8:k + 9]
+        assert any(i.startswith("SHFL.IDX") for i in after), sass[k - 8:k + 9]
+
+
+def test_program_enqueue_adds_cta_barriers():
+    """The first translation's tl.cumsum / tl.sum / scalar atomic cost CTA
+    barriers per direction that Numba never had."""
+    from .flood_fill import compiled_kernel
+    ptx = compiled_kernel("spill", 256, "program").asm["ptx"]
+    assert len(re.findall(r"\bbar\.sync\b", ptx)) > 4 * 4

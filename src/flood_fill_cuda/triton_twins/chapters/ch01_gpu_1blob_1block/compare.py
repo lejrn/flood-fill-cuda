@@ -15,6 +15,17 @@ The cases mirror chapters/ch01_gpu_1blob_1block/benchmarks/benchmark.py:
                  its first stamp to the RuntimeError.
 - tpb_sweep:     the benchmark's threads-per-block sweep (64..1024) on
                  sq_2000_center with the default "ring" kernel.
+- enqueue:       the v2 "spill" kernel's two enqueue forms on representative
+                 scenes (one-pixel frontiers, a ring-sized square, the big
+                 corner square, the spill scenes), two rows per scene:
+                 enqueue="lane" (the default: one atomic per winning lane,
+                 warp-aggregated by ptxas into Numba's SASS idiom) and
+                 enqueue="program" (config label "first_translation": the
+                 first translation's program-wide tl.cumsum/tl.sum enqueue,
+                 about 9 extra CTA barriers per direction). Numba runs its
+                 one v2 kernel in both rows. The lane rows repeat the
+                 scenes experiment's spill rows; the program rows measure
+                 what the first translation cost.
 
 Both backends always run the same configuration: one block = one program,
 the same threads per block (Triton num_warps = tpb // 32). The CPU
@@ -106,6 +117,13 @@ QUICK_SCENES = [
 QUICK_DIMS = {"serpentine_64": (64, 64), "disk_128": (128, 128)}
 QUICK_TRIP_SCENES = {"sq_2600_full_center"}
 QUICK_SWEEP = ("sq_256_center", [64, 1024])
+
+# The enqueue experiment's scenes: one-pixel frontiers, a ring-sized wide
+# frontier, the biggest scene that fits the ring, light and heavy spill.
+ENQ_SCENES = ["serpentine_256", "sq_2000_center", "sq_4000_corner",
+              "sq_2600_full_center", "sq_6000_center"]
+QUICK_ENQ_SCENES = ["serpentine_64", "sq_2600_full_center"]
+ENQ_LABELS = {"lane": "default", "program": "first_translation"}
 
 TIMING_FIELDS = {"alloc_ms", "h2d_ms", "kernel_ms", "d2h_ms", "total_ms"}
 HOST_PHASES = ("alloc_ms", "h2d_ms", "d2h_ms")
@@ -225,17 +243,39 @@ def numba_resources(variant):
             "local_bytes_per_thread": one(kernel.get_local_mem_per_thread())}
 
 
-def result_info(variant, tpb):
+def bar_syncs(ptx):
+    """CTA barriers (bar.sync / barrier.sync) in a kernel's PTX."""
+    return len(re.findall(r"\b(?:bar|barrier)\.sync\b", ptx))
+
+
+def numba_bar_syncs(variant):
+    kernel = (nb_kernels.single_block_bfs_kernel if variant == "ring"
+              else nb_kernels.single_block_bfs_spill_kernel)
+    counts = sorted({bar_syncs(p) for p in kernel.inspect_asm().values()})
+    return counts[0] if len(counts) == 1 else counts
+
+
+def result_info(variant, tpb, enqueue=None):
     def info(nb, tri):
+        if enqueue is None:
+            extra_nb, extra_tri = {}, {}
+        else:
+            ck = compiled_kernel(variant, tpb, enqueue)
+            extra_nb = {"bar_sync_in_ptx": numba_bar_syncs(variant)}
+            extra_tri = {"enqueue": enqueue,
+                         "bar_sync_in_ptx": bar_syncs(ck.asm["ptx"])}
         return {
             "filled": nb.filled, "levels": nb.levels,
             "peak_level": nb.peak_level, "peak_occupancy": nb.peak_occupancy,
             "spilled": nb.spilled, "peak_spill_window": nb.peak_spill_window,
             "processed": nb.processed, "cas_attempts": nb.cas_attempts,
             "thread_util_pct": nb.thread_util_pct,
-            "numba": {"grid": [1, tpb], **numba_resources(variant)},
+            "numba": {"grid": [1, tpb], **numba_resources(variant),
+                      **extra_nb},
             "triton": {"grid": [1], "BLOCK": tpb, "num_warps": tpb // 32,
-                       **kernel_resources(compiled_kernel(variant, tpb))},
+                       **kernel_resources(compiled_kernel(
+                           variant, tpb, enqueue or "lane")),
+                       **extra_tri},
         }
     return info
 
@@ -247,11 +287,11 @@ def trip_info(nb, tri):
                        **kernel_resources(compiled_kernel("ring", TPB))}}
 
 
-def runner(ff, cache, name, variant, tpb, log):
+def runner(ff, cache, name, variant, tpb, log, **kwargs):
     def run():
         img, sx, sy = cache.get(name)
         return log.record(ff(img, sx, sy, threads_per_block=tpb,
-                             variant=variant))
+                             variant=variant, **kwargs))
     return run
 
 
@@ -299,6 +339,7 @@ def build_cases(quick=False, only=None):
     dims = {**SCENE_DIMS, **QUICK_DIMS}
     trips = QUICK_TRIP_SCENES if quick else RING_TRIP_SCENES
     sweep_scene, sweep_tpbs = QUICK_SWEEP if quick else (SWEEP_SCENE, TPB_SWEEP)
+    enq_scenes = QUICK_ENQ_SCENES if quick else ENQ_SCENES
     cache = SceneCache(table)
     cases = []
 
@@ -333,6 +374,25 @@ def build_cases(quick=False, only=None):
                                   TPB, logs["triton"]),
                 same=same_result, pixels=w * h,
                 info=result_info(variant, TPB), notes=note, extra=extra))
+        # Right after the scene's own cases, so the one-slot cache holds it.
+        if name in enq_scenes:
+            for enqueue in ("lane", "program"):
+                logs, extra = phase_logs()
+                label = ENQ_LABELS[enqueue]
+                cases.append(Case(
+                    experiment="enqueue", scene=name,
+                    config={"variant": "spill", "threads_per_block": TPB,
+                            "enqueue": enqueue, "label": label},
+                    run_numba=runner(numba_flood_fill, cache, name, "spill",
+                                     TPB, logs["numba"]),
+                    run_triton=runner(triton_flood_fill, cache, name,
+                                      "spill", TPB, logs["triton"],
+                                      enqueue=enqueue),
+                    same=same_result, pixels=w * h,
+                    info=result_info("spill", TPB, enqueue),
+                    notes=(f"{note}. v2 enqueue={enqueue!r} ({label}); "
+                           f"Numba runs its warp-aggregated v2 kernel"),
+                    extra=extra))
 
     if keep(sweep_scene):
         w, h = dims[sweep_scene]
@@ -377,6 +437,9 @@ def main(argv=None):
                       "variant": "ring"},
         "ring_trip_scenes": sorted(QUICK_TRIP_SCENES if args.quick
                                    else RING_TRIP_SCENES),
+        "enqueue": {"scenes": QUICK_ENQ_SCENES if args.quick
+                    else ENQ_SCENES,
+                    "variant": "spill", "modes": dict(ENQ_LABELS)},
         "only": sorted(only) if only else None,
         # Every benchmark scene and sweep point runs at full size; the
         # pure-Python and @njit CPU baselines are not part of this comparison.
@@ -393,8 +456,19 @@ def main(argv=None):
             "v1 ticket atomics: one per winning lane in the source on both "
             "sides; ptxas warp-aggregates both (one ATOMS per warp in Numba, "
             "one ATOMG per warp in Triton), so the executed atomic counts "
-            "match. v2: Numba aggregates per warp in the source, Triton per "
-            "program (one atomic per tier per chunk per direction).",
+            "match.",
+            "v2 enqueue: Numba aggregates per warp by hand (activemask, "
+            "popc, ffs, shfl_sync). The Triton default (enqueue=\"lane\") "
+            "issues one atomic per winning lane per tier, which ptxas "
+            "warp-aggregates into the same SASS idiom (VOTEU.ANY, POPC, one "
+            "leader ATOMG, SHFL.IDX) with no CTA barrier: both v2 kernels "
+            "carry Numba's 4 bar.sync. The scenes rows run this default.",
+            "enqueue rows: two per scene. label \"first_translation\" "
+            "(enqueue=\"program\") is the first translation, aggregated "
+            "over the program with tl.cumsum/tl.sum (40 bar.sync in the "
+            "kernel instead of 4); it is kept to measure that choice and "
+            "is not the twin's default, so leave it out of default-setting "
+            "averages. info.*.bar_sync_in_ptx counts the CTA barriers.",
             "Use speedup_kernel for Numba vs Triton. total_ms and "
             "speedup_total add host-library costs that differ by stack: "
             "CuPy's pool and lighter .set/.get calls vs Numba's fresh "
