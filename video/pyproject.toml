@@ -1,0 +1,20 @@
+[project]
+name = "flood-fill-video"
+version = "0.4.0"
+description = "Explainer video for flood-fill-cuda: CPU to GPU, chapter by chapter. Manim scenes, local TTS, ffmpeg assembly."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "elevenlabs>=2.69.0",
+    "en-core-web-sm",
+    "espeakng-loader>=0.2.4",
+    "imageio-ffmpeg>=0.6.0",
+    "kokoro>=0.9.4",
+    "manim>=0.19.1",
+    "pillow>=12.3.0",
+    "soundfile>=0.14.0",
+    "yt-dlp>=2026.8.19",
+]
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
