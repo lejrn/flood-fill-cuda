@@ -1,10 +1,11 @@
 """Numba vs Triton for chapter 5, on the chapter's own benchmark experiments.
 
 Five experiments, built from the Numba benchmarks' own scene lists,
-strides and build names (imported, so they cannot drift), plus one
-ablation of the twin itself. Every case runs at tpb = benchmark.TPB = 256
+strides and build names (imported, so they cannot drift), plus two
+ablations of the twin itself. Every case runs at tpb = benchmark.TPB = 256
 (num_warps 8) on both backends, the twin in its default lane schedule
-("independent", see kernels.py).
+("independent") and its default enqueue ("lane", see kernels.py); every
+row's config.enqueue names the twin's enqueue mode.
 
 benchmark              benchmarks/benchmark.py: every SCENES scene with merge,
                        ccl, merge_bare, ccl_bare (flood_fill) and scan, cclp
@@ -47,6 +48,24 @@ lane_schedule          The twin's two union-find schedules against the same
                        cost and stay out of the averages. lane_independent
                        rows that repeat a benchmark or seeding cell carry
                        duplicate_of=<experiment> (all 14 in the default
+                       run). Both schedules run the default enqueue.
+enqueue                The twin's two enqueue spellings against the same
+                       Numba kernel, two rows per cell: config.enqueue
+                       "lane" (label per_lane, the default every other
+                       experiment runs: one relaxed atomic per winning
+                       lane, which ptxas warp-aggregates into the SASS of
+                       Numba's _warp_enqueue_global) and "program" (label
+                       first_translation: tl.cumsum ranks and one atomic
+                       per program, 7 CTA barriers per enqueue site). The
+                       cells: the six benchmark runners on two_disks_r1400
+                       and comb_2000, ccl and cclp on asym_4000_800,
+                       lattice 1 and 16 on two_disks_r1400, each pinned to
+                       the min of the Numba and both twin capacities, the
+                       default lane schedule in both rows.
+                       first_translation rows are comparable=False with
+                       first_translation=true; per_lane rows that repeat a
+                       benchmark or seeding cell carry
+                       duplicate_of=<experiment> (all 16 in the default
                        run).
 
 same() compares only what the algorithm fixes regardless of scheduling:
@@ -87,7 +106,8 @@ seeding 36, tuning 48, png 20). From single-run timings of every config
 on the full-size scenes, about 15 minutes of GPU time at 4 repeats (the
 r128_I8 and split_I8 rows cost ~6.3 s per round over all their scenes,
 both backends); peak host RSS 2.03 GB measured on asym_4000_800 with
-both slim results alive. lane_schedule adds 28 cases, about 5 minutes.
+both slim results alive. lane_schedule adds 28 cases, about 5 minutes;
+enqueue 32 cases, about 5 minutes.
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock.compare [--quick] [--repeats N] [--experiments a,b]
@@ -118,6 +138,7 @@ from ...compare.harness import Case, arrays_equal, run_cases, spin_up
 from ...runtime import kernel_resources
 from ...runtime.bandwidth import measure_peak_bandwidth as triton_peak
 from . import flood_fill as triton_ff
+from .flood_fill import DEFAULT_ENQ, ENQ_MODES
 
 CHAPTER = "ch05_gpu_nblob_nblock"
 # Even, so each backend runs first in half the rounds (the harness rounds
@@ -125,7 +146,7 @@ CHAPTER = "ch05_gpu_nblob_nblock"
 DEFAULT_REPEATS = 4
 TPB = nb_bench.TPB
 EXPERIMENTS = ("benchmark", "benchmark_blocks_none", "seeding", "tuning",
-               "png", "lane_schedule")
+               "png", "lane_schedule", "enqueue")
 
 # The benchmark's runners: name -> ("ff", flood_fill kwargs) or
 # ("probe", discovery_only variant)
@@ -200,6 +221,12 @@ METHOD_NOTES = [
     "experiment's first_translation rows (lane_sched 'lockstep', "
     "comparable=false, first_translation=true). Its lane_independent rows "
     "that repeat a benchmark or seeding cell carry duplicate_of=<experiment>",
+    "every row's config.enqueue names the twin's enqueue mode: 'lane' (the "
+    "default, meta.enqueue_default) everywhere except the enqueue "
+    "experiment's first_translation rows ('program': tl.sum + tl.cumsum over "
+    "the program and one atomic, the first translation; comparable=false, "
+    "first_translation=true). The enqueue experiment's per_lane rows that "
+    "repeat a benchmark or seeding cell carry duplicate_of=<experiment>",
     "seeding and the benchmark pin each kernel to min(Numba, Triton "
     "capacity); tuning and png launch blocks=None like tuning.py and "
     "png_inputs.py, so the fused lattice build runs Numba's 24-block grid "
@@ -398,7 +425,7 @@ def _slim(r, log):
 
 
 def _ff_runner(drv, slot, scene, kw, blocks, log, **extra):
-    """extra: twin-only keywords (lane_schedule)."""
+    """extra: twin-only keywords (lane_schedule, enqueue)."""
     def run():
         img = slot.get(scene)
         r = drv.flood_fill(img, threads_per_block=TPB, blocks=blocks, **kw,
@@ -510,7 +537,8 @@ def make_case(experiment, slot, scene, name, kind, spec, pinned, notes=""):
         same, info = make_same(spec, pinned), ff_info
         config = {"runner": name, **spec}
     config.update({"tpb": TPB, "num_warps": TPB // 32,
-                   "blocks": "None" if blocks is None else int(blocks)})
+                   "blocks": "None" if blocks is None else int(blocks),
+                   "enqueue": DEFAULT_ENQ})
     if blocks is None:
         config["resolved_blocks"] = dict(caps)
     extra = {"caps": caps, **res, "runs": runs}
@@ -636,7 +664,8 @@ def lane_case(slot, scene, name, kind, spec, sched, notes=""):
         tres = triton_ff.kernel_info(threads_per_block=TPB,
                                      lane_schedule=sched, **spec)
     config.update({"tpb": TPB, "num_warps": TPB // 32, "blocks": int(blocks),
-                   "lane_sched": sched, "label": LANE_LABELS[sched]})
+                   "lane_sched": sched, "label": LANE_LABELS[sched],
+                   "enqueue": DEFAULT_ENQ})
     extra = {"caps": caps, "numba_resources": nres,
              "triton_resources": tres, "runs": runs}
     default = sched == triton_ff.DEFAULT_LANE_SCHEDULE
@@ -666,28 +695,131 @@ def lane_schedule_cases(slot, scene_list, quick):
     return out
 
 
+# The keys an ablation varies (and its row label): a cell is the scene and
+# the config without them.
+_ABLATION_KEYS = ("lane_sched", "label", "enqueue")
+
+
 def _cell_key(case):
-    cfg = {k: v for k, v in case.config.items()
-           if k not in ("lane_sched", "label")}
+    cfg = {k: v for k, v in case.config.items() if k not in _ABLATION_KEYS}
     return case.scene, json.dumps(cfg, sort_keys=True)
 
 
-def mark_repeated_cells(earlier, lane_rows):
-    """Tag each lane_independent row whose cell (scene and config, the
-    schedule keys aside) an earlier experiment already measures with
+def _is_default(case):
+    """The twin runs its default lane schedule and enqueue in this row."""
+    cfg = case.config
+    return (cfg.get("lane_sched", triton_ff.DEFAULT_LANE_SCHEDULE)
+            == triton_ff.DEFAULT_LANE_SCHEDULE
+            and cfg.get("enqueue", DEFAULT_ENQ) == DEFAULT_ENQ)
+
+
+def mark_repeated_cells(earlier, ablation_rows):
+    """Tag each default row of an ablation experiment (lane_independent,
+    per_lane) whose cell (scene and config, the ablation keys aside) an
+    earlier experiment already measures with the twin's defaults with
     duplicate_of=<that experiment>, so a unit-wide average counts each
-    cell once. Returns the tagged count."""
+    cell once. A row already tagged is never a cell's first measurement.
+    Returns the tagged count."""
     seen = {}
     for c in earlier:
-        seen.setdefault(_cell_key(c), c.experiment)
+        if _is_default(c) and not c.extra.get("duplicate_of"):
+            seen.setdefault(_cell_key(c), c.experiment)
     tagged = 0
-    for c in lane_rows:
-        if c.config["lane_sched"] == triton_ff.DEFAULT_LANE_SCHEDULE:
+    for c in ablation_rows:
+        if _is_default(c):
             hit = seen.get(_cell_key(c))
             if hit is not None:
                 c.extra["duplicate_of"] = hit
                 tagged += 1
     return tagged
+
+
+# ------------------------------------------------------- enqueue ablation
+
+# The six benchmark runners on a solid scene where many waves collide
+# (two_disks_r1400) and on a thin, deep one (comb_2000); ccl and cclp on
+# the largest scene, where ccl_fill lost the most; lattice 1 (every red
+# pixel is a candidate, so P1 enqueues them all) and 16 (a sparse
+# lattice) from seeding.
+ENQ_CONFIGS = tuple(
+    [(name, kind, spec, ("two_disks_r1400", "comb_2000")
+      + (("asym_4000_800",) if name in ("ccl", "cclp") else ()))
+     for name, (kind, spec) in BENCH_RUNNERS.items()]
+    + [(f"S{s}", "ff", {"variant": "seed_merge", "lattice": s},
+        ("two_disks_r1400",)) for s in (1, 16)])
+assert len({name for name, *_ in ENQ_CONFIGS}) == len(ENQ_CONFIGS)
+assert {s for *_, sc in ENQ_CONFIGS for s in sc} <= {
+    n for n, _, _ in nb_bench.SCENES}
+ENQ_LABELS = {"lane": "per_lane", "program": "first_translation"}
+assert set(ENQ_LABELS) == set(ENQ_MODES)
+
+
+def _enq_caps(kind, spec):
+    """Cooperative capacity of the cell's kernel on Numba and on both twin
+    enqueue modes (each mode is its own compile), default lane schedule."""
+    caps = {"numba": facts(kind, spec)[0]["numba"]}
+    for enq in ENQ_MODES:
+        if kind == "probe":
+            key, comp = triton_ff.phase_kernel(spec, TPB, enqueue=enq)
+            caps[enq] = triton_ff._coop_max_blocks(key, comp)
+        else:
+            caps[enq] = triton_ff.max_blocks(threads_per_block=TPB,
+                                             enqueue=enq, **spec)
+    return caps
+
+
+def enqueue_case(slot, scene, name, kind, spec, enq, notes=""):
+    """One row of the enqueue experiment: Numba against the twin in enqueue
+    mode `enq` (default lane schedule), on the grid Numba and both modes
+    can host."""
+    caps = _enq_caps(kind, spec)
+    blocks = min(caps.values())
+    runs = {"numba": [], "triton": []}
+    nres = facts(kind, spec)[1]["numba_resources"]
+    if kind == "probe":
+        rn = _probe_runner(numba_ff, slot, scene, spec, blocks,
+                           runs["numba"])
+        rt = _probe_runner(triton_ff, slot, scene, spec, blocks,
+                           runs["triton"], enqueue=enq)
+        same, info = same_probe, probe_info
+        config = {"runner": name, "probe": spec}
+        tres = kernel_resources(triton_ff.phase_kernel(
+            spec, TPB, enqueue=enq)[1])
+    else:
+        rn = _ff_runner(numba_ff, slot, scene, spec, blocks, runs["numba"])
+        rt = _ff_runner(triton_ff, slot, scene, spec, blocks,
+                        runs["triton"], enqueue=enq)
+        same, info = make_same(spec, True), ff_info
+        config = {"runner": name, **spec}
+        tres = triton_ff.kernel_info(threads_per_block=TPB, enqueue=enq,
+                                     **spec)
+    config.update({"tpb": TPB, "num_warps": TPB // 32, "blocks": int(blocks),
+                   "lane_sched": triton_ff.DEFAULT_LANE_SCHEDULE,
+                   "enqueue": enq, "label": ENQ_LABELS[enq]})
+    extra = {"caps": caps, "numba_resources": nres,
+             "triton_resources": tres, "runs": runs}
+    default = enq == DEFAULT_ENQ
+    if not default:
+        extra["first_translation"] = True
+    return Case(experiment="enqueue", scene=scene, config=config,
+                run_numba=rn, run_triton=rt, same=same,
+                pixels=slot.pixels(scene), info=info, notes=notes,
+                extra=extra, comparable=default)
+
+
+def enqueue_cases(slot, scene_list, quick):
+    """Both enqueue modes per cell, the default first. Quick mode runs every
+    config on every (tiny) scene."""
+    out = []
+    for sname, _, note in scene_list:
+        for name, kind, spec, scenes_for in ENQ_CONFIGS:
+            if not quick and sname not in scenes_for:
+                continue
+            for enq in (DEFAULT_ENQ,) + tuple(
+                    e for e in ENQ_MODES if e != DEFAULT_ENQ):
+                out.append(enqueue_case(slot, sname, name, kind, spec, enq,
+                                        notes=note))
+    return out
 
 
 def build(quick, experiments):
@@ -731,6 +863,17 @@ def build(quick, experiments):
                       if c.config["lane_sched"]
                       == triton_ff.DEFAULT_LANE_SCHEDULE],
             "duplicate_rows": tagged}
+    if "enqueue" in experiments:
+        enq = enqueue_cases(slot, scene_list, quick)
+        tagged = mark_repeated_cells(cases, enq)
+        cases += enq
+        meta_exp["enqueue"] = {
+            "modes": list(ENQ_MODES), "default": DEFAULT_ENQ,
+            "labels": ENQ_LABELS,
+            "lane_sched": triton_ff.DEFAULT_LANE_SCHEDULE,
+            "cells": [[c.scene, c.config["runner"], c.config["blocks"]]
+                      for c in enq if c.config["enqueue"] == DEFAULT_ENQ],
+            "duplicate_rows": tagged}
     slot.release()  # the cases rebuild each scene when they run
 
     capacity = {}
@@ -741,6 +884,7 @@ def build(quick, experiments):
     meta = {
         "caps": [] if quick else CAPS,
         "lane_schedule_default": triton_ff.DEFAULT_LANE_SCHEDULE,
+        "enqueue_default": DEFAULT_ENQ,
         "method_notes": METHOD_NOTES,
         "quick": quick,
         "scope": SCOPE,
