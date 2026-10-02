@@ -13,7 +13,7 @@ work on both sides:
 - profile_kernel passes new_color as a host array. Numba then allocates it
   with cuMemAlloc, copies it in, launches and copies it back synchronously;
   the twin's cp.asarray / .get(out=) does the same steps through CuPy's
-  pool, at about half the cost.
+  pool, at a lower cost.
 
 Like-for-like rows (comparable, the primary comparison):
 - profile_kernel:  a fresh seeded scene per round.
@@ -25,12 +25,20 @@ Like-for-like rows (comparable, the primary comparison):
 
 Reference rows (comparable=False, the profile_kernel scenes):
 - profile_kernel_with_printf: the Numba kernel as written (with its printf),
-  device new_color. Its Numba time minus profile_kernel's is the printf.
+  device new_color.
 - profile_kernel_as_written: profile_kernel's exact call: the printf, and
-  new_color as a host array on both sides. Minus the with_printf row, it
-  gives each stack's host-array round trip.
-The medians of these differences are logged and stored in the JSON's
-meta["decomposition"].
+  new_color as a host array on both sides.
+
+The two costs themselves (the printf's share of Numba's kernel_ms and each
+stack's host new_color round trip) are NOT taken as differences between
+rows: the rows run minutes apart, and one block lets the GPU clock down,
+so the drift between rows is as large as the costs. After the rows, one
+interleaved loop runs six variants back to back on one scene every round
+(Numba with / without the printf x host / device new_color, Triton host /
+device new_color; the order rotates every round), with the rows' own
+runners and brackets. Its medians and within-round differences are logged
+and stored in the JSON's meta["decomposition"]; the row differences are
+kept there too, labelled approximate.
 
 Every row's info also holds device_us: the GPU-only time of one launch per
 backend (CUDA events, with a copy queued ahead so launch latency is hidden),
@@ -55,8 +63,10 @@ Run (writes results/triton_twins/ch00_cpu_baseline/compare_<UTC>.json):
     .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch00_cpu_baseline.compare
     .venv/bin/python -m flood_fill_cuda.triton_twins.chapters.ch00_cpu_baseline.compare --quick
 
---quick is a smoke test (2 rounds per row, no JSON). --repeats N sets the
-rounds of every case (default 100, profile_kernel's num_runs).
+--quick is a smoke test (2 rounds per row, one rotation of the
+decomposition, no JSON). --repeats N sets the rounds of every case
+(default 100, profile_kernel's num_runs); --decomposition-rounds N sets the
+interleaved loop's rounds (default 300, 0 skips it).
 """
 
 import os
@@ -79,7 +89,7 @@ import numpy as np
 from flood_fill_cuda.chapters.ch00_cpu_baseline import single_block as numba_proto
 from flood_fill_cuda.shared.cpu_oracle import cpu_flood_fill_8
 from flood_fill_cuda.triton_twins.compare.harness import (
-    Case, arrays_equal, run_cases, spin_up,
+    Case, arrays_equal, free_device_memory, gpu_clocks, run_cases, spin_up,
 )
 from flood_fill_cuda.triton_twins.runtime import kernel_resources, sync
 
@@ -94,6 +104,8 @@ PROFILE_SEED = 1000     # warm-up scene 1000, round r scene 1001 + r
 WIDTH = HEIGHT = 400
 DEVICE_ROUNDS = 20      # event-timed launches per backend, per case
 CASE_SPIN_SECONDS = 2.0
+DECOMP_ROUNDS = 300     # interleaved rounds of the cost decomposition
+DECOMP_SEED = 0         # its scene: fixed_scene's
 
 _libc = ctypes.CDLL(None)
 
@@ -327,12 +339,12 @@ PLAN = [  # (experiment, seed, fixed, numba printf, device new_color, comparable
     ("fixed_scene", 0, True, False, True, True,
      "setup_scene(rng_seed=0) every round, like for like (as profile_kernel)"),
     ("profile_kernel_with_printf", PROFILE_SEED, False, True, True, False,
-     "reference: the Numba kernel as written, with its exit printf; Numba "
-     "minus profile_kernel's Numba = the printf's share"),
+     "reference: the Numba kernel as written, with its exit printf (its "
+     "share is measured interleaved: meta.decomposition)"),
     ("profile_kernel_as_written", PROFILE_SEED, False, True, False, False,
      "reference: profile_kernel's exact call, printf and host new_color "
-     "(implicit round trip on both sides); minus profile_kernel_with_printf "
-     "= each stack's host-array round trip"),
+     "(implicit round trip on both sides; each stack's round trip is "
+     "measured interleaved: meta.decomposition)"),
 ]
 
 
@@ -359,9 +371,110 @@ def build_cases(quick=False):
     return cases
 
 
-def decomposition(rows):
-    """Median differences between the rows (ms): the printf's share of
-    Numba's kernel_ms and each stack's host new_color round trip."""
+DECOMP_VARIANTS = (  # (name, backend, Numba exit printf, device new_color)
+    ("numba_noprint_device", "numba", False, True),
+    ("numba_printf_device", "numba", True, True),
+    ("numba_noprint_host", "numba", False, False),
+    ("numba_printf_host", "numba", True, False),
+    ("triton_device", "triton", None, True),
+    ("triton_host", "triton", None, False),
+)
+
+# (key, minuend, subtrahend): each cost is one variant minus another.
+DECOMP_COSTS = (
+    ("numba_exit_printf_ms", "numba_printf_device", "numba_noprint_device"),
+    ("numba_exit_printf_ms_host_color", "numba_printf_host",
+     "numba_noprint_host"),
+    ("numba_host_new_color_round_trip_ms", "numba_noprint_host",
+     "numba_noprint_device"),
+    ("numba_host_new_color_round_trip_ms_with_printf", "numba_printf_host",
+     "numba_printf_device"),
+    ("triton_host_new_color_round_trip_ms", "triton_host", "triton_device"),
+)
+
+
+def measure_decomposition(rounds, spin_seconds, seed=DECOMP_SEED):
+    """The printf's share of Numba's kernel_ms and each stack's host
+    new_color round trip, measured interleaved on one scene.
+
+    Every round runs the six DECOMP_VARIANTS back to back on
+    setup_scene(seed), with the rows' own runners (numba_side,
+    triton_side) and so the rows' brackets; the order rotates every round,
+    so each variant takes each slot equally often. A cost is one variant
+    minus another: reported as the median and quartiles of the within-round
+    differences (paired_ms, paired_iqr_ms: the drift between rounds
+    cancels) and as the difference of the two medians (diff_of_medians_ms,
+    noisier). The costs themselves scale with the clock, so they vary from
+    run to run; clocks_after records it. Outputs are checked every round."""
+    scene = setup_scene(seed)
+    img, _, sx, sy = scene[:4]
+    filled = cpu_flood_fill_8(img, sx, sy)[3]
+    if filled > QUEUE_CAPACITY:  # Numba would read out of bounds
+        raise RuntimeError(f"scene {seed} has {filled} px, over the queue")
+    runners = {}
+    for name, backend, printf, device_color in DECOMP_VARIANTS:
+        if backend == "numba":
+            kernel = (numba_proto.flood_fill if printf
+                      else numba_noprint_kernel())
+            runners[name] = numba_side(kernel, device_color)
+        else:
+            runners[name] = triton_side(device_color)
+    names = [v[0] for v in DECOMP_VARIANTS]
+    for name in names:  # compiles and per-case uploads stay off the clock
+        runners[name](scene)
+    if spin_seconds > 0:
+        spin_up(spin_seconds)
+    times = {name: [] for name in names}
+    mismatches, detail = 0, ""
+    for r in range(rounds):
+        shift = r % len(names)
+        got = {}
+        for name in names[shift:] + names[:shift]:
+            got[name] = runners[name](scene)
+            times[name].append(float(got[name].kernel_ms))
+        for name in names:
+            if name != "triton_device":
+                ok, d = same_run(got[name], got["triton_device"])
+                if not ok:
+                    mismatches += 1
+                    detail = detail or f"{name}: {d}"
+        del got
+    clocks = gpu_clocks()
+    free_device_memory()
+
+    medians = {name: statistics.median(v) for name, v in times.items()}
+    costs = {}
+    for key, a, b in DECOMP_COSTS:
+        diffs = [x - y for x, y in zip(times[a], times[b])]
+        quartiles = (statistics.quantiles(diffs, n=4) if len(diffs) > 1
+                     else diffs * 3)
+        costs[key] = {
+            "paired_ms": statistics.median(diffs),
+            "paired_iqr_ms": [quartiles[0], quartiles[2]],
+            "diff_of_medians_ms": medians[a] - medians[b],
+            "variants": [a, b]}
+    return {
+        "method": ("interleaved: every round runs the six variants back to "
+                   "back on one scene, order rotating; costs are within-round "
+                   "differences of kernel_ms (median), so clock drift "
+                   "cancels; device_us in each row's info gives the GPU-only "
+                   "time"),
+        "scene": f"random_walk_400 seed {seed}",
+        "rounds": rounds,
+        "medians_ms": medians,
+        **costs,
+        "outputs_equal": mismatches == 0,
+        "mismatched_checks": mismatches,
+        **({"mismatch_detail": detail} if detail else {}),
+        "clocks_after": clocks,
+    }
+
+
+def row_differences(rows):
+    """The same costs as differences of kernel_ms medians between rows.
+    Approximate: the rows run minutes apart at different clocks (one block
+    lets the GPU clock down), so the drift is as large as the costs. Kept
+    as a cross-check of measure_decomposition."""
     by = {r["experiment"]: r for r in rows}
     need = ("profile_kernel", "profile_kernel_with_printf",
             "profile_kernel_as_written")
@@ -372,27 +485,33 @@ def decomposition(rows):
         return by[name][side]["kernel_ms"]["median"]
 
     return {
+        "approximate": True,
+        "note": ("differences of kernel_ms medians between rows run minutes "
+                 "apart: confounded by the clock drift between them; the "
+                 "interleaved figures above are the measurement"),
         "numba_exit_printf_ms": (med("profile_kernel_with_printf", "numba")
                                  - med("profile_kernel", "numba")),
         "host_new_color_round_trip_ms": {
             side: (med("profile_kernel_as_written", side)
                    - med("profile_kernel_with_printf", side))
             for side in ("numba", "triton")},
-        "method": ("differences of kernel_ms medians between rows on the same "
-                   "seeded scenes; device_us in each row's info gives the "
-                   "GPU-only part"),
     }
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--quick", action="store_true",
-                    help="smoke test: 2 rounds per row, no JSON")
+                    help="smoke test: 2 rounds per row, one rotation of "
+                         "the decomposition, no JSON")
     ap.add_argument("--repeats", type=int, default=None,
                     help=f"timed rounds per case (default {NUM_RUNS}, "
                          f"profile_kernel's num_runs)")
     ap.add_argument("--no-write", action="store_true",
                     help="do not write the comparison JSON")
+    ap.add_argument("--decomposition-rounds", type=int, default=None,
+                    help=f"interleaved rounds of the printf / round-trip "
+                         f"decomposition (default {DECOMP_ROUNDS}, --quick "
+                         f"{len(DECOMP_VARIANTS)}; 0 skips it)")
     args = ap.parse_args(argv)
 
     cases = build_cases(quick=args.quick)
@@ -417,8 +536,11 @@ def main(argv=None):
             "profile_kernel_as_written (printf + host new_color on both "
             "sides). Numba's implicit host-array transfer allocates with "
             "cuMemAlloc and copies synchronously; the twin's goes through "
-            "CuPy's pool, so the same steps cost Numba about twice as much. "
-            "meta.decomposition holds the measured differences.",
+            "CuPy's pool, so the same steps cost Numba more. "
+            "meta.decomposition measures the printf's share and each "
+            "stack's round trip interleaved (six variants back to back on "
+            "one scene every round), not as differences between rows, "
+            "which run minutes apart at different clocks.",
             "Numba's 6000-slot queue and scalars are shared memory; the "
             "twin's live in a preallocated global scratch (Triton has no "
             "user-addressable shared memory). Per-lane rear atomics on both "
@@ -436,12 +558,28 @@ def main(argv=None):
     write = not (args.quick or args.no_write)
     doc = run_cases(CHAPTER, cases, repeats=repeats, meta=meta, write=write,
                     spin_seconds=0 if args.quick else 8.0)
-    decomp = decomposition(doc["rows"])
-    if decomp is not None:
-        rt = decomp["host_new_color_round_trip_ms"]
-        print(f"decomposition: Numba exit printf "
-              f"{decomp['numba_exit_printf_ms']:+.3f} ms; host new_color round "
-              f"trip numba {rt['numba']:+.3f} ms, triton {rt['triton']:+.3f} ms")
+    rounds = args.decomposition_rounds
+    if rounds is None:
+        rounds = len(DECOMP_VARIANTS) if args.quick else DECOMP_ROUNDS
+    if rounds > 0:
+        try:
+            decomp = measure_decomposition(
+                rounds, 0 if args.quick else CASE_SPIN_SECONDS)
+        except Exception as exc:  # recorded, not hidden
+            decomp = {"error": f"{type(exc).__name__}: {exc}"}
+            print(f"decomposition: ERROR {decomp['error']}")
+        else:
+            print(f"decomposition ({rounds} interleaved rounds, within-round "
+                  f"medians): Numba exit printf "
+                  f"{decomp['numba_exit_printf_ms']['paired_ms']:+.3f} ms; "
+                  f"host new_color round trip numba "
+                  f"{decomp['numba_host_new_color_round_trip_ms']['paired_ms']:+.3f}"
+                  f" ms, triton "
+                  f"{decomp['triton_host_new_color_round_trip_ms']['paired_ms']:+.3f}"
+                  f" ms; outputs equal={decomp['outputs_equal']}")
+        approx = row_differences(doc["rows"])
+        if approx is not None:
+            decomp["row_differences"] = approx
         doc["meta"]["decomposition"] = decomp
         if "path" in doc:  # add it to the JSON run_cases wrote
             path = doc.pop("path")

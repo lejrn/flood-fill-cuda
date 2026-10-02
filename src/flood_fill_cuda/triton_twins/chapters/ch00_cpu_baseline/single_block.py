@@ -268,8 +268,9 @@ def _launch(d_img, d_visited, start_x, start_y, width, height, new_color,
     host-array transfer); the twin does the same steps (cp.asarray, then
     .get(out=new_color)). The steps match, the cost does not: Numba's
     transfer allocates with cuMemAlloc and copies synchronously, CuPy's
-    comes from its pool, so the round trip costs Numba about twice as much
-    (see the README). A CuPy new_color stays on the device: no round trip.
+    comes from its pool, so the round trip costs Numba two to three times
+    as much (see the README). A CuPy new_color stays on the device: no
+    round trip.
     """
     _check_launch(threads_per_block, blocks_per_grid)
     d_queue, d_state = _scratch()
