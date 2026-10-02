@@ -12,9 +12,11 @@ variant="spill" - v2: two-tier frontier (ring + global spill tier sized
                   width*height, so it cannot overflow) with a
                   program-aggregated enqueue.
 
-Same validation (plus one Triton rule: threads_per_block must be a power of
-2, because num_warps = threads_per_block // 32 and tl.arange lengths must
-be powers of 2), the same one-program launch, the same overflow tripwire,
+Same validation in the same order (plus one Triton rule, checked last:
+threads_per_block must be a power of 2, because num_warps =
+threads_per_block // 32 and tl.arange lengths must be powers of 2), the
+same accepted seed types (NumPy integers are converted to int before the
+launch), the same one-program launch, the same overflow tripwire,
 and the same timing decomposition (alloc / H2D / kernel / D2H / total with
 time.perf_counter and a device synchronize closing each phase). CuPy arrays
 replace Numba device arrays. The ring and its scalars, shared memory in
@@ -24,6 +26,7 @@ The result is the Numba driver's FloodFillResult itself, so every field
 name and meaning is shared.
 """
 
+import operator
 import time
 
 import cupy as cp
@@ -120,13 +123,19 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, variant="ring"):
         raise ValueError(
             f"threads_per_block must be a multiple of 32 in [32, 1024], "
             f"got {threads_per_block}")
+    if variant not in ("ring", "spill"):
+        raise ValueError(f'variant must be "ring" or "spill", got {variant!r}')
+    # The Triton-only rule comes last, so every check shared with Numba
+    # fires in Numba's order.
     if threads_per_block & (threads_per_block - 1):
         raise ValueError(
             f"threads_per_block must be a power of 2 for the Triton twin "
             f"(num_warps = threads_per_block // 32 and tl.arange lengths must "
             f"be powers of 2), got {threads_per_block}")
-    if variant not in ("ring", "spill"):
-        raise ValueError(f'variant must be "ring" or "spill", got {variant!r}')
+    # Numba types NumPy integer seeds (np.int32, np.int64, ...) as kernel
+    # args; Triton's launcher cannot specialize NumPy scalars. The seeds
+    # already indexed img_host above, so they are integers.
+    seed_x, seed_y = operator.index(seed_x), operator.index(seed_y)
 
     _warmup(variant, threads_per_block)
     device = device_info()

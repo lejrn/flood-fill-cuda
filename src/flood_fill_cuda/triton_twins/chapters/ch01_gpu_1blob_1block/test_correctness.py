@@ -341,6 +341,27 @@ def test_cross_backend_tpb_768_numba_accepts_triton_rejects():
         flood_fill(img, sx, sy, threads_per_block=768, variant="spill")
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed_type", [np.int32, np.int64])
+def test_cross_backend_numpy_int_seeds(seed_type, variant):
+    """Seeds taken from NumPy (np.argwhere, arrays) work on both backends:
+    Numba types them as kernel args, the twin converts them to int."""
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    tri = flood_fill(img, seed_type(sx), seed_type(sy), variant=variant)
+    nb = numba_flood_fill(img, seed_type(sx), seed_type(sy), variant=variant)
+    assert tri.filled == 400
+    assert_same_as_numba(tri, nb)
+
+
+def test_cross_backend_check_order_matches_numba():
+    """With two bad inputs, the twin raises the same error as Numba: the
+    checks they share run in Numba's order, the power-of-2 rule last."""
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    for ff in (flood_fill, numba_flood_fill):
+        with pytest.raises(ValueError, match="variant must be"):
+            ff(img, sx, sy, threads_per_block=96, variant="turbo")
+
+
 def test_cross_backend_no_recompile_inside_timing():
     """After the warm-up, scenes of other sizes and seeds reuse the compiled
     kernel, so no Triton compile ever lands inside kernel_ms."""
