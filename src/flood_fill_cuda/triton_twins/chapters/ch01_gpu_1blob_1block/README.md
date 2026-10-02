@@ -203,6 +203,13 @@ The compare runs at full scene size (up to the 36M px `sq_6000_center`).
   `first_translation: true`, as in ch02-ch04, so the summary's
   like-for-like averages and extremes leave them out. The `per_lane` rows
   repeat the `scenes` spill rows of the same scenes.
+- **Repeated cells.** A like-for-like row that measures a cell (scene,
+  variant, threads per block, enqueue) an earlier experiment already
+  measures carries `duplicate_of: "<that experiment>"`, as in ch03: the
+  `per_lane` enqueue rows and the 256-thread `tpb_sweep` row (the `scenes`
+  ring row of `sq_2000_center`). They stay comparable, so each
+  experiment's own average keeps them. A unit-wide average should skip
+  them to weigh each cell once; `meta.repeated_cells` counts them.
 - **`--quick`** uses three small scenes plus the 2600x2600 tripwire scene.
   Overflowing the 8192-slot ring needs a frontier above 8192 pixels, so it
   is the only quick case for the spill tier and the tripwire (about 3 s).

@@ -14,7 +14,9 @@ The cases mirror chapters/ch01_gpu_1blob_1block/benchmarks/benchmark.py:
                  perf_counter stamps; total_ms is the driver's bracket from
                  its first stamp to the RuntimeError.
 - tpb_sweep:     the benchmark's threads-per-block sweep (64..1024) on
-                 sq_2000_center with the default "ring" kernel.
+                 sq_2000_center with the default "ring" kernel. Its
+                 256-thread row repeats the scenes ring row of that scene
+                 and carries duplicate_of="scenes" (see below).
 - enqueue:       the v2 "spill" kernel's two enqueue forms on representative
                  scenes (one-pixel frontiers, a ring-sized square, the big
                  corner square, the spill scenes), two rows per scene:
@@ -30,6 +32,13 @@ The cases mirror chapters/ch01_gpu_1blob_1block/benchmarks/benchmark.py:
                  first_translation=true, as in ch02-ch04: they stay out of
                  the like-for-like averages and extremes of summary.py and
                  figures.py.
+
+A like-for-like row whose cell (scene, variant, threads per block,
+enqueue) an earlier experiment already measures carries
+duplicate_of=<that experiment>, as in ch03: the per_lane enqueue rows and
+the 256-thread tpb_sweep row. They stay comparable, so each experiment's
+own average keeps them, but a unit-wide average should skip them to weigh
+each cell once. meta.repeated_cells counts them.
 
 Both backends always run the same configuration: one block = one program,
 the same threads per block (Triton num_warps = tpb // 32). The CPU
@@ -342,6 +351,33 @@ def phase_logs():
     return logs, {"phases_ms": {k: v.out for k, v in logs.items()}}
 
 
+def repeated_cell(case):
+    """What a row times: the scene and the kernel configuration."""
+    cfg = case.config
+    return (case.scene, cfg["variant"], cfg["threads_per_block"],
+            cfg.get("enqueue", DEFAULT_ENQ))
+
+
+def mark_repeated_cells(cases):
+    """Tag each like-for-like row whose cell (scene, variant, threads per
+    block, enqueue) an earlier experiment already measures with
+    duplicate_of=<that experiment>, as ch03 does. In ch01 these are the
+    per_lane enqueue rows (the scenes spill rows again) and the tpb_sweep
+    row at 256 threads (the scenes ring row of its scene). They stay
+    comparable, since their own experiment's average needs them, but a
+    unit-wide average should skip them to weigh each cell once. Returns
+    the tagged count."""
+    seen, tagged = {}, 0
+    for c in cases:
+        if not c.comparable:
+            continue
+        first = seen.setdefault(repeated_cell(c), c.experiment)
+        if first != c.experiment:
+            c.extra["duplicate_of"] = first
+            tagged += 1
+    return tagged
+
+
 def build_cases(quick=False, only=None):
     table = QUICK_SCENES if quick else nb_bench.SCENES
     dims = {**SCENE_DIMS, **QUICK_DIMS}
@@ -424,6 +460,7 @@ def build_cases(quick=False, only=None):
                 info=result_info("ring", tpb),
                 notes="the benchmark's threads-per-block sweep (ring kernel)",
                 extra=extra))
+    mark_repeated_cells(cases)
     return cases
 
 
@@ -457,6 +494,7 @@ def main(argv=None):
                     "variant": "spill", "labels": dict(ENQ_LABELS),
                     "default": DEFAULT_ENQ},
         "triton_enqueue_default": DEFAULT_ENQ,
+        "repeated_cells": sum("duplicate_of" in c.extra for c in cases),
         "only": sorted(only) if only else None,
         # Every benchmark scene and sweep point runs at full size; the
         # pure-Python and @njit CPU baselines are not part of this comparison.
@@ -490,6 +528,13 @@ def main(argv=None):
             "first_translation=true, so the like-for-like averages and "
             "extremes leave them out. info.*.bar_sync_in_ptx counts the "
             "CTA barriers.",
+            "Repeated cells: a like-for-like row whose (scene, variant, "
+            "threads_per_block, enqueue) an earlier experiment already "
+            "measures carries duplicate_of=<that experiment> (the per_lane "
+            "enqueue rows and the 256-thread tpb_sweep row; count in "
+            "repeated_cells). They stay comparable for their own "
+            "experiment's average; a unit-wide average should skip them to "
+            "weigh each cell once.",
             "Use speedup_kernel for Numba vs Triton. total_ms and "
             "speedup_total add host-library costs that differ by stack: "
             "CuPy's pool and lighter .set/.get calls vs Numba's fresh "

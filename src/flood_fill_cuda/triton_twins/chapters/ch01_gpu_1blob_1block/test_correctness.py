@@ -24,7 +24,8 @@ center-seeded squares at the ring/spill window edge (0, 2, 14 and 2,702
 spilled pixels) at 32, 256 and 1024 threads. It also pins every default
 to "lane" (at the launch itself) and checks the codegen claim: the
 default kernels carry Numba's CTA barrier count and every enqueue atomic
-is warp-aggregated by ptxas in the SASS.
+is warp-aggregated by ptxas in the SASS. test_compare_marks_repeated_cells
+checks which compare.py rows carry duplicate_of.
 
 Run:
 
@@ -670,3 +671,29 @@ def test_program_enqueue_adds_cta_barriers():
     from .flood_fill import compiled_kernel
     ptx = compiled_kernel("spill", 256, "program").asm["ptx"]
     assert len(re.findall(r"\bbar\.sync\b", ptx)) > 4 * 4
+
+
+@pytest.mark.parametrize("quick", [True, False])
+def test_compare_marks_repeated_cells(quick):
+    """compare.py tags exactly the like-for-like rows that repeat an earlier
+    experiment's cell (per_lane enqueue rows, the 256-thread sweep row) with
+    duplicate_of, never a first_translation row; skipping the tagged rows
+    leaves every comparable cell measured once. Builds the cases only."""
+    from . import compare as cmp
+    cases = cmp.build_cases(quick=quick)
+    enq_scenes = cmp.QUICK_ENQ_SCENES if quick else cmp.ENQ_SCENES
+    sweep_scene, sweep_tpbs = (cmp.QUICK_SWEEP if quick
+                               else (cmp.SWEEP_SCENE, cmp.TPB_SWEEP))
+    expected = {("enqueue", s, "spill", cmp.TPB): "scenes"
+                for s in enq_scenes}
+    if cmp.TPB in sweep_tpbs:
+        expected[("tpb_sweep", sweep_scene, "ring", cmp.TPB)] = "scenes"
+    tagged = {(c.experiment, c.scene, c.config["variant"],
+               c.config["threads_per_block"]): c.extra["duplicate_of"]
+              for c in cases if "duplicate_of" in c.extra}
+    assert tagged == expected
+    assert not any(c.extra.get("first_translation") and
+                   "duplicate_of" in c.extra for c in cases)
+    cells = [cmp.repeated_cell(c) for c in cases
+             if c.comparable and "duplicate_of" not in c.extra]
+    assert len(cells) == len(set(cells))
