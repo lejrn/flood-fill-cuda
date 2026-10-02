@@ -82,7 +82,7 @@ class BlobCounter(VGroup):
         self.line = VMobject(stroke_color=TEAL, stroke_width=2)
         self.dot = Dot(radius=0.035, color=TEAL)
         self.add(self.backdrop, self.base, self.top_line, ticks, self.line, self.dot, self.text)
-        self.draw(0)
+        self.draw(self.replay.t * self.replay.fps)
         self.add_updater(lambda m, dt: m.draw(self.replay.t * self.replay.fps))
 
     def fmt(self, i: int) -> str:
@@ -200,7 +200,12 @@ class Intro(BeatScene):
         meta = json.loads((ASSETS / "drones_labels" / "meta.json").read_text(encoding="utf-8"))
         counter = BlobCounter(gpu, meta["blobs_per_frame"],
                               np.array([COL_X[3], ROW_Y - PH / 2 + 0.62, 0.0]), PW - 0.16)
+        # FadeIn is a Transform: it pairs glyphs once, at its start, so a count
+        # that gains a digit mid-fade ("936" -> "1,104") would lose its last
+        # glyphs. Hold the counter still for the fade, then let it run.
+        counter.suspend_updating()
         self.play(FadeIn(counter), run_time=fr(6))
+        counter.resume_updating()
 
         self.until(t_b + 5.0)
         verdict = VGroup(
