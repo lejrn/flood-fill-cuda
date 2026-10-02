@@ -1,13 +1,22 @@
 """Host driver for the Triton twin of the seed-discovery flood fill.
 
-Public API (the Numba driver's, unchanged):
+Public API (the Numba driver's, plus one twin-only keyword):
     flood_fill(img, variant="seed_merge", threads_per_block=256,
                blocks=None, bare=False, lattice=None, interior=False,
-               build="fused") -> SeedDiscoveryResult
+               build="fused", *, lane_schedule="independent")
+               -> SeedDiscoveryResult
     max_blocks(variant="seed_merge", threads_per_block=256, bare=False,
-               lattice=None, build="fused")
+               lattice=None, build="fused", *, lane_schedule=...)
     discovery_only(img, variant="seed_merge", threads_per_block=256,
-                   blocks=None) -> (kernel_ms, candidates)
+                   blocks=None, *, lane_schedule=...)
+                   -> (kernel_ms, candidates)
+
+lane_schedule picks how the union-find loops are spelled (the kernels'
+LANE constexpr, see kernels.py): "independent" (the default: per-lane
+state machines, each lane moving on as a SIMT thread does) or
+"lockstep" (the earlier translation, kept to measure its cost). Both
+give identical outputs; each is its own compile and has its own
+cooperative capacity.
 
 Same defaults, validation messages, result dataclass (imported from the
 Numba driver, so the field names cannot drift), model_bytes_ch05 and
@@ -79,9 +88,24 @@ from .kernels import (
 
 __all__ = [
     "BUILDS", "LEVEL_TRACE_CAPACITY", "MODEL_NOTE", "VARIANTS",
+    "LANE_SCHEDULES", "DEFAULT_LANE_SCHEDULE",
     "SeedDiscoveryResult", "model_bytes_ch05", "flood_fill", "max_blocks",
     "discovery_only", "regs_per_thread", "compiled_kernel", "kernel_info",
+    "phase_kernel",
 ]
+
+# lane_schedule -> the kernels' LANE constexpr
+LANE_SCHEDULES = ("independent", "lockstep")
+DEFAULT_LANE_SCHEDULE = "independent"
+_LANE = {"independent": 1, "lockstep": 0}
+
+
+def _lane(lane_schedule):
+    try:
+        return _LANE[lane_schedule]
+    except (KeyError, TypeError):
+        raise ValueError(f"lane_schedule must be one of {LANE_SCHEDULES}, "
+                         f"got {lane_schedule!r}") from None
 
 
 @dataclass(frozen=True)
@@ -89,11 +113,13 @@ class _KernelSpec:
     """One Numba kernel's Triton twin: the @triton.jit body, the
     constexprs that select it (INSTR=False is the bare twin), whether it
     holds grid barriers (cooperative launch), and extra launch options
-    (e.g. maxnreg, the twin of Numba's max_registers)."""
+    (e.g. maxnreg, the twin of Numba's max_registers). lane: the kernel
+    holds union-find loops and takes the LANE constexpr."""
     fn: object
     constexprs: dict = field(default_factory=dict)
     cooperative: bool = True
     options: dict = field(default_factory=dict)
+    lane: bool = True
 
 
 # (kernel_key, bare) -> twin. Keys are the Numba driver's _KERNELS keys.
@@ -115,17 +141,17 @@ _KERNELS = {
 
 # variant -> discovery-only phase kernel (benchmark attribution)
 _PHASE_KERNELS = {
-    "seed_merge": _KernelSpec(seed_scan_kernel),
+    "seed_merge": _KernelSpec(seed_scan_kernel, lane=False),
     "ccl_fill": _KernelSpec(ccl_kernel),
 }
 
-# kernel_key -> fn(bufs, threads_per_block): extra launches a warm-up must
-# compile besides the cooperative kernel (the split build's two plain
-# cleanup kernels, registered below _launch_plain).
+# kernel_key -> fn(bufs, threads_per_block, lane): extra launches a
+# warm-up must compile besides the cooperative kernel (the split build's
+# two plain cleanup kernels, registered below _launch_plain).
 _EXTRA_WARMUPS = {}
 
-# (kernel_key, bare, tpb) -> CompiledKernel; ("phase", variant, tpb) and
-# ("plain", name) (the split build's cleanup kernels) too
+# (kernel_key, bare, tpb, lane) -> CompiledKernel; ("phase", variant, tpb,
+# lane) and ("plain", name, lane) (the split build's cleanup kernels) too
 _compiled = {}
 _coop_cache = {}
 _palette_dev = None
@@ -178,19 +204,23 @@ def _spec(kernel_key, bare):
             "registered in this driver yet") from None
 
 
-def _launch(spec, grid, args, tpb):
+def _launch(spec, grid, args, tpb, lane):
+    extra = {"LANE": lane} if spec.lane else {}
     return spec.fn[(grid,)](
         *args, BLOCK=tpb, num_warps=tpb // 32, num_stages=1,
         launch_cooperative_grid=spec.cooperative, **spec.constexprs,
-        **spec.options)
+        **spec.options, **extra)
 
 
-def _launch_plain(fn, args, grid=_PLAIN_GRID[0]):
+def _launch_plain(fn, args, lane=None, grid=_PLAIN_GRID[0]):
     """A split-build cleanup kernel on the Numba driver's _PLAIN_GRID:
     (256 blocks, 256 threads) -> 256 programs of 256 lanes, no
-    cooperative launch (no barrier inside)."""
+    cooperative launch (no barrier inside). lane: the LANE constexpr of
+    lat_compress_kernel (lat_finish_kernel has no union-find choice)."""
     tpb = _PLAIN_GRID[1]
-    return fn[(grid,)](*args, BLOCK=tpb, num_warps=tpb // 32, num_stages=1)
+    extra = {} if lane is None else {"LANE": lane}
+    return fn[(grid,)](*args, BLOCK=tpb, num_warps=tpb // 32, num_stages=1,
+                       **extra)
 
 
 def _split_cleanup_args(bufs):
@@ -200,14 +230,14 @@ def _split_cleanup_args(bufs):
              t(bufs["prov"]), t(_palette()), n))
 
 
-def _warm_split_cleanup(bufs, threads_per_block):
+def _warm_split_cleanup(bufs, threads_per_block, lane):
     """The Numba warm-up's lat_compress / lat_finish [1, 32] launches: one
     program each at the real _PLAIN_GRID block size (num_warps is
     compile-time), after the core's warm-up launch on the same stream."""
     compress_args, finish_args = _split_cleanup_args(bufs)
-    _compiled[("plain", "lat_compress")] = _launch_plain(
-        lat_compress_kernel, compress_args, grid=1)
-    _compiled[("plain", "lat_finish")] = _launch_plain(
+    _compiled[("plain", "lat_compress", lane)] = _launch_plain(
+        lat_compress_kernel, compress_args, lane, grid=1)
+    _compiled[("plain", "lat_finish", lane)] = _launch_plain(
         lat_finish_kernel, finish_args, grid=1)
 
 
@@ -285,20 +315,22 @@ def _kernel_args(kernel_key, bare, bufs, lattice=None, interior=False):
     return args
 
 
-def _warmup(kernel_key, bare, threads_per_block):
-    """Compile each twin once per block size, off the clock, with a
-    one-program launch on _tiny_scene (two isolated red pixels: every
-    phase including the fence-sandwich rear read runs, nothing grows)."""
-    key = (kernel_key, bare, threads_per_block)
+def _warmup(kernel_key, bare, threads_per_block, lane):
+    """Compile each twin once per block size and lane schedule, off the
+    clock, with a one-program launch on _tiny_scene (two isolated red
+    pixels: every phase including the fence-sandwich rear read runs,
+    nothing grows)."""
+    key = (kernel_key, bare, threads_per_block, lane)
     if key in _compiled:
         return _compiled[key]
     spec = _spec(kernel_key, bare)
     bufs = _device_buffers(_tiny_scene(), kernel_key, not bare, 1, 4)
     compiled = _launch(spec, 1, _kernel_args(kernel_key, bare, bufs,
-                                             lattice=2), threads_per_block)
+                                             lattice=2), threads_per_block,
+                       lane)
     extra = _EXTRA_WARMUPS.get(kernel_key)
     if extra is not None:
-        extra(bufs, threads_per_block)
+        extra(bufs, threads_per_block, lane)
     sync()
     _compiled[key] = compiled
     return compiled
@@ -328,11 +360,13 @@ def _cycles_to_ms(cycles):
 
 
 def compiled_kernel(variant="seed_merge", threads_per_block=256, bare=False,
-                    lattice=None, build="fused"):
+                    lattice=None, build="fused", *,
+                    lane_schedule=DEFAULT_LANE_SCHEDULE):
     """The warmed CompiledKernel flood_fill launches for this selection."""
+    lane = _lane(lane_schedule)
     _check_tpb_pow2(threads_per_block)
     return _warmup(_kernel_key(variant, lattice, build), bare,
-                   threads_per_block)
+                   threads_per_block, lane)
 
 
 def regs_per_thread(compiled):
@@ -346,42 +380,47 @@ def regs_per_thread(compiled):
 
 
 def kernel_info(variant="seed_merge", threads_per_block=256, bare=False,
-                lattice=None, build="fused"):
+                lattice=None, build="fused", *,
+                lane_schedule=DEFAULT_LANE_SCHEDULE):
     """Registers, spills, shared bytes, warps and cooperative capacity of
     the selected twin: the facts benchmarks record next to the timings.
     The split build adds its two plain cleanup kernels and their grid."""
     compiled = compiled_kernel(variant, threads_per_block, bare, lattice,
-                               build)
+                               build, lane_schedule=lane_schedule)
     info = kernel_resources(compiled)
     info["coop_max_blocks"] = max_blocks(variant, threads_per_block, bare,
-                                         lattice, build)
+                                         lattice, build,
+                                         lane_schedule=lane_schedule)
     if _kernel_key(variant, lattice, build) == "seed_merge_lat_core":
+        lane = _lane(lane_schedule)
         info["cleanup"] = {
-            name: kernel_resources(_compiled[("plain", name)])
+            name: kernel_resources(_compiled[("plain", name, lane)])
             for name in ("lat_compress", "lat_finish")}
         info["cleanup_grid"] = list(_PLAIN_GRID)
     return info
 
 
 def max_blocks(variant="seed_merge", threads_per_block=256, bare=False,
-               lattice=None, build="fused"):
+               lattice=None, build="fused", *,
+               lane_schedule=DEFAULT_LANE_SCHEDULE):
     """The largest cooperative grid this GPU can host at threads_per_block,
     queried per compiled twin (never assumed equal across variants)."""
+    lane = _lane(lane_schedule)
     _check_tpb_pow2(threads_per_block)
     key = _kernel_key(variant, lattice, build)
-    compiled = _warmup(key, bare, threads_per_block)
-    return _coop_max_blocks((key, bare, threads_per_block), compiled)
+    compiled = _warmup(key, bare, threads_per_block, lane)
+    return _coop_max_blocks((key, bare, threads_per_block, lane), compiled)
 
 
 def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
                blocks=None, bare=False, lattice=None, interior=False,
-               build="fused"):
+               build="fused", *, lane_schedule=DEFAULT_LANE_SCHEDULE):
     """Discover, label and flood-fill every red blob - no seeds taken.
 
     The Numba driver's contract (see its docstring for lattice, interior
     and build); raises ValueError for bad inputs and RuntimeError if the
     GPU cannot host the requested cooperative launch (or a structural
-    tripwire fires)."""
+    tripwire fires). lane_schedule: see the module doc (twin-only)."""
     if img_host.ndim != 3 or img_host.shape[2] != 3 or img_host.dtype != np.uint8:
         raise ValueError("img must be a (width, height, 3) uint8 array")
     width, height = img_host.shape[0], img_host.shape[1]
@@ -418,6 +457,7 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
             "to filter)")
     if build not in BUILDS:
         raise ValueError(f"build must be one of {BUILDS}, got {build!r}")
+    lane = _lane(lane_schedule)
     if build != "fused":
         if lattice is None:
             raise ValueError(
@@ -429,8 +469,8 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
 
     kernel_key = _kernel_key(variant, lattice, build)
     spec = _spec(kernel_key, bare)
-    compiled = _warmup(kernel_key, bare, threads_per_block)
-    coop_max = _coop_max_blocks((kernel_key, bare, threads_per_block),
+    compiled = _warmup(kernel_key, bare, threads_per_block, lane)
+    coop_max = _coop_max_blocks((kernel_key, bare, threads_per_block, lane),
                                 compiled)
     if blocks is None:
         launch_blocks = coop_max
@@ -463,10 +503,10 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
         ev = [cp.cuda.Event() for _ in range(3)]
         _launch(spec, launch_blocks,
                 _kernel_args(kernel_key, bare, bufs, lattice, interior),
-                threads_per_block)
+                threads_per_block, lane)
         ev[0].record()
         compress_args, finish_args = _split_cleanup_args(bufs)
-        _launch_plain(lat_compress_kernel, compress_args)
+        _launch_plain(lat_compress_kernel, compress_args, lane)
         ev[1].record()
         _launch_plain(lat_finish_kernel, finish_args)
         ev[2].record()
@@ -476,7 +516,7 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
     else:
         _launch(spec, launch_blocks,
                 _kernel_args(kernel_key, bare, bufs, lattice, interior),
-                threads_per_block)
+                threads_per_block, lane)
         sync()
     t_d2h0 = time.perf_counter()
     kernel_ms = (t_d2h0 - t_kernel0) * 1000
@@ -579,8 +619,42 @@ def flood_fill(img_host, variant="seed_merge", threads_per_block=256,
     )
 
 
+def _phase_bufs(img):
+    w, h = img.shape[0], img.shape[1]
+    return (_upload_img(img),
+            cp.asarray(np.zeros((w, h), dtype=np.int32)),
+            cp.asarray(np.full((w, h), -1, dtype=np.int32)),
+            cp.empty(w * h, dtype=np.int32),
+            cp.empty(w * h, dtype=np.int32),
+            cp.asarray(np.array([0], dtype=np.int32)),
+            cp.asarray(np.zeros(NUM_COUNTERS, dtype=np.int64)),
+            cp.asarray(np.zeros(1, dtype=np.int64)))  # grid barrier
+
+
+def _phase_args(bufs):
+    w, h = bufs[0].shape[0], bufs[0].shape[1]
+    return tuple(t(b) for b in bufs) + (w, h, w * h, w * h)
+
+
+def phase_kernel(variant="seed_merge", threads_per_block=256, *,
+                 lane_schedule=DEFAULT_LANE_SCHEDULE):
+    """(cache key, warmed CompiledKernel) of discovery_only's kernel."""
+    lane = _lane(lane_schedule)
+    _check_tpb_pow2(threads_per_block)
+    spec = _PHASE_KERNELS[variant]
+    if not spec.lane:
+        lane = 0   # seed_scan_kernel has no union-find loop
+    key = ("phase", variant, threads_per_block, lane)
+    if key not in _compiled:
+        _compiled[key] = _launch(spec, 1,
+                                 _phase_args(_phase_bufs(_tiny_scene())),
+                                 threads_per_block, lane)
+        sync()
+    return key, _compiled[key]
+
+
 def discovery_only(img_host, variant="seed_merge", threads_per_block=256,
-                   blocks=None):
+                   blocks=None, *, lane_schedule=DEFAULT_LANE_SCHEDULE):
     """Benchmark probe: run ONLY the discovery phases on fresh buffers -
     seed_merge's candidate scan (P0-P1) or ccl_fill's full CCL (P0-P2).
     Returns (kernel_ms, candidates), like the Numba probe."""
@@ -588,31 +662,13 @@ def discovery_only(img_host, variant="seed_merge", threads_per_block=256,
         raise ValueError("img must be a (width, height, 3) uint8 array")
     if variant not in VARIANTS:
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
+    lane = _lane(lane_schedule)
     _check_tpb_pow2(threads_per_block)
     spec = _PHASE_KERNELS[variant]
 
-    def _bufs(img):
-        w, h = img.shape[0], img.shape[1]
-        return (_upload_img(img),
-                cp.asarray(np.zeros((w, h), dtype=np.int32)),
-                cp.asarray(np.full((w, h), -1, dtype=np.int32)),
-                cp.empty(w * h, dtype=np.int32),
-                cp.empty(w * h, dtype=np.int32),
-                cp.asarray(np.array([0], dtype=np.int32)),
-                cp.asarray(np.zeros(NUM_COUNTERS, dtype=np.int64)),
-                cp.asarray(np.zeros(1, dtype=np.int64)))  # grid barrier
-
-    def _args(bufs):
-        w, h = bufs[0].shape[0], bufs[0].shape[1]
-        return tuple(t(b) for b in bufs) + (w, h, w * h, w * h)
-
-    key = ("phase", variant, threads_per_block)
-    if key not in _compiled:
-        _compiled[key] = _launch(spec, 1, _args(_bufs(_tiny_scene())),
-                                 threads_per_block)
-        sync()
-
-    coop_max = _coop_max_blocks(key, _compiled[key])
+    key, compiled = phase_kernel(variant, threads_per_block,
+                                 lane_schedule=lane_schedule)
+    coop_max = _coop_max_blocks(key, compiled)
     launch_blocks = coop_max if blocks is None else int(blocks)
     if launch_blocks > coop_max:
         raise RuntimeError(
@@ -620,11 +676,12 @@ def discovery_only(img_host, variant="seed_merge", threads_per_block=256,
     _check_int32_grid_stride(img_host.shape[0] * img_host.shape[1],
                              launch_blocks * threads_per_block)
 
-    bufs = _bufs(img_host)
-    args = _args(bufs)
+    bufs = _phase_bufs(img_host)
+    args = _phase_args(bufs)
     sync()
     t0 = time.perf_counter()
-    _launch(spec, launch_blocks, args, threads_per_block)
+    _launch(spec, launch_blocks, args, threads_per_block,
+            lane if spec.lane else 0)
     sync()
     kernel_ms = (time.perf_counter() - t0) * 1000
     candidates = int(cp.asnumpy(bufs[6])[CANDIDATES])

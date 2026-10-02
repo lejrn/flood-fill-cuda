@@ -1,8 +1,10 @@
 """Numba vs Triton for chapter 5, on the chapter's own benchmark experiments.
 
 Five experiments, built from the Numba benchmarks' own scene lists,
-strides and build names (imported, so they cannot drift). Every case runs
-at tpb = benchmark.TPB = 256 (num_warps 8) on both backends.
+strides and build names (imported, so they cannot drift), plus one
+ablation of the twin itself. Every case runs at tpb = benchmark.TPB = 256
+(num_warps 8) on both backends, the twin in its default lane schedule
+("independent", see kernels.py).
 
 benchmark              benchmarks/benchmark.py: every SCENES scene with merge,
                        ccl, merge_bare, ccl_bare (flood_fill) and scan, cclp
@@ -30,6 +32,22 @@ tuning                 benchmarks/tuning.py, an 8-config subset of its 53 (see
 png                    benchmarks/png_inputs.py: v1, ccl and the tuning subset,
                        blocks=None, on images/input/input_blocks.png (whole)
                        and input_blobs.png (cropped, see caps).
+lane_schedule          The twin's two union-find schedules against the same
+                       Numba kernel, two rows per cell: config.lane_sched
+                       "independent" (label lane_independent, the default
+                       every other experiment runs) and "lockstep" (label
+                       first_translation: the lockstep loops of the first
+                       translation). The union-heavy cells: ccl and the
+                       cclp probe on the four solid scenes, lattice 1 and 4
+                       on three of them, each pinned to the min of the
+                       Numba and both twin capacities. first_translation
+                       rows are comparable=False with config.label
+                       first_translation and first_translation=true (as in
+                       ch01-ch04): they measure the first translation's
+                       cost and stay out of the averages. lane_independent
+                       rows that repeat a benchmark or seeding cell carry
+                       duplicate_of=<experiment> (all 14 in the default
+                       run).
 
 same() compares only what the algorithm fixes regardless of scheduling:
 img, visited, depth, label, n_blobs, filled, levels, and for instrumented
@@ -47,9 +65,11 @@ union_thread_ms are kept in each row's "runs" (entry 0 is the warm-up).
 A discovery probe's total_ms is the wall time of the discovery_only call.
 
 union_thread_ms is NOT comparable across backends: Numba sums each
-thread's own %clock64 cycles inside _union; the twin adds the program's
-whole lockstep union duration to every colliding lane (an emulated
-indicator, see the README mapping table), so it reads higher.
+thread's own %clock64 cycles inside _union; the twin adds, per colliding
+lane, the program's whole lockstep union (per-direction batches) or the
+lane's own union from its collision to its end, waits for full steps
+included (lane-independent levels): an emulated indicator, see the
+README mapping table, that reads higher.
 
 speedup_kernel is the metric to read; speedup_total also compares the
 two stacks' host allocators. A blocks=None row whose two grids resolve
@@ -67,7 +87,7 @@ seeding 36, tuning 48, png 20). From single-run timings of every config
 on the full-size scenes, about 15 minutes of GPU time at 4 repeats (the
 r128_I8 and split_I8 rows cost ~6.3 s per round over all their scenes,
 both backends); peak host RSS 2.03 GB measured on asym_4000_800 with
-both slim results alive.
+both slim results alive. lane_schedule adds 28 cases, about 5 minutes.
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch05_gpu_nblob_nblock.compare [--quick] [--repeats N] [--experiments a,b]
@@ -79,6 +99,7 @@ os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
 
 import argparse
 import gc
+import json
 import time
 import warnings
 from types import SimpleNamespace
@@ -104,7 +125,7 @@ CHAPTER = "ch05_gpu_nblob_nblock"
 DEFAULT_REPEATS = 4
 TPB = nb_bench.TPB
 EXPERIMENTS = ("benchmark", "benchmark_blocks_none", "seeding", "tuning",
-               "png")
+               "png", "lane_schedule")
 
 # The benchmark's runners: name -> ("ff", flood_fill kwargs) or
 # ("probe", discovery_only variant)
@@ -170,9 +191,15 @@ METHOD_NOTES = [
     "in the r128 and split builds, which resolve to the same grid",
     "union_thread_ms (in runs) is not comparable across backends: Numba "
     "sums each thread's own %clock64 cycles inside _union, the twin adds "
-    "the program's whole lockstep union duration to every colliding lane "
-    "(emulated indicator), so it reads higher by construction. Compare it "
-    "only within one backend",
+    "per colliding lane the program's whole lockstep union (per-direction "
+    "batches) or the lane's own union with its waits (lane-independent "
+    "levels), an emulated indicator that reads higher by construction. "
+    "Compare it only within one backend",
+    "the twin runs its default lane schedule ('independent', "
+    "meta.lane_schedule_default) everywhere except the lane_schedule "
+    "experiment's first_translation rows (lane_sched 'lockstep', "
+    "comparable=false, first_translation=true). Its lane_independent rows "
+    "that repeat a benchmark or seeding cell carry duplicate_of=<experiment>",
     "seeding and the benchmark pin each kernel to min(Numba, Triton "
     "capacity); tuning and png launch blocks=None like tuning.py and "
     "png_inputs.py, so the fused lattice build runs Numba's 24-block grid "
@@ -288,13 +315,11 @@ def facts(kind, spec):
     if kind == "probe":
         _warm_probe(spec)
         nk = numba_ff._PHASE_KERNELS[spec]
-        tkey = ("phase", spec, TPB)
+        tkey, tcompiled = triton_ff.phase_kernel(spec, TPB)
         caps = {"numba": numba_ff._coop_max_blocks(nk, TPB),
-                "triton": triton_ff._coop_max_blocks(
-                    tkey, triton_ff._compiled[tkey])}
+                "triton": triton_ff._coop_max_blocks(tkey, tcompiled)}
         res = {"numba_resources": _numba_resources(nk),
-               "triton_resources": kernel_resources(
-                   triton_ff._compiled[tkey])}
+               "triton_resources": kernel_resources(tcompiled)}
     else:
         # the kernel does not depend on the interior rule (a runtime int)
         kw = {k: v for k, v in spec.items() if k != "interior"}
@@ -372,22 +397,24 @@ def _slim(r, log):
         **{f: getattr(r, f) for f in _SCALARS})
 
 
-def _ff_runner(drv, slot, scene, kw, blocks, log):
+def _ff_runner(drv, slot, scene, kw, blocks, log, **extra):
+    """extra: twin-only keywords (lane_schedule)."""
     def run():
         img = slot.get(scene)
-        r = drv.flood_fill(img, threads_per_block=TPB, blocks=blocks, **kw)
+        r = drv.flood_fill(img, threads_per_block=TPB, blocks=blocks, **kw,
+                           **extra)
         s = _slim(r, log)
         del r
         return s
     return run
 
 
-def _probe_runner(drv, slot, scene, variant, blocks, log):
+def _probe_runner(drv, slot, scene, variant, blocks, log, **extra):
     def run():
         img = slot.get(scene)
         t0 = time.perf_counter()
         ms, cand = drv.discovery_only(img, variant, threads_per_block=TPB,
-                                      blocks=blocks)
+                                      blocks=blocks, **extra)
         total = (time.perf_counter() - t0) * 1000
         log.append({"kernel_ms": float(ms)})
         return SimpleNamespace(kernel_ms=float(ms), total_ms=total,
@@ -551,6 +578,118 @@ def png_scenes(quick):
     return found, missing
 
 
+# ------------------------------------------------- lane_schedule ablation
+
+# The union-heavy cells where the lockstep translation cost the most
+# (ccl_fill x0.08-0.31, lattice-1 seeding x0.23-0.42 before the
+# lane-independent schedule). asym_4000_800 joins ccl and cclp only, as
+# in the other experiments' caps.
+LANE_SCENES = ("asym_4000_800", "two_disks_r1400", "two_sq_2800",
+               "blob_grid_100")
+LANE_CONFIGS = (
+    ("ccl", "ff", {"variant": "ccl_fill"}, LANE_SCENES),
+    ("cclp", "probe", "ccl_fill", LANE_SCENES),
+    ("S1", "ff", {"variant": "seed_merge", "lattice": 1}, LANE_SCENES[1:]),
+    ("S4", "ff", {"variant": "seed_merge", "lattice": 4}, LANE_SCENES[1:]),
+)
+LANE_LABELS = {"independent": "lane_independent",
+               "lockstep": "first_translation"}
+
+
+def _lane_caps(kind, spec):
+    """Cooperative capacity of the cell's kernel on Numba and on both twin
+    schedules (each schedule is its own compile)."""
+    caps = {"numba": facts(kind, spec)[0]["numba"]}
+    for sched in triton_ff.LANE_SCHEDULES:
+        if kind == "probe":
+            key, comp = triton_ff.phase_kernel(spec, TPB,
+                                               lane_schedule=sched)
+            caps[sched] = triton_ff._coop_max_blocks(key, comp)
+        else:
+            caps[sched] = triton_ff.max_blocks(threads_per_block=TPB,
+                                               lane_schedule=sched, **spec)
+    return caps
+
+
+def lane_case(slot, scene, name, kind, spec, sched, notes=""):
+    """One row of the lane_schedule experiment: Numba against the twin in
+    schedule `sched`, on the grid every schedule and Numba can host."""
+    caps = _lane_caps(kind, spec)
+    blocks = min(caps.values())
+    runs = {"numba": [], "triton": []}
+    nres = facts(kind, spec)[1]["numba_resources"]
+    if kind == "probe":
+        rn = _probe_runner(numba_ff, slot, scene, spec, blocks,
+                           runs["numba"])
+        rt = _probe_runner(triton_ff, slot, scene, spec, blocks,
+                           runs["triton"], lane_schedule=sched)
+        same, info = same_probe, probe_info
+        config = {"runner": name, "probe": spec}
+        tres = kernel_resources(triton_ff.phase_kernel(
+            spec, TPB, lane_schedule=sched)[1])
+    else:
+        rn = _ff_runner(numba_ff, slot, scene, spec, blocks, runs["numba"])
+        rt = _ff_runner(triton_ff, slot, scene, spec, blocks,
+                        runs["triton"], lane_schedule=sched)
+        same, info = make_same(spec, True), ff_info
+        config = {"runner": name, **spec}
+        tres = triton_ff.kernel_info(threads_per_block=TPB,
+                                     lane_schedule=sched, **spec)
+    config.update({"tpb": TPB, "num_warps": TPB // 32, "blocks": int(blocks),
+                   "lane_sched": sched, "label": LANE_LABELS[sched]})
+    extra = {"caps": caps, "numba_resources": nres,
+             "triton_resources": tres, "runs": runs}
+    default = sched == triton_ff.DEFAULT_LANE_SCHEDULE
+    if not default:
+        extra["first_translation"] = True
+    return Case(experiment="lane_schedule", scene=scene, config=config,
+                run_numba=rn, run_triton=rt, same=same,
+                pixels=slot.pixels(scene), info=info, notes=notes,
+                extra=extra, comparable=default)
+
+
+def lane_schedule_cases(slot, scene_list, quick):
+    """Both schedules per cell, the default first."""
+    names = {n for n, _, _ in scene_list}
+    out = []
+    for sname, _, note in scene_list:
+        for name, kind, spec, scenes_for in LANE_CONFIGS:
+            if not quick and sname not in scenes_for:
+                continue
+            if sname not in names:
+                continue
+            for sched in (triton_ff.DEFAULT_LANE_SCHEDULE,) + tuple(
+                    x for x in triton_ff.LANE_SCHEDULES
+                    if x != triton_ff.DEFAULT_LANE_SCHEDULE):
+                out.append(lane_case(slot, sname, name, kind, spec, sched,
+                                     notes=note))
+    return out
+
+
+def _cell_key(case):
+    cfg = {k: v for k, v in case.config.items()
+           if k not in ("lane_sched", "label")}
+    return case.scene, json.dumps(cfg, sort_keys=True)
+
+
+def mark_repeated_cells(earlier, lane_rows):
+    """Tag each lane_independent row whose cell (scene and config, the
+    schedule keys aside) an earlier experiment already measures with
+    duplicate_of=<that experiment>, so a unit-wide average counts each
+    cell once. Returns the tagged count."""
+    seen = {}
+    for c in earlier:
+        seen.setdefault(_cell_key(c), c.experiment)
+    tagged = 0
+    for c in lane_rows:
+        if c.config["lane_sched"] == triton_ff.DEFAULT_LANE_SCHEDULE:
+            hit = seen.get(_cell_key(c))
+            if hit is not None:
+                c.extra["duplicate_of"] = hit
+                tagged += 1
+    return tagged
+
+
 def build(quick, experiments):
     """All cases plus the meta block, in experiment then scene order."""
     scene_list = QUICK_SCENES if quick else nb_bench.SCENES
@@ -581,6 +720,17 @@ def build(quick, experiments):
         meta_exp["png"] = {"configs": PNG_CONFIGS,
                            "scenes": [n for n, _, _ in pngs],
                            "missing_inputs": missing}
+    if "lane_schedule" in experiments:
+        lane = lane_schedule_cases(slot, scene_list, quick)
+        tagged = mark_repeated_cells(cases, lane)
+        cases += lane
+        meta_exp["lane_schedule"] = {
+            "schedules": list(triton_ff.LANE_SCHEDULES),
+            "default": triton_ff.DEFAULT_LANE_SCHEDULE,
+            "cells": [[c.scene, c.config["runner"]] for c in lane
+                      if c.config["lane_sched"]
+                      == triton_ff.DEFAULT_LANE_SCHEDULE],
+            "duplicate_rows": tagged}
     slot.release()  # the cases rebuild each scene when they run
 
     capacity = {}
@@ -590,6 +740,7 @@ def build(quick, experiments):
         capacity[f"lattice_{b}"] = facts("ff", _tuning_spec(f"{b}_L8"))[0]
     meta = {
         "caps": [] if quick else CAPS,
+        "lane_schedule_default": triton_ff.DEFAULT_LANE_SCHEDULE,
         "method_notes": METHOD_NOTES,
         "quick": quick,
         "scope": SCOPE,
