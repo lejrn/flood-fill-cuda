@@ -198,6 +198,7 @@ def run_case(case: Case, repeats: int) -> dict:
                 times[name]["kernel"].append(float(res.kernel_ms))
                 times[name]["total"].append(float(res.total_ms))
                 got[name] = res
+                res = None  # only got holds results; none outlives its round
             ok, d = case.same(got["numba"], got["triton"])
             if not ok:
                 mismatches += 1
