@@ -9,8 +9,11 @@ on both backends:
 
 - small_example: scan_image_small_example on the experiment's own scene
                  (setup_scene_small_example, seeds 0 and 1). The square
-                 always covers a patch corner, so the scan stops after one
-                 step: the time is launch and transfer overhead.
+                 always covers a patch corner, so the scan stops after its
+                 first step: about 10 us on the GPU on both backends (the
+                 twin leaves its loops at the stop, as Numba's threads
+                 break out of theirs), so kernel_ms is mostly launch and
+                 synchronize overhead.
 - early_stop:    the same kernel on scenes where the stop comes later: a
                  one-pixel spot found mid-scan, and an all-white image (no
                  red: every thread scans its whole patch).
@@ -25,9 +28,11 @@ print inside process_image_small_example is left out on both sides.
 The outputs are nondeterministic by construction (tick order, the race to
 the first find), so same() compares only what is not: whether red was
 found, the found pixel where only one thread can find it (spot) or nobody
-does (white), and the painted coverage of full scans. The timings are
-launch-bound (a 100x100 image, one block): record them, do not headline
-them.
+does (white), and the painted coverage of full scans. Every row's info
+holds device_us, the GPU-only time of one launch per backend (CUDA events,
+with a copy queued ahead so launch latency is hidden): the early_stop and
+simple_scan rows run 60-150 us on the GPU, the small_example rows about
+10 us, so read those with device_us.
 
 Run (writes results/triton_twins/scan_multi_blob/compare_<UTC>.json):
 
@@ -42,6 +47,7 @@ import os
 os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
 
 import argparse
+import statistics
 import time
 from types import SimpleNamespace
 
@@ -54,13 +60,14 @@ from flood_fill_cuda.triton_twins.compare.harness import (
 from flood_fill_cuda.triton_twins.runtime import kernel_resources
 
 from .scan_only import (
-    BLOCK, NUM_WARPS, THREADS_PER_BLOCK, blank_scene, compiled_kernel,
-    run_scan, setup_scene_small_example,
+    BLOCK, NUM_WARPS, STATE_SLOTS, THREADS_PER_BLOCK, _launch, _to_device,
+    blank_scene, compiled_kernel, run_scan, setup_scene_small_example,
 )
 
 CHAPTER = "scan_multi_blob"
 DEFAULT_REPEATS = 50
 SIDE = 100
+DEVICE_ROUNDS = 30      # event-timed launches per backend, per case
 
 
 def spot_scene(x0, y0, size):
@@ -143,10 +150,52 @@ def numba_resources(kernel):
             "local_bytes_per_thread": _one(k.get_local_mem_per_thread())}
 
 
-def info_for(kernel):
+def device_us(kernel, scene, rounds):
+    """GPU-only time of one launch per backend, in microseconds: CUDA events
+    around the launch, with a 32 MB copy queued ahead of it so the launch
+    latency is hidden. The order alternates every round. Median and min."""
+    import cupy as cp
+    from numba import cuda
+
+    img, visited, width, height, found_flag = scene
+    busy_a = cp.zeros(4 * 2 ** 20, dtype=cp.int64)
+    busy_b = cp.empty_like(busy_a)
+    d_state = cp.zeros(STATE_SLOTS, dtype=cp.int32)
+    times = {"numba": [], "triton": []}
+    for r in range(rounds):
+        for side in ("numba", "triton") if r % 2 == 0 else ("triton", "numba"):
+            e0, e1 = cp.cuda.Event(), cp.cuda.Event()
+            if side == "numba":
+                d_img = cuda.to_device(img)
+                d_visited = cuda.to_device(visited)
+                d_found = cuda.to_device(found_flag)
+                cuda.synchronize()
+                busy_b[...] = busy_a
+                e0.record()
+                numba_kernel(kernel)[1, THREADS_PER_BLOCK](
+                    d_img, d_visited, width, height, d_found)
+            else:
+                c_img = _to_device(img)
+                c_visited = _to_device(visited)
+                c_found = _to_device(found_flag)
+                cp.cuda.Device().synchronize()
+                busy_b[...] = busy_a
+                e0.record()
+                _launch(kernel, c_img, c_visited, width, height, c_found,
+                        d_state)
+            e1.record()
+            e1.synchronize()
+            times[side].append(cp.cuda.get_elapsed_time(e0, e1) * 1000)
+    del busy_a, busy_b
+    return {side: {"median": statistics.median(v), "min": min(v)}
+            for side, v in times.items()} | {"rounds": rounds}
+
+
+def info_for(kernel, scene, device_rounds):
     def info(nb, tri):
         return {
             "found": int(nb.found_flag[0]),
+            "device_us": device_us(kernel, scene, device_rounds),
             # schedule-dependent, recorded for reading only
             "painted_numba": int(nb.visited.any(axis=2).sum()),
             "painted_triton": int(tri.visited.any(axis=2).sum()),
@@ -190,7 +239,9 @@ def build_cases(quick=False):
             run_numba=lambda k=kernel, s=scene: numba_run(k, s),
             run_triton=lambda k=kernel, s=scene: run_scan(*s, kernel=k),
             same=same_for(kernel, scene_name, scene[0]),
-            pixels=SIDE * SIDE, info=info_for(kernel), notes=note))
+            pixels=SIDE * SIDE,
+            info=info_for(kernel, scene, 3 if quick else DEVICE_ROUNDS),
+            notes=note))
     return cases
 
 
@@ -218,15 +269,25 @@ def main(argv=None):
             "global scratch allocated outside the timed brackets. One clock "
             "atomic per lane per step on both sides (shared-memory atomics "
             "in Numba, L2 atomics in Triton).",
-            "Launch-bound: one block on a 100x100 image. The numbers show "
-            "per-launch overhead more than kernel speed.",
+            "One block on a 100x100 image. small_example stops after its "
+            "first step (about 10 us on the GPU on both sides), so its "
+            "kernel_ms is mostly launch + synchronize overhead; early_stop "
+            "and simple_scan run 60-150 us on the GPU. info.device_us is "
+            "the GPU-only time (CUDA events, queue kept busy).",
             "Outputs are nondeterministic by construction; same() checks "
             "only the schedule-free parts (see compare.py).",
         ],
     }
-    return run_cases(CHAPTER, build_cases(quick=args.quick), repeats=repeats,
-                     meta=meta, write=not (args.quick or args.no_write),
-                     spin_seconds=0 if args.quick else 8.0)
+    doc = run_cases(CHAPTER, build_cases(quick=args.quick), repeats=repeats,
+                    meta=meta, write=not (args.quick or args.no_write),
+                    spin_seconds=0 if args.quick else 8.0)
+    for row in doc["rows"]:
+        d = row.get("info", {}).get("device_us")
+        if d:
+            print(f"{row['experiment']} {row['scene']}: device_us numba "
+                  f"{d['numba']['median']:.1f} | triton "
+                  f"{d['triton']['median']:.1f}")
+    return doc
 
 
 if __name__ == "__main__":
