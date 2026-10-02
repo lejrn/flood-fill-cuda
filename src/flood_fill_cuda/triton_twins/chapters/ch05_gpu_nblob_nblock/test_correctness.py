@@ -919,3 +919,105 @@ def test_cross_backend_result_fields_are_the_numba_dataclass():
     img = _cross_scene("u_shape")
     r = flood_fill(img)
     assert type(r) is numba_driver.SeedDiscoveryResult
+
+
+# ========================================================== lane schedules
+# The twin spells Numba's per-thread _find / _union loops two ways
+# (kernels.py, the LANE constexpr; the driver's lane_schedule keyword):
+# "independent" (the default, per-lane state machines) and "lockstep" (the
+# earlier translation, kept for the lane_schedule ablation). Both must give
+# the same deterministic outputs, as each other and as Numba.
+
+_SCHED_CONFIGS = (
+    dict(variant="ccl_fill"),
+    dict(variant="ccl_fill", bare=True),
+    dict(variant="seed_merge"),
+    dict(variant="seed_merge", bare=True),
+    dict(variant="seed_merge", lattice=1),
+    dict(variant="seed_merge", lattice=4),
+    dict(variant="seed_merge", lattice=1, interior=True, bare=True),
+    dict(variant="seed_merge", lattice=1, build="r128"),
+    dict(variant="seed_merge", lattice=1, build="split"),
+)
+_SCHED_SCENES = ("full_red", "two_disks", "comb", "random", "serpentine")
+# (tpb, blocks) with many slots per lane (the lane bodies walk several
+# items, the fill's lattice-1 levels switch to the lane-independent body
+# and its window binds) and the default grid
+_SCHED_GRIDS = ((32, 2), (64, 1), (256, None))
+
+
+def _sched_scene(name):
+    if name == "full_red":
+        # 9216 px of one solid blob: at lattice 1 every probe collides
+        return scenes.full_red_scene(96, 96)[0]
+    return _cross_scene(name)
+
+
+@pytest.mark.parametrize("tpb, blocks", _SCHED_GRIDS)
+@pytest.mark.parametrize("kw", _SCHED_CONFIGS,
+                         ids=lambda kw: "-".join(f"{k}={v}"
+                                                 for k, v in kw.items()))
+def test_lane_schedules_give_identical_outputs(kw, tpb, blocks):
+    """Lockstep and lane-independent schedules: identical deterministic
+    outputs (img, visited, depth, label, seeds, levels, the level trace,
+    the deterministic counters) and, on the same grid, the same per-block
+    work split."""
+    for name in _SCHED_SCENES:
+        img = _sched_scene(name)
+        a = flood_fill(img, threads_per_block=tpb, blocks=blocks,
+                       lane_schedule="lockstep", **kw)
+        b = flood_fill(img, threads_per_block=tpb, blocks=blocks,
+                       lane_schedule="independent", **kw)
+        assert_backends_agree(a, b, pinned=blocks is not None)
+
+
+@pytest.mark.parametrize("tpb, blocks", ((32, 2), (64, 1)))
+@pytest.mark.parametrize("kw", _SCHED_CONFIGS,
+                         ids=lambda kw: "-".join(f"{k}={v}"
+                                                 for k, v in kw.items()))
+def test_cross_backend_both_lane_schedules(kw, tpb, blocks):
+    """Both schedules against Numba on small grids, where every lane walks
+    many items: the lane-independent bodies, the fill's switch and its
+    window all run, and the lockstep ablation stays exact too."""
+    for name in ("full_red", "two_disks", "random"):
+        img = _sched_scene(name)
+        a = numba_driver.flood_fill(img, threads_per_block=tpb,
+                                    blocks=blocks, **kw)
+        for sched in twin_driver.LANE_SCHEDULES:
+            b = flood_fill(img, threads_per_block=tpb, blocks=blocks,
+                           lane_schedule=sched, **kw)
+            assert_backends_agree(a, b, pinned=True)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_lane_schedules_discovery_only_agree(variant):
+    for name in ("full_red", "two_disks", "random", "comb"):
+        img = _sched_scene(name)
+        _, cand = numba_driver.discovery_only(img, variant=variant)
+        for sched in twin_driver.LANE_SCHEDULES:
+            assert discovery_only(img, variant=variant,
+                                  lane_schedule=sched)[1] == cand
+
+
+def test_lane_schedule_default_and_validation():
+    assert twin_driver.DEFAULT_LANE_SCHEDULE == "independent"
+    assert set(twin_driver.LANE_SCHEDULES) == {"independent", "lockstep"}
+    img = _sched_scene("two_disks")
+    for fn in (flood_fill, discovery_only):
+        with pytest.raises(ValueError, match="lane_schedule"):
+            fn(img, lane_schedule="warp")
+    with pytest.raises(ValueError, match="lane_schedule"):
+        max_blocks(lane_schedule=None)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_lane_schedules_are_separate_compiles(variant):
+    """Each schedule is its own compiled kernel with its own measured
+    cooperative capacity (registers differ)."""
+    ind = twin_driver.compiled_kernel(variant, 256,
+                                      lane_schedule="independent")
+    lck = twin_driver.compiled_kernel(variant, 256, lane_schedule="lockstep")
+    assert ind is not lck
+    for sched in twin_driver.LANE_SCHEDULES:
+        info = twin_driver.kernel_info(variant, 256, lane_schedule=sched)
+        assert info["coop_max_blocks"] >= 1
