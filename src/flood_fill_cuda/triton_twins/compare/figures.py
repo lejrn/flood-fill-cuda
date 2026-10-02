@@ -78,8 +78,8 @@ def _text(x, y, s, size=12, fill=INK, anchor="start", weight="400",
 
 
 def _ratio(s):
-    """1.37 -> 'x1.37'; values under 1 keep two significant digits."""
-    return f"x{s:.2f}" if s >= 0.995 else f"x{s:.2g}"
+    """1.37 -> 'x1.37', 0.9 -> 'x0.90': always two decimals."""
+    return f"x{s:.2f}"
 
 
 def _load_units():
@@ -256,9 +256,85 @@ def grand_table(doc):
     return _svg(W, H, "\n".join(body), "Grand table, Numba versus Triton")
 
 
+# ---------------------------------------------------------- ablations
+
+def ablations_chart(units):
+    """First translation vs the refined default, per translation choice:
+    the same paired cells, two geometric means, joined by a line."""
+    from flood_fill_cuda.triton_twins.compare.summary import ablations
+
+    items = []
+    for key, name, doc in units:
+        for exp, ab in (ablations(doc["rows"]) or {}).items():
+            if ab and ab["paired"]:
+                items.append((f"{name}, {exp.replace('_', ' ')}",
+                              ab["paired"],
+                              ab["geomean_speedup_kernel_first_translation"],
+                              ab["geomean_speedup_kernel_default"]))
+    if not items:
+        return None
+    vals = [v for _, _, a, b in items for v in (a, b)]
+    lo = min(0.125, 2.0 ** math.floor(math.log2(min(vals))))
+    hi = max(2.0, 2.0 ** math.ceil(math.log2(max(vals))))
+    W, row_h, lab_w, pad_r, top = 860, 30, 230, 150, 48
+    H = top + len(items) * row_h + 70
+    span = W - lab_w - pad_r
+
+    def x_of(v):
+        return lab_w + (math.log2(v) - math.log2(lo)) / (
+            math.log2(hi) - math.log2(lo)) * span
+
+    body = [_text(0, 16, "First translation vs refined twin, same cells "
+                         "(kernel time, Numba / Triton, log scale)", 13,
+                  INK_STRONG, weight="600"),
+            _text(0, 33, "hollow: first translation  |  filled: the twin "
+                         "as shipped  |  right of x1: Triton faster", 11,
+                  INK)]
+    bottom = top + len(items) * row_h
+    t = lo
+    while t <= hi * 1.0001:
+        x = x_of(t)
+        one = abs(t - 1) < 1e-9
+        dash = "" if one else ' stroke-dasharray="3 3"'
+        body.append(f'<line x1="{x:.1f}" y1="{top - 6}" x2="{x:.1f}" '
+                    f'y2="{bottom}" stroke="{RULE}" stroke-width="'
+                    f'{1.5 if one else 1}" stroke-opacity="'
+                    f'{0.7 if one else 0.22}"{dash}/>')
+        body.append(_text(x, bottom + 16, f"x{t:g}", 10, INK,
+                          anchor="middle", mono=True))
+        t *= 2
+    for i, (label, n, first, final) in enumerate(items):
+        cy = top + i * row_h + row_h / 2
+        body.append(_text(lab_w - 12, cy + 4, label, 11, INK_STRONG,
+                          anchor="end"))
+        x0, x1 = x_of(first), x_of(final)
+        body.append(f'<line x1="{x0:.1f}" y1="{cy:.1f}" x2="{x1:.1f}" '
+                    f'y2="{cy:.1f}" stroke="{RULE}" stroke-width="2" '
+                    f'stroke-opacity="0.6"/>')
+        c0 = C_TRITON if first > 1 else C_NUMBA
+        c1 = C_TRITON if final > 1 else C_NUMBA
+        body.append(f'<circle cx="{x0:.1f}" cy="{cy:.1f}" r="5" fill="none" '
+                    f'stroke="{c0}" stroke-width="2"><title>{_esc(label)}: '
+                    f'first translation {_ratio(first)} over {n} cells'
+                    f'</title></circle>')
+        body.append(f'<circle cx="{x1:.1f}" cy="{cy:.1f}" r="5.5" '
+                    f'fill="{c1}"><title>{_esc(label)}: refined '
+                    f'{_ratio(final)} over {n} cells</title></circle>')
+        body.append(_text(W - pad_r + 10, cy + 4,
+                          f"{_ratio(first)} > {_ratio(final)}", 10.5,
+                          INK_STRONG, mono=True))
+    body.append(_text(lab_w + span / 2, bottom + 34, "numba_ms / triton_ms",
+                      10.5, INK, anchor="middle"))
+    return _svg(W, H, "\n".join(body),
+                "First translation versus refined twin")
+
+
 def main():
     units = _load_units()
     figs = [("speedup_by_unit.svg", speedup_by_unit(units))]
+    ab = ablations_chart(units)
+    if ab:
+        figs.append(("ablations.svg", ab))
     over = [doc for key, _, doc in units if key == "overview"]
     if over:
         figs.append(("grand_table.svg", grand_table(over[0])))
