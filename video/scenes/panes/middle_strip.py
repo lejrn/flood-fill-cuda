@@ -14,7 +14,7 @@ from manim import (
 )
 from manim.constants import RESAMPLING_ALGORITHMS
 
-from scenes.style import ASSETS, GREY, GRID, INK_SOFT, RED_PX, TEAL, label
+from scenes.style import ASSETS, GREY, GRID, INK_SOFT, RED_PX, TEAL, is_vertical, label
 from scenes.panes.geometry import Box
 
 THUMB_W = 0.44
@@ -80,6 +80,11 @@ def captions(box: Box, line1: str | None, line2: str | None) -> VGroup:
         g.add(label(line1, size=CAP_FONT, color=INK_SOFT).move_to(box.at(box.cx, box.y0 + 0.56)))
     if line2:
         g.add(label(line2, size=CAP2_FONT, color=GREY).move_to(box.at(box.cx, box.y0 + 0.24)))
+    if is_vertical():
+        # the pane sits at the frame edge here: no neighbour's margin to overhang into
+        for m in g:
+            if m.width > box.w:
+                m.scale_to_fit_width(box.w)
     return g
 
 
