@@ -52,7 +52,12 @@ def cta_sync():
 
 @triton.jit
 def load_acquire(ptr):
-    """Scalar load with gpu-scope acquire ordering."""
+    """Scalar load with gpu-scope acquire ordering.
+
+    This is a load, not a fence: Triton lowers it to ``ld.acquire.gpu``
+    and removes it when the result is unused. Use the value (for example
+    to drive a spin loop), or the ordering silently disappears.
+    """
     return tl.atomic_add(ptr, 0, sem="acquire", scope="gpu")
 
 
