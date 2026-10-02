@@ -1,11 +1,14 @@
 """Render every beat of script.md with ElevenLabs into out/elevenlabs/.
 
 Usage (from video/):
-    uv run narration/tts_elevenlabs.py [--voice-id JBFqnCBsd6RMkjVDRZzb] [--gap 0.6]
+    uv run narration/tts_elevenlabs.py [--voice-id Ix8C14HEHgIQkJswik2o] [--model eleven_v4]
 
 Reads ELEVENLABS_API_KEY from video/.env (never printed, never logged).
 Only the beat text is sent. Each beat is one request, so the free tier
-(10k characters/month) covers the whole script many times over.
+(10k characters/month) covers the whole script a few times over.
+
+Without a key, the same narration can be made with the ElevenLabs
+connector (one TTS node per beat) and brought in with import_audio.py.
 """
 from __future__ import annotations
 
@@ -17,11 +20,12 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from common import HERE, load_beats, write_timing
+from common import HERE, load_beats, trim_edges, write_timing
 
 ENV = HERE.parent / ".env"
-# "George", a calm narration voice from the default library. Override with --voice-id.
-DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb"
+# "Peter Baker - Deep, Clear and Mature", a British narrator from the voice
+# library, chosen by the user. Override with --voice-id.
+DEFAULT_VOICE = "Ix8C14HEHgIQkJswik2o"
 
 
 def load_env_key() -> str:
@@ -38,8 +42,8 @@ def load_env_key() -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--voice-id", default=DEFAULT_VOICE)
-    ap.add_argument("--model", default="eleven_multilingual_v2")
-    ap.add_argument("--gap", type=float, default=0.6)
+    ap.add_argument("--model", default="eleven_v4")
+    ap.add_argument("--gap", type=float, default=0.4)
     args = ap.parse_args()
 
     from elevenlabs.client import ElevenLabs
@@ -68,6 +72,7 @@ def main() -> None:
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
         sr = sr or beat_sr
+        audio = trim_edges(audio, beat_sr)
         sf.write(out / f"{beat.name}.wav", audio, beat_sr)
         durations[beat.name] = len(audio) / beat_sr
         joined += [audio, np.zeros(int(beat_sr * args.gap), dtype=np.float32)]

@@ -19,24 +19,9 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 
-from common import HERE, load_beats, write_timing  # noqa: E402
+from common import HERE, load_beats, trim_edges, write_timing  # noqa: E402
 
 SR = 24_000
-
-
-def trim_edges(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float = 0.12) -> np.ndarray:
-    """Cut leading/trailing silence, keeping `keep` seconds of air on each side."""
-    if audio.size == 0:
-        return audio
-    amp = np.abs(audio)
-    floor = amp.max() * (10 ** (thresh_db / 20))
-    loud = np.flatnonzero(amp > floor)
-    if loud.size == 0:
-        return audio
-    pad = int(sr * keep)
-    lo = max(0, loud[0] - pad)
-    hi = min(audio.size, loud[-1] + pad)
-    return audio[lo:hi]
 
 
 def main() -> None:
