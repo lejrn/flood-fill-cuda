@@ -94,7 +94,10 @@ def _load_units():
 
 
 def _comparable(rows):
+    """The rows the summary averages: like-for-like, not an ablation of
+    the first translation, not a cell another experiment already has."""
     return [r for r in rows if "error" not in r and r.get("comparable", True)
+            and not r.get("first_translation") and not r.get("duplicate_of")
             and r.get("speedup_kernel")]
 
 

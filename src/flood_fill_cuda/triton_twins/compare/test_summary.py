@@ -62,3 +62,26 @@ def test_not_comparable_rows_are_counted_but_not_averaged(tmp_path):
     assert u["not_comparable_rows"] == 1
     assert u["best_for_numba"]["scene"] == "a"
     assert u["own_default_geomean_speedup_kernel"] == pytest.approx((2.0 * 0.1) ** 0.5)
+
+
+def test_ablation_and_duplicate_rows_stay_out_of_every_average(tmp_path):
+    root = str(tmp_path)
+    lane = _row("enqueue", "sq", 4.0, 2.0)
+    lane["config"] = {"tpb": 256, "enqueue": "lane", "label": "per_lane"}
+    prog = _row("enqueue", "sq", 4.0, 8.0)
+    prog["config"] = {"tpb": 256, "enqueue": "program", "label": "first_translation"}
+    prog["comparable"] = False
+    prog["first_translation"] = True
+    dup = _row("enqueue", "sq", 4.0, 2.0)
+    dup["duplicate_of"] = "scenes"
+    main = _row("scenes", "sq", 4.0, 2.0)
+    _write(root, "ch01", "20260101T000000Z", [main, lane, prog, dup])
+    u = summarize(root)["units"]["ch01"]
+    assert u["geomean_speedup_kernel"] == pytest.approx(2.0)
+    assert "own_default_geomean_speedup_kernel" not in u  # nothing left over
+    assert u["ablation_rows"] == 1 and u["duplicate_rows"] == 1
+    ab = u["first_translation_ablation"]
+    assert ab["paired"] == 1
+    assert ab["geomean_speedup_kernel_first_translation"] == pytest.approx(0.5)
+    assert ab["geomean_speedup_kernel_default"] == pytest.approx(2.0)
+    assert ab["geomean_triton_gain"] == pytest.approx(4.0)
