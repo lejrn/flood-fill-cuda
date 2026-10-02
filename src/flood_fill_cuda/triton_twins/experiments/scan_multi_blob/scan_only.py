@@ -30,9 +30,13 @@ tick is a per-lane atomic add on it (one atomic per lane, as in Numba, at L2
 instead of in shared memory). The stop flag is read with volatile loads, at
 the same two places (after the tick, and after each diagonal).
 
-Triton has no per-lane break. A sticky lane mask `alive` replaces it: a lane
-that sees the stop flag is masked off for the rest of the scan, which is
-where Numba's break-then-break leaves its thread.
+Triton has no break. The two loops are while loops whose conditions fold
+the breaks in: the stop flag is a scalar (every thread reads the same word,
+as every Numba thread reads the same shared word), and a thread that has
+read 1 leaves the inner loop, then the outer one, exactly where Numba's
+break-then-break leaves it. The program does not keep stepping through the
+rest of the scan after the stop, so the early stop saves the same work as
+in Numba. Lanes >= 100 stay masked off.
 
 The first-finder CAS on found_flag[0] is a masked atomic exchange to 1
 (Triton 3.7.1's atomic_cas has no mask; on a 0/1 flag "old == 0 wins" is the
@@ -48,7 +52,9 @@ of bounds otherwise; on that image the guard never fires.
 
 Host side: setup_scene_small_example, process_image_small_example and
 main_small_example keep their names and roles. The scene builder is the
-Numba one (imported, not copied), with an optional rng_seed. Images go to
+Numba one (imported, not copied), with an optional rng_seed. Host arrays
+are made C-contiguous before the upload (the kernels index raw C-order
+buffers; Numba follows the strides of a Fortran-ordered array). Images go to
 results/triton_twins/scan_multi_blob/ instead of ./images/, and the
 matplotlib window is opt-in (show=True). run_scan is added for the tests and
 the compare: one launch of either kernel with an h2d / kernel / d2h / total
@@ -83,12 +89,14 @@ MAX_TICKS = 10000   # 100 threads * 100 pixels, the kernels' normalizer
 # Slots of the per-call `state` scratch, the twin of the shared arrays.
 STOP = 0    # stop_scanning[0]
 CLOCK = 1   # clock[0]
-STATE_SLOTS = 2
+ITERS = 2   # tests only (COUNT_ITERS): most inner-loop iterations of a thread
+STATE_SLOTS = 3
 
 KERNELS = ("scan", "simple")  # scan_image_small_example, simple_scan_kernel
 
 _STOP = tl.constexpr(STOP)
 _CLOCK = tl.constexpr(CLOCK)
+_ITERS = tl.constexpr(ITERS)
 _PATCH = tl.constexpr(PATCH_SIZE)
 _MAX_TICKS = tl.constexpr(float(MAX_TICKS))
 _GOLDEN = tl.constexpr(0.618033988749895)
@@ -184,14 +192,17 @@ def _paint(img_ptr, visited_ptr, x, y, height, tick, base_r, base_g, base_b,
 @triton.jit(do_not_specialize=_RUNTIME_INTS)
 def scan_image_small_example(img_ptr, visited_ptr, width, height,
                              found_flag_ptr, state_ptr,
-                             N_THREADS: tl.constexpr, BLOCK: tl.constexpr):
+                             N_THREADS: tl.constexpr, BLOCK: tl.constexpr,
+                             COUNT_ITERS: tl.constexpr = False):
     """
     Each thread scans one 10x10 patch along its anti-diagonals and stops as
     soon as any thread has found a red pixel.
 
     Launch with grid (1,), num_warps = BLOCK // 32; lanes >= N_THREADS idle.
     state (int32, STATE_SLOTS) is the twin of the shared stop flag and
-    clock; the kernel initializes it.
+    clock; the kernel initializes it. COUNT_ITERS (tests only) stores the
+    most inner-loop iterations any thread ran in state[ITERS]; the default
+    build has no counter.
     """
     tid = tl.arange(0, BLOCK)
     zero = tid * 0
@@ -206,22 +217,29 @@ def scan_image_small_example(img_ptr, visited_ptr, width, height,
 
     base_r, base_g, base_b = _thread_base_color(tid)
 
-    alive = tid < N_THREADS   # Numba's thread still in the scan loops
-    for sum_idx in range(2 * _PATCH - 1):  # Process diagonals
-        for i in range(_PATCH):
+    active = tid < N_THREADS   # lanes >= 100 have no Numba thread
+    # The stop flag is a scalar: every thread reads the same word, as all
+    # Numba threads read the same shared word. Each loop exits once its
+    # thread has read 1 (Numba's two breaks; Triton has no break).
+    stop = 0
+    iters = 0
+    sum_idx = 0
+    while (sum_idx < 2 * _PATCH - 1) & (stop != 1):  # Process diagonals
+        i = 0
+        while (i < _PATCH) & (stop != 1):
+            if COUNT_ITERS:
+                iters += 1
             j = sum_idx - i
             if (j >= 0) & (j < _PATCH):
                 x = patch_x + i
                 y = patch_y + j
                 # Get the current global clock value and increment it
-                tick = tl.atomic_add(state_ptr + _CLOCK + zero, 1, mask=alive,
-                                     sem="relaxed")
+                tick = tl.atomic_add(state_ptr + _CLOCK + zero, 1,
+                                     mask=active, sem="relaxed")
                 # Check if we should stop scanning (Numba: break)
-                stop = tl.load(state_ptr + _STOP + zero, mask=alive, other=1,
-                               volatile=True)
-                alive = alive & (stop != 1)
+                stop = tl.load(state_ptr + _STOP, volatile=True)
 
-                go = alive & is_valid_pixel(x, y, width, height)
+                go = active & (stop != 1) & is_valid_pixel(x, y, width, height)
                 go = is_not_visited(visited_ptr, x, y, height, go)
                 red = _paint(img_ptr, visited_ptr, x, y, height, tick,
                              base_r, base_g, base_b, go)
@@ -232,12 +250,15 @@ def scan_image_small_example(img_ptr, visited_ptr, width, height,
                 tl.store(found_flag_ptr + 1 + zero, x, mask=first)
                 tl.store(found_flag_ptr + 2 + zero, y, mask=first)
                 tl.store(state_ptr + _STOP + zero, 1, mask=first)
+            i += 1
 
         # Check again if we should stop scanning (Numba: break)
-        stop = tl.load(state_ptr + _STOP + zero, mask=alive, other=1,
-                       volatile=True)
-        alive = alive & (stop != 1)
+        stop = tl.load(state_ptr + _STOP, volatile=True)
+        sum_idx += 1
 
+    if COUNT_ITERS:
+        tl.atomic_max(state_ptr + _ITERS + zero, iters + zero, mask=active,
+                      sem="relaxed")
     cta_sync()
 
 
@@ -282,7 +303,7 @@ def simple_scan_kernel(img_ptr, visited_ptr, width, height, found_flag_ptr,
 # Host side
 # ---------------------------------------------------------------------------
 
-_warmed_up = {}  # kernel name -> CompiledKernel of the warm-up launch
+_warmed_up = {}  # (kernel name, count_iters) -> CompiledKernel of the warm-up
 
 
 def _kernel(name):
@@ -291,24 +312,34 @@ def _kernel(name):
     return scan_image_small_example if name == "scan" else simple_scan_kernel
 
 
-def _launch(name, d_img, d_visited, width, height, d_found_flag, d_state):
+def _to_device(a):
+    """cuda.to_device's twin for the kernels' (x, y[, c]) layout: the kernels
+    index the raw buffer as C order, so a Fortran-ordered or strided host
+    array is made C-contiguous first (Numba follows the strides instead)."""
+    return cp.asarray(np.ascontiguousarray(a))
+
+
+def _launch(name, d_img, d_visited, width, height, d_found_flag, d_state,
+            count_iters=False):
     """kernel[1, 100](d_img, d_visited, width, height, d_found_flag)."""
+    extra = {"COUNT_ITERS": True} if count_iters else {}
     return _kernel(name)[(1,)](
         t(d_img), t(d_visited), int(width), int(height), t(d_found_flag),
         t(d_state), N_THREADS=THREADS_PER_BLOCK, BLOCK=BLOCK,
-        num_warps=NUM_WARPS)
+        num_warps=NUM_WARPS, **extra)
 
 
-def _warmup(name):
+def _warmup(name, count_iters=False):
     """Compile on a blank scene, so no compile lands inside a timed window."""
-    if name in _warmed_up:
-        return _warmed_up[name]
+    key = (name, count_iters)
+    if key in _warmed_up:
+        return _warmed_up[key]
     img, visited, width, height, found_flag = blank_scene()
     compiled = _launch(name, cp.asarray(img), cp.asarray(visited), width,
                        height, cp.asarray(found_flag),
-                       cp.zeros(STATE_SLOTS, dtype=cp.int32))
+                       cp.zeros(STATE_SLOTS, dtype=cp.int32), count_iters)
     sync()
-    _warmed_up[name] = compiled
+    _warmed_up[key] = compiled
     return compiled
 
 
@@ -348,9 +379,9 @@ def process_image_small_example(img, visited, width, height, found_flag):
     """Process the small example image."""
     _warmup("scan")
     # Copy data to device
-    d_img = cp.asarray(img)
-    d_visited = cp.asarray(visited)
-    d_found_flag = cp.asarray(found_flag)
+    d_img = _to_device(img)
+    d_visited = _to_device(visited)
+    d_found_flag = _to_device(found_flag)
     d_state = cp.zeros(STATE_SLOTS, dtype=cp.int32)  # the shared arrays' twin
 
     # Configure thread block - exactly 100 threads for 100 patches (10x10 each)
@@ -373,7 +404,9 @@ class ScanRun:
     """One launch of either kernel on one scene (run_scan's result).
 
     clock is the final tick count (the shared clock's twin): the number of
-    scan steps all threads took. stop is the final stop flag.
+    scan steps all threads took. stop is the final stop flag. iters is the
+    most inner-loop iterations any thread ran (190 = the whole scan), or -1
+    when not counted (count_iters=False, and always for "simple").
     """
 
     kernel: str
@@ -385,24 +418,32 @@ class ScanRun:
     kernel_ms: float        # launch + synchronize
     d2h_ms: float           # visited and found_flag back
     total_ms: float
+    iters: int = -1
 
 
-def run_scan(img, visited, width, height, found_flag, kernel="scan"):
+def run_scan(img, visited, width, height, found_flag, kernel="scan",
+             count_iters=False):
     """One launch of `kernel` ("scan" = scan_image_small_example, "simple" =
     simple_scan_kernel) on one scene, with process_image_small_example's
     steps (without its print) and a timing decomposition. The arguments are
-    setup_scene_small_example's tuple. Inputs are not modified."""
-    _warmup(kernel)
+    setup_scene_small_example's tuple. Inputs are not modified.
+
+    count_iters=True (scan only, for the tests) runs the COUNT_ITERS build,
+    which records ScanRun.iters; its timings are not the bare kernel's."""
+    if count_iters and kernel != "scan":
+        raise ValueError("count_iters needs kernel='scan'")
+    _warmup(kernel, count_iters)
     d_state = cp.zeros(STATE_SLOTS, dtype=cp.int32)  # the shared arrays' twin
     sync()
 
     t0 = time.perf_counter()
-    d_img = cp.asarray(img)
-    d_visited = cp.asarray(visited)
-    d_found_flag = cp.asarray(found_flag)
+    d_img = _to_device(img)
+    d_visited = _to_device(visited)
+    d_found_flag = _to_device(found_flag)
     sync()
     t1 = time.perf_counter()
-    _launch(kernel, d_img, d_visited, width, height, d_found_flag, d_state)
+    _launch(kernel, d_img, d_visited, width, height, d_found_flag, d_state,
+            count_iters)
     sync()
     t2 = time.perf_counter()
     result_visited = d_visited.get()
@@ -414,7 +455,8 @@ def run_scan(img, visited, width, height, found_flag, kernel="scan"):
         kernel=kernel, visited=result_visited, found_flag=result_found,
         clock=int(state[CLOCK]), stop=int(state[STOP]),
         h2d_ms=(t1 - t0) * 1000, kernel_ms=(t2 - t1) * 1000,
-        d2h_ms=(t3 - t2) * 1000, total_ms=(t3 - t0) * 1000)
+        d2h_ms=(t3 - t2) * 1000, total_ms=(t3 - t0) * 1000,
+        iters=int(state[ITERS]) if count_iters else -1)
 
 
 def main_small_example(rng_seed=None, show=False):

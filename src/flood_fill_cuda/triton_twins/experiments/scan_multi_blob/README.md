@@ -34,9 +34,12 @@ run satisfies, on both backends:
   finder's scan ends on it;
 - each patch's painted pixels are a prefix of its scan order, and the
   brightness never decreases along it;
-- red pixels are painted magenta (G = 0, R = B); every other painted pixel
-  carries the hue of the thread that owns its patch;
-- `simple_scan_kernel` paints every pixel and ticks exactly 10,000 times.
+- every painted pixel is one of the exact colors its owner thread can
+  paint: its hue (red pixels: magenta) at the brightness of some tick, with
+  the kernels' float64 arithmetic and truncations;
+- `simple_scan_kernel` paints every pixel and ticks exactly 10,000 times;
+- after the stop no thread keeps iterating to the end of its scan (the
+  `COUNT_ITERS` build counts loop iterations: 190 only on the white image).
 
 Across backends, the same scene gives the same found flag, the same found
 pixel when only one thread can find it, and the same coverage on full scans.
@@ -48,14 +51,15 @@ pixel when only one thread can find it, and the same coverage on full scans.
 | `kernel[1, 100]` | `kernel[(1,)](..., N_THREADS=100, BLOCK=128, num_warps=4)` | close | 100 is not a power of 2: 128 lanes, lanes >= 100 masked off. 4 warps, as Numba's 100 threads occupy. |
 | `cuda.shared.array(1)` `stop_scanning`, `clock` | `state`: int32[2] global scratch, initialized by the kernel | emulated | No user-addressable shared memory in Triton. |
 | `cuda.atomic.add(clock, 0, 1)` per step | per-lane `tl.atomic_add(state + CLOCK, 1, sem="relaxed")` | close | One atomic per active lane per step, as in Numba (L2 instead of shared memory). |
-| `if stop_scanning[0] == 1: break` (inner), then again after each diagonal (outer) | volatile load at the same two places, sticky lane mask `alive` | close | Triton has no per-lane `break`. A lane that sees the flag is masked off for the rest of the scan, where Numba's break-then-break leaves its thread. |
+| `if stop_scanning[0] == 1: break` (inner), then again after each diagonal (outer) | scalar volatile load of the flag at the same two places, folded into the conditions of two `while` loops | close | Triton has no `break`. Every thread reads the same flag word (as every Numba thread reads the same shared word), and a thread that has read 1 leaves the inner loop, then the outer one, where Numba's break-then-break leaves it. So the program stops iterating at the stop, as Numba's threads do: about 10 us on the GPU on both backends when the stop comes at the first step. The tests pin this with the `COUNT_ITERS` build (not compiled into the default kernel), which counts each thread's loop iterations. |
+| (loop structure) `for sum_idx` / `for i` | `while sum_idx < 19 and stop != 1` / `while i < 10 and stop != 1` | close | Same iteration order and the same steps; only the exit is folded into the condition. |
 | `cuda.syncthreads()` (scan: after init and at exit; simple: after init) | `cta_sync()` | exact | Same places. The compiled PTX has exactly 2 `bar.sync` (scan) and 1 (simple), and no shared memory. |
 | `cuda.atomic.cas(found_flag, 0, 0, 1)` | masked `tl.atomic_xchg(found_flag, 1, sem="relaxed")`, `old == 0` wins | close | `tl.atomic_cas` has no mask in Triton 3.7.1; same exactly-once claim on a 0/1 flag. |
 | `cuda.atomic.max(found_flag, 0, 1)`, racy `found_flag[1:3]` stores | masked `tl.atomic_max`, masked `tl.store` | exact | Racy on both. |
 | per-thread hue (`h_i` if/elif chain), brightness, `min(255, int(...))` | float64 lane tensors, `tl.where` chain, `.to(int32)` truncation | exact | Same float64 constants and truncations. |
 | `for _ in range(5): pass` delay | (nothing) | exact | Compiles to nothing in Numba too. |
 | unchecked `img[x, y]` indexing | accesses masked with `x < width`, `y < height` | close | Never fires on the 100x100 image the host uses; avoids out-of-bounds access on other sizes. |
-| `cuda.to_device`, `copy_to_host`, `cuda.synchronize` | `cp.asarray`, `.get`, `runtime.sync()` | close | |
+| `cuda.to_device`, `copy_to_host`, `cuda.synchronize` | `cp.asarray(np.ascontiguousarray(...))`, `.get`, `runtime.sync()` | close | The kernels index raw C-order buffers, so Fortran-ordered or strided inputs are made contiguous first (Numba follows their strides). |
 | `./images/...` PNGs, `plt.show()` | `results/triton_twins/scan_multi_blob/` PNGs, `show=False` by default | close | The repo's results layout; the window is opt-in. |
 
 ## Deviations
@@ -76,7 +80,8 @@ pixel when only one thread can find it, and the same coverage on full scans.
 # plus test_cross_backend_* against the Numba kernels
 .venv/bin/python -m pytest -p no:cacheprovider src/flood_fill_cuda/triton_twins/experiments/scan_multi_blob/test_correctness.py -v
 
-# Numba vs Triton (timing only; launch-bound, 100x100 image);
+# Numba vs Triton (timing only, 100x100 image; small_example stops after
+# one step, so its kernel_ms is mostly launch overhead: read info.device_us);
 # writes results/triton_twins/scan_multi_blob/compare_<UTC>.json
 .venv/bin/python -m flood_fill_cuda.triton_twins.experiments.scan_multi_blob.compare
 .venv/bin/python -m flood_fill_cuda.triton_twins.experiments.scan_multi_blob.compare --quick  # smoke test

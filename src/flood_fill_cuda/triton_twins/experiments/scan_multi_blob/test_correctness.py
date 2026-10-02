@@ -15,9 +15,12 @@ schedule, on both kernels:
   anti-diagonal order for scan_image_small_example, row-major for
   simple_scan_kernel), and the brightness never decreases along it (each
   thread's ticks increase);
-- a painted red pixel is magenta-ish (G == 0, R == B), every other painted
-  pixel carries the hue of the thread that owns its patch;
-- simple_scan_kernel paints every pixel and ticks exactly 100 * 100 times.
+- every painted pixel is one of the exact colors its owner thread can
+  paint: the thread's hue (red: magenta) at the brightness of some tick,
+  with the kernels' float64 arithmetic and truncations;
+- simple_scan_kernel paints every pixel and ticks exactly 100 * 100 times;
+- after the stop the Triton program leaves its loops, as Numba's threads
+  break out of theirs (the COUNT_ITERS build counts the iterations).
 
 The test_cross_backend_* section runs the Numba kernels on the same seeded
 scenes and requires the deterministic parts to be identical (found or not,
@@ -93,19 +96,47 @@ def brightness_index(pixel, is_red, base):
     return int(pixel[base.index(255)])
 
 
-def check_pixel(pixel, is_red, base):
-    """Magenta for red; the thread's hue at some brightness otherwise."""
-    r, g, b = (int(c) for c in pixel)
+def _brightness_by_tick():
+    """The kernels' brightness for every tick a run can take, in float64
+    with their operations: 0.2 + 0.8 * min(1.0, tick / 10000)."""
+    ticks = np.arange(MAX_TICKS + 1, dtype=np.float64)
+    return 0.2 + 0.8 * np.minimum(1.0, ticks / MAX_TICKS)
+
+
+def _paint_values(channel, brightness):
+    """min(255, int(channel * brightness)) per tick."""
+    return np.minimum(255, (channel * brightness).astype(np.int64))
+
+
+_COLOR_SETS = {}
+
+
+def exact_colors(tid):
+    """Every color thread tid can paint (any tick): its hue's exact float64
+    values, plus the magenta set for red pixels (key "red")."""
+    if tid not in _COLOR_SETS:
+        bright = _brightness_by_tick()
+        if tid == "red":
+            m = _paint_values(255, bright)
+            colors = np.stack([m, np.zeros_like(m), m], axis=1)
+        else:
+            colors = np.stack([_paint_values(c, bright)
+                               for c in base_color(tid)], axis=1)
+        _COLOR_SETS[tid] = {tuple(int(v) for v in c)
+                            for c in np.unique(colors, axis=0)}
+    return _COLOR_SETS[tid]
+
+
+def check_pixel(pixel, is_red, tid):
+    """Magenta for red; the thread's hue at some tick's brightness otherwise,
+    with the kernels' exact float64 arithmetic and truncations."""
+    color = tuple(int(c) for c in pixel)
     if is_red:
-        assert g == 0 and r == b, f"red pixel painted {pixel}, not magenta"
-        assert 51 <= r <= 254, f"red pixel brightness {r} outside [51, 254]"
+        assert color in exact_colors("red"), \
+            f"red pixel painted {color}, not an exact magenta"
         return
-    v = brightness_index(pixel, False, base)
-    assert 51 <= v <= 254, f"pixel {pixel}: brightness {v} outside [51, 254]"
-    # brightness in [v / 255, (v + 1) / 255): each channel follows.
-    for c, bc in zip((r, g, b), base):
-        lo, hi = (bc * v) // 255, (bc * (v + 1)) // 255
-        assert lo <= c <= hi, f"pixel {pixel} is not hue {base} at {v}/255"
+    assert color in exact_colors(tid), \
+        f"pixel {color} is not an exact color of thread {tid} (hue {base_color(tid)})"
 
 
 def check_invariants(kernel, img, visited, found_flag):
@@ -125,7 +156,7 @@ def check_invariants(kernel, img, visited, found_flag):
         base = base_color(tid)
         last = -1
         for x, y in order[:k]:
-            check_pixel(visited[x, y], reds[x, y], base)
+            check_pixel(visited[x, y], reds[x, y], tid)
             v = brightness_index(visited[x, y], reds[x, y], base)
             assert v >= last, f"thread {tid}: brightness went down at {(x, y)}"
             last = v
@@ -230,6 +261,49 @@ def test_simple_scan_blank_image():
     r = run_scan(img, visited, w, h, found_flag, kernel="simple")
     check_invariants("simple", img, r.visited, r.found_flag)
     assert list(r.found_flag) == [0, 0, 0]
+
+
+FULL_SCAN_ITERS = PATCH_SIZE * (2 * PATCH_SIZE - 1)  # 19 diagonals x 10
+
+
+@pytest.mark.parametrize("name,build,first_step", [
+    ("square20_seed0", lambda: setup_scene_small_example(0), True),
+    ("square20_seed3", lambda: setup_scene_small_example(3), True),
+    ("spot1_at_0_0", lambda: spot_scene(0, 0, 1), True),
+    ("spot1_at_4_95", lambda: spot_scene(4, 95, 1), False),
+])
+def test_scan_leaves_its_loops_after_the_stop(name, build, first_step):
+    """Numba's threads break out of both loops once they see the stop flag.
+    The twin folds those breaks into its while conditions, so no thread
+    keeps iterating to the end of the scan (190 iterations) after the stop."""
+    img, visited, w, h, found_flag = build()
+    r = run_scan(img, visited, w, h, found_flag, kernel="scan",
+                 count_iters=True)
+    check_invariants("scan", img, r.visited, r.found_flag)
+    assert r.stop == 1
+    assert 0 < r.iters < FULL_SCAN_ITERS
+    if first_step:  # found at a patch corner: everyone stops within a few diagonals
+        assert r.iters <= FULL_SCAN_ITERS // 2
+
+
+def test_scan_blank_image_runs_every_iteration():
+    img, visited, w, h, found_flag = blank_scene()
+    r = run_scan(img, visited, w, h, found_flag, kernel="scan",
+                 count_iters=True)
+    assert r.iters == FULL_SCAN_ITERS and r.clock == MAX_TICKS
+
+
+def test_fortran_ordered_inputs():
+    """Numba follows the strides of a Fortran-ordered array; the twin makes
+    the upload C-contiguous, so the result is the same."""
+    img, visited, w, h, found_flag = spot_scene(57, 33, 2)
+    r = run_scan(np.asfortranarray(img), np.asfortranarray(visited), w, h,
+                 found_flag, kernel="scan")
+    check_invariants("scan", img, r.visited, r.found_flag)
+    assert tuple(r.found_flag) == (1, 57, 33)
+    out_visited, out_found = process_image_small_example(
+        np.asfortranarray(img), np.asfortranarray(visited), w, h, found_flag)
+    check_invariants("scan", img, out_visited, out_found)
 
 
 def test_seeded_scene_is_reproducible_and_leaves_global_random_alone():
