@@ -10,20 +10,27 @@ blue.  With CONVERGE=True a program keeps sweeping its own tile until it
 stops changing, so one launch advances the frontier by up to a whole tile
 (and often further, because ``.cg`` loads observe sibling programs' stores
 through L2 mid-launch).  With CONVERGE=False each launch performs exactly one
-lock-step BFS level — the naive baseline.
+lock-step BFS level: the naive baseline.
 
 Races between tiles are benign: a pixel only ever transitions RED -> BLUE,
 and a stale read can only *delay* a fill, never corrupt one.  The host
 relaunches until a launch converts nothing, which is exact convergence: a
 launch that changed nothing observed a fully settled image (kernel launch
 boundaries order memory), so no red pixel with a blue neighbour existed.
+
+The scan mode (``run_flood_fill_scan``) works on whole lines instead:
+``scan_line_step`` floods every red run that touches blue along a row or a
+column with a segmented max-scan, and ``gather_dirty`` compacts the lines
+that may still change, so each pass launches one program per dirty line.
 """
 
 import cupy as cp
 import triton
 import triton.language as tl
 
-from cupy_bridge import t
+# The shared Triton runtime: importing it installs the CuPy driver once
+# per process (the Triton twins use the same one).
+from flood_fill_cuda.triton_twins.runtime import t
 
 BACKGROUND = 0
 RED = 1
@@ -132,7 +139,7 @@ def scan_line_step(
     A line can only gain new fills after a perpendicular pass lands a blue
     on it, so each fill marks the crossing line dirty; the host compacts
     dirty lines with ``gather_dirty`` and launches exactly one program per
-    dirty line — settled lines cost nothing.  (The scan must stay outside
+    dirty line, so settled lines cost nothing.  (The scan must stay outside
     conditionals: Triton 3.7 miscompiles tl.associative_scan inside an if.)
     """
     pid = tl.program_id(0)
