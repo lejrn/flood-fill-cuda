@@ -17,8 +17,9 @@ union-find](#lockstep-vs-lane-independent-union-find).
 
 The queue appends also have two spellings. `enqueue="lane"` (the
 default) takes one ticket per winning lane with a plain atomic, which
-ptxas compiles into the same warp-aggregated SASS as Numba's
-hand-written helper. `enqueue="program"` is the first translation, kept
+ptxas compiles into the same warp-aggregated pattern as Numba's
+hand-written helper (one leader atomic per warp, no CTA barrier).
+`enqueue="program"` is the first translation, kept
 to measure its cost. See [Enqueue: per lane vs per
 program](#enqueue-per-lane-vs-per-program).
 
@@ -447,12 +448,16 @@ twin_ms; program / lane above 1 means the per-lane spelling is faster.
 | merge `two_disks_r1400` | 48 | 3 | 74-78 ms | x0.57-0.60 | x0.56-0.57 | 0.95-0.98 |
 
 The rows are noisy. Inside one run, the interquartile range of a row's
-per-round program / lane ratios is up to 17% wide (ccl
-`asym_4000_800`: 1.00-1.17; S1: under 2%). In one run ccl
-`two_disks_r1400` took 49-65 ms per lane. Two independent review runs
-of that row gave x lane 0.92 and 0.96 and program / lane 1.09 and
-1.13: the per-lane spelling is reliably faster there, but not at
-parity with Numba.
+per-round program / lane ratios is up to about 0.25 wide.
+
+Examples: ccl `asym_4000_800` 0.98-1.23, scan `comb_2000` 1.20-1.43,
+cclp `asym_4000_800` 0.90-1.11. One 12-round run of merge_bare
+`comb_2000` reached 1.08-1.51. S1 is the steadiest, 0.01-0.04 wide.
+
+In one run ccl `two_disks_r1400` took 49-65 ms per lane. Two
+independent review runs of that row gave x lane 0.92 and 0.96 and
+program / lane 1.09 and 1.13. The per-lane spelling is reliably faster
+there, but not at parity with Numba.
 
 Outputs were identical on every run. The gain sits where the fill is a
 plain BFS. In `ccl_fill` the fill phase dropped in every run:
