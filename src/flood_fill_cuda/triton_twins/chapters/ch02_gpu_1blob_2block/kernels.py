@@ -173,7 +173,11 @@ def _enqueue_global(arr, cap, state, rear_slot, item, won, counters,
     each lane base + rank): Numba's warp aggregation, with no CTA barrier.
     ENQ="program": the first translation. A program-wide prefix sum ranks
     the claiming lanes and one atomic per program reserves the slab.
+    Every kernel appends through here, so an unknown ENQ fails to compile
+    instead of silently taking the "program" branch.
     """
+    tl.static_assert((ENQ == "lane") | (ENQ == "program"),
+                     "ENQ must be 'lane' or 'program'")
     if ENQ == "lane":
         z = tl.zeros_like(item)
         idx = tl.atomic_add(state + rear_slot + z, z + 1, mask=won,

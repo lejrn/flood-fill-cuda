@@ -8,7 +8,7 @@ and a Numba-vs-Triton comparison of the chapter's own benchmark.
 |---|---|
 | `kernels.py` | `global`, `split`, `dirsplit` (each with an `INSTRUMENTED` constexpr: `False` is the bare twin) and `pinned`; every kernel takes the `ENQ` constexpr (`"lane"` default, `"program"` = the first translation) |
 | `flood_fill.py` | the host driver: same `flood_fill(...)` signature, defaults, validation and `DualFloodFillResult` fields as Numba, plus the twin-only `enqueue="lane"` keyword |
-| `test_correctness.py` | the Numba test file test for test (same 102 names), plus `test_cross_backend_*`, `test_enqueue_*` (both enqueue modes vs Numba and the CPU oracle) and a SASS check |
+| `test_correctness.py` | the Numba test file test for test (same 102 names), plus `test_cross_backend_*`, `test_enqueue_*` (both enqueue modes vs Numba and the CPU oracle) and SASS and PTX checks of the enqueue |
 | `compare.py` | the chapter benchmark's scenes, tpb sweep and placement experiment, plus an `enqueue` experiment (both enqueue modes), timed on both backends |
 
 Scenes and the CPU oracle are imported from the Numba chapter, never copied.
@@ -23,7 +23,7 @@ Scenes and the CPU oracle are imported from the Numba chapter, never copied.
 | `dual_block_split_bare_kernel` | `dual_block_split_kernel[INSTRUMENTED=False]`, `maxnreg=120` | 2 programs, cooperative |
 | `dual_block_dirsplit_kernel` | `dual_block_dirsplit_kernel[INSTRUMENTED=True]` | 2 programs, cooperative |
 | `dual_block_dirsplit_bare_kernel` | `dual_block_dirsplit_kernel[INSTRUMENTED=False]` | 2 programs, cooperative |
-| `dual_block_pinned_kernel` (48 x 768, `max_registers=40`) | `dual_block_pinned_kernel` (48 x 512, `maxnreg=64`) | cooperative |
+| `dual_block_pinned_kernel` (48 x 768, `max_registers=40`) | `dual_block_pinned_kernel` (72 x 512 by default, 48 x 512 with `enqueue="program"`; `maxnreg=64`) | cooperative; same_sm launch size, see the pinned deviation |
 
 The bare specializations compile without any counter, trace, owner or
 `%smid` code: the `INSTRUMENTED` branches are constexpr, so they are never
@@ -44,7 +44,7 @@ block-stride loops keep Numba's strides, so the item-to-program map of
 | `_pair_barrier` (pinned) | `_pair_barrier`, same sense-reversing algorithm | close | relaxed snapshot as in Numba, acq_rel arrival, relaxed reset then releasing bump on one thread; `threadfence()` after the spin becomes acquire spin reads (a separate trailing acquire costs one more program-wide broadcast per barrier, measured up to 5% slower) |
 | `cuda.atomic.cas(visited, (x, y), 0, 1) == 0` | masked `tl.atomic_xchg(visited, 1, sem="relaxed") == 0` | close | same exactly-once claim on a 0/1 flag; Triton's CAS has no mask |
 | `_warp_enqueue_global` (ballot, popc, leader atomic, shfl: one atomic per warp) | `_enqueue_global`, `ENQ="lane"`: a masked per-lane `tl.atomic_add(rear, 1, sem="relaxed")`, each lane writes its item at the returned ticket | exact | ptxas warp-aggregates the per-lane atomic: same SASS pattern as Numba (VOTE.ANY, POPC, one leader `ATOMG.E.ADD`, `SHFL.IDX`, lanemask POPC), no CTA barrier; see "Enqueue" below |
-| (first translation) | `_enqueue_global`, `ENQ="program"`: `tl.sum` + `tl.cumsum` over the program, one atomic per program | close | about 7 extra `BAR.SYNC` per append site, all warps of a program in lockstep; measured 1.2-2.1x slower than `"lane"` |
+| (first translation) | `_enqueue_global`, `ENQ="program"`: `tl.sum` + `tl.cumsum` over the program, one atomic per program | close | about 7 extra `BAR.SYNC` per append site, all warps of a program in lockstep; measured 1.18-2.08x slower than `"lane"` on every timed row |
 | `_warp_enqueue_two_tier` (shared ring, then spill) | `_enqueue_two_tier_lane` (`ENQ="lane"`) | exact | statement for statement: per-lane ticket atomic, `ticket - front < 8192` takes ring slot `ticket & 8191`, the rest take a second per-lane spill atomic (Numba's re-ballot); both warp-aggregated by ptxas |
 | (first translation) | `_enqueue_two_tier` (`ENQ="program"`) | close | same tickets, window and spill rule; the second ballot is the closed form `rank - room` |
 | `cuda.shared.array(8192)` ring + shared rears | 8192-slot region of a `(2, 8192)` global scratch array per program; rears: two program-private int32 slots of `g_state` (`"lane"`) or registers (`"program"`) | emulated | no user shared memory in Triton, so the ticket atomics are global (L2) atomics where Numba's are shared; the ring rear overshoots by the spilled tickets and is clamped back at the level end, as in Numba |
@@ -161,14 +161,38 @@ Numba's `_warp_enqueue_global` compiles to the same steps: `VOTE.ANY`,
 `BREV` + `FLO` for the lowest lane, `POPC`, one leader `ATOMG.E.ADD`,
 `SHFL.IDX`, `SR_LTMASK` + `POPC`.
 
-In the lane builds every `ATOMG.E.ADD` is aggregated this way. That is 4
-append sites in `global`, `dirsplit` and `pinned`, and 12 in `split`
-(ring ticket, spill ticket and inbox, per direction).
+In the lane builds every `ATOMG.E.ADD` is aggregated this way. `global`
+and `dirsplit` have 4 append sites, `split` has 12 (ring ticket, spill
+ticket and inbox, per direction). `pinned` has 7 add atomics: its 4
+append sites, plus the worker-rank dispenser and 2 pair-barrier arrivals,
+which ptxas wraps the same way.
 
 `BAR.SYNC` counts per kernel, lane vs program: `global` bare 10 vs 38,
-`dirsplit` bare 10 vs 38, `split` bare 15 vs 60, `pinned` 18 vs 46.
-`test_lane_enqueue_is_warp_aggregated_in_sass` checks this on every
-build, so a compiler change that stops the aggregation fails a test.
+`dirsplit` bare 10 vs 38, `split` bare 15 vs 60, `pinned` 18 vs 46. At
+tpb 32 (one warp per program) the scans need fewer barriers: `global`
+bare 10 vs 18, `split` bare 15 vs 20.
+
+The SASS alone does not tell the two modes apart. ptxas also wraps the
+first translation's single slab atomic in the vote/leader idiom, so the
+program builds pass the same aggregation check.
+
+The PTX does tell them apart. In a lane build each append site is a
+predicated per-lane `atom.global.gpu.relaxed.add.u32`, and its result
+goes straight into that lane's `st.global`, with no `bar.sync` or
+`st.shared` in between. In a program build every append atomic is a
+scalar: a `bar.sync`, the atomic, then a `st.shared` broadcast and
+another `bar.sync` before any lane can store.
+
+Two tests check this on every kernel at tpb 256 (512 for `pinned`), and
+on `global` and `split` at tpb 32:
+- `test_lane_enqueue_is_warp_aggregated_in_sass`: every add atomic is
+  aggregated, and the program build has more barriers (20+ more above one
+  warp per program).
+- `test_lane_enqueue_is_per_lane_in_ptx`: the lane build has exactly the
+  per-lane append sites above (plus pinned's one scalar rank dispenser),
+  and the program build has none.
+
+So a compiler change that stops the aggregation fails a test.
 
 `split` needs one more step. Its rears were shared-memory atomics in
 Numba and registers in the first translation. Under `"lane"` they are two
@@ -183,9 +207,12 @@ So the tickets that went to the spill tier are retracted, and nothing was
 ever written past the window. Spill, peak and processed counters keep
 Numba's meaning.
 
-The tests check this on a scene where only program 0 works and its ring
-overflows. There the spill counts and the peak spill window are
-deterministic, and they equal Numba's in both modes.
+The tests check this on a scene where only one program works and its
+ring overflows. There the spill counts and the peak spill window are
+deterministic, and they equal Numba's in both modes. The scene runs as
+built (program 0 spills) and mirrored along x (program 1 spills, through
+its own rear slots), at tpb 32, 256 and 512. The bare split runs through
+the same spill tier and matches Numba and the CPU oracle.
 
 Register use, lane vs program: `split` 72 vs 93 (bare 53 vs 75), `global`
 39 vs 36 (bare 28 vs 40), `dirsplit` 40 vs 39 (bare 28 vs 40), `pinned`
@@ -218,15 +245,36 @@ narrow and small scenes.
 | split tpb 512 sq_2000_center | 17.7 | 25.2 (x0.70) | 14.7 (x1.21) |
 | pinned 2x512 spread sq_2000_center (matched) | 10.1 | 17.4 (x0.58) | 11.9 (x0.85) |
 
-A second pass over 11 of these rows, in another session, agreed within
-5% on every ratio except the short pinned row. There it gave lane x0.92
-and program x0.78.
+A second pass, in another session, re-timed 9 of these rows plus
+`global sq_256_center` and `global` tpb 512 `sq_2000_center`. It agreed
+within 5% on every ratio except the short pinned row. There it gave lane
+x0.92 and program x0.78.
+
+A third session added the four worst rows of the first comparison that
+the table above lacks, with the same method (6 interleaved rounds after
+an 8 s spin-up, identical outputs in every run):
+
+| row | Numba | Triton program (first translation) | Triton lane (default) |
+|---|---|---|---|
+| pinned 2x512 spread sq_6000_center (matched), first run x0.625 | 206.9 | 329.7 (x0.63) | 201.3 (x1.03) |
+| global bare sq_6000_center, first run x0.645 | 272.2 | 428.6 (x0.64) | 247.6 (x1.10) |
+| global sq_6000_center, first run x0.662 | 289.4 | 434.6 (x0.67) | 264.8 (x1.09) |
+| global bare sq_5000_center, first run x0.667 | 191.6 | 290.7 (x0.66) | 172.0 (x1.11) |
+
+On the big pinned row lane beat Numba in 5 of 6 rounds (per-round median
+x1.05). An independent re-measurement by the reviewer gave x1.06.
+
+The same session re-timed the short pinned row twice. The medians were
+lane x1.06 and x1.10, program x0.75 and x0.78. Its 10-25 ms kernels sit
+where the laptop GPU drops its clock between runs (915-2070 MHz
+recorded). So per-round ratios ranged from x0.79 to x2.48, and lane was
+ahead in 13 of 18 rounds.
 
 What this shows:
 
 - **The first translation's loss was the enqueue.** With nothing else
-  changed, the lane path is 1.2-2.1x faster than the program path on
-  every row of both passes. Every `split`, `global` and `dirsplit` row is
+  changed, the lane path is 1.18-2.08x faster than the program path on
+  every row of every pass. Every `split`, `global` and `dirsplit` row is
   now ahead of Numba (x1.09-1.70), including all the rows that trailed
   (down to x0.56).
 - **`split` is ahead even though its ticket atomics are global.** Numba's
@@ -234,11 +282,16 @@ What this shows:
   the twin still wins by 16-29%. A likely cause, read from the code and
   the register counts but not profiled: the twin uses 32-bit indices and
   fewer registers (72 vs Numba's capped 120).
-- **`pinned` still trails** (x0.85-0.92 on the matched row, from
-  x0.58-0.78). Its appends are now Numba's, so what is left is the pair
-  barrier. In the twin every scalar atomic of the barrier is broadcast to
-  the whole 16-warp program through shared memory. So each barrier step
-  costs more than Numba's thread-0 spin.
+- **`pinned` is level with Numba or ahead.** On the large matched row
+  (`sq_6000_center`) the lane build leads, x1.03-1.06, up from x0.625.
+  The short `sq_2000_center` row moved from x0.58-0.78 to x0.85-1.10
+  across four passes. It is barrier-bound and clock-sensitive, so it
+  shows no stable gap either way.
+- **The pair barrier is the one cost the appends do not explain.** In
+  the twin every scalar atomic of the barrier is broadcast to the whole
+  16-warp program through shared memory, so each barrier step costs more
+  than Numba's thread-0 spin. That cost is per level, so it shows most on
+  the short row. It was left as it is, since it is not an enqueue.
 - **Placement rows are not all like-for-like.** The chapter's own rows
   pit 2 x 768 Numba threads against 2 x 512 Triton lanes, so their ratio
   mixes a config change with the backend change (`comparable=false` in
@@ -247,9 +300,21 @@ What this shows:
 `compare.py` repeats this in the harness: its `enqueue` experiment runs
 each kernel on `sq_2000_center`, `sq_4000_corner`, `serpentine_256` and
 `seam_serpentine_256` (and the matched pinned row) twice, once per
-enqueue mode. The lane rows carry the config label `per_lane`, the
-program rows `first_translation` and `first_translation: true` (the
-labels the ch03 and ch04 twins use).
+enqueue mode.
+
+The lane rows carry the config label `per_lane`, the program rows
+`first_translation`, the pinned pair included; its placement and tpb are
+in the config. These are the labels the ch01, ch03 and ch04 twins use.
+
+The program rows are `comparable: false` and carry
+`first_translation: true`, as in ch01, ch03 and ch04. They time code the
+twin no longer runs by default. So they stay out of the like-for-like
+averages and extremes of `summary.py` and `figures.py`, and still show in
+the experiment's own block and in the JSON.
+
+The lane rows repeat cells that `scenes` and `placement` already time.
+They carry `duplicate_of` naming that experiment, so a unit-wide average
+can count each cell once.
 
 ## Running
 
