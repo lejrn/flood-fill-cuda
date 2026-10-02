@@ -27,8 +27,10 @@ translation) against each other and against Numba: identical device
 buffers and counters, also on merge / flatten grids pinned to a few
 programs so that every lane walks hundreds of runs (the state machines'
 full steps, retries and next-run fetches all run), on the multi-chunk
-shapes (width or height > 1024) and on many-run scenes. Parts 1-3 run
-the default schedule.
+shapes (width or height > 1024), on many-run scenes, and on 1024-lane
+programs. They compare outputs and totals; that each run does exactly
+Numba's operations (probes, walk tests, unions) is not pinned here.
+Parts 1-3 run the default schedule.
 """
 
 import os
@@ -589,12 +591,13 @@ LANE_SCENES = {
     "stripes_1px": SCENES["stripes_1px"],            # 1-px runs
     "blob_grid_100": SCENES["blob_grid_100"],
     "one_col": SCENES["one_col"],
+    "one_row": SCENES["one_row"],                    # every run: `continue`
     "noise_1000": CROSS_SCENES["noise_1000"],
     "wide_3000x40": CROSS_SCENES["wide_3000x40"],    # width > 1024
     "big_2049x1100": CROSS_SCENES["big_2049x1100"],  # both > 1024
     "tall_13x2100": CROSS_SCENES["tall_13x2100"],    # height > 1024
-    # many runs: 550 per row, 1.1 M in all (rows wider than 1024 and
-    # more than 1024 rows), every run touching its row-below twin
+    # many runs: 550 per row, 605 k in all (more than 1024 rows, rows
+    # longer than 1024 px), every run touching its row-below twin
     "stripes_1100x1100": lambda: (_stripes(1100, 1100, 2), None),
     # dense 8-connected noise: contended links, atomic_min retries
     "noise_060": lambda: _scenes.random_blobs_scene(400, 400, 0.60, 5),
@@ -622,7 +625,7 @@ def _lane_buffers(img, contract, instrumented, sched, grid=None,
 
 
 # merge / flatten blocks: the default PHASE_BLOCKS (512), and 3 blocks of
-# 64, where every lane walks many runs (stripes_1100x1100: ~2900 each)
+# 64, where every lane walks many runs (stripes_1100x1100: ~3150 each)
 _LANE_PHASE_BLOCKS = (None, 3)
 
 
@@ -672,6 +675,43 @@ def test_lane_schedules_block_sizes_match_numba(sched, tpb):
                         phase_blocks=2)
     _assert_buffers_equal(ref, _lane_buffers(img, "mask", True, sched,
                                              grid=grid, phase_blocks=2))
+
+
+@pytest.mark.parametrize("phase_blocks", [1, 3])
+@pytest.mark.parametrize("name", ["noise_060", "big_2049x1100",
+                                  "stripes_1100x1100"])
+@pytest.mark.parametrize("sched", LANE_SCHEDULES)
+def test_lane_schedules_block_size_1024_match_numba(sched, name,
+                                                    phase_blocks):
+    """1024-lane programs (32 warps, the largest program-wide max), merge
+    and flatten on 1 or 3 of them, so every lane walks hundreds of runs
+    (stripes_1100x1100: ~590 or ~200 each). Numba cannot launch emit at
+    1024 threads, but every compared buffer is grid-independent, so the
+    reference is Numba at its default grid."""
+    img = _lane_scene(name)
+    ref = _lane_buffers(img, "rgb", True, "numba")
+    _assert_buffers_equal(ref, _lane_buffers(img, "rgb", True, sched,
+                                             grid=(64, 1024),
+                                             phase_blocks=phase_blocks))
+
+
+@pytest.mark.parametrize("sched", LANE_SCHEDULES)
+def test_lane_schedules_block_size_1024_match_cpu_oracle(sched):
+    """recolor() on an engine of 1024-lane programs with merge and
+    flatten on one program: the CPU oracle's label map, paint and
+    n_blobs, both contracts."""
+    img = _lane_scene("noise_060")
+    label, n_blobs = cpu_label_components(img)
+    for contract in CONTRACTS:
+        engine = RunRecolor(img.shape[0], img.shape[1], grid=(64, 1024),
+                            run_capacity=max(8192, _numpy_run_count(img) + 1),
+                            lane_schedule=sched)
+        _pin_union_grid(engine, 1)
+        result = recolor(img, engine=engine, contract=contract,
+                         emit_label=True)
+        assert result.n_blobs == n_blobs
+        np.testing.assert_array_equal(result.label, label)
+        np.testing.assert_array_equal(result.img, _expected_paint(img, label))
 
 
 @pytest.mark.parametrize("sched", LANE_SCHEDULES)
