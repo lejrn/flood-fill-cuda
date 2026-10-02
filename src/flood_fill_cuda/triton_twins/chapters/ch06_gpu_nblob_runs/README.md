@@ -56,7 +56,7 @@ thread-per-run kernels use a flat `[T]` tensor.
 | `_find` with path halving, lane-divergent | independent (default): one halving hop per lane per mini-step, inside each lane's state machine; lockstep: `while tl.max(active) > 0` over a lane mask | emulated | same loads, halving stores and root per lane in both. Independent: a lane at its root moves on; lockstep: the slowest of the program's lanes sets the pace, and every trip ends in a program-wide max |
 | `_union` retry loop, `cuda.atomic.min` | independent: per-lane registers (a, b, cursor, which find) advanced hop by hop, the `tl.atomic_min(sem="relaxed")` at the next full step, retry from the value it returned; lockstep: lane-mask loop | emulated | same protocol in both: find(a) to the end, then find(b), the larger root takes the smaller, retry from `old`. Numba atomics are relaxed; so are these |
 | binary search and forward walk with `continue` (merge) | independent: one probe or one walk test per lane per mini-step, the next run's 5 descriptor loads at the full step; lockstep: `while` loops, `continue` as a lane mask | emulated | same probes, same walk tests, same `continue` on the last row. Triton has no `break` / `continue` |
-| grid-stride `for r in range(tid, n_runs, stride)` around them (merge, flatten) | independent: each lane walks its own runs, taking the next at the full step after its current one is done; lockstep: `range(...)` batches of BLOCK runs | close | same run -> (program, lane) map; the counters per lane are the same |
+| grid-stride `for r in range(tid, n_runs, stride)` around them (merge, flatten) | independent: each lane walks its own runs, taking the next at the full step after its current one is done; lockstep: `range(...)` batches of BLOCK runs | close | same run -> (program, lane) map; the attempts per lane are the same (successful links per lane depend on races, in Numba too) |
 | per-thread `cuda.atomic.add` of attempts / done / roots, `if count:` | per-lane `tl.atomic_add(int64, mask=count > 0, sem="relaxed")` under `INSTRUMENTED` | exact | one atomic per thread with a nonzero count, as in Numba; the bare variants have none |
 | `shfl_sync(k)` descriptor replay (paint) | masked sum along the lane axis picks lane k's value | close | one `redux.sync.add.s32` per value, one warp instruction like the shuffle; descriptors still fetched 32 at a time, coalesced; the rejected per-run broadcast loads stay out |
 | span loop `for y in range(y0 + lane, y1 + 1, 32)` (paint, label) | `for ci in range(n_chunks)`, masked by `y <= y1` | emulated | trip count = longest span among the program's warps at that step |
@@ -172,6 +172,12 @@ Every lane fetches its first merge run before the loop. Per run the
 operations are Numba's, in Numba's order (the same probes, walk tests,
 finds, links, retries and counters), and so are the outputs.
 
+The suite pins the outputs and the counter totals. The per-run claim
+was checked outside it, with counting copies built from the same state
+blocks: per run one descriptor fetch, one flatten epilogue, and the
+probes, walk tests and unions of a CPU simulation of Numba's merge, on
+12 scenes x 5 grids (tpb 32-1024, 1-512 programs).
+
 Two placement choices were measured, not assumed:
 
 - **The next run at the full step, not at once.** Lanes that finish
@@ -191,61 +197,121 @@ Two placement choices were measured, not assumed:
   0.007 lockstep; fetching the first run before the loop alone fixed
   `serpentine_2048` but not `disk_r2000`). Linking at the full step puts
   a window of finds before a program's first link. Numba has the same
-  race and loses it now and then (`disk_r2000` merge: 3 runs of 30 at
-  0.12-0.15 ms, the rest 0.006).
+  race, and how often it loses it varies from session to session: its
+  `disk_r2000` merge takes 0.010-0.012 ms when it wins and 0.12-0.20 ms
+  when it loses (3 runs of 30 lost in one session, more than half in
+  the table below).
 
-Mini-steps per full step: 4 for both kernels. At 8 the merge was 11-19%
-slower on the big and the chain scenes; flatten was flat from 4 to 8 and
-worse at 2.
+Mini-steps per full step: 4 for both kernels. Measured on this layout,
+merge-only and flatten-only, 21 interleaved rounds, SM clock logged at
+2070 MHz throughout:
+
+- Merge at 8: 9-11% slower on `input_blobs` and the 8000 crop, 4% on
+  the 6000 crop, 8% on `random_4000`, 10% faster on `blob_grid_100`.
+- Merge at 2: 4-14% slower on those four. At 6: 5-10% slower on the
+  three big scenes, 10-13% faster on `random_4000` and `blob_grid_100`.
+- Flatten at 8: 0-5% slower on the big scenes and `random_4000`; at 2,
+  14-16% slower on the three big scenes.
+
+An earlier sweep read 11-19% for 4 over 8. It ran at 210-360 MHz, so
+only its direction stands. The chain scenes' merge and the small
+scenes' flatten take 7-11 us, where one timer tick is 10%; they do not
+choose.
 
 ### Before / after
 
-GPU-only phase medians (every launch queued behind a 3 ms device spin),
-mask contract, Numba and both twin schedules interleaved in one process,
-10-12 rounds, `x` = numba_ms / twin_ms:
+GPU-only phase medians (every pipeline run queued behind compare.py's
+3 ms device spin), mask contract, on compare.py's own sides. Numba and
+both twin schedules interleaved, 21 rounds per scene. The SM clock,
+sampled every 50 ms, read 2070 MHz throughout every scene. `x` =
+numba_ms / twin_ms.
 
 | scene | merge: Numba | lockstep | independent | flatten: Numba | lockstep | independent | span: lockstep | independent |
 |---|---|---|---|---|---|---|---|---|
-| `input_blobs` 9000² | 0.310 ms | 0.604 (x0.51) | 0.275 (x1.13) | 0.0328 ms | 0.0471 (x0.70) | 0.0379 (x0.87) | x0.86 | x1.12 |
-| crop 8000² | 0.251 ms | 0.511 (x0.49) | 0.246 (x1.02) | 0.0282 ms | 0.0410 (x0.69) | 0.0328 (x0.86) | x0.84 | x1.08 |
-| crop 6000² | 0.220 ms | 0.406 (x0.54) | 0.229 (x0.96) | 0.0225 ms | 0.0317 (x0.71) | 0.0256 (x0.88) | x0.94 | x1.22 |
-| crop 4000² | 0.135 ms | 0.191 (x0.71) | 0.139 (x0.97) | 0.0113 ms | 0.0143 (x0.79) | 0.0133 (x0.85) | x1.05 | x1.24 |
-| crop 2000² | 0.044 ms | 0.061 (x0.72) | 0.049 (x0.89) | 0.0072 ms | 0.0072 (x1.00) | 0.0077 (x0.94) | x1.14 | x1.28 |
-| `random_4000` | 1.506 ms | 1.915 (x0.79) | 1.344 (x1.12) | 0.3005 ms | 0.3236 (x0.93) | 0.3164 (x0.95) | x1.27 | x1.42 |
-| `blob_grid_100` | 0.069 ms | 0.048 (x1.45) | 0.100 (x0.69) | 0.0072 ms | 0.0092 (x0.78) | 0.0092 (x0.78) | x1.37 | x1.18 |
-| `disk_r2000` | 0.012 ms | 0.011 (x1.09) | 0.011 (x1.09) | 0.0072 ms | 0.0092 (x0.78) | 0.0082 (x0.88) | x1.18 | x1.20 |
-| `serpentine_2048` | 0.009 ms | 0.009 (x1.00) | 0.008 (x1.12) | 0.0072 ms | 0.0082 (x0.88) | 0.0072 (x1.00) | x1.10 | x1.09 |
-| `input_blocks` | 0.052 ms | 0.056 (x0.94) | 0.053 (x0.98) | 0.0189 ms | 0.0195 (x0.97) | 0.0184 (x1.03) | x1.41 | x1.36 |
+| `input_blobs` 9000² | 0.307 ms | 0.600 (x0.51) | 0.272 (x1.13) | 0.0328 ms | 0.0481 (x0.68) | 0.0379 (x0.86) | x0.85 | x1.10 |
+| crop 8000² | 0.251 ms | 0.512 (x0.49) | 0.246 (x1.02) | 0.0287 ms | 0.0410 (x0.70) | 0.0328 (x0.88) | x0.84 | x1.08 |
+| crop 6000² | 0.192 ms | 0.334 (x0.57) | 0.196 (x0.98) | 0.0195 ms | 0.0266 (x0.73) | 0.0225 (x0.86) | x0.92 | x1.15 |
+| crop 4000² | 0.135 ms | 0.191 (x0.71) | 0.139 (x0.97) | 0.0113 ms † | 0.0154 (x0.73) | 0.0133 † (x0.85) | x1.06 | x1.24 |
+| crop 2000² | 0.043 ms | 0.060 (x0.71) | 0.047 (x0.91) | 0.0072 ms † | 0.0072 † (x1.00) | 0.0082 † (x0.88) | x1.07 | x1.18 |
+| `random_4000` | 1.443 ms | 1.857 (x0.78) | 1.329 (x1.09) | 0.311 ms | 0.326 (x0.96) | 0.317 (x0.98) | x1.28 | x1.45 |
+| `blob_grid_100` | 0.070 ms | 0.047 (x1.48) | 0.095 (x0.73) | 0.0072 ms † | 0.0092 † (x0.78) | 0.0092 † (x0.78) | x1.38 | x1.19 |
+| `disk_r2000` | 0.152 ms ‡ | 0.011 † | 0.010 † | 0.0072 ms † | 0.0092 † (x0.78) | 0.0082 † (x0.88) | x1.26 ‡ | x1.26 ‡ |
+| `serpentine_2048` | 0.0092 ms † | 0.0082 † (x1.13) | 0.0082 † (x1.13) | 0.0061 ms † | 0.0082 † (x0.75) | 0.0072 † (x0.86) | x1.06 | x1.06 |
+| `input_blocks` | 0.052 ms | 0.055 (x0.94) | 0.053 (x0.98) | 0.0184 ms | 0.0195 (x0.95) | 0.0184 (x1.00) | x1.23 | x1.27 |
 
-Geometric means over the ten scenes: merge x0.78 lockstep, x0.99
-independent; flatten x0.82 and x0.90; the GPU-only span x1.10 and x1.21.
-On the three largest (`input_blobs` and the 8000 and 6000 crops), where
-merge dominates the mask contract: merge x0.51 and x1.03, flatten x0.70
-and x0.87, span x0.88 and x1.14. The counters agreed on every scene;
-the outputs are compared by the tests and by `compare.py` on every run.
+† Under 15 us: a few ticks of the 1.02 us event timer, so one tick
+moves the ratio by 7-15%. These cells stay out of the geometric means.
+
+‡ Numba's `disk_r2000` merge is bimodal: 0.010-0.012 ms when it wins
+the chain race, 0.12-0.20 ms when it loses (more than half of these 21
+runs; 13 of 21 in a repeat). No merge ratio is given, and its span
+ratios carry that loss.
+
+Geometric means over the scenes whose three times are all at least
+15 us:
+
+| phase | scenes | lockstep | independent |
+|---|---|---|---|
+| merge | 8 (all but `disk_r2000`, `serpentine_2048`) | x0.73 | x0.97 |
+| flatten | 5 (the three largest, `random_4000`, `input_blocks`) | x0.79 | x0.92 |
+| span | all 10 (9 without `disk_r2000`: x1.06 and x1.19) | x1.08 | x1.19 |
+
+On the three largest (`input_blobs` and the 8000 and 6000 crops),
+where merge dominates the mask contract: merge x0.52 and x1.04,
+flatten x0.70 and x0.87, span x0.87 and x1.11. The counters agreed on
+every run; the outputs are compared by the tests and by `compare.py`
+on every run.
+
+This table replaces the one first committed with the schedule. That
+one did not log the clock during the runs and mixed two passes. Its
+`crop_6000` and `blob_grid_100` rows came from a rerun, after a first
+pass in which even the untouched emit and paint kernels ran 12-20%
+slower on the independent side (`crop_6000` merge x0.79, span x1.06).
+The rerun read `crop_6000` span x1.22; here it is x1.15.
 
 ### What it does not recover
 
-- `blob_grid_100` loses its merge: x1.45 lockstep, x0.69 independent.
+- `blob_grid_100` loses its merge: x1.48 lockstep, x0.73 independent.
   Each of its 100 squares is a 360-run chain spread over 14 programs.
   Lockstep links all of them while every find still reads the iota (the
   forest after the merge is a full chain, mean depth 178), so each union
   is one hop. Lane-independent programs still lose the chain race at
   some boundaries, and one lane walks up to 181 hops. The absolute cost
-  is 0.05 ms.
+  is about 0.05 ms.
 - Flatten stays behind Numba's (x0.86-0.88 on the big scenes). Its finds
   are short (2.1 iterations per run), so the lockstep waste was small to
   begin with; the lane-independent flatten still takes a program-wide max
   every 4 hops and holds a finished lane until the window ends, which
   Numba's warps do not.
+- Scenes made only of 1-px runs keep merge near x0.6 in both
+  schedules. Vertical 1-px lines, 2053 x 1033 (1.06 M runs, 517
+  chains): Numba 0.195 ms, lockstep 0.325 (x0.60), independent 0.347
+  (x0.56). A 1031 x 1029 checkerboard (0.53 M runs, one blob): 0.203,
+  0.333 (x0.61) and 0.327 (x0.62). Dense noise is the control: 2111 x
+  1503 at 0.45 goes from x0.73 to x1.23. (Same method as the table, 21
+  rounds.)
+
+  There every lane does the same short work per run: about 10 probes,
+  2-3 walk tests and 1-2 unions of one or two hops. So lockstep wastes
+  few lane slots, and there is little to recover.
+
+  The gap comes with program width instead. On one 32-lane program the
+  lockstep merge is close to Numba's one-warp block (lines 73.3 vs 61.1
+  ms, checkerboard 47.6 vs 54.1). On one 1024-lane program it is far
+  behind (11.6 vs 4.2 ms, 6.9 vs 3.5). The state machine pays for every
+  mini-step: it issues the find, probe and walk blocks each time, plus
+  the full step. On one 32-lane program it takes 1.3x (94.8 ms) and
+  1.8x (86.3 ms) the lockstep time. Flatten does recover part of its
+  gap there: x0.54 to x0.68 on the lines, x0.63 to x0.86 on the
+  checkerboard.
 
 ## Run
 
 Tests (same CPU oracle as the Numba chapter, plus Numba-vs-Triton
 equality on every variant; the `test_lane_*` tests run both lane
 schedules against each other and against Numba, also with merge and
-flatten pinned to 2-3 blocks so every lane walks hundreds of runs, on
-the multi-chunk shapes and on many-run scenes):
+flatten pinned to 1-3 blocks so every lane walks hundreds of runs, on
+the multi-chunk shapes, on many-run scenes and on 1024-lane programs):
 
 ```
 .venv/bin/python -m pytest -p no:cacheprovider src/flood_fill_cuda/triton_twins/chapters/ch06_gpu_nblob_runs

@@ -556,19 +556,21 @@ def flatten_kernel(parent_ptr, run_x_ptr, run_y0_ptr, run_label_ptr, height,
 # link lands, which is what lockstep does. A program that reads a
 # neighbour's boundary run after the neighbour has linked its rows
 # instead walks that whole chain, one halving hop per mini-step, and its
-# program waits for it (Numba has the same race and loses it now and
-# then: disk merge 3 runs of 30 at 0.12-0.15 ms, the rest 0.006). With
-# the link in the mini-step, programs lost that race on every run: the
-# first lane of each program walked 128-386 hops, merge 0.085-0.16 ms on
-# both scenes against 0.007 lockstep (fetching the first run before the
-# loop alone fixed serpentine_2048, not disk_r2000). Linking at the full
-# step puts a window of finds between a program's first find and its
-# first link, and with the first fetch before the loop no program
-# starts a window late: both scenes back at the lockstep time (x1.09 and
-# x1.13 of Numba's merge). blob_grid_100 (100 squares, 360-run chains spread over
-# 14 programs each) still loses the race at some program boundaries (a
-# lane walks up to 181 hops): x0.69 of Numba's merge, where lockstep,
-# whose finds all read the iota, takes x1.45.
+# program waits for it. Numba has the same race, and how often it loses
+# it varies from session to session: its disk_r2000 merge takes
+# 0.010-0.012 ms when it wins and 0.12-0.20 ms when it loses (3 runs of
+# 30 lost in one session, 13 of 21 in another). With the link in the
+# mini-step, programs lost that race on every run: the first lane of
+# each program walked 128-386 hops, merge 0.085-0.16 ms on both scenes
+# against 0.007 lockstep (fetching the first run before the loop alone
+# fixed serpentine_2048, not disk_r2000). Linking at the full step puts
+# a window of finds between a program's first find and its first link,
+# and with the first fetch before the loop no program starts a window
+# late: both scenes back at the lockstep time (0.010 and 0.008 ms).
+# blob_grid_100 (100 squares, 360-run chains spread over 14 programs
+# each) still loses the race at some program boundaries (a lane walks up
+# to 181 hops): x0.73 of Numba's merge, where lockstep, whose finds all
+# read the iota, takes x1.48.
 #
 # Per run the operations are Numba's, in Numba's order: the same
 # descriptor loads, the same binary-search probes, the same walk tests,
@@ -578,12 +580,17 @@ def flatten_kernel(parent_ptr, run_x_ptr, run_y0_ptr, run_label_ptr, height,
 # returned, the same counters; flatten's find, store and label likewise.
 
 # Mini-steps per full step (and per program-wide check), merge and
-# flatten. Merge at 4 vs 8 (link at the full step; one interleaved
-# merge-only run): 4 is 11-19% faster on input_blobs, crop_6000,
-# random_4000, serpentine_2048 and disk_r2000, within 2% on
-# blob_grid_100 and input_blocks. Flatten at 2 / 4 / 6 / 8 with its
-# epilogue at the full step: 4, 6 and 8 within a few percent (x0.83-1.00
-# of Numba's flatten on five scenes), 2 worse (x0.71-0.97).
+# flatten. Measured on this layout, merge-only and flatten-only, GPU-only,
+# 21 interleaved rounds with the SM clock logged at 2070 MHz throughout
+# (an earlier sweep that read 11-19% for 4 over 8 ran at 210-360 MHz):
+# merge at 8 is 9-11% slower than at 4 on input_blobs and crop_8000, 4%
+# on crop_6000, 8% on random_4000, 10% faster on blob_grid_100, within
+# 2% on input_blocks; at 2, 4-14% slower on those four; at 6, 5-10%
+# slower on the three big scenes, 10-13% faster on random_4000 and
+# blob_grid_100. Flatten at 8 is 0-5% slower on the big scenes and
+# random_4000, at 2 14-16% slower on the big scenes. disk_r2000 and
+# serpentine_2048 merge, and flatten on the small scenes, take 7-11 us:
+# one event-timer tick (1.02 us) is 10%, so they do not choose.
 _MERGE_STEPS = tl.constexpr(4)
 _FLATTEN_STEPS = tl.constexpr(4)
 
