@@ -21,8 +21,10 @@ are the backend's:
   this number can differ from the Numba twin's; pin blocks to compare.
 - Every launch is cooperative (launch_cooperative_grid=True), so an
   oversized grid is refused by the driver exactly as in Numba.
-- Device memory is CuPy's; a grid barrier counter (int32[1]) is allocated
+- Device memory is CuPy's; a grid barrier counter (int64[1]) is allocated
   with the other buffers and zeroed with the H2D copies.
+- A non-contiguous input (a transposed view, say) is accepted: CuPy's
+  .set() copies it contiguous, where Numba's copy_to_device refuses it.
 """
 
 import time
@@ -61,6 +63,11 @@ LEVEL_TRACE_CAPACITY = 2 ** 21
 
 # Lane counts a Triton program can have (power-of-2 tl.arange and num_warps)
 POW2_TPB = (32, 64, 128, 256, 512)
+
+# Grid barrier counter: 2 arrivals per program per level. int32 would wrap
+# after 2**31 arrivals (a 2048x2048 serpentine at 576 programs gets there);
+# int64 cannot wrap in practice, like Numba's grid.sync.
+BAR_DTYPE = np.int64
 
 
 @dataclass
@@ -165,7 +172,7 @@ def _warmup(bare, connectivity=4, radius=1, probe_layout="thread",
     if (key, threads_per_block) in _warmed:
         return _warmed[(key, threads_per_block)]
     d_img, d_visited, d_depth, d_counters, d_queue, d_q = _tiny_args()
-    d_bar = cp.zeros(1, dtype=cp.int32)
+    d_bar = cp.zeros(1, dtype=BAR_DTYPE)
     kernel_fn = _KERNELS[key]
     if bare:
         compiled = _launch(kernel_fn, 1, threads_per_block, False, d_img,
@@ -296,7 +303,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     d_depth = cp.empty(depth_host.shape, dtype=cp.int32)
     d_counters = cp.empty(NUM_COUNTERS, dtype=cp.int64)
     d_queue = cp.empty(width * height, dtype=cp.int32)
-    d_bar = cp.empty(1, dtype=cp.int32)
+    d_bar = cp.empty(1, dtype=BAR_DTYPE)
     d_owner = d_stats = d_trace = None
     if instrumented:
         owner_host = np.full((width, height), -1, dtype=np.int16)
@@ -314,7 +321,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     d_counters.set(counters_host)
     d_queue[:1].set(seed_lin)
     d_q_state = cp.asarray(np.array([1], dtype=np.int32))
-    d_bar.set(np.zeros(1, dtype=np.int32))
+    d_bar.set(np.zeros(1, dtype=BAR_DTYPE))
     if instrumented:
         d_owner.set(owner_host)
         d_stats.set(stats_host)
