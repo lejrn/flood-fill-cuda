@@ -35,9 +35,14 @@ enqueue            The twin's two enqueue settings against the same Numba
                    serpentine_256 at the minimum capacity over variants,
                    backends and settings, plus the first run's worst sweep
                    cells (one 512-lane program on disk_4001_r1900, conn4
-                   and conn8). first_translation rows are comparable=False:
-                   they measure the first translation's cost and stay out
-                   of the unit's averages.
+                   and conn8). first_translation rows are comparable=False
+                   and carry first_translation=true, as in ch01, ch02 and
+                   ch04: they measure the first translation's cost and
+                   stay out of the like-for-like averages. In the default
+                   run all 26 per_lane rows repeat a cell of suite (12),
+                   barrier_work (12) or sweep (2); those carry
+                   duplicate_of=<experiment>, so a unit-wide average can
+                   count each cell once.
 
 Every case runs the same configuration on both backends (same tpb =
 num_warps * 32, same explicit program count except in suite_blocks_none)
@@ -141,6 +146,11 @@ METHOD_NOTES = [
     "every row's config.enqueue names the twin's enqueue mode: 'lane' (the "
     "default) everywhere except the enqueue experiment's first_translation "
     "rows",
+    "the enqueue experiment's per_lane rows that repeat a cell of suite, "
+    "sweep or barrier_work (same scene, variant, tpb, blocks and enqueue) "
+    "carry duplicate_of=<experiment>. They stay comparable for the "
+    "enqueue experiment's own average; a unit-wide average that keeps "
+    "them counts those cells twice",
 ]
 SCOPE = (
     "benchmark.py also times ch01 v2, ch02 dual-global and the @njit "
@@ -184,9 +194,13 @@ ENQUEUE_NOTE = (
     "_warp_enqueue_global) and 'program' (label first_translation: tl.sum + "
     "tl.cumsum over the program and one atomic per program per direction, "
     "7 CTA barriers per enqueue site in SASS). Both rows time the same "
-    "Numba kernel. first_translation rows are comparable=false, so the "
-    "unit's averages describe the default twin only; their speedups are "
-    "the measured cost of the first translation")
+    "Numba kernel. first_translation rows are comparable=false and carry "
+    "first_translation=true (as in ch01, ch02 and ch04), so the "
+    "like-for-like averages describe the default twin only; their "
+    "speedups are the measured cost of the first translation, and an "
+    "'own default' average over all measured rows must drop them too. "
+    "per_lane rows whose cell another experiment already measures carry "
+    "duplicate_of=<experiment>; a unit-wide average should skip them")
 
 
 class SceneSlot:
@@ -314,8 +328,9 @@ def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
     blocks=None lets each backend resolve its own grid: both resolved sizes
     go into the config, and the row is comparable only if they agree.
     enqueue picks the Triton twin's enqueue mode (config["enqueue"]); a
-    "program" row is the first translation, labelled and kept out of the
-    averages (see ENQUEUE_NOTE)."""
+    "program" row is the first translation: comparable=False, label
+    first_translation and first_translation=true, as in ch01, ch02 and
+    ch04 (see ENQUEUE_NOTE)."""
     kw = {**VARIANTS[name], "threads_per_block": tpb, "blocks": blocks}
     c = caps(name, tpb, enqueue)
 
@@ -340,6 +355,9 @@ def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
     row_extra = {"caps": c, **resources(name, tpb, enqueue), **(extra or {})}
     if grid_of:
         row_extra["grid_of"] = grid_of
+    if enqueue != DEFAULT_ENQ:
+        # the filter key ch01 and ch02 use too (config.label is the other)
+        row_extra["first_translation"] = True
     return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=run_numba, run_triton=run_triton,
                 same=make_same(name, pinned=equal_grid),
@@ -434,6 +452,30 @@ def enqueue_cases(slot, scene_list, low_grid, tpb, notes):
     return out, all_caps, pin
 
 
+def _cell(case):
+    cfg = case.config
+    return (case.scene, cfg["variant"], cfg["tpb"], cfg["blocks"],
+            cfg["enqueue"])
+
+
+def mark_repeated_cells(earlier, enqueue_rows):
+    """Tag each per_lane enqueue row whose cell (scene, variant, tpb,
+    explicit blocks, enqueue) an earlier experiment already measures with
+    duplicate_of=<that experiment>. Those rows stay comparable (the
+    enqueue experiment's own average needs them), but a unit-wide average
+    should skip them to weigh each cell once. Returns the tagged count."""
+    seen = {}
+    for c in earlier:
+        if c.config["blocks"] != "None":
+            seen.setdefault(_cell(c), c.experiment)
+    tagged = 0
+    for c in enqueue_rows:
+        if c.config["enqueue"] == DEFAULT_ENQ and _cell(c) in seen:
+            c.extra["duplicate_of"] = seen[_cell(c)]
+            tagged += 1
+    return tagged
+
+
 def build(quick):
     """All cases plus the meta block, in scene-grouped order."""
     if quick:
@@ -467,6 +509,7 @@ def build(quick):
     ecases, ecaps, epin = enqueue_cases(
         slot, enq_scenes, enq_low, tpb,
         {n: note for n, _, note in suite_list + barrier_list})
+    repeated = mark_repeated_cells(cases, ecases)
     cases += ecases
     slot.release()  # the cases rebuild each scene when they run
 
@@ -489,6 +532,7 @@ def build(quick):
                         for s, v, t, b in enq_low],
                     "coop_max_by_config_and_enqueue": ecaps,
                     "labels": ENQ_LABELS, "default": DEFAULT_ENQ,
+                    "per_lane_rows_repeating_a_cell": repeated,
                     "note": ENQUEUE_NOTE},
         "triton_enqueue_default": DEFAULT_ENQ,
         "suite_tpb": tpb,

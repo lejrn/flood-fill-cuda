@@ -23,7 +23,7 @@ T // 32, lane i plays thread i):
 - _warp_enqueue_global     -> _lane_enqueue_global (ENQ="lane", the
                               default): one relaxed tl.atomic_add per
                               claiming lane on the rear, which ptxas
-                              warp-aggregates (VOTEU.ANY, UPOPC, one leader
+                              warp-aggregates (VOTEU.ANY, POPC, one leader
                               ATOMG, SHFL.IDX): the SASS pattern of Numba's
                               activemask/popc/leader/shfl helper.
                               ENQ="program" keeps the first translation,
@@ -150,11 +150,15 @@ def _lane_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, item, claimed,
     with one relaxed atomic_add of 1 on the rear and writes its item at the
     slot the atomic returned. The address is the same for the whole warp,
     so ptxas compiles the add into a warp-aggregated atomic: VOTEU.ANY of
-    the active lanes, UPOPC for the count, one ATOMG by the leader lane,
-    SHFL.IDX of the base and each lane's rank among the active lanes. That
-    is the machine code Numba's activemask/popc/leader/shfl helper produces,
-    with no CTA barrier. The bound check is the same defensive tripwire
-    (a rear past qcap writes nothing out of bounds).
+    the active lanes into a uniform register, POPC of it for the count,
+    one ATOMG by the leader lane, SHFL.IDX of the base and each lane's
+    rank among the active lanes. That is the machine code Numba's
+    activemask/popc/leader/shfl helper produces, with no CTA barrier.
+
+    The bound check is the same defensive tripwire: a lane whose slot is
+    at or past qcap stores nothing and sets OVERFLOW, and the rear keeps
+    counting, so the final rear is still one ticket per claim
+    (test_enqueue_modes_overflow_tripwire forces it).
     """
     zero = item * 0
     slot = tl.atomic_add(q_state_ptr + _Q_REAR + zero, 1, mask=claimed,
