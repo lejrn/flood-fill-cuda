@@ -195,6 +195,12 @@ def grand_table(doc):
             scenes.append(s["row"])
         if s.get("column") not in cols:
             cols.append(s["column"])
+    # chapter order (ch01 ... ch06), first appearance within a chapter: the
+    # one-blob scenes come first and have no ch04 cells, so appearance alone
+    # would put ch04 after ch06
+    def _chapter(c):
+        return int(c[2:4]) if c[:2] == "ch" and c[2:4].isdigit() else 99
+    cols = sorted(cols, key=lambda c: (_chapter(c), cols.index(c)))
     cell = {(r["scene"], r["experiment"]): r for r in rows}
     errors = {(r["scene"], r["experiment"]) for r in doc["rows"]
               if "error" in r}

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="328" viewBox="0 0 860 328" role="img" aria-label="First translation versus refined twin">
+<title>First translation versus refined twin</title>
+<text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#768390" text-anchor="start" font-weight="600">First translation vs refined twin, same cells (kernel time, Numba / Triton, log scale)</text>
+<text x="0.0" y="33.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#7d8590" text-anchor="start" font-weight="400">hollow: first translation  |  filled: the twin as shipped  |  right of x1: Triton faster</text>
+<line x1="230.0" y1="42" x2="230.0" y2="258" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22" stroke-dasharray="3 3"/>
+<text x="230.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">x0.125</text>
+<line x1="350.0" y1="42" x2="350.0" y2="258" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22" stroke-dasharray="3 3"/>
+<text x="350.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">x0.25</text>
+<line x1="470.0" y1="42" x2="470.0" y2="258" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22" stroke-dasharray="3 3"/>
+<text x="470.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">x0.5</text>
+<line x1="590.0" y1="42" x2="590.0" y2="258" stroke="#8b949e" stroke-width="1.5" stroke-opacity="0.7"/>
+<text x="590.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">x1</text>
+<line x1="710.0" y1="42" x2="710.0" y2="258" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22" stroke-dasharray="3 3"/>
+<text x="710.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">x2</text>
+<text x="218.0" y="67.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch01 one block, enqueue</text>
+<line x1="517.7" y1="63.0" x2="623.2" y2="63.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="517.7" cy="63.0" r="5" fill="none" stroke="#e05a59" stroke-width="2"><title>ch01 one block, enqueue: first translation x0.66 over 5 cells</title></circle>
+<circle cx="623.2" cy="63.0" r="5.5" fill="#3987e5"><title>ch01 one block, enqueue: refined x1.21 over 5 cells</title></circle>
+<text x="720.0" y="67.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x0.66 &gt; x1.21</text>
+<text x="218.0" y="97.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch02 two blocks, enqueue</text>
+<line x1="562.8" y1="93.0" x2="636.5" y2="93.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="562.8" cy="93.0" r="5" fill="none" stroke="#e05a59" stroke-width="2"><title>ch02 two blocks, enqueue: first translation x0.85 over 13 cells</title></circle>
+<circle cx="636.5" cy="93.0" r="5.5" fill="#3987e5"><title>ch02 two blocks, enqueue: refined x1.31 over 13 cells</title></circle>
+<text x="720.0" y="97.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x0.85 &gt; x1.31</text>
+<text x="218.0" y="127.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch03 N blocks, enqueue</text>
+<line x1="573.2" y1="123.0" x2="630.2" y2="123.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="573.2" cy="123.0" r="5" fill="none" stroke="#e05a59" stroke-width="2"><title>ch03 N blocks, enqueue: first translation x0.91 over 26 cells</title></circle>
+<circle cx="630.2" cy="123.0" r="5.5" fill="#3987e5"><title>ch03 N blocks, enqueue: refined x1.26 over 26 cells</title></circle>
+<text x="720.0" y="127.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x0.91 &gt; x1.26</text>
+<text x="218.0" y="157.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch04 two blobs, enqueue</text>
+<line x1="565.1" y1="153.0" x2="616.2" y2="153.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="565.1" cy="153.0" r="5" fill="none" stroke="#e05a59" stroke-width="2"><title>ch04 two blobs, enqueue: first translation x0.87 over 16 cells</title></circle>
+<circle cx="616.2" cy="153.0" r="5.5" fill="#3987e5"><title>ch04 two blobs, enqueue: refined x1.16 over 16 cells</title></circle>
+<text x="720.0" y="157.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x0.87 &gt; x1.16</text>
+<text x="218.0" y="187.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch05 N blobs, enqueue</text>
+<line x1="511.8" y1="183.0" x2="543.6" y2="183.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="511.8" cy="183.0" r="5" fill="none" stroke="#e05a59" stroke-width="2"><title>ch05 N blobs, enqueue: first translation x0.64 over 16 cells</title></circle>
+<circle cx="543.6" cy="183.0" r="5.5" fill="#e05a59"><title>ch05 N blobs, enqueue: refined x0.76 over 16 cells</title></circle>
+<text x="720.0" y="187.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x0.64 &gt; x0.76</text>
+<text x="218.0" y="217.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch05 N blobs, lane schedule</text>
+<line x1="350.9" y1="213.0" x2="558.2" y2="213.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="350.9" cy="213.0" r="5" fill="none" stroke="#e05a59" stroke-width="2"><title>ch05 N blobs, lane schedule: first translation x0.25 over 14 cells</title></circle>
+<circle cx="558.2" cy="213.0" r="5.5" fill="#e05a59"><title>ch05 N blobs, lane schedule: refined x0.83 over 14 cells</title></circle>
+<text x="720.0" y="217.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x0.25 &gt; x0.83</text>
+<text x="218.0" y="247.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#768390" text-anchor="end" font-weight="400">ch06 runs, lane schedule</text>
+<line x1="666.9" y1="243.0" x2="671.7" y2="243.0" stroke="#8b949e" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="666.9" cy="243.0" r="5" fill="none" stroke="#3987e5" stroke-width="2"><title>ch06 runs, lane schedule: first translation x1.56 over 6 cells</title></circle>
+<circle cx="671.7" cy="243.0" r="5.5" fill="#3987e5"><title>ch06 runs, lane schedule: refined x1.60 over 6 cells</title></circle>
+<text x="720.0" y="247.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="start" font-weight="400">x1.56 &gt; x1.60</text>
+<text x="470.0" y="292.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#7d8590" text-anchor="middle" font-weight="400">numba_ms / triton_ms</text>
+</svg>

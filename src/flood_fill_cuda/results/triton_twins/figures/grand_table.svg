@@ -1,0 +1,719 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="970" height="594" viewBox="0 0 970 594" role="img" aria-label="Grand table, Numba versus Triton">
+<title>Grand table, Numba versus Triton</title>
+<text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#768390" text-anchor="start" font-weight="600">The grand table, Numba / Triton kernel time per cell</text>
+<text x="0.0" y="33.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#7d8590" text-anchor="start" font-weight="400">blue: Triton faster, red: Numba faster, deeper = bigger gap (full at 4x)</text>
+<text x="130.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 130.0 142.0)">ch01_ring</text>
+<text x="170.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 170.0 142.0)">ch01_spill</text>
+<text x="210.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 210.0 142.0)">ch02_split</text>
+<text x="250.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 250.0 142.0)">ch02_global</text>
+<text x="290.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 290.0 142.0)">ch02_dirsplit</text>
+<text x="330.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 330.0 142.0)">ch02_pinned</text>
+<text x="370.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 370.0 142.0)">ch02_pinned_matched</text>
+<text x="410.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 410.0 142.0)">ch03_conn4</text>
+<text x="450.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 450.0 142.0)">ch03_conn8</text>
+<text x="490.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 490.0 142.0)">ch03_conn8_r2</text>
+<text x="530.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 530.0 142.0)">ch04_seq</text>
+<text x="570.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 570.0 142.0)">ch04_multi</text>
+<text x="610.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 610.0 142.0)">ch04_streams</text>
+<text x="650.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 650.0 142.0)">ch05_merge</text>
+<text x="690.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 690.0 142.0)">ch05_ccl</text>
+<text x="730.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 730.0 142.0)">ch05_fused_L8</text>
+<text x="770.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 770.0 142.0)">ch05_r128_L8</text>
+<text x="810.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 810.0 142.0)">ch05_split_L8</text>
+<text x="850.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 850.0 142.0)">ch05_split_I1</text>
+<text x="890.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 890.0 142.0)">ch06_rgb</text>
+<text x="930.0" y="142.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400" transform="rotate(-55 930.0 142.0)">ch06_mask</text>
+<text x="102.0" y="165.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">sq_256</text>
+<rect x="111" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>sq_256 / ch01_ring: numba 0.544 ms, triton 0.468 ms</title></rect>
+<text x="130.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.16</text>
+<rect x="151" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>sq_256 / ch01_spill: numba 0.645 ms, triton 0.494 ms</title></rect>
+<text x="170.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.31</text>
+<rect x="191" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.23"><title>sq_256 / ch02_split: numba 2.33 ms, triton 1.7 ms</title></rect>
+<text x="210.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.37</text>
+<rect x="231" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.26"><title>sq_256 / ch02_global: numba 2.83 ms, triton 1.93 ms</title></rect>
+<text x="250.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.47</text>
+<rect x="271" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.30"><title>sq_256 / ch02_dirsplit: numba 2.79 ms, triton 1.77 ms</title></rect>
+<text x="290.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.58</text>
+<rect x="311" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10" stroke="#8b949e" stroke-dasharray="2 2"><title>sq_256 / ch02_pinned: numba 3.59 ms, triton 3.36 ms (not like-for-like)</title></rect>
+<text x="330.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="351" y="151" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>sq_256 / ch02_pinned_matched: numba 3.16 ms, triton 3.46 ms</title></rect>
+<text x="370.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.92</text>
+<rect x="391" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>sq_256 / ch03_conn4: numba 4.5 ms, triton 3.51 ms</title></rect>
+<text x="410.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="431" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.34"><title>sq_256 / ch03_conn8: numba 3.38 ms, triton 2.01 ms</title></rect>
+<text x="450.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.68</text>
+<rect x="471" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07"><title>sq_256 / ch03_conn8_r2: numba 2.99 ms, triton 2.93 ms</title></rect>
+<text x="490.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.02</text>
+<text x="530.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>sq_256 / ch05_merge: numba 1.28 ms, triton 1.23 ms</title></rect>
+<text x="650.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04</text>
+<rect x="671" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>sq_256 / ch05_ccl: numba 1.21 ms, triton 1.08 ms</title></rect>
+<text x="690.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.12</text>
+<rect x="711" y="151" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>sq_256 / ch05_fused_L8: numba 0.346 ms, triton 0.35 ms</title></rect>
+<text x="730.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99</text>
+<rect x="751" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>sq_256 / ch05_r128_L8: numba 0.37 ms, triton 0.33 ms</title></rect>
+<text x="770.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.12</text>
+<rect x="791" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>sq_256 / ch05_split_L8: numba 0.403 ms, triton 0.373 ms</title></rect>
+<text x="810.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.08</text>
+<rect x="831" y="151" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.21"><title>sq_256 / ch05_split_I1: numba 0.49 ms, triton 0.646 ms</title></rect>
+<text x="850.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.76</text>
+<rect x="871" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.38"><title>sq_256 / ch06_rgb: numba 0.474 ms, triton 0.258 ms</title></rect>
+<text x="890.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.84</text>
+<rect x="911" y="151" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.48"><title>sq_256 / ch06_mask: numba 0.388 ms, triton 0.178 ms</title></rect>
+<text x="930.0" y="164.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.18</text>
+<text x="102.0" y="187.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">sq_1024</text>
+<rect x="111" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>sq_1024 / ch01_ring: numba 4.85 ms, triton 3.91 ms</title></rect>
+<text x="130.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.24</text>
+<rect x="151" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>sq_1024 / ch01_spill: numba 5.25 ms, triton 4.21 ms</title></rect>
+<text x="170.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.24</text>
+<rect x="191" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>sq_1024 / ch02_split: numba 4.6 ms, triton 3.6 ms</title></rect>
+<text x="210.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="231" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>sq_1024 / ch02_global: numba 4.28 ms, triton 3.39 ms</title></rect>
+<text x="250.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.26</text>
+<rect x="271" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>sq_1024 / ch02_dirsplit: numba 5.67 ms, triton 4.28 ms</title></rect>
+<text x="290.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.32</text>
+<rect x="311" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14" stroke="#8b949e" stroke-dasharray="2 2"><title>sq_1024 / ch02_pinned: numba 5.81 ms, triton 4.99 ms (not like-for-like)</title></rect>
+<text x="330.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.16</text>
+<rect x="351" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>sq_1024 / ch02_pinned_matched: numba 5.73 ms, triton 5.48 ms</title></rect>
+<text x="370.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05</text>
+<rect x="391" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>sq_1024 / ch03_conn4: numba 5.99 ms, triton 4.88 ms</title></rect>
+<text x="410.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.23</text>
+<rect x="431" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>sq_1024 / ch03_conn8: numba 4.02 ms, triton 3.88 ms</title></rect>
+<text x="450.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.03</text>
+<rect x="471" y="173" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>sq_1024 / ch03_conn8_r2: numba 4.8 ms, triton 4.86 ms</title></rect>
+<text x="490.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99</text>
+<text x="530.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="173" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.10"><title>sq_1024 / ch05_merge: numba 5.96 ms, triton 6.46 ms</title></rect>
+<text x="650.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.92</text>
+<rect x="671" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>sq_1024 / ch05_ccl: numba 6.61 ms, triton 5.97 ms</title></rect>
+<text x="690.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.11</text>
+<rect x="711" y="173" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.17"><title>sq_1024 / ch05_fused_L8: numba 1.07 ms, triton 1.33 ms</title></rect>
+<text x="730.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.81</text>
+<rect x="751" y="173" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.17"><title>sq_1024 / ch05_r128_L8: numba 1.12 ms, triton 1.37 ms</title></rect>
+<text x="770.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.82</text>
+<rect x="791" y="173" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.15"><title>sq_1024 / ch05_split_L8: numba 1.21 ms, triton 1.43 ms</title></rect>
+<text x="810.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.85</text>
+<rect x="831" y="173" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.25"><title>sq_1024 / ch05_split_I1: numba 2.84 ms, triton 4.08 ms</title></rect>
+<text x="850.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.70</text>
+<rect x="871" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.35"><title>sq_1024 / ch06_rgb: numba 0.542 ms, triton 0.316 ms</title></rect>
+<text x="890.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.71</text>
+<rect x="911" y="173" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.43"><title>sq_1024 / ch06_mask: numba 0.456 ms, triton 0.229 ms</title></rect>
+<text x="930.0" y="186.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.99</text>
+<text x="102.0" y="209.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">sq_4000</text>
+<rect x="111" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>sq_4000 / ch01_ring: numba 61 ms, triton 52.7 ms</title></rect>
+<text x="130.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.16</text>
+<rect x="151" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>sq_4000 / ch01_spill: numba 65.2 ms, triton 53.8 ms</title></rect>
+<text x="170.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="191" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>sq_4000 / ch02_split: numba 41 ms, triton 34 ms</title></rect>
+<text x="210.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="231" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>sq_4000 / ch02_global: numba 38.4 ms, triton 33.9 ms</title></rect>
+<text x="250.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="271" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>sq_4000 / ch02_dirsplit: numba 40.6 ms, triton 34.5 ms</title></rect>
+<text x="290.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.17</text>
+<rect x="311" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.06" stroke="#8b949e" stroke-dasharray="2 2"><title>sq_4000 / ch02_pinned: numba 27.3 ms, triton 27.2 ms (not like-for-like)</title></rect>
+<text x="330.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01</text>
+<rect x="351" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.06"><title>sq_4000 / ch02_pinned_matched: numba 29.2 ms, triton 29.3 ms</title></rect>
+<text x="370.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.00</text>
+<rect x="391" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>sq_4000 / ch03_conn4: numba 18.4 ms, triton 15.2 ms</title></rect>
+<text x="410.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="431" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>sq_4000 / ch03_conn8: numba 14.7 ms, triton 13.7 ms</title></rect>
+<text x="450.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="471" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>sq_4000 / ch03_conn8_r2: numba 15.5 ms, triton 15.9 ms</title></rect>
+<text x="490.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.97</text>
+<text x="530.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>sq_4000 / ch05_merge: numba 24.2 ms, triton 25 ms</title></rect>
+<text x="650.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.97</text>
+<rect x="671" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>sq_4000 / ch05_ccl: numba 33.3 ms, triton 31.9 ms</title></rect>
+<text x="690.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04</text>
+<rect x="711" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.26"><title>sq_4000 / ch05_fused_L8: numba 14.6 ms, triton 21.3 ms</title></rect>
+<text x="730.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.68</text>
+<rect x="751" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.18"><title>sq_4000 / ch05_r128_L8: numba 11.3 ms, triton 14.2 ms</title></rect>
+<text x="770.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.79</text>
+<rect x="791" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.23"><title>sq_4000 / ch05_split_L8: numba 10.1 ms, triton 13.8 ms</title></rect>
+<text x="810.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.73</text>
+<rect x="831" y="195" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.46"><title>sq_4000 / ch05_split_I1: numba 11.2 ms, triton 23.8 ms</title></rect>
+<text x="850.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.47</text>
+<rect x="871" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>sq_4000 / ch06_rgb: numba 0.866 ms, triton 0.767 ms</title></rect>
+<text x="890.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="911" y="195" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.26"><title>sq_4000 / ch06_mask: numba 0.788 ms, triton 0.541 ms</title></rect>
+<text x="930.0" y="208.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.46</text>
+<text x="102.0" y="231.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">disk_256</text>
+<rect x="111" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>disk_256 / ch01_ring: numba 0.917 ms, triton 0.741 ms</title></rect>
+<text x="130.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.24</text>
+<rect x="151" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>disk_256 / ch01_spill: numba 1.08 ms, triton 0.832 ms</title></rect>
+<text x="170.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.29</text>
+<rect x="191" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>disk_256 / ch02_split: numba 1.12 ms, triton 0.844 ms</title></rect>
+<text x="210.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.33</text>
+<rect x="231" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>disk_256 / ch02_global: numba 1.16 ms, triton 0.867 ms</title></rect>
+<text x="250.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.33</text>
+<rect x="271" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.25"><title>disk_256 / ch02_dirsplit: numba 1.14 ms, triton 0.795 ms</title></rect>
+<text x="290.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.44</text>
+<rect x="311" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11" stroke="#8b949e" stroke-dasharray="2 2"><title>disk_256 / ch02_pinned: numba 1.15 ms, triton 1.04 ms (not like-for-like)</title></rect>
+<text x="330.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.11</text>
+<rect x="351" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>disk_256 / ch02_pinned_matched: numba 1.12 ms, triton 1.05 ms</title></rect>
+<text x="370.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="391" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>disk_256 / ch03_conn4: numba 1.21 ms, triton 0.958 ms</title></rect>
+<text x="410.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.26</text>
+<rect x="431" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>disk_256 / ch03_conn8: numba 1.05 ms, triton 0.918 ms</title></rect>
+<text x="450.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.15</text>
+<rect x="471" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>disk_256 / ch03_conn8_r2: numba 1.16 ms, triton 1.11 ms</title></rect>
+<text x="490.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04</text>
+<text x="530.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="217" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.37"><title>disk_256 / ch05_merge: numba 3.07 ms, triton 5.44 ms</title></rect>
+<text x="650.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.56</text>
+<rect x="671" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>disk_256 / ch05_ccl: numba 1.92 ms, triton 1.52 ms</title></rect>
+<text x="690.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.26</text>
+<rect x="711" y="217" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>disk_256 / ch05_fused_L8: numba 0.358 ms, triton 0.37 ms</title></rect>
+<text x="730.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.97</text>
+<rect x="751" y="217" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>disk_256 / ch05_r128_L8: numba 0.368 ms, triton 0.371 ms</title></rect>
+<text x="770.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99</text>
+<rect x="791" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>disk_256 / ch05_split_L8: numba 0.423 ms, triton 0.397 ms</title></rect>
+<text x="810.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="831" y="217" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.30"><title>disk_256 / ch05_split_I1: numba 0.477 ms, triton 0.749 ms</title></rect>
+<text x="850.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.64</text>
+<rect x="871" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.40"><title>disk_256 / ch06_rgb: numba 0.434 ms, triton 0.228 ms</title></rect>
+<text x="890.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.91</text>
+<rect x="911" y="217" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.49"><title>disk_256 / ch06_mask: numba 0.356 ms, triton 0.16 ms</title></rect>
+<text x="930.0" y="230.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.23</text>
+<text x="102.0" y="253.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">disk_1024</text>
+<rect x="111" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>disk_1024 / ch01_ring: numba 10.3 ms, triton 9.08 ms</title></rect>
+<text x="130.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="151" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>disk_1024 / ch01_spill: numba 11.3 ms, triton 8.92 ms</title></rect>
+<text x="170.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.27</text>
+<rect x="191" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>disk_1024 / ch02_split: numba 8.01 ms, triton 6.25 ms</title></rect>
+<text x="210.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="231" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>disk_1024 / ch02_global: numba 7.5 ms, triton 6.34 ms</title></rect>
+<text x="250.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.18</text>
+<rect x="271" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>disk_1024 / ch02_dirsplit: numba 7.97 ms, triton 6.3 ms</title></rect>
+<text x="290.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.27</text>
+<rect x="311" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09" stroke="#8b949e" stroke-dasharray="2 2"><title>disk_1024 / ch02_pinned: numba 6.01 ms, triton 5.7 ms (not like-for-like)</title></rect>
+<text x="330.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05</text>
+<rect x="351" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>disk_1024 / ch02_pinned_matched: numba 6.19 ms, triton 5.69 ms</title></rect>
+<text x="370.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.09</text>
+<rect x="391" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>disk_1024 / ch03_conn4: numba 4.57 ms, triton 3.71 ms</title></rect>
+<text x="410.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.23</text>
+<rect x="431" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>disk_1024 / ch03_conn8: numba 4.02 ms, triton 3.62 ms</title></rect>
+<text x="450.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.11</text>
+<rect x="471" y="239" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>disk_1024 / ch03_conn8_r2: numba 4.42 ms, triton 4.59 ms</title></rect>
+<text x="490.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.96</text>
+<text x="530.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="239" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.43"><title>disk_1024 / ch05_merge: numba 16.1 ms, triton 32.4 ms</title></rect>
+<text x="650.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.50</text>
+<rect x="671" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>disk_1024 / ch05_ccl: numba 9.55 ms, triton 7.35 ms</title></rect>
+<text x="690.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.30</text>
+<rect x="711" y="239" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.22"><title>disk_1024 / ch05_fused_L8: numba 2.12 ms, triton 2.84 ms</title></rect>
+<text x="730.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.75</text>
+<rect x="751" y="239" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.13"><title>disk_1024 / ch05_r128_L8: numba 1.65 ms, triton 1.89 ms</title></rect>
+<text x="770.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.87</text>
+<rect x="791" y="239" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>disk_1024 / ch05_split_L8: numba 1.68 ms, triton 1.84 ms</title></rect>
+<text x="810.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.91</text>
+<rect x="831" y="239" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.30"><title>disk_1024 / ch05_split_I1: numba 2.21 ms, triton 3.5 ms</title></rect>
+<text x="850.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.63</text>
+<rect x="871" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.36"><title>disk_1024 / ch06_rgb: numba 0.596 ms, triton 0.339 ms</title></rect>
+<text x="890.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.76</text>
+<rect x="911" y="239" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.39"><title>disk_1024 / ch06_mask: numba 0.594 ms, triton 0.317 ms</title></rect>
+<text x="930.0" y="252.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.87</text>
+<text x="102.0" y="275.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">disk_4000</text>
+<text x="130.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="151" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>disk_4000 / ch01_spill: numba 173 ms, triton 145 ms</title></rect>
+<text x="170.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19</text>
+<rect x="191" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>disk_4000 / ch02_split: numba 101 ms, triton 84.3 ms</title></rect>
+<text x="210.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19</text>
+<rect x="231" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>disk_4000 / ch02_global: numba 91.9 ms, triton 83.5 ms</title></rect>
+<text x="250.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10</text>
+<rect x="271" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>disk_4000 / ch02_dirsplit: numba 97.7 ms, triton 85.3 ms</title></rect>
+<text x="290.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.15</text>
+<rect x="311" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07" stroke="#8b949e" stroke-dasharray="2 2"><title>disk_4000 / ch02_pinned: numba 58.8 ms, triton 60.3 ms (not like-for-like)</title></rect>
+<text x="330.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.97</text>
+<rect x="351" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>disk_4000 / ch02_pinned_matched: numba 64.3 ms, triton 60.2 ms</title></rect>
+<text x="370.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="391" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>disk_4000 / ch03_conn4: numba 25.2 ms, triton 21.2 ms</title></rect>
+<text x="410.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19</text>
+<rect x="431" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>disk_4000 / ch03_conn8: numba 27.2 ms, triton 24 ms</title></rect>
+<text x="450.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="471" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>disk_4000 / ch03_conn8_r2: numba 37.9 ms, triton 35.6 ms</title></rect>
+<text x="490.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<text x="530.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.37"><title>disk_4000 / ch05_merge: numba 104 ms, triton 184 ms</title></rect>
+<text x="650.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.56</text>
+<rect x="671" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>disk_4000 / ch05_ccl: numba 61.5 ms, triton 67 ms</title></rect>
+<text x="690.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.92</text>
+<rect x="711" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.22"><title>disk_4000 / ch05_fused_L8: numba 33.4 ms, triton 45.4 ms</title></rect>
+<text x="730.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.74</text>
+<rect x="751" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.17"><title>disk_4000 / ch05_r128_L8: numba 23.2 ms, triton 28.3 ms</title></rect>
+<text x="770.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.82</text>
+<rect x="791" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.17"><title>disk_4000 / ch05_split_L8: numba 22.7 ms, triton 27.9 ms</title></rect>
+<text x="810.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.81</text>
+<rect x="831" y="261" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.26"><title>disk_4000 / ch05_split_I1: numba 26.5 ms, triton 38.7 ms</title></rect>
+<text x="850.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.68</text>
+<rect x="871" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>disk_4000 / ch06_rgb: numba 1.23 ms, triton 0.964 ms</title></rect>
+<text x="890.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="911" y="261" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.25"><title>disk_4000 / ch06_mask: numba 1.16 ms, triton 0.812 ms</title></rect>
+<text x="930.0" y="274.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.43</text>
+<text x="102.0" y="297.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">serp_128</text>
+<rect x="111" y="283" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.09"><title>serp_128 / ch01_ring: numba 9.25 ms, triton 9.84 ms</title></rect>
+<text x="130.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.94</text>
+<rect x="151" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>serp_128 / ch01_spill: numba 12.8 ms, triton 10.6 ms</title></rect>
+<text x="170.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="191" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>serp_128 / ch02_split: numba 29.2 ms, triton 23 ms</title></rect>
+<text x="210.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.27</text>
+<rect x="231" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.29"><title>serp_128 / ch02_global: numba 28.1 ms, triton 18.3 ms</title></rect>
+<text x="250.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.54</text>
+<rect x="271" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.34"><title>serp_128 / ch02_dirsplit: numba 31.3 ms, triton 18.5 ms</title></rect>
+<text x="290.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.69</text>
+<rect x="311" y="283" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07" stroke="#8b949e" stroke-dasharray="2 2"><title>serp_128 / ch02_pinned: numba 27.3 ms, triton 27.8 ms (not like-for-like)</title></rect>
+<text x="330.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="351" y="283" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>serp_128 / ch02_pinned_matched: numba 27.2 ms, triton 27.9 ms</title></rect>
+<text x="370.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="391" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.30"><title>serp_128 / ch03_conn4: numba 32.6 ms, triton 20.7 ms</title></rect>
+<text x="410.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.57</text>
+<rect x="431" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.24"><title>serp_128 / ch03_conn8: numba 39.8 ms, triton 28.6 ms</title></rect>
+<text x="450.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.39</text>
+<rect x="471" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.24"><title>serp_128 / ch03_conn8_r2: numba 44.6 ms, triton 32 ms</title></rect>
+<text x="490.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.39</text>
+<text x="530.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>serp_128 / ch05_merge: numba 0.952 ms, triton 0.918 ms</title></rect>
+<text x="650.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04</text>
+<rect x="671" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.29"><title>serp_128 / ch05_ccl: numba 41.3 ms, triton 26.9 ms</title></rect>
+<text x="690.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.54</text>
+<rect x="711" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07"><title>serp_128 / ch05_fused_L8: numba 0.891 ms, triton 0.881 ms</title></rect>
+<text x="730.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01</text>
+<rect x="751" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>serp_128 / ch05_r128_L8: numba 0.968 ms, triton 0.916 ms</title></rect>
+<text x="770.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="791" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>serp_128 / ch05_split_L8: numba 1.02 ms, triton 0.933 ms</title></rect>
+<text x="810.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10</text>
+<rect x="831" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>serp_128 / ch05_split_I1: numba 0.982 ms, triton 0.93 ms</title></rect>
+<text x="850.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="871" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.47"><title>serp_128 / ch06_rgb: numba 0.499 ms, triton 0.23 ms</title></rect>
+<text x="890.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.17</text>
+<rect x="911" y="283" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.53"><title>serp_128 / ch06_mask: numba 0.468 ms, triton 0.195 ms</title></rect>
+<text x="930.0" y="296.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.41</text>
+<text x="102.0" y="319.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">serp_256</text>
+<rect x="111" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.09"><title>serp_256 / ch01_ring: numba 36.3 ms, triton 38.5 ms</title></rect>
+<text x="130.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.94</text>
+<rect x="151" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>serp_256 / ch01_spill: numba 50.6 ms, triton 41.9 ms</title></rect>
+<text x="170.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="191" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>serp_256 / ch02_split: numba 116 ms, triton 90.6 ms</title></rect>
+<text x="210.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="231" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.30"><title>serp_256 / ch02_global: numba 111 ms, triton 71.6 ms</title></rect>
+<text x="250.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.56</text>
+<rect x="271" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.34"><title>serp_256 / ch02_dirsplit: numba 125 ms, triton 73.5 ms</title></rect>
+<text x="290.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.70</text>
+<rect x="311" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.06" stroke="#8b949e" stroke-dasharray="2 2"><title>serp_256 / ch02_pinned: numba 110 ms, triton 111 ms (not like-for-like)</title></rect>
+<text x="330.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99</text>
+<rect x="351" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>serp_256 / ch02_pinned_matched: numba 107 ms, triton 112 ms</title></rect>
+<text x="370.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.95</text>
+<rect x="391" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.30"><title>serp_256 / ch03_conn4: numba 130 ms, triton 83 ms</title></rect>
+<text x="410.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.56</text>
+<rect x="431" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.24"><title>serp_256 / ch03_conn8: numba 174 ms, triton 124 ms</title></rect>
+<text x="450.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.40</text>
+<rect x="471" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.24"><title>serp_256 / ch03_conn8_r2: numba 180 ms, triton 129 ms</title></rect>
+<text x="490.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.40</text>
+<text x="530.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>serp_256 / ch05_merge: numba 1.84 ms, triton 2.02 ms</title></rect>
+<text x="650.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.91</text>
+<rect x="671" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.30"><title>serp_256 / ch05_ccl: numba 166 ms, triton 106 ms</title></rect>
+<text x="690.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.57</text>
+<rect x="711" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>serp_256 / ch05_fused_L8: numba 1.68 ms, triton 1.74 ms</title></rect>
+<text x="730.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.96</text>
+<rect x="751" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>serp_256 / ch05_r128_L8: numba 1.81 ms, triton 1.88 ms</title></rect>
+<text x="770.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.96</text>
+<rect x="791" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>serp_256 / ch05_split_L8: numba 1.87 ms, triton 1.9 ms</title></rect>
+<text x="810.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="831" y="305" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.12"><title>serp_256 / ch05_split_I1: numba 1.86 ms, triton 2.1 ms</title></rect>
+<text x="850.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.89</text>
+<rect x="871" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.45"><title>serp_256 / ch06_rgb: numba 0.574 ms, triton 0.274 ms</title></rect>
+<text x="890.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.09</text>
+<rect x="911" y="305" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.52"><title>serp_256 / ch06_mask: numba 0.429 ms, triton 0.182 ms</title></rect>
+<text x="930.0" y="318.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.36</text>
+<text x="102.0" y="341.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">comb_24</text>
+<rect x="111" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>comb_24 / ch01_ring: numba 0.397 ms, triton 0.357 ms</title></rect>
+<text x="130.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.11</text>
+<rect x="151" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>comb_24 / ch01_spill: numba 0.483 ms, triton 0.394 ms</title></rect>
+<text x="170.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.23</text>
+<rect x="191" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>comb_24 / ch02_split: numba 0.876 ms, triton 0.681 ms</title></rect>
+<text x="210.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.29</text>
+<rect x="231" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.25"><title>comb_24 / ch02_global: numba 0.859 ms, triton 0.602 ms</title></rect>
+<text x="250.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.43</text>
+<rect x="271" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.29"><title>comb_24 / ch02_dirsplit: numba 0.929 ms, triton 0.601 ms</title></rect>
+<text x="290.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.55</text>
+<rect x="311" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10" stroke="#8b949e" stroke-dasharray="2 2"><title>comb_24 / ch02_pinned: numba 0.844 ms, triton 0.776 ms (not like-for-like)</title></rect>
+<text x="330.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.09</text>
+<rect x="351" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>comb_24 / ch02_pinned_matched: numba 0.87 ms, triton 0.81 ms</title></rect>
+<text x="370.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="391" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.27"><title>comb_24 / ch03_conn4: numba 0.946 ms, triton 0.637 ms</title></rect>
+<text x="410.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.48</text>
+<rect x="431" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.22"><title>comb_24 / ch03_conn8: numba 1.15 ms, triton 0.856 ms</title></rect>
+<text x="450.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.34</text>
+<rect x="471" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>comb_24 / ch03_conn8_r2: numba 1.24 ms, triton 0.965 ms</title></rect>
+<text x="490.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.29</text>
+<text x="530.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>comb_24 / ch05_merge: numba 0.675 ms, triton 0.631 ms</title></rect>
+<text x="650.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="671" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.22"><title>comb_24 / ch05_ccl: numba 1.25 ms, triton 0.927 ms</title></rect>
+<text x="690.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.34</text>
+<rect x="711" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>comb_24 / ch05_fused_L8: numba 0.459 ms, triton 0.399 ms</title></rect>
+<text x="730.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.15</text>
+<rect x="751" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>comb_24 / ch05_r128_L8: numba 0.454 ms, triton 0.406 ms</title></rect>
+<text x="770.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.12</text>
+<rect x="791" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>comb_24 / ch05_split_L8: numba 0.477 ms, triton 0.399 ms</title></rect>
+<text x="810.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.20</text>
+<rect x="831" y="327" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>comb_24 / ch05_split_I1: numba 0.478 ms, triton 0.488 ms</title></rect>
+<text x="850.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="871" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.48"><title>comb_24 / ch06_rgb: numba 0.541 ms, triton 0.244 ms</title></rect>
+<text x="890.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.21</text>
+<rect x="911" y="327" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.51"><title>comb_24 / ch06_mask: numba 0.45 ms, triton 0.194 ms</title></rect>
+<text x="930.0" y="340.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.32</text>
+<text x="102.0" y="363.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">comb_2000</text>
+<rect x="111" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>comb_2000 / ch01_ring: numba 74.3 ms, triton 65.9 ms</title></rect>
+<text x="130.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="151" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>comb_2000 / ch01_spill: numba 80.4 ms, triton 67.9 ms</title></rect>
+<text x="170.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19</text>
+<rect x="191" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>comb_2000 / ch02_split: numba 81.3 ms, triton 66.5 ms</title></rect>
+<text x="210.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22</text>
+<rect x="231" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>comb_2000 / ch02_global: numba 65.1 ms, triton 53.8 ms</title></rect>
+<text x="250.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="271" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>comb_2000 / ch02_dirsplit: numba 94.3 ms, triton 77.2 ms</title></rect>
+<text x="290.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22</text>
+<rect x="311" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09" stroke="#8b949e" stroke-dasharray="2 2"><title>comb_2000 / ch02_pinned: numba 58.5 ms, triton 55.2 ms (not like-for-like)</title></rect>
+<text x="330.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="351" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>comb_2000 / ch02_pinned_matched: numba 57.7 ms, triton 55.7 ms</title></rect>
+<text x="370.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04</text>
+<rect x="391" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>comb_2000 / ch03_conn4: numba 50.7 ms, triton 39.5 ms</title></rect>
+<text x="410.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="431" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>comb_2000 / ch03_conn8: numba 63.6 ms, triton 52.9 ms</title></rect>
+<text x="450.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.20</text>
+<rect x="471" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.06"><title>comb_2000 / ch03_conn8_r2: numba 63.7 ms, triton 63.3 ms</title></rect>
+<text x="490.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01</text>
+<text x="530.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="570.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<text x="610.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="349" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.18"><title>comb_2000 / ch05_merge: numba 61.8 ms, triton 77.4 ms</title></rect>
+<text x="650.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.80</text>
+<rect x="671" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>comb_2000 / ch05_ccl: numba 70 ms, triton 53.5 ms</title></rect>
+<text x="690.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.31</text>
+<rect x="711" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>comb_2000 / ch05_fused_L8: numba 17.1 ms, triton 15.5 ms</title></rect>
+<text x="730.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10</text>
+<rect x="751" y="349" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>comb_2000 / ch05_r128_L8: numba 13.1 ms, triton 14.2 ms</title></rect>
+<text x="770.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.92</text>
+<rect x="791" y="349" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.10"><title>comb_2000 / ch05_split_L8: numba 14.5 ms, triton 15.6 ms</title></rect>
+<text x="810.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.93</text>
+<rect x="831" y="349" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.06"><title>comb_2000 / ch05_split_I1: numba 18 ms, triton 18 ms</title></rect>
+<text x="850.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.00</text>
+<rect x="871" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>comb_2000 / ch06_rgb: numba 7.38 ms, triton 5.65 ms</title></rect>
+<text x="890.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.31</text>
+<rect x="911" y="349" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>comb_2000 / ch06_mask: numba 11.1 ms, triton 8.34 ms</title></rect>
+<text x="930.0" y="362.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.33</text>
+<text x="102.0" y="385.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">two_sq_300</text>
+<rect x="111" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>two_sq_300 / ch01_ring: numba 3.56 ms, triton 2.91 ms</title></rect>
+<text x="130.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22</text>
+<rect x="151" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>two_sq_300 / ch01_spill: numba 3.93 ms, triton 3.03 ms</title></rect>
+<text x="170.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.30</text>
+<rect x="191" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>two_sq_300 / ch02_split: numba 5.25 ms, triton 4.1 ms</title></rect>
+<text x="210.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.28</text>
+<rect x="231" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>two_sq_300 / ch02_global: numba 3.82 ms, triton 2.95 ms</title></rect>
+<text x="250.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.30</text>
+<rect x="271" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.24"><title>two_sq_300 / ch02_dirsplit: numba 3.79 ms, triton 2.71 ms</title></rect>
+<text x="290.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.40</text>
+<rect x="311" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11" stroke="#8b949e" stroke-dasharray="2 2"><title>two_sq_300 / ch02_pinned: numba 3.84 ms, triton 3.52 ms (not like-for-like)</title></rect>
+<text x="330.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.09</text>
+<rect x="351" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>two_sq_300 / ch02_pinned_matched: numba 5.2 ms, triton 4.89 ms</title></rect>
+<text x="370.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="391" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>two_sq_300 / ch03_conn4: numba 5.55 ms, triton 4.43 ms</title></rect>
+<text x="410.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.25</text>
+<rect x="431" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>two_sq_300 / ch03_conn8: numba 3.74 ms, triton 3.24 ms</title></rect>
+<text x="450.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.16</text>
+<rect x="471" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.06"><title>two_sq_300 / ch03_conn8_r2: numba 4.25 ms, triton 4.22 ms</title></rect>
+<text x="490.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01</text>
+<rect x="511" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>two_sq_300 / ch04_seq: numba 6.78 ms, triton 5.53 ms</title></rect>
+<text x="530.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22</text>
+<rect x="551" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>two_sq_300 / ch04_multi: numba 4.07 ms, triton 3.36 ms</title></rect>
+<text x="570.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<text x="610.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07"><title>two_sq_300 / ch05_merge: numba 3.04 ms, triton 3.01 ms</title></rect>
+<text x="650.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01</text>
+<rect x="671" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>two_sq_300 / ch05_ccl: numba 2.95 ms, triton 2.78 ms</title></rect>
+<text x="690.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="711" y="371" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.09"><title>two_sq_300 / ch05_fused_L8: numba 0.743 ms, triton 0.787 ms</title></rect>
+<text x="730.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.94</text>
+<rect x="751" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>two_sq_300 / ch05_r128_L8: numba 0.636 ms, triton 0.581 ms</title></rect>
+<text x="770.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10</text>
+<rect x="791" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>two_sq_300 / ch05_split_L8: numba 0.678 ms, triton 0.602 ms</title></rect>
+<text x="810.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="831" y="371" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.18"><title>two_sq_300 / ch05_split_I1: numba 1.05 ms, triton 1.32 ms</title></rect>
+<text x="850.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.80</text>
+<rect x="871" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.43"><title>two_sq_300 / ch06_rgb: numba 0.549 ms, triton 0.276 ms</title></rect>
+<text x="890.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.99</text>
+<rect x="911" y="371" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.46"><title>two_sq_300 / ch06_mask: numba 0.481 ms, triton 0.227 ms</title></rect>
+<text x="930.0" y="384.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.12</text>
+<text x="102.0" y="407.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">two_sq_2800</text>
+<text x="130.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="151" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>two_sq_2800 / ch01_spill: numba 244 ms, triton 202 ms</title></rect>
+<text x="170.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="191" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>two_sq_2800 / ch02_split: numba 264 ms, triton 222 ms</title></rect>
+<text x="210.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19</text>
+<rect x="231" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>two_sq_2800 / ch02_global: numba 133 ms, triton 120 ms</title></rect>
+<text x="250.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.11</text>
+<rect x="271" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>two_sq_2800 / ch02_dirsplit: numba 142 ms, triton 124 ms</title></rect>
+<text x="290.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.15</text>
+<rect x="311" y="393" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.06" stroke="#8b949e" stroke-dasharray="2 2"><title>two_sq_2800 / ch02_pinned: numba 91.4 ms, triton 92.1 ms (not like-for-like)</title></rect>
+<text x="330.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99</text>
+<rect x="351" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>two_sq_2800 / ch02_pinned_matched: numba 98 ms, triton 91.8 ms</title></rect>
+<text x="370.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="391" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>two_sq_2800 / ch03_conn4: numba 50.4 ms, triton 43.5 ms</title></rect>
+<text x="410.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.16</text>
+<rect x="431" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>two_sq_2800 / ch03_conn8: numba 38.4 ms, triton 35 ms</title></rect>
+<text x="450.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.09</text>
+<rect x="471" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>two_sq_2800 / ch03_conn8_r2: numba 57.5 ms, triton 48.1 ms</title></rect>
+<text x="490.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19</text>
+<rect x="511" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>two_sq_2800 / ch04_seq: numba 45 ms, triton 38.5 ms</title></rect>
+<text x="530.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.17</text>
+<rect x="551" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>two_sq_2800 / ch04_multi: numba 42.4 ms, triton 32.2 ms</title></rect>
+<text x="570.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.32</text>
+<text x="610.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07"><title>two_sq_2800 / ch05_merge: numba 47.6 ms, triton 46.4 ms</title></rect>
+<text x="650.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.02</text>
+<rect x="671" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>two_sq_2800 / ch05_ccl: numba 102 ms, triton 94 ms</title></rect>
+<text x="690.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.08</text>
+<rect x="711" y="393" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.20"><title>two_sq_2800 / ch05_fused_L8: numba 45.2 ms, triton 58.8 ms</title></rect>
+<text x="730.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.77</text>
+<rect x="751" y="393" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.15"><title>two_sq_2800 / ch05_r128_L8: numba 30.6 ms, triton 36.1 ms</title></rect>
+<text x="770.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.85</text>
+<rect x="791" y="393" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.16"><title>two_sq_2800 / ch05_split_L8: numba 29.5 ms, triton 35.3 ms</title></rect>
+<text x="810.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.84</text>
+<rect x="831" y="393" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.53"><title>two_sq_2800 / ch05_split_I1: numba 35.5 ms, triton 86.2 ms</title></rect>
+<text x="850.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.41</text>
+<rect x="871" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.27"><title>two_sq_2800 / ch06_rgb: numba 1.37 ms, triton 0.914 ms</title></rect>
+<text x="890.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.49</text>
+<rect x="911" y="393" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.40"><title>two_sq_2800 / ch06_mask: numba 1.7 ms, triton 0.901 ms</title></rect>
+<text x="930.0" y="406.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.88</text>
+<text x="102.0" y="429.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">asym_4000_800</text>
+<text x="130.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="151" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>asym_4000_800 / ch01_spill: numba 256 ms, triton 214 ms</title></rect>
+<text x="170.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.20</text>
+<rect x="191" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>asym_4000_800 / ch02_split: numba 179 ms, triton 153 ms</title></rect>
+<text x="210.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.17</text>
+<rect x="231" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>asym_4000_800 / ch02_global: numba 135 ms, triton 123 ms</title></rect>
+<text x="250.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10</text>
+<rect x="271" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>asym_4000_800 / ch02_dirsplit: numba 152 ms, triton 129 ms</title></rect>
+<text x="290.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.18</text>
+<rect x="311" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07" stroke="#8b949e" stroke-dasharray="2 2"><title>asym_4000_800 / ch02_pinned: numba 90 ms, triton 92 ms (not like-for-like)</title></rect>
+<text x="330.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="351" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>asym_4000_800 / ch02_pinned_matched: numba 97.1 ms, triton 91.3 ms</title></rect>
+<text x="370.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="391" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>asym_4000_800 / ch03_conn4: numba 44.9 ms, triton 36.8 ms</title></rect>
+<text x="410.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22</text>
+<rect x="431" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>asym_4000_800 / ch03_conn8: numba 34.7 ms, triton 32.5 ms</title></rect>
+<text x="450.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.07</text>
+<rect x="471" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.06"><title>asym_4000_800 / ch03_conn8_r2: numba 45.2 ms, triton 45.6 ms</title></rect>
+<text x="490.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99</text>
+<rect x="511" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>asym_4000_800 / ch04_seq: numba 43.4 ms, triton 44.3 ms</title></rect>
+<text x="530.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="551" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>asym_4000_800 / ch04_multi: numba 37.7 ms, triton 41.2 ms</title></rect>
+<text x="570.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.92</text>
+<text x="610.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>asym_4000_800 / ch05_merge: numba 53.5 ms, triton 51.5 ms</title></rect>
+<text x="650.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04</text>
+<rect x="671" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.21"><title>asym_4000_800 / ch05_ccl: numba 80.9 ms, triton 107 ms</title></rect>
+<text x="690.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.75</text>
+<rect x="711" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.20"><title>asym_4000_800 / ch05_fused_L8: numba 50.2 ms, triton 65.5 ms</title></rect>
+<text x="730.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.77</text>
+<rect x="751" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.16"><title>asym_4000_800 / ch05_r128_L8: numba 33.1 ms, triton 39.8 ms</title></rect>
+<text x="770.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.83</text>
+<rect x="791" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.15"><title>asym_4000_800 / ch05_split_L8: numba 32.2 ms, triton 38.3 ms</title></rect>
+<text x="810.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.84</text>
+<rect x="831" y="415" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.73"><title>asym_4000_800 / ch05_split_I1: numba 40.2 ms, triton 140 ms</title></rect>
+<text x="850.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.29</text>
+<rect x="871" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>asym_4000_800 / ch06_rgb: numba 5.07 ms, triton 4.16 ms</title></rect>
+<text x="890.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22</text>
+<rect x="911" y="415" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>asym_4000_800 / ch06_mask: numba 5.47 ms, triton 4.88 ms</title></rect>
+<text x="930.0" y="428.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.12</text>
+<text x="102.0" y="451.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">random_1000</text>
+<rect x="111" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>random_1000 / ch01_ring: numba 8.56e+03 ms, triton 7.02e+03 ms (estimated per blob)</title></rect>
+<text x="130.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.22*</text>
+<rect x="151" y="437" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>random_1000 / ch01_spill: numba 9.21e+03 ms, triton 9.43e+03 ms (estimated per blob)</title></rect>
+<text x="170.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98*</text>
+<rect x="191" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>random_1000 / ch02_split: numba 9.61e+03 ms, triton 9.15e+03 ms (estimated per blob)</title></rect>
+<text x="210.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="231" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07"><title>random_1000 / ch02_global: numba 8.55e+03 ms, triton 8.45e+03 ms (estimated per blob)</title></rect>
+<text x="250.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01*</text>
+<rect x="271" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>random_1000 / ch02_dirsplit: numba 8.35e+03 ms, triton 7.93e+03 ms (estimated per blob)</title></rect>
+<text x="290.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="311" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07" stroke="#8b949e" stroke-dasharray="2 2"><title>random_1000 / ch02_pinned: numba 1.08e+04 ms, triton 1.06e+04 ms (estimated per blob) (not like-for-like)</title></rect>
+<text x="330.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01*</text>
+<rect x="351" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.17"><title>random_1000 / ch02_pinned_matched: numba 9.33e+03 ms, triton 7.58e+03 ms (estimated per blob)</title></rect>
+<text x="370.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.23*</text>
+<rect x="391" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.25"><title>random_1000 / ch03_conn4: numba 1.03e+04 ms, triton 7.25e+03 ms (estimated per blob)</title></rect>
+<text x="410.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.43*</text>
+<rect x="431" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>random_1000 / ch03_conn8: numba 9.73e+03 ms, triton 9.35e+03 ms (estimated per blob)</title></rect>
+<text x="450.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04*</text>
+<rect x="471" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>random_1000 / ch03_conn8_r2: numba 1.01e+04 ms, triton 8.41e+03 ms (estimated per blob)</title></rect>
+<text x="490.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21*</text>
+<rect x="511" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>random_1000 / ch04_seq: numba 1.27e+04 ms, triton 1.15e+04 ms (estimated per blob)</title></rect>
+<text x="530.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10*</text>
+<rect x="551" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>random_1000 / ch04_multi: numba 9.01e+03 ms, triton 8.51e+03 ms (estimated per blob)</title></rect>
+<text x="570.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06*</text>
+<text x="610.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>random_1000 / ch05_merge: numba 1.18 ms, triton 1.12 ms</title></rect>
+<text x="650.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06</text>
+<rect x="671" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.26"><title>random_1000 / ch05_ccl: numba 1.73 ms, triton 1.2 ms</title></rect>
+<text x="690.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.44</text>
+<rect x="711" y="437" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>random_1000 / ch05_fused_L8: numba 1.82 ms, triton 1.87 ms</title></rect>
+<text x="730.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.97</text>
+<rect x="751" y="437" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>random_1000 / ch05_r128_L8: numba 1.73 ms, triton 1.81 ms</title></rect>
+<text x="770.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.96</text>
+<rect x="791" y="437" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.09"><title>random_1000 / ch05_split_L8: numba 2.01 ms, triton 2.13 ms</title></rect>
+<text x="810.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.94</text>
+<rect x="831" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>random_1000 / ch05_split_I1: numba 3.86 ms, triton 2.93 ms</title></rect>
+<text x="850.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.32</text>
+<rect x="871" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.28"><title>random_1000 / ch06_rgb: numba 0.735 ms, triton 0.486 ms</title></rect>
+<text x="890.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.51</text>
+<rect x="911" y="437" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.28"><title>random_1000 / ch06_mask: numba 0.668 ms, triton 0.442 ms</title></rect>
+<text x="930.0" y="450.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.51</text>
+<text x="102.0" y="473.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">random_4000</text>
+<rect x="111" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>random_4000 / ch01_ring: numba 1.44e+05 ms, triton 1.58e+05 ms (estimated per blob)</title></rect>
+<text x="130.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.91*</text>
+<rect x="151" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.13"><title>random_4000 / ch01_spill: numba 1.46e+05 ms, triton 1.68e+05 ms (estimated per blob)</title></rect>
+<text x="170.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.87*</text>
+<rect x="191" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.07"><title>random_4000 / ch02_split: numba 1.73e+05 ms, triton 1.71e+05 ms (estimated per blob)</title></rect>
+<text x="210.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.01*</text>
+<rect x="231" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.08"><title>random_4000 / ch02_global: numba 1.5e+05 ms, triton 1.54e+05 ms (estimated per blob)</title></rect>
+<text x="250.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.97*</text>
+<rect x="271" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>random_4000 / ch02_dirsplit: numba 1.51e+05 ms, triton 1.55e+05 ms (estimated per blob)</title></rect>
+<text x="290.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98*</text>
+<rect x="311" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.09" stroke="#8b949e" stroke-dasharray="2 2"><title>random_4000 / ch02_pinned: numba 1.42e+05 ms, triton 1.49e+05 ms (estimated per blob) (not like-for-like)</title></rect>
+<text x="330.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.95*</text>
+<rect x="351" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.09"><title>random_4000 / ch02_pinned_matched: numba 1.42e+05 ms, triton 1.52e+05 ms (estimated per blob)</title></rect>
+<text x="370.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.94*</text>
+<rect x="391" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>random_4000 / ch03_conn4: numba 1.75e+05 ms, triton 1.4e+05 ms (estimated per blob)</title></rect>
+<text x="410.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.24*</text>
+<rect x="431" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>random_4000 / ch03_conn8: numba 1.78e+05 ms, triton 1.7e+05 ms (estimated per blob)</title></rect>
+<text x="450.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.04*</text>
+<rect x="471" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>random_4000 / ch03_conn8_r2: numba 1.91e+05 ms, triton 1.75e+05 ms (estimated per blob)</title></rect>
+<text x="490.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.09*</text>
+<rect x="511" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>random_4000 / ch04_seq: numba 1.48e+05 ms, triton 1.24e+05 ms (estimated per blob)</title></rect>
+<text x="530.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.19*</text>
+<rect x="551" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10"><title>random_4000 / ch04_multi: numba 9.73e+04 ms, triton 8.96e+04 ms (estimated per blob)</title></rect>
+<text x="570.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.09*</text>
+<text x="610.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>random_4000 / ch05_merge: numba 25.7 ms, triton 24.8 ms</title></rect>
+<text x="650.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.03</text>
+<rect x="671" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>random_4000 / ch05_ccl: numba 28.8 ms, triton 25.5 ms</title></rect>
+<text x="690.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.13</text>
+<rect x="711" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>random_4000 / ch05_fused_L8: numba 33.2 ms, triton 36.5 ms</title></rect>
+<text x="730.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.91</text>
+<rect x="751" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.15"><title>random_4000 / ch05_r128_L8: numba 22 ms, triton 25.8 ms</title></rect>
+<text x="770.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.85</text>
+<rect x="791" y="459" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.07"><title>random_4000 / ch05_split_L8: numba 25.1 ms, triton 25.7 ms</title></rect>
+<text x="810.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.98</text>
+<rect x="831" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>random_4000 / ch05_split_I1: numba 29.4 ms, triton 25.8 ms</title></rect>
+<text x="850.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.14</text>
+<rect x="871" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.25"><title>random_4000 / ch06_rgb: numba 6.14 ms, triton 4.3 ms</title></rect>
+<text x="890.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.43</text>
+<rect x="911" y="459" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.28"><title>random_4000 / ch06_mask: numba 11 ms, triton 7.32 ms</title></rect>
+<text x="930.0" y="472.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.50</text>
+<text x="102.0" y="495.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">png_blobs</text>
+<rect x="111" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>png_blobs / ch01_ring: numba 1.25e+03 ms, triton 1.19e+03 ms (estimated per blob)</title></rect>
+<text x="130.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="151" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>png_blobs / ch01_spill: numba 1.38e+03 ms, triton 1.23e+03 ms (estimated per blob)</title></rect>
+<text x="170.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.12*</text>
+<rect x="191" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>png_blobs / ch02_split: numba 1.99e+03 ms, triton 1.66e+03 ms (estimated per blob)</title></rect>
+<text x="210.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.20*</text>
+<rect x="231" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>png_blobs / ch02_global: numba 1.88e+03 ms, triton 1.43e+03 ms (estimated per blob)</title></rect>
+<text x="250.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.31*</text>
+<rect x="271" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>png_blobs / ch02_dirsplit: numba 1.92e+03 ms, triton 1.47e+03 ms (estimated per blob)</title></rect>
+<text x="290.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.31*</text>
+<rect x="311" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.10" stroke="#8b949e" stroke-dasharray="2 2"><title>png_blobs / ch02_pinned: numba 1.84e+03 ms, triton 1.7e+03 ms (estimated per blob) (not like-for-like)</title></rect>
+<text x="330.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.08*</text>
+<rect x="351" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>png_blobs / ch02_pinned_matched: numba 1.88e+03 ms, triton 1.79e+03 ms (estimated per blob)</title></rect>
+<text x="370.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="391" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.22"><title>png_blobs / ch03_conn4: numba 2.14e+03 ms, triton 1.6e+03 ms (estimated per blob)</title></rect>
+<text x="410.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.34*</text>
+<rect x="431" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>png_blobs / ch03_conn8: numba 1.93e+03 ms, triton 1.6e+03 ms (estimated per blob)</title></rect>
+<text x="450.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.20*</text>
+<rect x="471" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09"><title>png_blobs / ch03_conn8_r2: numba 2.1e+03 ms, triton 1.99e+03 ms (estimated per blob)</title></rect>
+<text x="490.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="511" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.21"><title>png_blobs / ch04_seq: numba 2.44e+03 ms, triton 1.84e+03 ms (estimated per blob)</title></rect>
+<text x="530.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.32*</text>
+<rect x="551" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.19"><title>png_blobs / ch04_multi: numba 1.42e+03 ms, triton 1.12e+03 ms (estimated per blob)</title></rect>
+<text x="570.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.27*</text>
+<text x="610.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.55"><title>png_blobs / ch05_merge: numba 211 ms, triton 83.9 ms</title></rect>
+<text x="650.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.52</text>
+<rect x="671" y="481" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.10"><title>png_blobs / ch05_ccl: numba 95.1 ms, triton 103 ms</title></rect>
+<text x="690.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.92</text>
+<rect x="711" y="481" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.17"><title>png_blobs / ch05_fused_L8: numba 71.9 ms, triton 88.8 ms</title></rect>
+<text x="730.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.81</text>
+<rect x="751" y="481" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.20"><title>png_blobs / ch05_r128_L8: numba 47.2 ms, triton 61 ms</title></rect>
+<text x="770.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.77</text>
+<rect x="791" y="481" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.20"><title>png_blobs / ch05_split_L8: numba 46.2 ms, triton 59.7 ms</title></rect>
+<text x="810.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.77</text>
+<rect x="831" y="481" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.31"><title>png_blobs / ch05_split_I1: numba 54.5 ms, triton 87.6 ms</title></rect>
+<text x="850.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.62</text>
+<rect x="871" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.16"><title>png_blobs / ch06_rgb: numba 4.22 ms, triton 3.48 ms</title></rect>
+<text x="890.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.21</text>
+<rect x="911" y="481" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>png_blobs / ch06_mask: numba 2.14 ms, triton 1.69 ms</title></rect>
+<text x="930.0" y="494.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.26</text>
+<text x="102.0" y="517.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#768390" text-anchor="end" font-weight="400">png_blocks</text>
+<rect x="111" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>png_blocks / ch01_ring: numba 3.67e+03 ms, triton 3.5e+03 ms (estimated per blob)</title></rect>
+<text x="130.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="151" y="503" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.06"><title>png_blocks / ch01_spill: numba 4.3e+03 ms, triton 4.33e+03 ms (estimated per blob)</title></rect>
+<text x="170.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.99*</text>
+<rect x="191" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.08"><title>png_blocks / ch02_split: numba 5.18e+03 ms, triton 4.95e+03 ms (estimated per blob)</title></rect>
+<text x="210.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.05*</text>
+<rect x="231" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.12"><title>png_blocks / ch02_global: numba 4.88e+03 ms, triton 4.36e+03 ms (estimated per blob)</title></rect>
+<text x="250.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.12*</text>
+<rect x="271" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.14"><title>png_blocks / ch02_dirsplit: numba 4.59e+03 ms, triton 3.97e+03 ms (estimated per blob)</title></rect>
+<text x="290.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.16*</text>
+<rect x="311" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.09" stroke="#8b949e" stroke-dasharray="2 2"><title>png_blocks / ch02_pinned: numba 4.23e+03 ms, triton 3.99e+03 ms (estimated per blob) (not like-for-like)</title></rect>
+<text x="330.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.06*</text>
+<rect x="351" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.13"><title>png_blocks / ch02_pinned_matched: numba 4.54e+03 ms, triton 3.95e+03 ms (estimated per blob)</title></rect>
+<text x="370.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.15*</text>
+<rect x="391" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.20"><title>png_blocks / ch03_conn4: numba 4.74e+03 ms, triton 3.67e+03 ms (estimated per blob)</title></rect>
+<text x="410.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.29*</text>
+<rect x="431" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.11"><title>png_blocks / ch03_conn8: numba 4.5e+03 ms, triton 4.1e+03 ms (estimated per blob)</title></rect>
+<text x="450.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.10*</text>
+<rect x="471" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>png_blocks / ch03_conn8_r2: numba 5.08e+03 ms, triton 4.33e+03 ms (estimated per blob)</title></rect>
+<text x="490.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.17*</text>
+<rect x="511" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>png_blocks / ch04_seq: numba 7.17e+03 ms, triton 6.07e+03 ms (estimated per blob)</title></rect>
+<text x="530.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.18*</text>
+<rect x="551" y="503" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.13"><title>png_blocks / ch04_multi: numba 5.07e+03 ms, triton 5.72e+03 ms (estimated per blob)</title></rect>
+<text x="570.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.89*</text>
+<text x="610.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">-</text>
+<rect x="631" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.15"><title>png_blocks / ch05_merge: numba 1.11 ms, triton 0.947 ms</title></rect>
+<text x="650.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.17</text>
+<rect x="671" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.18"><title>png_blocks / ch05_ccl: numba 1.58 ms, triton 1.26 ms</title></rect>
+<text x="690.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.26</text>
+<rect x="711" y="503" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.11"><title>png_blocks / ch05_fused_L8: numba 1.59 ms, triton 1.74 ms</title></rect>
+<text x="730.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.91</text>
+<rect x="751" y="503" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.12"><title>png_blocks / ch05_r128_L8: numba 1.24 ms, triton 1.4 ms</title></rect>
+<text x="770.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.89</text>
+<rect x="791" y="503" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.10"><title>png_blocks / ch05_split_L8: numba 1.49 ms, triton 1.6 ms</title></rect>
+<text x="810.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.93</text>
+<rect x="831" y="503" width="38" height="20" rx="3" fill="#e05a59" fill-opacity="0.12"><title>png_blocks / ch05_split_I1: numba 2.44 ms, triton 2.73 ms</title></rect>
+<text x="850.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">0.89</text>
+<rect x="871" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.43"><title>png_blocks / ch06_rgb: numba 0.509 ms, triton 0.255 ms</title></rect>
+<text x="890.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">1.99</text>
+<rect x="911" y="503" width="38" height="20" rx="3" fill="#3987e5" fill-opacity="0.44"><title>png_blocks / ch06_mask: numba 0.449 ms, triton 0.219 ms</title></rect>
+<text x="930.0" y="516.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="9" fill="#7d8590" text-anchor="middle" font-weight="400">2.05</text>
+<text x="110.0" y="546.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400">*  estimated per blob, the same sample on both sides     dashed  not like-for-like (different thread count or grid)     -  skipped on both sides, as the Numba table does</text>
+<text x="110.0" y="564.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="start" font-weight="400">values are numba_ms / triton_ms; above 1 Triton is faster</text>
+</svg>
