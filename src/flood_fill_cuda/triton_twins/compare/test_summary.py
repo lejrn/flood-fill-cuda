@@ -107,3 +107,19 @@ def test_two_ablations_in_one_unit_are_reported_apart(tmp_path):
     assert set(ab) == {"enqueue", "lane_schedule"}
     assert ab["enqueue"]["geomean_triton_gain"] == pytest.approx(4.0)
     assert ab["lane_schedule"]["geomean_triton_gain"] == pytest.approx(20.0)
+
+
+def test_duplicate_marker_inside_config_counts_too(tmp_path):
+    root = str(tmp_path)
+    main = _row("modes", "sq", 4.0, 2.0)
+    lane = _row("enqueue", "sq", 4.0, 1.0)
+    lane["config"] = {"tpb": 256, "enqueue": "lane", "duplicate_of": ["modes"]}
+    prog = _row("enqueue", "sq", 4.0, 4.0)
+    prog["config"] = {"tpb": 256, "enqueue": "program"}
+    prog["first_translation"] = True
+    prog["comparable"] = False
+    _write(root, "ch04", "20260101T000000Z", [main, lane, prog])
+    u = summarize(root)["units"]["ch04"]
+    assert u["geomean_speedup_kernel"] == pytest.approx(2.0)  # lane row not averaged
+    assert u["duplicate_rows"] == 1
+    assert u["first_translation_ablations"]["enqueue"]["paired"] == 1

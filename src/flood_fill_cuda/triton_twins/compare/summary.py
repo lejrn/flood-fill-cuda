@@ -61,7 +61,7 @@ def _extreme(rows, key, pick):
 
 
 ABLATION_KEYS = ("enqueue", "label", "schedule", "lane_sched", "LANE_SCHED",
-                 "lane_schedule")
+                 "lane_schedule", "duplicate_of")
 
 
 def _is_ablation(r):
@@ -69,7 +69,8 @@ def _is_ablation(r):
 
 
 def _is_duplicate(r):
-    return bool(r.get("duplicate_of"))
+    # ch04 records the marker inside config (as a list), the others on the row
+    return bool(r.get("duplicate_of") or r.get("config", {}).get("duplicate_of"))
 
 
 def _pair_key(r):
