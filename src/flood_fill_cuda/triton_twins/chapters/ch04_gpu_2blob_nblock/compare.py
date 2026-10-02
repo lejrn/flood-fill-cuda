@@ -1,7 +1,9 @@
 """Numba vs Triton for chapter 4, on the chapter's own benchmark experiments.
 
-Six experiments on the Numba benchmarks' own four scenes (imported, so they
-cannot drift), all at tpb=256:
+Seven experiments on the Numba benchmarks' own four scenes (imported, so
+they cannot drift), all at tpb=256. Every Triton run uses the default
+per-lane enqueue (ENQ="lane") except the program rows of the enqueue
+experiment; each row's config records its "enqueue":
 
 modes        benchmarks/benchmark.py's round-robin: seq, seq_half, multi,
              multi_xy, bare, bare_xy, seq8, multi8. Each config runs on its
@@ -27,6 +29,17 @@ radius2      benchmarks/benchmark_radius2_barrier_work.py: seq8, multi8,
              seq8r2, multi8r2, all pinned to the minimum capacity over the
              lin8 and lin8r2 kernels and both backends (Numba pins over its
              two kernels).
+enqueue      the cost of the first translation. multi, bare_xy, multi8 and
+             multi8r2 (one config per kernel family: lin 4-conn, xy bare,
+             8-conn, radius 2) on every scene, Numba vs Triton twice: the
+             default per-lane enqueue (config.enqueue="lane",
+             label="per_lane") and the program-aggregated enqueue of the
+             first translation (config.enqueue="program",
+             label="first_translation"). Both rows of a pair run at one grid,
+             min(Numba cap, Triton lane cap, Triton program cap), which is
+             Numba's own grid. Each row's triton_ptx_bar_sync is the CTA
+             barrier count of the binary it ran (equal to the SASS
+             BAR.SYNC count; see sass.py).
 
 Every case runs the same configuration on both backends (same tpb =
 num_warps * 32, same explicit program count except in blocks_none) through
@@ -47,8 +60,9 @@ for the sequential configs).
 
 The radius-2 rows carry one structural difference: Numba skips ring 2
 per warp, the twin per program (8 warps at tpb=256), so the Triton
-seq8r2 / multi8r2 times include masked ring-2 probe work Numba skips (see
-the README's Deviations).
+seq8r2 / multi8r2 times include masked ring-2 probe work Numba skips, and
+the gate's program-wide tl.max adds 3 CTA barriers per tile (see the
+README's Deviations).
 
 Not run here, by design: mode="streams" (the Numba benchmark excludes it:
 two concurrent cooperative grids can wedge the GPU), and the @njit oracle
@@ -63,8 +77,8 @@ Caps: none. Every scene, config and grid is the Numba benchmarks' own.
 The harness holds one Numba and one Triton result at a time (about 0.3 GB
 each at the 22.9M-px asym scene); a probe of the seq, multi and mb_a cases
 on that scene peaked at 1.5 GB RSS. Each run spends about 0.9 s in the
-drivers at the 18-23M-px scenes, so the default (68 cases, warm-up + 6
-rounds) is about 12 minutes of GPU time.
+drivers at the 18-23M-px scenes, so the default (100 cases, warm-up + 6
+rounds) is about 18 minutes of GPU time.
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch04_gpu_2blob_nblock.compare [--quick] [--repeats N]
@@ -90,6 +104,8 @@ from ...compare.harness import Case, arrays_equal, run_cases, spin_up
 from ...runtime.bandwidth import measure_peak_bandwidth as triton_peak
 from ..ch03_gpu_1blob_nblock import flood_fill as triton_mb
 from . import flood_fill as triton_ff
+from . import sass as twin_sass
+from .kernels import ENQ_LANE, ENQ_PROGRAM
 
 CHAPTER = "ch04_gpu_2blob_nblock"
 TPB = nb_bench.TPB  # 256, also nb_r2.TPB
@@ -112,6 +128,13 @@ MODE_CONFIGS = {
 R2_CONFIGS = nb_r2.CONFIGS  # seq8, multi8, seq8r2, multi8r2
 for _name in ("seq8", "multi8"):
     assert R2_CONFIGS[_name] == MODE_CONFIGS[_name], _name
+
+# The enqueue experiment: one config per kernel family, both ENQ settings
+ENQ_CONFIGS = {"multi": MODE_CONFIGS["multi"],
+               "bare_xy": MODE_CONFIGS["bare_xy"],
+               "multi8": MODE_CONFIGS["multi8"],
+               "multi8r2": R2_CONFIGS["multi8r2"]}
+ENQ_LABELS = {ENQ_LANE: "per_lane", ENQ_PROGRAM: "first_translation"}
 
 CAPS = []
 METHOD_NOTES = [
@@ -144,11 +167,20 @@ METHOD_NOTES = [
     "of 1 mean the row is noise",
     "radius2 rows: Numba skips ring 2 per warp (divergent `if interior:`), "
     "the twin per program (256 lanes = 8 warps): when any lane is "
-    "interior every warp runs the 16 masked ring-2 probes and their "
-    "program-wide enqueue scans. Outputs and counters are unchanged, but "
-    "the Triton seq8r2/multi8r2 times include masked probe work Numba "
-    "skips, so r2_multi_vs_conn8 is not a pure algorithm-vs-algorithm "
-    "ratio on the Triton side",
+    "interior every warp runs the 16 masked ring-2 probes, and the gate "
+    "itself is a program-wide tl.max (3 CTA barriers per tile). Outputs "
+    "and counters are unchanged, but the Triton seq8r2/multi8r2 times "
+    "include masked probe work Numba skips, so r2_multi_vs_conn8 is not a "
+    "pure algorithm-vs-algorithm ratio on the Triton side",
+    "Triton runs use the per-lane enqueue (ENQ='lane'): one relaxed atomic "
+    "per winning lane, which ptxas compiles warp-aggregated (VOTEU.ANY, "
+    "POPC, one leader ATOMG.ADD, SHFL.IDX), the SASS of Numba's "
+    "_warp_enqueue_global. The enqueue experiment adds, per scene and "
+    "config, a row with the first translation's program-aggregated "
+    "enqueue (ENQ='program', label first_translation: tl.sum + tl.cumsum, "
+    "7 BAR.SYNC per enqueue site), at the same grid, so the cost of that "
+    "translation choice is measured in the same harness. Those rows "
+    "measure an alternative twin, not the default one",
 ]
 SCOPE = (
     "benchmark.py also times the @njit two-blob oracle and cross-checks "
@@ -226,11 +258,13 @@ def _kernel_kw(kw):
     return {k: v for k, v in kw.items() if k != "mode"}
 
 
-def caps(kw):
-    """Co-resident capacity of one ch04 kernel at TPB, per backend."""
+def caps(kw, enqueue=ENQ_LANE):
+    """Co-resident capacity of one ch04 kernel at TPB, per backend (the
+    Triton binary compiled with ``enqueue``)."""
     k = _kernel_kw(kw)
     return {"numba": numba_ff.max_blocks(threads_per_block=TPB, **k),
-            "triton": triton_ff.max_blocks(threads_per_block=TPB, **k)}
+            "triton": triton_ff.max_blocks(threads_per_block=TPB,
+                                           enqueue=enqueue, **k)}
 
 
 def _one(value):
@@ -241,14 +275,18 @@ def _one(value):
     return int(value)
 
 
-def resources(kw):
-    """Registers and friends of both compiled ch04 kernels."""
+def resources(kw, enqueue=ENQ_LANE):
+    """Registers and friends of both compiled ch04 kernels, plus the CTA
+    barrier count of the Triton binary (its PTX; equal to SASS BAR.SYNC)."""
     k = _kernel_kw(kw)
     numba_ff.max_blocks(threads_per_block=TPB, **k)  # compiles if needed
     nk = numba_ff._KERNELS[_key(kw)]
+    ptx = triton_ff._warmup(*_key(kw), TPB, enqueue).asm["ptx"]
     return {
         "kernel": nk.__name__,
-        "triton_resources": triton_ff.kernel_info(threads_per_block=TPB, **k),
+        "triton_resources": triton_ff.kernel_info(threads_per_block=TPB,
+                                                  enqueue=enqueue, **k),
+        "triton_ptx_bar_sync": twin_sass.ptx_barriers(ptx),
         "numba_resources": {
             "n_regs": _one(nk.get_regs_per_thread()),
             "shared_bytes": _one(nk.get_shared_mem_per_block()),
@@ -319,11 +357,13 @@ def info(n, t):
 
 
 def make_case(experiment, slot, scene, name, kw, blocks, notes="",
-              grid_of=None, which=None, extra=None):
+              grid_of=None, which=None, extra=None, enqueue=ENQ_LANE,
+              label=None):
     """One ch04 cell: same scene, same kwargs, same grid on both backends.
     blocks=None lets each backend resolve its own grid: both resolved sizes
-    go into the config, and the row is comparable only if they agree."""
-    c = caps(kw)
+    go into the config, and the row is comparable only if they agree.
+    ``enqueue`` is the Triton side's ENQ (Numba has one enqueue)."""
+    c = caps(kw, enqueue)
 
     def wrap(r):
         return LaunchView(r, which) if which else r
@@ -336,10 +376,14 @@ def make_case(experiment, slot, scene, name, kw, blocks, notes="",
     def run_triton():
         img, seeds = slot.get(scene)
         return wrap(triton_ff.flood_fill(img, seeds, threads_per_block=TPB,
-                                         blocks=blocks, **kw))
+                                         blocks=blocks, enqueue=enqueue,
+                                         **kw))
 
     config = {"config": name, **kw, "tpb": TPB, "num_warps": TPB // 32,
-              "blocks": "None" if blocks is None else int(blocks)}
+              "blocks": "None" if blocks is None else int(blocks),
+              "enqueue": enqueue}
+    if label:
+        config["label"] = label
     if which:
         config["launch"] = which
     if blocks is None:
@@ -348,7 +392,7 @@ def make_case(experiment, slot, scene, name, kw, blocks, notes="",
         resolved = {"numba": int(blocks), "triton": int(blocks)}
     config["resolved_blocks"] = resolved
     equal_grid = resolved["numba"] == resolved["triton"]
-    row_extra = {"caps": c, **resources(kw), **(extra or {})}
+    row_extra = {"caps": c, **resources(kw, enqueue), **(extra or {})}
     if grid_of:
         row_extra["grid_of"] = grid_of
     return Case(experiment=experiment, scene=scene, config=config,
@@ -427,6 +471,26 @@ def pinned(kw):
     return min(c.values())
 
 
+def enq_pinned(kw):
+    """One grid for both rows of an enqueue pair: min over Numba and both
+    Triton binaries (Numba's own grid for every ch04 kernel)."""
+    return min(min(caps(kw, e).values()) for e in ENQ_LABELS)
+
+
+def enqueue_cases(slot, scene, note):
+    """The enqueue experiment's cases for one scene: per config, the
+    per-lane row, then the first translation's program row."""
+    out = []
+    for name, kw in ENQ_CONFIGS.items():
+        blocks = enq_pinned(kw)
+        for enq, label in ENQ_LABELS.items():
+            out.append(make_case(
+                "enqueue", slot, scene, name, kw, blocks, notes=note,
+                grid_of="min(numba, triton lane, triton program)",
+                enqueue=enq, label=label))
+    return out
+
+
 def scene_cases(slot, scene, note, r2_pin, mb_pin):
     """Every experiment's cases for one scene, in Numba benchmark order."""
     out = []
@@ -449,6 +513,7 @@ def scene_cases(slot, scene, note, r2_pin, mb_pin):
     for name, kw in R2_CONFIGS.items():
         out.append(make_case("radius2", slot, scene, name, kw, r2_pin,
                              notes=note))
+    out += enqueue_cases(slot, scene, note)
     return out
 
 
@@ -482,6 +547,7 @@ def build(quick):
                   "seq_half_blocks": pinned(MODE_CONFIGS["seq"]) // 2},
         "radius2": {"pinned_blocks": r2_pin, "coop_max_by_kernel": r2_caps},
         "packing_tax": {"pinned_blocks": mb_pin, "coop_max": mb_c},
+        "enqueue": enqueue_meta(),
         "bandwidth_model": bandwidth.MODEL_NOTE,
         "derived": (
             "per backend, from the kernel_ms medians: speedup_multi_vs_seq = "
@@ -489,12 +555,40 @@ def build(quick):
             "multi / ideal_max; xy_vs_lin = multi / multi_xy; "
             "multi_overhead_pct = 100 * (multi - bare) / bare; "
             "packing_tax_pct = 100 * (seq_a - mb_a) / mb_a; "
-            "r2_multi_vs_conn8 = multi8 / multi8r2 (radius2 rows); model "
+            "r2_multi_vs_conn8 = multi8 / multi8r2 (radius2 rows); "
+            "first-translation cost = triton kernel_ms of the program row / "
+            "triton kernel_ms of the per_lane row of the same enqueue pair "
+            "(enqueue rows; each row also times Numba itself, so each has "
+            "its own speedup_kernel against Numba); model "
             "GB/s = info.<backend>_model_bytes / (kernel_ms * 1e6), against "
             "meta.peak_gb_s of the same backend's copy probe"),
         "pixels": "scene width * height; info.filled is both blobs' size",
     }
     return cases, meta
+
+
+def enqueue_meta():
+    """Per enqueue config: the pinned grid, and per Triton binary its
+    capacity, registers and CTA barrier count."""
+    out = {"labels": ENQ_LABELS, "configs": ENQ_CONFIGS, "by_config": {}}
+    for name, kw in ENQ_CONFIGS.items():
+        k = _kernel_kw(kw)
+        per = {}
+        for enq in ENQ_LABELS:
+            ck = triton_ff._warmup(*_key(kw), TPB, enq)
+            per[enq] = {
+                "cap": triton_ff.max_blocks(threads_per_block=TPB,
+                                            enqueue=enq, **k),
+                "n_regs": triton_ff.kernel_info(threads_per_block=TPB,
+                                                enqueue=enq, **k)["n_regs"],
+                "ptx_bar_sync": twin_sass.ptx_barriers(ck.asm["ptx"]),
+            }
+        out["by_config"][name] = {
+            "kernel": triton_ff._KERNELS[_key(kw)].__name__,
+            "pinned_blocks": enq_pinned(kw),
+            "numba_cap": numba_ff.max_blocks(threads_per_block=TPB, **k),
+            "triton": per}
+    return out
 
 
 def measure_peaks(quick):

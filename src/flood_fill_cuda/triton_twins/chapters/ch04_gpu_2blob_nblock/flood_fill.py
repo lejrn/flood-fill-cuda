@@ -3,14 +3,18 @@
 Public API (identical to the Numba chapter's flood_fill.py):
     flood_fill(img, seeds, mode="multisource", threads_per_block=256,
                blocks=None, bare=False, connectivity=4, entry_format="lin",
-               radius=1)
+               radius=1, enqueue="lane")
         -> DualBlobResult
     max_blocks(threads_per_block=256, bare=False, connectivity=4,
-               entry_format="lin", radius=1)
+               entry_format="lin", radius=1, enqueue="lane")
 
 Same modes, same validation (messages included), same result fields and
-the same timing brackets (time.perf_counter around runtime.sync()). What
-changes is the runtime underneath:
+the same timing brackets (time.perf_counter around runtime.sync()). The
+one twin-only keyword is ``enqueue``: "lane" (the default) compiles the
+per-lane enqueue that ptxas warp-aggregates like Numba's helper,
+"program" the first translation's program-aggregated enqueue (kept to
+measure its cost). Outputs are identical under both. What changes is the
+runtime underneath:
 
 - CuPy arrays replace Numba device arrays; kernels launch through the
   CuPy-backed Triton driver (runtime.t / runtime.sync).
@@ -55,7 +59,7 @@ from .kernels import (
     dual_blob_xy8_kernel, dual_blob_xy8_bare_kernel,
     PALETTE_HOST,
     XY_FIELD_BITS, XY_LBL_SHIFT, XY_MAX_DIM,
-    NUM_COUNTERS,
+    NUM_COUNTERS, ENQ_LANE, ENQ_MODES,
     FILLED, LEVELS, OVERFLOW, PEAK_LEVEL, PEAK_OCC,
     ACTIVE_THREAD_SUM, ACTIVE_WARP_SUM, PROCESSED, CAS_ATTEMPTS, INTERIOR,
     BS_PROCESSED, BS_SMID,
@@ -63,6 +67,7 @@ from .kernels import (
 
 MODES = ("sequential", "streams", "multisource")
 ENTRY_FORMATS = ("lin", "xy")
+ENQUEUE_MODES = ENQ_MODES   # twin-only: ("lane", "program")
 
 # (entry_format, bare, connectivity, radius) -> kernel, as in Numba
 _KERNELS = {
@@ -158,9 +163,10 @@ class DualBlobResult:
     model_bytes: int
     model_gb_s: float
     launches: list = field(repr=False, default=None)  # of LaunchStats
+    enqueue: str = ENQ_LANE  # twin-only: the ENQ the kernel compiled with
 
 
-# (key, tpb) -> CompiledKernel of the warm-up launch; (key, tpb) -> capacity
+# (key, tpb, enqueue) -> CompiledKernel of the warm-up launch, and -> capacity
 _warmed = {}
 _coop_cache = {}
 _streams_ok = None      # None = unprobed; True/False after first warmup
@@ -185,12 +191,19 @@ def _check_tpb(threads_per_block):
             f"128, 256 or 512, got {threads_per_block}")
 
 
+def _check_enqueue(enqueue):
+    if enqueue not in ENQUEUE_MODES:
+        raise ValueError(
+            f"enqueue must be one of {ENQUEUE_MODES}, got {enqueue!r}")
+
+
 def _launch(kernel_fn, blocks, tpb, instrumented, d_img, d_visited, d_depth,
             d_owner, d_queue, d_q_state, d_counters, d_stats, d_trace, d_bar,
-            width, height, n_seeds):
+            width, height, n_seeds, enqueue):
     """One cooperative launch on the current CuPy stream; returns the
-    CompiledKernel (its registers size the cooperative grid)."""
-    common = dict(BLOCK=tpb, num_warps=tpb // 32, num_stages=1,
+    CompiledKernel (its registers size the cooperative grid). ``enqueue``
+    is the ENQ constexpr: part of the binary, like BLOCK."""
+    common = dict(BLOCK=tpb, ENQ=enqueue, num_warps=tpb // 32, num_stages=1,
                   launch_cooperative_grid=True)
     if instrumented:
         return kernel_fn[(blocks,)](
@@ -226,7 +239,7 @@ def _tiny_args(entry_format):
     return d_img, d_visited, d_depth, d_counters, d_queue, d_q
 
 
-def _tiny_launch(key, tpb):
+def _tiny_launch(key, tpb, enqueue):
     """The [1 program x tpb lanes] launch on the tiny image (n_seeds=2)."""
     entry_format, bare = key[0], key[1]
     d_img, d_visited, d_depth, d_counters, d_queue, d_q = \
@@ -240,12 +253,12 @@ def _tiny_launch(key, tpb):
         d_trace = cp.empty(4, dtype=cp.int32)
     return _launch(_KERNELS[key], 1, tpb, not bare, d_img, d_visited,
                    d_depth, d_owner, d_queue, d_q, d_counters, d_stats,
-                   d_trace, d_bar, 8, 8, 2)
+                   d_trace, d_bar, 8, 8, 2, enqueue)
 
 
 def _warmup(entry_format, bare, connectivity=4, radius=1,
-            threads_per_block=256):
-    """Compile each (kernel, tpb) once, off the clock, and return its
+            threads_per_block=256, enqueue=ENQ_LANE):
+    """Compile each (kernel, tpb, enqueue) once, off the clock, and return its
     CompiledKernel. Numba compiles one binary per kernel and warms it with
     a [1, 32] launch; a Triton program's lane count is a compile-time
     constant, so the twin warms the exact binary the timed launch uses.
@@ -254,16 +267,16 @@ def _warmup(entry_format, bare, connectivity=4, radius=1,
     outcome is recorded, never assumed."""
     global _streams_ok, _streams_err
     key = (entry_format, bare, connectivity, radius)
-    wkey = (key, threads_per_block)
+    wkey = (key, threads_per_block, enqueue)
     if wkey not in _warmed:
-        _warmed[wkey] = _tiny_launch(key, threads_per_block)
+        _warmed[wkey] = _tiny_launch(key, threads_per_block, enqueue)
         sync()
     if _streams_ok is None and not bare:
         try:
             s = cp.cuda.Stream()
             with s:
                 _tiny_launch((entry_format, False, connectivity, radius),
-                             threads_per_block)
+                             threads_per_block, enqueue)
             s.synchronize()
             _streams_ok = True
         except Exception as exc:  # record, don't crash: streams mode raises
@@ -272,38 +285,45 @@ def _warmup(entry_format, bare, connectivity=4, radius=1,
     return _warmed[wkey]
 
 
-def _coop_max_blocks(key, tpb):
-    if (key, tpb) not in _coop_cache:
-        _coop_cache[(key, tpb)] = max_coresident_programs(_warmed[(key, tpb)])
-    return _coop_cache[(key, tpb)]
+def _coop_max_blocks(key, tpb, enqueue):
+    wkey = (key, tpb, enqueue)
+    if wkey not in _coop_cache:
+        _coop_cache[wkey] = max_coresident_programs(_warmed[wkey])
+    return _coop_cache[wkey]
 
 
 def kernel_info(threads_per_block=256, bare=False, connectivity=4,
-                entry_format="lin", radius=1):
+                entry_format="lin", radius=1, enqueue=ENQ_LANE):
     """Registers, spills, shared bytes and warps of the compiled twin
     (runtime.occupancy.kernel_resources); compiles it on first call.
     Twin-only helper (the compare script records it per row)."""
     _check_tpb(threads_per_block)
+    _check_enqueue(enqueue)
     return kernel_resources(_warmup(entry_format, bare, connectivity, radius,
-                                    threads_per_block))
+                                    threads_per_block, enqueue))
 
 
 def max_blocks(threads_per_block=256, bare=False, connectivity=4,
-               entry_format="lin", radius=1):
+               entry_format="lin", radius=1, enqueue=ENQ_LANE):
     """The largest cooperative grid this GPU can host at threads_per_block
     for ONE launch of that exact twin (what blocks=None resolves to
-    outside streams mode). Queried per compiled binary, never assumed
-    equal across twins or to the Numba kernels' capacity."""
+    outside streams mode). Queried per compiled binary (enqueue included),
+    never assumed equal across twins or to the Numba kernels' capacity."""
     _check_tpb(threads_per_block)
-    _warmup(entry_format, bare, connectivity, radius, threads_per_block)
+    _check_enqueue(enqueue)
+    _warmup(entry_format, bare, connectivity, radius, threads_per_block,
+            enqueue)
     return _coop_max_blocks((entry_format, bare, connectivity, radius),
-                            threads_per_block)
+                            threads_per_block, enqueue)
 
 
 def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
                blocks=None, bare=False, connectivity=4, entry_format="lin",
-               radius=1):
+               radius=1, enqueue=ENQ_LANE):
     """Flood-fill two disconnected red blobs, blob 0 blue / blob 1 green.
+
+    enqueue (twin-only): "lane" (default) or "program", the ENQ constexpr
+    of the kernel (see kernels.py); outputs are identical under both.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
     returned. Raises ValueError for bad inputs, RuntimeError if the GPU
@@ -357,15 +377,17 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
         raise ValueError(
             "radius=2 requires connectivity=8 and entry_format='lin' (the "
             "guarded ring-2 twins exist only for the lin conn8 kernels)")
+    _check_enqueue(enqueue)
 
-    _warmup(entry_format, bare, connectivity, radius, threads_per_block)
+    _warmup(entry_format, bare, connectivity, radius, threads_per_block,
+            enqueue)
     if mode == "streams" and not _streams_ok:
         raise NotImplementedError(
             "mode='streams' unavailable: this Triton/driver rejected a "
             f"cooperative launch on a non-default stream ({_streams_err})")
 
     key = (entry_format, bare, connectivity, radius)
-    coop_max = _coop_max_blocks(key, threads_per_block)
+    coop_max = _coop_max_blocks(key, threads_per_block, enqueue)
     if blocks is None:
         # Streams default: a THIRD of capacity per launch (the Numba
         # driver's probed margin: two concurrent cooperative grids near
@@ -458,7 +480,7 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
         _launch(kernel_fn, launch_blocks, threads_per_block, instrumented,
                 d_img, d_visited, d_depth, d_owner, d_queues[i],
                 d_q_states[i], d_counters[i], d_stats[i], d_traces[i],
-                d_bars[i], width, height, n_seeds)
+                d_bars[i], width, height, n_seeds, enqueue)
 
     overlap_ratio = 0.0
     if mode == "sequential":
@@ -611,4 +633,5 @@ def flood_fill(img_host, seeds, mode="multisource", threads_per_block=256,
         model_bytes=mbytes,
         model_gb_s=_model_gb_s(mbytes, kernel_ms),
         launches=launches,
+        enqueue=enqueue,
     )
