@@ -18,14 +18,18 @@ The cases mirror chapters/ch01_gpu_1blob_1block/benchmarks/benchmark.py:
 - enqueue:       the v2 "spill" kernel's two enqueue forms on representative
                  scenes (one-pixel frontiers, a ring-sized square, the big
                  corner square, the spill scenes), two rows per scene:
-                 enqueue="lane" (the default: one atomic per winning lane,
-                 warp-aggregated by ptxas into Numba's SASS idiom) and
-                 enqueue="program" (config label "first_translation": the
-                 first translation's program-wide tl.cumsum/tl.sum enqueue,
-                 about 9 extra CTA barriers per direction). Numba runs its
-                 one v2 kernel in both rows. The lane rows repeat the
-                 scenes experiment's spill rows; the program rows measure
-                 what the first translation cost.
+                 enqueue="lane" (config label "per_lane", the default: one
+                 atomic per winning lane, warp-aggregated by ptxas into
+                 Numba's SASS idiom) and enqueue="program" (config label
+                 "first_translation": the first translation's program-wide
+                 tl.cumsum/tl.sum enqueue, about 9 extra CTA barriers per
+                 direction). Numba runs its one v2 kernel in both rows.
+                 The lane rows repeat the scenes experiment's spill rows;
+                 the program rows measure what the first translation cost.
+                 Program rows are comparable=False and carry
+                 first_translation=true, as in ch02-ch04: they stay out of
+                 the like-for-like averages and extremes of summary.py and
+                 figures.py.
 
 Both backends always run the same configuration: one block = one program,
 the same threads per block (Triton num_warps = tpb // 32). The CPU
@@ -82,6 +86,7 @@ from flood_fill_cuda.triton_twins.compare.harness import Case, run_cases
 from flood_fill_cuda.triton_twins.runtime import kernel_resources
 
 from .flood_fill import compiled_kernel, flood_fill as triton_flood_fill
+from .kernels import ENQ_MODES
 
 CHAPTER = "ch01_gpu_1blob_1block"
 TPB = 256                       # the benchmark's default for both variants
@@ -123,7 +128,10 @@ QUICK_SWEEP = ("sq_256_center", [64, 1024])
 ENQ_SCENES = ["serpentine_256", "sq_2000_center", "sq_4000_corner",
               "sq_2600_full_center", "sq_6000_center"]
 QUICK_ENQ_SCENES = ["serpentine_64", "sq_2600_full_center"]
-ENQ_LABELS = {"lane": "default", "program": "first_translation"}
+# The labels ch02-ch04 use; only the lane form is the twin's default.
+ENQ_LABELS = {"lane": "per_lane", "program": "first_translation"}
+DEFAULT_ENQ = "lane"
+assert set(ENQ_LABELS) == set(ENQ_MODES) and ENQ_MODES[0] == DEFAULT_ENQ
 
 TIMING_FIELDS = {"alloc_ms", "h2d_ms", "kernel_ms", "d2h_ms", "total_ms"}
 HOST_PHASES = ("alloc_ms", "h2d_ms", "d2h_ms")
@@ -376,9 +384,12 @@ def build_cases(quick=False, only=None):
                 info=result_info(variant, TPB), notes=note, extra=extra))
         # Right after the scene's own cases, so the one-slot cache holds it.
         if name in enq_scenes:
-            for enqueue in ("lane", "program"):
+            for enqueue in ENQ_MODES:
                 logs, extra = phase_logs()
                 label = ENQ_LABELS[enqueue]
+                default = enqueue == DEFAULT_ENQ
+                if not default:
+                    extra["first_translation"] = True
                 cases.append(Case(
                     experiment="enqueue", scene=name,
                     config={"variant": "spill", "threads_per_block": TPB,
@@ -391,8 +402,12 @@ def build_cases(quick=False, only=None):
                     same=same_result, pixels=w * h,
                     info=result_info("spill", TPB, enqueue),
                     notes=(f"{note}. v2 enqueue={enqueue!r} ({label}); "
-                           f"Numba runs its warp-aggregated v2 kernel"),
-                    extra=extra))
+                           f"Numba runs its warp-aggregated v2 kernel"
+                           + ("" if default else
+                              "; first translation, superseded by the "
+                              "per-lane default: not in the like-for-like "
+                              "averages")),
+                    extra=extra, comparable=default))
 
     if keep(sweep_scene):
         w, h = dims[sweep_scene]
@@ -439,7 +454,9 @@ def main(argv=None):
                                    else RING_TRIP_SCENES),
         "enqueue": {"scenes": QUICK_ENQ_SCENES if args.quick
                     else ENQ_SCENES,
-                    "variant": "spill", "modes": dict(ENQ_LABELS)},
+                    "variant": "spill", "labels": dict(ENQ_LABELS),
+                    "default": DEFAULT_ENQ},
+        "triton_enqueue_default": DEFAULT_ENQ,
         "only": sorted(only) if only else None,
         # Every benchmark scene and sweep point runs at full size; the
         # pure-Python and @njit CPU baselines are not part of this comparison.
@@ -463,12 +480,16 @@ def main(argv=None):
             "warp-aggregates into the same SASS idiom (VOTEU.ANY, POPC, one "
             "leader ATOMG, SHFL.IDX) with no CTA barrier: both v2 kernels "
             "carry Numba's 4 bar.sync. The scenes rows run this default.",
-            "enqueue rows: two per scene. label \"first_translation\" "
+            "enqueue rows: two per scene. label \"per_lane\" "
+            "(enqueue=\"lane\") is the default and repeats the scenes "
+            "experiment's spill row. label \"first_translation\" "
             "(enqueue=\"program\") is the first translation, aggregated "
             "over the program with tl.cumsum/tl.sum (40 bar.sync in the "
-            "kernel instead of 4); it is kept to measure that choice and "
-            "is not the twin's default, so leave it out of default-setting "
-            "averages. info.*.bar_sync_in_ptx counts the CTA barriers.",
+            "kernel instead of 4); it is kept to measure that choice. "
+            "Those rows are comparable=false and carry "
+            "first_translation=true, so the like-for-like averages and "
+            "extremes leave them out. info.*.bar_sync_in_ptx counts the "
+            "CTA barriers.",
             "Use speedup_kernel for Numba vs Triton. total_ms and "
             "speedup_total add host-library costs that differ by stack: "
             "CuPy's pool and lighter .set/.get calls vs Numba's fresh "
