@@ -14,7 +14,8 @@ Mapping (one Numba block of T threads = one program of T lanes, num_warps =
 T // 32, lane i plays thread i):
 
 - grid.sync()              -> runtime.device.grid_sync (cooperative launch,
-                              monotonic counter, two per level as in Numba)
+                              monotonic int64 counter, two per level as in
+                              Numba)
 - cuda.atomic.cas(visited, 0, 1)
                            -> masked tl.atomic_xchg(visited, 1): the same
                               exactly-once claim on a 0/1 flag (old == 0
@@ -156,7 +157,7 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
     Host contract (as in Numba): launch [blocks] programs of BLOCK lanes,
     cooperatively; visited[seed]=1, queue[0]=seed linear index, q_state=[1],
     depth=-1, counters and block_stats zeroed (BS_SMID column -1), owner=-1,
-    bar=[0]. Two grid barriers per level: #1 makes the level's enqueues and
+    bar=int64[0]. Two grid barriers per level: #1 makes the level's enqueues and
     rear visible grid-wide, #2 guarantees every program has read the new
     rear before any next-level atomic.
     """
@@ -180,6 +181,10 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
     front = 0
     rear = 1
     level = 0
+    # Barrier epochs (2 per level). The counter and the target are int64:
+    # 2 * levels * programs arrivals can pass 2**31 on a long serpentine at
+    # a wide grid, and grid.sync has no such limit. epoch itself stays int32
+    # (levels < width*height < 2**31 / 15 for any image that fits in VRAM).
     epoch = 0
     if INSTRUMENTED:
         peak_level = 1
@@ -306,10 +311,10 @@ def _bfs(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr, q_state_ptr,
                                                   qcap)
 
         epoch += 1
-        grid_sync(bar_ptr, epoch * nprog)  # enqueues + rear visible
+        grid_sync(bar_ptr, epoch.to(tl.int64) * nprog)  # enqueues + rear visible
         new_rear = tl.load(q_state_ptr + _Q_REAR)
         epoch += 1
-        grid_sync(bar_ptr, epoch * nprog)  # everyone read new_rear
+        grid_sync(bar_ptr, epoch.to(tl.int64) * nprog)  # everyone read new_rear
 
         level += 1
         if INSTRUMENTED:

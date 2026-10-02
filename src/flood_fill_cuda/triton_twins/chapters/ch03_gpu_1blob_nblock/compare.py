@@ -12,12 +12,16 @@ suite              benchmarks/benchmark.py section 1: every suite scene at
 suite_blocks_none  The same scenes with blocks=None on both sides, conn4 and
                    conn8: each backend at its own co-resident maximum, the
                    launch a caller gets by default. Both resolved grids are
-                   in each row's info.
+                   in config["resolved_blocks"]; they differ (48 vs 144 or
+                   120 at tpb=256), so these rows are comparable=False and
+                   stay out of the summary averages.
 sweep              benchmark.py section 2: TPB_SWEEP x BLOCKS_SWEEP on the
                    sweep scenes at conn4 and conn8. "max" resolves per tpb
-                   to min(both capacities); cells beyond either capacity
-                   are listed in meta["skipped_cells"], like the Numba
-                   sweep's skipped rows.
+                   to the common grid min(both capacities), which is
+                   Numba's maximum but not Triton's (is_common_max, and
+                   is_backend_max per backend); cells beyond either
+                   capacity are listed in meta["skipped_cells"], like the
+                   Numba sweep's skipped rows.
 barrier_work       benchmarks/benchmark_connectivity_and_barrier_work.py:
                    conn4, conn8, r2, wc and the three conn8-family bare
                    twins at tpb=256, all pinned to the minimum capacity over
@@ -28,7 +32,14 @@ num_warps * 32, same explicit program count except in suite_blocks_none)
 through compare/harness.py. same() compares only outputs the algorithm
 fixes regardless of scheduling (img, visited, depth, levels, filled, the
 level trace, processed, interior, peaks; per-block counts when the grids
-match; cas_attempts for conn4 only). Both copy peaks (Numba and Triton
+match; cas_attempts for conn4 only).
+
+speedup_kernel is the metric to read. speedup_total mostly compares
+CuPy's caching pool with Numba's per-array cuMemAlloc. kernel_ms includes
+each runtime's Python launch path, which matters only for the sub-2 ms
+scenes.
+
+Both copy peaks (Numba and Triton
 probes) are measured after a spin-up and stored in meta; model_bytes per
 backend is in each row's info, so model GB/s = model_bytes /
 (median kernel_ms * 1e6).
@@ -36,8 +47,9 @@ backend is in each row's info, so model GB/s = model_bytes /
 Cap (recorded in meta["caps"]): the 64M-px scene is dropped, which keeps
 the default run under 2 GB of host RAM (1.84 GB peak measured). Every
 other scene, variant and sweep cell is the Numba benchmarks' own. One run
-of every case per backend took 2.3 minutes, so the default (warm-up + 5
-rounds) is about 13-14 minutes of GPU time.
+of every case per backend took 2.3 minutes, so the default (warm-up + 4
+rounds; repeats are kept even so each backend runs first equally often)
+is about 12 minutes of GPU time.
 
 Run:
     python -m flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock.compare [--quick] [--repeats N]
@@ -62,7 +74,11 @@ from ...runtime.bandwidth import measure_peak_bandwidth as triton_peak
 from . import flood_fill as triton_ff
 
 CHAPTER = "ch03_gpu_1blob_nblock"
-DEFAULT_REPEATS = 5  # GPU_REPEATS of both Numba benchmarks
+# Even, so each backend runs first in half the rounds: the second run of a
+# round is measurably slower on the 16M-px scenes (total_ms most of all),
+# and an odd count would put Triton second more often. The harness rounds
+# an odd --repeats up; 4 keeps the default run near 12 minutes.
+DEFAULT_REPEATS = 4
 
 # flood_fill kwargs per variant, named as in the Numba benchmarks
 VARIANTS = {
@@ -90,10 +106,24 @@ CAPS = [
     "host arrays each at 64M px), past the 2.5 GB host-RAM budget",
 ]
 METHOD_NOTES = [
-    "every experiment runs at the harness's repeats (default 5, both "
-    "Numba benchmarks' GPU_REPEATS); the Numba sweep used SWEEP_REPEATS=3",
+    "every experiment runs at the harness's repeats (default 4; both Numba "
+    "benchmarks use GPU_REPEATS=5 and the Numba sweep SWEEP_REPEATS=3). "
+    "Repeats must be even (an odd --repeats is rounded up) so each backend "
+    "runs first in half the rounds: the second run of a round is slower on "
+    "the large scenes, total_ms most of all",
     "the Numba barrier-work benchmark interleaves its 7 configs per round; "
     "the harness interleaves the two backends per case instead",
+    "speedup_kernel is the Numba-vs-Triton metric. kernel_ms includes each "
+    "runtime's Python launch path (Numba's is 13-52 us slower per launch on "
+    "this machine), which matters only for the sub-2 ms scenes. "
+    "speedup_total mostly compares host memory management (CuPy's caching "
+    "pool vs Numba's cuMemAlloc per array), not the kernels",
+    "suite_blocks_none rows run each backend at its own co-resident maximum "
+    "(different grids, see config.resolved_blocks), so they are marked "
+    "comparable=false and stay out of the summary averages",
+    "sweep 'max' is the common grid min(Numba cap, Triton cap): "
+    "extra.is_common_max marks it, extra.is_backend_max says which backend "
+    "(if either) is at its own capacity there",
 ]
 SCOPE = (
     "benchmark.py also times ch01 v2, ch02 dual-global and the @njit "
@@ -211,10 +241,13 @@ def make_same(name, pinned):
 
 
 def info(n, t):
-    """Per-case facts from the warm-up results."""
+    """Per-case facts from the warm-up results. Unprefixed fields are the
+    deterministic ones same() checks; the rest are per backend."""
     return {
         "filled": t.filled, "levels": t.levels, "peak_level": t.peak_level,
-        "interior": t.interior, "thread_util_pct": t.thread_util_pct,
+        "interior": t.interior,
+        "numba_thread_util_pct": n.thread_util_pct,
+        "triton_thread_util_pct": t.thread_util_pct,
         "numba_blocks": n.blocks, "triton_blocks": t.blocks,
         "numba_cas_attempts": n.cas_attempts,
         "triton_cas_attempts": t.cas_attempts,
@@ -229,8 +262,11 @@ def info(n, t):
 
 def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
               grid_of=None, extra=None):
-    """One cell: same scene, same kwargs, same grid on both backends."""
+    """One cell: same scene, same kwargs, same grid on both backends.
+    blocks=None lets each backend resolve its own grid: both resolved sizes
+    go into the config, and the row is comparable only if they agree."""
     kw = {**VARIANTS[name], "threads_per_block": tpb, "blocks": blocks}
+    c = caps(name, tpb)
 
     def run_numba():
         img, sx, sy = slot.get(scene)
@@ -243,15 +279,20 @@ def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
     config = {"variant": name, **VARIANTS[name], "tpb": tpb,
               "num_warps": tpb // 32,
               "blocks": "None" if blocks is None else int(blocks)}
-    row_extra = {"caps": caps(name, tpb), **resources(name, tpb),
-                 **(extra or {})}
+    if blocks is None:
+        resolved = dict(c)
+    else:
+        resolved = {"numba": int(blocks), "triton": int(blocks)}
+    config["resolved_blocks"] = resolved
+    equal_grid = resolved["numba"] == resolved["triton"]
+    row_extra = {"caps": c, **resources(name, tpb), **(extra or {})}
     if grid_of:
         row_extra["grid_of"] = grid_of
     return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=run_numba, run_triton=run_triton,
-                same=make_same(name, pinned=blocks is not None),
+                same=make_same(name, pinned=equal_grid),
                 pixels=slot.pixels(scene), info=info,
-                notes=notes, extra=row_extra)
+                notes=notes, extra=row_extra, comparable=equal_grid)
 
 
 # -------------------------------------------------------------- experiments
@@ -292,9 +333,13 @@ def sweep_cases(slot, passes, tpbs, blocks_axis, skipped):
                                     "numba_cap": c["numba"],
                                     "triton_cap": c["triton"]})
                     continue
+                # "max" is the common grid: Numba's capacity, at most
+                # Triton's (which is often 1.5-3x larger)
                 out.append(make_case(
                     "sweep", slot, sname, name, tpb, n,
-                    extra={"is_coop_max": n == cap}))
+                    extra={"is_common_max": n == cap,
+                           "is_backend_max": {k: n == v
+                                              for k, v in c.items()}}))
     return out
 
 
@@ -385,6 +430,7 @@ def main(argv=None):
     ap.add_argument("--repeats", type=int, default=None)
     args = ap.parse_args(argv)
     repeats = args.repeats or (1 if args.quick else DEFAULT_REPEATS)
+    repeats += repeats % 2  # what the harness runs: even, see METHOD_NOTES
     spin = 0.0 if args.quick else 8.0
 
     if spin:

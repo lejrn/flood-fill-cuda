@@ -620,7 +620,9 @@ VARIANTS = {
 INSTRUMENTED = [v for v, kw in VARIANTS.items() if not kw.get("bare")]
 CROSS_SCENES = ["square_nonsquare_img", "disk_101", "serpentine_nonsquare",
                 "random_supercritical", "full_red_128"]
-CROSS_GRIDS = [(3, 64), (8, 256)]  # (blocks, tpb): odd grid, wide grid
+# (blocks, tpb): every lane count the twin accepts. tpb=32 is the
+# one-warp program (num_warps=1, and WARPS=1 in the warp-cooperative layout).
+CROSS_GRIDS = [(5, 32), (3, 64), (7, 128), (8, 256), (2, 512)]
 
 
 def _scene(name, kw):
@@ -724,18 +726,55 @@ def test_cross_backend_owner_map_at_one_block(variant):
     np.testing.assert_array_equal(t.owner, n.owner)
 
 
+@pytest.mark.parametrize("grid", ["pinned_48x256", "own_max_x32"])
 @pytest.mark.parametrize("scene", ["square_64", "disk_101", "full_red_128",
                                    "random_supercritical"])
-def test_cross_backend_conn4_cas_attempts_is_edge_count(scene):
+def test_cross_backend_conn4_cas_attempts_is_edge_count(scene, grid):
     """conn4 probes each edge of the filled component exactly once, so a
     stale red read after the grid barrier (a memory-ordering bug) would
-    show up as an extra attempt on either backend."""
+    show up as an extra attempt on either backend. own_max_x32 runs each
+    backend at its own full residency (Numba 384, Triton 576 one-warp
+    programs): the most barrier arrivals per level."""
     img, sx, sy = SCENES[scene]()
-    blocks = _pinned(48, 256, {})
-    n = numba_flood_fill(img, sx, sy, blocks=blocks)
-    t = flood_fill(img, sx, sy, blocks=blocks)
+    if grid == "pinned_48x256":
+        blocks, tpb = _pinned(48, 256, {}), 256
+    else:
+        blocks, tpb = None, 32
+    n = numba_flood_fill(img, sx, sy, threads_per_block=tpb, blocks=blocks)
+    t = flood_fill(img, sx, sy, threads_per_block=tpb, blocks=blocks)
+    if blocks is None:
+        assert t.blocks == max_blocks(threads_per_block=32)
+    np.testing.assert_array_equal(t.visited, n.visited)
+    np.testing.assert_array_equal(t.depth, n.depth)
     edges = _adjacent_pairs_4(n.visited == 1)
     assert n.cas_attempts == t.cas_attempts == edges
+
+
+# Degenerate shapes, full red, every corner seed: 1-wide and 1-tall images
+# (every 2D neighbour on one axis out of bounds), a single pixel, an odd
+# rectangle. (width, height, seed_x, seed_y)
+EDGE_CASES = [(1, 257, 0, 0), (1, 257, 0, 256), (257, 1, 0, 0),
+              (257, 1, 256, 0), (1, 1, 0, 0), (17, 33, 0, 0),
+              (17, 33, 16, 0), (17, 33, 0, 32), (17, 33, 16, 32)]
+
+
+@pytest.mark.parametrize("grid", [(5, 32), (2, 512)],
+                         ids=lambda g: f"{g[0]}x{g[1]}")
+@pytest.mark.parametrize("case", EDGE_CASES,
+                         ids=lambda c: f"{c[0]}x{c[1]}@{c[2]},{c[3]}")
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_cross_backend_degenerate_shapes_and_corner_seeds(variant, case, grid):
+    kw = VARIANTS[variant]
+    w, h, sx, sy = case
+    img = np.empty((w, h, 3), dtype=np.uint8)
+    img[:, :] = scenes.RED
+    blocks = _pinned(grid[0], grid[1], kw)
+    n = numba_flood_fill(img, sx, sy, threads_per_block=grid[1],
+                         blocks=blocks, **kw)
+    t = flood_fill(img, sx, sy, threads_per_block=grid[1], blocks=blocks,
+                   **kw)
+    assert t.filled == w * h
+    assert_same_deterministic_outputs(n, t, kw)
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -753,23 +792,54 @@ def test_cross_backend_capacity_is_reported_per_backend(variant):
         flood_fill(img, sx, sy, blocks=cap_t + 1, **kw)
 
 
-def test_twin_no_recompile_inside_the_timed_launch():
+from flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock import (
+    flood_fill as twin_driver,
+)
+
+
+def _kernel_kwargs(key):
+    bare, connectivity, radius, probe_layout = key
+    return dict(bare=bare, connectivity=connectivity, radius=radius,
+                probe_layout=probe_layout)
+
+
+@pytest.mark.parametrize("tpb", [32, 128, 512])
+@pytest.mark.parametrize("key", list(twin_driver._KERNELS),
+                         ids=lambda k: "-".join(map(str, k)))
+def test_twin_no_recompile_inside_the_timed_launch(key, tpb):
     """The warm-up compiles the exact binary the timed launch uses: image
     sizes of every divisibility class reuse the one specialization per
     (kernel, tpb), so no compile can land inside kernel_ms."""
-    from flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock.flood_fill import (
-        _KERNELS,
-    )
-    kernel = _KERNELS[(False, 4, 1, "thread")]
+    kernel = twin_driver._KERNELS[key]
+    kw = _kernel_kwargs(key)
 
     def compiled():
         return sum(len(c[0]) for c in kernel.device_caches.values())
 
-    flood_fill(*scenes.square_scene(64, 64, 20, 20), threads_per_block=128)
+    flood_fill(*scenes.square_scene(64, 64, 20, 20), threads_per_block=tpb,
+               **kw)
     before = compiled()
     assert before >= 1
     for w, h in [(101, 37), (96, 160), (33, 1), (200, 130)]:
         img = np.full((w, h, 3), 255, dtype=np.uint8)
         img[:, :] = scenes.RED
-        flood_fill(img, 0, 0, threads_per_block=128, blocks=3)
+        flood_fill(img, 0, 0, threads_per_block=tpb, blocks=3, **kw)
     assert compiled() == before
+
+
+@pytest.mark.parametrize("key", list(twin_driver._KERNELS),
+                         ids=lambda k: "-".join(map(str, k)))
+def test_twin_grid_barrier_is_64_bit(key):
+    """The barrier counter and its target are int64, so 2 * levels *
+    programs arrivals cannot wrap (an int32 target goes negative after
+    2**31 arrivals and lets a program through early). Both arrivals per
+    level are 64-bit release adds, the spin a 64-bit acquire load."""
+    import re
+
+    assert twin_driver.BAR_DTYPE == np.int64
+    twin_driver._warmup(*key, threads_per_block=256)
+    ptx = twin_driver._warmed[(key, 256)].asm["ptx"]
+    assert len(re.findall(r"atom\.global\.gpu\.release\.add\.u64", ptx)) == 2
+    assert not re.search(r"release\.add\.[us]32", ptx)
+    spins = re.findall(r"ld\.global\.gpu\.acquire\.(\w+)", ptx)
+    assert spins and set(spins) == {"b64"}

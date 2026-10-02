@@ -47,7 +47,7 @@ programs.
 
 | Numba construct | Triton construct | fidelity | note |
 |---|---|---|---|
-| cooperative launch + `grid.sync()` (2 per level) | `launch_cooperative_grid=True` + `runtime.device.grid_sync` (2 per level) | emulated | The barrier is a monotonic counter, with a CTA barrier, a release arrival and an acquire spin. It sits at the same two points. An oversized grid is refused by the driver, as in Numba. |
+| cooperative launch + `grid.sync()` (2 per level) | `launch_cooperative_grid=True` + `runtime.device.grid_sync` (2 per level) | emulated | The barrier is a monotonic int64 counter, with a CTA barrier, a release arrival and an acquire spin. It sits at the same two points. An oversized grid is refused by the driver, as in Numba. |
 | `max_cooperative_grid_blocks(tpb)` | `runtime.occupancy.max_coresident_programs(compiled)` | close | Same occupancy formula. The value differs because the register counts differ (see below). |
 | `cuda.grid(1)`, `gridsize(1)`, `blockIdx.x` | `pid * BLOCK + tl.arange(0, BLOCK)`, `num_programs * BLOCK`, `program_id` | exact | Same stride, so each queue index lands on the same thread and block as in Numba. |
 | `for i in range(front + tid, rear, stride)` | `for base in range(front + pid * BLOCK, rear, stride)` + lane mask `i < rear` | exact | Programs past a narrow level skip the body, like Numba's idle threads. |
@@ -70,12 +70,26 @@ programs.
   Numba's other multiples of 32 raise `ValueError`, and the message names
   the power-of-2 rule. The Numba message comes first for values Numba
   also rejects. No Numba test uses a non-power-of-2 value.
-- **Capacity differs, so `blocks=None` differs.** Triton allocates far
-  fewer registers: about 39 for conn4 versus Numba's ~104. So at tpb=256,
-  `blocks=None` resolves to 144 programs, where Numba gets 48. The
-  radius-2 kernel uses about 123 registers and gets 48. Compare backends
-  at an explicit, equal `blocks`, as the cross-backend tests and the
-  compare script do.
+- **Capacity differs, so `blocks=None` differs.** The register counts
+  differ, so the co-resident maximum differs too. Measured at tpb=256 on
+  the RTX 4060 Laptop (24 SMs):
+
+  | variant | Numba regs | Numba cap | Triton regs | Triton cap |
+  |---|---|---|---|---|
+  | conn4 | 104 | 48 | ~38 | 144 |
+  | conn4_bare | 74 | 72 | ~40 | 144 |
+  | conn8 | 104 | 48 | ~48 | 120 |
+  | conn8_bare | 74 | 72 | ~40 | 144 |
+  | r2 | 112 | 48 | ~128 | 48 |
+  | r2_bare | 79 | 72 | ~118 | **48** |
+  | wc | 96 | 48 | ~30 | 144 |
+  | wc_bare | 65 | 72 | ~33 | 144 |
+
+  Most twins use far fewer registers and host 1.5-3x more programs. The
+  radius-2 pair is the exception: it uses more registers than Numba, so
+  `r2_bare` gets fewer programs than Numba's (48 vs 72 at tpb=256, 192 vs
+  288 at tpb=64). Compare backends at an explicit, equal `blocks`, as the
+  cross-backend tests and the compare script do.
 - **Enqueue aggregation is per program, not per warp.** One atomic per
   program per direction replaces one per warp. That costs a cross-warp
   reduction and scan, done through shared memory with CTA barriers.
@@ -84,8 +98,15 @@ programs.
 - **Error-message dashes.** The two messages that contain an em dash in
   Numba ("is not red ...", "structural tripwire fired ...") use "-" here.
   The tests match on the words, not the dash.
-- **Grid barrier counter.** Each launch gets one extra int32 buffer. It is
-  allocated with the other buffers and zeroed with the H2D copies.
+- **Grid barrier counter.** Each launch gets one extra int64 buffer. It is
+  allocated with the other buffers and zeroed with the H2D copies. It
+  counts 2 arrivals per program per level, so an int32 counter would wrap
+  on long runs (a 2048x2048 serpentine at 576 programs). int64 cannot
+  wrap in practice, like Numba's `grid.sync()`.
+- **Non-contiguous inputs are accepted.** A transposed or Fortran-order
+  view works, because CuPy's `.set()` copies it contiguous. Numba's
+  `copy_to_device` refuses a transposed view with a ValueError. That is a
+  transfer limitation, not a validation rule, so the twin does not copy it.
 
 ## Deterministic outputs (what the cross-backend tests assert)
 
@@ -123,13 +144,27 @@ Comparison (writes `results/triton_twins/ch03_gpu_1blob_nblock/compare_<UTC>.jso
 - `suite`: conn4, conn8 and their bare twins at 256 lanes, pinned to
   min(Numba capacity, Triton capacity).
 - `suite_blocks_none`: each backend at its own maximum, with both grids
-  recorded.
-- `sweep`: TPB_SWEEP x BLOCKS_SWEEP.
+  in `config["resolved_blocks"]`. The grids differ, so these rows are
+  `comparable=false` and stay out of the summary averages.
+- `sweep`: TPB_SWEEP x BLOCKS_SWEEP. Its "max" column is the common grid,
+  min(both capacities). That is Numba's maximum but usually not Triton's
+  (`is_common_max`, and `is_backend_max` per backend).
 - `barrier_work`: the seven per-barrier-work configs at one pinned grid.
 
 Its `meta["caps"]` lists the one reduction: the 64M-pixel scene is
 dropped, because holding a Numba and a Triton result at that size would
 pass the 2.5 GB host-RAM budget. Every other scene and sweep cell is the
-Numba benchmarks' own. The default run takes about 13-14 minutes of GPU
-time with a 1.84 GB peak RSS. `--quick` runs tiny scenes once and writes
+Numba benchmarks' own. The default run (4 rounds) takes about 12 minutes
+of GPU time with a 1.84 GB peak RSS. `--quick` runs tiny scenes and writes
 nothing.
+
+Reading the rows:
+
+- `speedup_kernel` is the Numba-vs-Triton number. `kernel_ms` includes
+  each runtime's Python launch path. Numba's is 13-52 us slower per
+  launch on this machine, which matters only for the sub-2 ms scenes.
+- `speedup_total` mostly compares host memory management: CuPy's caching
+  pool against Numba's `cuMemAlloc` per array. It is not a kernel metric.
+- Repeats are even (an odd `--repeats` is rounded up), so each backend
+  runs first in half the rounds. The second run of a round is slower on
+  the large scenes, so an odd count would favour one backend.
