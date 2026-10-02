@@ -608,17 +608,11 @@ the `program` rows of `enqueue` are first translations: label
 stay out of every average.
 
 The summary pairs each first-translation row with its default row
-(same experiment, scene and config apart from the ablated setting). Its
-unit figure, `first_translation_ablation`, then takes one geometric mean
-over all those pairs. For this chapter that pools two unrelated
-ablations: 14 lockstep pairs (the twin about 3.7x slower) and 16
-program-enqueue pairs (about 1.0-1.2x slower). The mixed figure is
-neither cost.
-
-Read the two costs per experiment instead. In the JSON, pair the rows
-of `lane_schedule`, and separately of `enqueue`, by scene and config
-apart from `label`, `enqueue` and `lane_sched` (summary.py's
-`_pair_key`), or use the tables above.
+(same experiment, scene and config apart from the ablated setting). It
+reports one paired figure per experiment, `first_translation_ablations`
+(`lane_schedule` and `enqueue` for this chapter), never pooled: the two
+costs differ by far (the lockstep union-find about 3.7x, the program
+enqueue about 1.0-1.2x).
 
 The default rows of the ablations (labels `lane_independent` and
 `per_lane`) repeat benchmark and seeding cells and carry
