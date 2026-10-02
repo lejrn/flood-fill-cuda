@@ -1086,9 +1086,10 @@ def test_enqueue_modes_overflow_tripwire(key, qcap, grid):
 
 def test_compare_marks_first_translation_and_repeated_cells():
     """compare.py: only the enqueue experiment's program rows are the first
-    translation (label, first_translation=true, comparable=False, as in
-    ch01, ch02 and ch04), and exactly the per_lane enqueue rows whose cell
-    another experiment measures carry duplicate_of=<that experiment>."""
+    translation (label and comparable=False as in ch01, ch02 and ch04;
+    first_translation=true as in ch01 and ch02), and exactly the per_lane
+    enqueue rows whose cell another experiment measures carry
+    duplicate_of=<that experiment>."""
     from flood_fill_cuda.triton_twins.chapters.ch03_gpu_1blob_nblock import (
         compare,
     )
