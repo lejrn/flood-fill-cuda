@@ -40,7 +40,7 @@ T // 32, lane i plays thread i):
                               relaxed tl.atomic_add(rear, 1) per winning
                               lane. ptxas warp-aggregates it (VOTEU.ANY,
                               FLO + POPC, one leader ATOMG.E.ADD, SHFL.IDX),
-                              the machine code of Numba's hand-written
+                              the same pattern as Numba's hand-written
                               activemask/popc/shfl helper.
                               ENQ="program" (the first translation):
                               _block_enqueue_global, tl.sum + tl.cumsum
@@ -183,11 +183,12 @@ def _lane_enqueue_global(queue_ptr, q_state_ptr, counters_ptr, qcap, item,
     atomic warp-aggregated: VOTEU.ANY collects the active lanes, FLO picks
     the leader and POPC counts them, the leader issues one ATOMG.E.ADD of
     that count, SHFL.IDX broadcasts the old rear and each lane adds its
-    rank (POPC of the active mask below it). That is the SASS
-    of Numba's _warp_enqueue_global (activemask, popc, leader atomic,
-    shfl), with no CTA barrier and no lockstep across warps. Tickets are
-    the same set of slots as Numba's (one per winner, in some order); the
-    bound check is the same defensive tripwire.
+    rank (POPC of the active mask below it). That is the warp-aggregation
+    pattern of Numba's _warp_enqueue_global (activemask, popc, leader
+    atomic, shfl), with no CTA barrier and no lockstep across warps; the
+    leader lane (highest, not lowest) and the slot width (int32) differ.
+    Tickets are the same set of slots as Numba's (one per winner, in some
+    order); the bound check is the same defensive tripwire.
     """
     same = item * 0  # keeps the rear pointer a per-lane tensor
     idx = tl.atomic_add(q_state_ptr + _Q_REAR + same, 1, mask=won,
@@ -361,11 +362,11 @@ def _dual_blob(img_ptr, visited_ptr, depth_ptr, owner_ptr, queue_ptr,
                 if INSTR:
                     my_interior += interior.to(tl.int64)
                 # Numba's divergent `if interior:` skips ring 2 per warp;
-                # here per program (structural: Triton has no per-warp
-                # branch), as a 0/1-trip loop so the program enqueue's
-                # scan is never inside an if. The gate itself is a
-                # program-wide tl.max, under both ENQ settings, so the two
-                # differ in the enqueue only.
+                # Triton has no per-warp branch (structural), so the twin
+                # skips per program (a choice), as a 0/1-trip loop so the
+                # program enqueue's scan is never inside an if. The gate
+                # is a program-wide tl.max (3 BAR.SYNC per tile), under
+                # both ENQ settings, so the two differ in the enqueue only.
                 any_interior = tl.max(interior.to(tl.int32), axis=0)
                 for _ring2 in range(0, any_interior):
                     for d in tl.static_range(16):

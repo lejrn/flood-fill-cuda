@@ -39,7 +39,12 @@ enqueue      the cost of the first translation. multi, bare_xy, multi8 and
              min(Numba cap, Triton lane cap, Triton program cap), which is
              Numba's own grid. Each row's triton_ptx_bar_sync is the CTA
              barrier count of the binary it ran (equal to the SASS
-             BAR.SYNC count; see sass.py).
+             BAR.SYNC count; see sass.py), and info.triton_enqueue is the
+             setting the timed Triton result reports. first_translation rows
+             are comparable=False: they measure a superseded twin, so they
+             stay out of the unit's averages (as in ch03). The per_lane rows
+             repeat a modes or radius2 cell (same config, same grid);
+             config.duplicate_of names it, so a summary can drop them.
 
 Every case runs the same configuration on both backends (same tpb =
 num_warps * 32, same explicit program count except in blocks_none) through
@@ -168,19 +173,28 @@ METHOD_NOTES = [
     "radius2 rows: Numba skips ring 2 per warp (divergent `if interior:`), "
     "the twin per program (256 lanes = 8 warps): when any lane is "
     "interior every warp runs the 16 masked ring-2 probes, and the gate "
-    "itself is a program-wide tl.max (3 CTA barriers per tile). Outputs "
+    "itself is a program-wide tl.max (3 CTA barriers per tile; an "
+    "ungated ablation measured 0.98-1.01x, see the README). Outputs "
     "and counters are unchanged, but the Triton seq8r2/multi8r2 times "
     "include masked probe work Numba skips, so r2_multi_vs_conn8 is not a "
     "pure algorithm-vs-algorithm ratio on the Triton side",
     "Triton runs use the per-lane enqueue (ENQ='lane'): one relaxed atomic "
     "per winning lane, which ptxas compiles warp-aggregated (VOTEU.ANY, "
-    "POPC, one leader ATOMG.ADD, SHFL.IDX), the SASS of Numba's "
+    "POPC, one leader ATOMG.ADD, SHFL.IDX), the same pattern as Numba's "
     "_warp_enqueue_global. The enqueue experiment adds, per scene and "
     "config, a row with the first translation's program-aggregated "
     "enqueue (ENQ='program', label first_translation: tl.sum + tl.cumsum, "
     "7 BAR.SYNC per enqueue site), at the same grid, so the cost of that "
     "translation choice is measured in the same harness. Those rows "
-    "measure an alternative twin, not the default one",
+    "measure a superseded twin, not the default one, so they are "
+    "comparable=false and stay out of the summary averages (as in ch03); "
+    "the cost of the first translation is the triton kernel_ms of a "
+    "first_translation row over that of its per_lane pair",
+    "enqueue per_lane rows repeat a cell that a modes or radius2 row "
+    "already measures (same config, same grid; config.duplicate_of names "
+    "it). They stay comparable, as in ch03, so a per-row average counts "
+    "multi, bare_xy, multi8r2 twice and multi8 three times (modes, radius2, "
+    "enqueue); filter on config.duplicate_of for one row per cell",
 ]
 SCOPE = (
     "benchmark.py also times the @njit two-blob oracle and cross-checks "
@@ -295,12 +309,15 @@ def resources(kw, enqueue=ENQ_LANE):
     }
 
 
-def make_same(kw, pinned):
-    """same(numba, triton) for a ch04 result: deterministic outputs only."""
+def make_same(kw, pinned, enqueue=ENQ_LANE):
+    """same(numba, triton) for a ch04 result: deterministic outputs only,
+    plus a provenance check that the Triton result ran ``enqueue``."""
     instrumented = not kw.get("bare", False)
     conn4_r1 = kw.get("connectivity", 4) == 4 and kw.get("radius", 1) == 1
 
     def same(n, t):
+        if t.enqueue != enqueue:
+            return False, f"triton ran enqueue={t.enqueue!r}, not {enqueue!r}"
         pairs = {"img": (n.img, t.img), "visited": (n.visited, t.visited),
                  "depth": (n.depth, t.depth), "label": (n.label, t.label)}
         for i, (ln, lt) in enumerate(zip(n.launches, t.launches)):
@@ -345,6 +362,7 @@ def info(n, t):
         "levels": t.levels, "levels_a": t.levels_a, "levels_b": t.levels_b,
         "interior": t.interior,
         "peak_frontier": max(l.peak_level for l in t.launches),
+        "triton_enqueue": t.enqueue,  # the binary the Triton side ran
     }
     for name, r in (("numba", n), ("triton", t)):
         out[f"{name}_blocks"] = r.blocks
@@ -358,11 +376,14 @@ def info(n, t):
 
 def make_case(experiment, slot, scene, name, kw, blocks, notes="",
               grid_of=None, which=None, extra=None, enqueue=ENQ_LANE,
-              label=None):
+              label=None, duplicate_of=None):
     """One ch04 cell: same scene, same kwargs, same grid on both backends.
     blocks=None lets each backend resolve its own grid: both resolved sizes
     go into the config, and the row is comparable only if they agree.
-    ``enqueue`` is the Triton side's ENQ (Numba has one enqueue)."""
+    ``enqueue`` is the Triton side's ENQ (Numba has one enqueue); an
+    ENQ="program" row is the first translation and never comparable, so
+    it stays out of the unit's averages. ``duplicate_of`` names the
+    experiments whose rows already measure this exact cell."""
     c = caps(kw, enqueue)
 
     def wrap(r):
@@ -384,6 +405,8 @@ def make_case(experiment, slot, scene, name, kw, blocks, notes="",
               "enqueue": enqueue}
     if label:
         config["label"] = label
+    if duplicate_of:
+        config["duplicate_of"] = list(duplicate_of)
     if which:
         config["launch"] = which
     if blocks is None:
@@ -397,9 +420,10 @@ def make_case(experiment, slot, scene, name, kw, blocks, notes="",
         row_extra["grid_of"] = grid_of
     return Case(experiment=experiment, scene=scene, config=config,
                 run_numba=run_numba, run_triton=run_triton,
-                same=make_same(kw, pinned=equal_grid),
+                same=make_same(kw, pinned=equal_grid, enqueue=enqueue),
                 pixels=slot.pixels(scene), info=info, notes=notes,
-                extra=row_extra, comparable=equal_grid)
+                extra=row_extra,
+                comparable=equal_grid and enqueue == ENQ_LANE)
 
 
 # ------------------------------------------- packing tax: ch03 on blob A
@@ -477,17 +501,30 @@ def enq_pinned(kw):
     return min(min(caps(kw, e).values()) for e in ENQ_LABELS)
 
 
-def enqueue_cases(slot, scene, note):
+def duplicated_by(name, kw, blocks, r2_pin):
+    """The experiments whose default (per-lane) rows already measure this
+    config at this grid on every scene."""
+    out = []
+    if MODE_CONFIGS.get(name) == kw and pinned(kw) == blocks:
+        out.append("modes")
+    if R2_CONFIGS.get(name) == kw and r2_pin == blocks:
+        out.append("radius2")
+    return out
+
+
+def enqueue_cases(slot, scene, note, r2_pin):
     """The enqueue experiment's cases for one scene: per config, the
     per-lane row, then the first translation's program row."""
     out = []
     for name, kw in ENQ_CONFIGS.items():
         blocks = enq_pinned(kw)
         for enq, label in ENQ_LABELS.items():
+            dup = (duplicated_by(name, kw, blocks, r2_pin)
+                   if enq == ENQ_LANE else None)
             out.append(make_case(
                 "enqueue", slot, scene, name, kw, blocks, notes=note,
                 grid_of="min(numba, triton lane, triton program)",
-                enqueue=enq, label=label))
+                enqueue=enq, label=label, duplicate_of=dup))
     return out
 
 
@@ -513,7 +550,7 @@ def scene_cases(slot, scene, note, r2_pin, mb_pin):
     for name, kw in R2_CONFIGS.items():
         out.append(make_case("radius2", slot, scene, name, kw, r2_pin,
                              notes=note))
-    out += enqueue_cases(slot, scene, note)
+    out += enqueue_cases(slot, scene, note, r2_pin)
     return out
 
 
@@ -667,8 +704,9 @@ def print_ratios(doc):
     print("\nspeedup_kernel (median) vs speedup_kernel_min (best-vs-best), "
           ">1: Triton faster")
     for row in doc["rows"]:
+        cfg = row["config"]
         name = (f"{row['experiment']:12s} {row['scene']:16s} "
-                f"{row['config'].get('config', ''):9s}")
+                f"{cfg.get('config', ''):9s} {cfg.get('label', ''):17s}")
         if "error" in row:
             print(f"  {name} error")
             continue
