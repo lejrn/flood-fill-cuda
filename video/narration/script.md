@@ -34,7 +34,7 @@ On screen: the CPU panel stuck on frame 1 with a stopwatch running towards 24,08
 ## beat 00_cpu
 
 ```text
-A CPU fills a blob one pixel at a time. Pure Python: twenty-four seconds for the real image. Numba: one point three. On the left, the CPU time for seventeen shapes. Every chapter now gets a column, and a shape glows when the GPU wins.
+A CPU fills a blob one pixel at a time. Pure Python: twenty-four seconds for the real image. Numba: one point three. The table holds the CPU time for seventeen shapes. Every chapter now gets a column, and a shape glows when the GPU wins.
 ```
 
 On screen: the 256² square filled in CPU visit order (grey), the CPU box on the right, the CPU column of the matrix.
