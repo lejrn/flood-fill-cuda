@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "script.md"
 
@@ -32,6 +34,21 @@ def load_beats(path: Path = SCRIPT) -> list[Beat]:
             raise ValueError(f"beat {h.group(1)} has no ```text block")
         beats.append(Beat(h.group(1), " ".join(m.group(1).split())))
     return beats
+
+
+def trim_edges(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float = 0.12) -> np.ndarray:
+    """Cut leading/trailing silence, keeping `keep` seconds of air on each side."""
+    if audio.size == 0:
+        return audio
+    amp = np.abs(audio)
+    floor = amp.max() * (10 ** (thresh_db / 20))
+    loud = np.flatnonzero(amp > floor)
+    if loud.size == 0:
+        return audio
+    pad = int(sr * keep)
+    lo = max(0, loud[0] - pad)
+    hi = min(audio.size, loud[-1] + pad)
+    return audio[lo:hi]
 
 
 def write_timing(out_dir: Path, voice: str, durations: dict[str, float], gap: float) -> Path:
