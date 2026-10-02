@@ -1,0 +1,3023 @@
+{
+ "speedup_definition": "numba_ms / triton_ms; above 1 = Triton faster",
+ "units": {
+  "ch00_cpu_baseline": {
+   "source": "triton_twins/ch00_cpu_baseline/compare_20261002T204833Z.json",
+   "created_utc": "20261002T204833Z",
+   "git_commit": "6a5d126",
+   "repeats": 100,
+   "caps": [],
+   "rows": 4,
+   "ablation_rows": 0,
+   "duplicate_rows": 0,
+   "errors": [],
+   "not_comparable_rows": 2,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "own_default_geomean_speedup_kernel": 0.9705143099304371,
+   "geomean_speedup_kernel": 0.8968138724167608,
+   "geomean_speedup_total": 1.255526530262201,
+   "triton_faster_rows": 0,
+   "best_for_triton": {
+    "speedup": 0.8995525746149612,
+    "experiment": "fixed_scene",
+    "scene": "random_walk_400 seed 0",
+    "config": {
+     "threads_per_block": 64,
+     "blocks_per_grid": 1,
+     "connectivity": 8,
+     "queue_capacity": 6000,
+     "numba_exit_printf": false,
+     "new_color": "device"
+    },
+    "numba_ms": 0.5072550011391286,
+    "triton_ms": 0.563897003303282,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.8940835082411975,
+    "experiment": "profile_kernel",
+    "scene": "random_walk_400 seeds 1000..",
+    "config": {
+     "threads_per_block": 64,
+     "blocks_per_grid": 1,
+     "connectivity": 8,
+     "queue_capacity": 6000,
+     "numba_exit_printf": false,
+     "new_color": "device"
+    },
+    "numba_ms": 0.8030515018617734,
+    "triton_ms": 0.8981840001069941,
+    "est": false
+   },
+   "first_translation_ablations": null,
+   "experiments": {
+    "profile_kernel": {
+     "rows": 1,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.8940835082411975,
+     "geomean_speedup_total": 1.1993168644573644,
+     "triton_faster_rows": 0,
+     "best_for_triton": {
+      "speedup": 0.8940835082411975,
+      "experiment": "profile_kernel",
+      "scene": "random_walk_400 seeds 1000..",
+      "config": {
+       "threads_per_block": 64,
+       "blocks_per_grid": 1,
+       "connectivity": 8,
+       "queue_capacity": 6000,
+       "numba_exit_printf": false,
+       "new_color": "device"
+      },
+      "numba_ms": 0.8030515018617734,
+      "triton_ms": 0.8981840001069941,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8940835082411975,
+      "experiment": "profile_kernel",
+      "scene": "random_walk_400 seeds 1000..",
+      "config": {
+       "threads_per_block": 64,
+       "blocks_per_grid": 1,
+       "connectivity": 8,
+       "queue_capacity": 6000,
+       "numba_exit_printf": false,
+       "new_color": "device"
+      },
+      "numba_ms": 0.8030515018617734,
+      "triton_ms": 0.8981840001069941,
+      "est": false
+     }
+    },
+    "fixed_scene": {
+     "rows": 1,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.8995525746149612,
+     "geomean_speedup_total": 1.3143706345740964,
+     "triton_faster_rows": 0,
+     "best_for_triton": {
+      "speedup": 0.8995525746149612,
+      "experiment": "fixed_scene",
+      "scene": "random_walk_400 seed 0",
+      "config": {
+       "threads_per_block": 64,
+       "blocks_per_grid": 1,
+       "connectivity": 8,
+       "queue_capacity": 6000,
+       "numba_exit_printf": false,
+       "new_color": "device"
+      },
+      "numba_ms": 0.5072550011391286,
+      "triton_ms": 0.563897003303282,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8995525746149612,
+      "experiment": "fixed_scene",
+      "scene": "random_walk_400 seed 0",
+      "config": {
+       "threads_per_block": 64,
+       "blocks_per_grid": 1,
+       "connectivity": 8,
+       "queue_capacity": 6000,
+       "numba_exit_printf": false,
+       "new_color": "device"
+      },
+      "numba_ms": 0.5072550011391286,
+      "triton_ms": 0.563897003303282,
+      "est": false
+     }
+    },
+    "profile_kernel_with_printf": {
+     "rows": 1,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 1,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 0.9921537235803304
+    },
+    "profile_kernel_as_written": {
+     "rows": 1,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 1,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 1.1117936045745058
+    }
+   }
+  },
+  "ch01_gpu_1blob_1block": {
+   "source": "triton_twins/ch01_gpu_1blob_1block/compare_20261002T205131Z.json",
+   "created_utc": "20261002T205131Z",
+   "git_commit": "6a5d126",
+   "repeats": 6,
+   "caps": [],
+   "rows": 37,
+   "ablation_rows": 5,
+   "duplicate_rows": 6,
+   "errors": [],
+   "not_comparable_rows": 0,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "geomean_speedup_kernel": 1.1819093916592378,
+   "geomean_speedup_total": 1.224062079852142,
+   "triton_faster_rows": 25,
+   "best_for_triton": {
+    "speedup": 1.4385022687281892,
+    "experiment": "tpb_sweep",
+    "scene": "sq_2000_center",
+    "config": {
+     "variant": "ring",
+     "threads_per_block": 512
+    },
+    "numba_ms": 17.377689997374546,
+    "triton_ms": 12.080404998414451,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.9512001654827058,
+    "experiment": "scenes",
+    "scene": "serpentine_256",
+    "config": {
+     "variant": "ring",
+     "threads_per_block": 256
+    },
+    "numba_ms": 36.695886999950744,
+    "triton_ms": 38.578512001549825,
+    "est": false
+   },
+   "first_translation_ablations": {
+    "enqueue": {
+     "first_translation_rows": 5,
+     "paired": 5,
+     "geomean_speedup_kernel_first_translation": 0.65875348073867,
+     "geomean_speedup_kernel_default": 1.2113747893283107,
+     "geomean_triton_gain": 1.8230586702811307
+    }
+   },
+   "experiments": {
+    "scenes": {
+     "rows": 18,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1844531196286525,
+     "geomean_speedup_total": 1.264287755454033,
+     "triton_faster_rows": 17,
+     "best_for_triton": {
+      "speedup": 1.3113749322379498,
+      "experiment": "scenes",
+      "scene": "sq_256_center",
+      "config": {
+       "variant": "spill",
+       "threads_per_block": 256
+      },
+      "numba_ms": 0.567786002648063,
+      "triton_ms": 0.4329699986556079,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9512001654827058,
+      "experiment": "scenes",
+      "scene": "serpentine_256",
+      "config": {
+       "variant": "ring",
+       "threads_per_block": 256
+      },
+      "numba_ms": 36.695886999950744,
+      "triton_ms": 38.578512001549825,
+      "est": false
+     }
+    },
+    "enqueue": {
+     "rows": 10,
+     "ablation_rows": 5,
+     "duplicate_rows": 5,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    },
+    "ring_tripwire": {
+     "rows": 4,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1578068879955303,
+     "geomean_speedup_total": 1.1481098195860602,
+     "triton_faster_rows": 4,
+     "best_for_triton": {
+      "speedup": 1.302451485230535,
+      "experiment": "ring_tripwire",
+      "scene": "sq_6000_center",
+      "config": {
+       "variant": "ring",
+       "threads_per_block": 256
+      },
+      "numba_ms": 40.24639300041599,
+      "triton_ms": 30.90049299862585,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.054067204552124,
+      "experiment": "ring_tripwire",
+      "scene": "sq_4000_center",
+      "config": {
+       "variant": "ring",
+       "threads_per_block": 256
+      },
+      "numba_ms": 37.48425200319616,
+      "triton_ms": 35.56153899990022,
+      "est": false
+     }
+    },
+    "tpb_sweep": {
+     "rows": 5,
+     "ablation_rows": 0,
+     "duplicate_rows": 1,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1948974165989603,
+     "geomean_speedup_total": 1.128319937788581,
+     "triton_faster_rows": 4,
+     "best_for_triton": {
+      "speedup": 1.4385022687281892,
+      "experiment": "tpb_sweep",
+      "scene": "sq_2000_center",
+      "config": {
+       "variant": "ring",
+       "threads_per_block": 512
+      },
+      "numba_ms": 17.377689997374546,
+      "triton_ms": 12.080404998414451,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.0032045355429973,
+      "experiment": "tpb_sweep",
+      "scene": "sq_2000_center",
+      "config": {
+       "variant": "ring",
+       "threads_per_block": 64
+      },
+      "numba_ms": 51.907003500673454,
+      "triton_ms": 51.74119699586299,
+      "est": false
+     }
+    }
+   }
+  },
+  "ch02_gpu_1blob_2block": {
+   "source": "triton_twins/ch02_gpu_1blob_2block/compare_20261002T210248Z.json",
+   "created_utc": "20261002T210248Z",
+   "git_commit": "6a5d126",
+   "repeats": 6,
+   "caps": [],
+   "rows": 125,
+   "ablation_rows": 13,
+   "duplicate_rows": 13,
+   "errors": [],
+   "not_comparable_rows": 4,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "own_default_geomean_speedup_kernel": 1.2052358482423198,
+   "geomean_speedup_kernel": 1.2143831431666394,
+   "geomean_speedup_total": 1.234557558924316,
+   "triton_faster_rows": 94,
+   "best_for_triton": {
+    "speedup": 1.7308149143151128,
+    "experiment": "scenes",
+    "scene": "sq_256_center",
+    "config": {
+     "kernel": "split",
+     "bare": false,
+     "tpb": 256,
+     "placement": null
+    },
+    "numba_ms": 3.129222499410389,
+    "triton_ms": 1.8079475012200419,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.8046831248329788,
+    "experiment": "scenes",
+    "scene": "sq_1024_center",
+    "config": {
+     "kernel": "dirsplit",
+     "bare": true,
+     "tpb": 256,
+     "placement": null
+    },
+    "numba_ms": 5.1097474970447365,
+    "triton_ms": 6.350011997710681,
+    "est": false
+   },
+   "first_translation_ablations": {
+    "enqueue": {
+     "first_translation_rows": 13,
+     "paired": 13,
+     "geomean_speedup_kernel_first_translation": 0.8546014462232903,
+     "geomean_speedup_kernel_default": 1.3084653329116613,
+     "geomean_triton_gain": 1.5280026975463574
+    }
+   },
+   "experiments": {
+    "scenes": {
+     "rows": 77,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.214141565170546,
+     "geomean_speedup_total": 1.24621610255711,
+     "triton_faster_rows": 76,
+     "best_for_triton": {
+      "speedup": 1.7308149143151128,
+      "experiment": "scenes",
+      "scene": "sq_256_center",
+      "config": {
+       "kernel": "split",
+       "bare": false,
+       "tpb": 256,
+       "placement": null
+      },
+      "numba_ms": 3.129222499410389,
+      "triton_ms": 1.8079475012200419,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8046831248329788,
+      "experiment": "scenes",
+      "scene": "sq_1024_center",
+      "config": {
+       "kernel": "dirsplit",
+       "bare": true,
+       "tpb": 256,
+       "placement": null
+      },
+      "numba_ms": 5.1097474970447365,
+      "triton_ms": 6.350011997710681,
+      "est": false
+     }
+    },
+    "tpb_sweep": {
+     "rows": 12,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.186576567255015,
+     "geomean_speedup_total": 1.1762772555136074,
+     "triton_faster_rows": 12,
+     "best_for_triton": {
+      "speedup": 1.3301472271533752,
+      "experiment": "tpb_sweep",
+      "scene": "sq_2000_center",
+      "config": {
+       "kernel": "dirsplit",
+       "bare": false,
+       "tpb": 128,
+       "placement": null
+      },
+      "numba_ms": 24.639745002787095,
+      "triton_ms": 18.524073500884697,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.082842853581841,
+      "experiment": "tpb_sweep",
+      "scene": "sq_2000_center",
+      "config": {
+       "kernel": "split",
+       "bare": false,
+       "tpb": 64,
+       "placement": null
+      },
+      "numba_ms": 31.294178501411807,
+      "triton_ms": 28.900018500280567,
+      "est": false
+     }
+    },
+    "placement": {
+     "rows": 10,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 4,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 1.1603378623047098,
+     "geomean_speedup_kernel": 1.275218177521046,
+     "geomean_speedup_total": 1.205393269416187,
+     "triton_faster_rows": 6,
+     "best_for_triton": {
+      "speedup": 1.593294630970267,
+      "experiment": "placement",
+      "scene": "sq_6000_center",
+      "config": {
+       "kernel": "v2",
+       "variant": "spill",
+       "blocks": 1,
+       "tpb": 512,
+       "label": "v2 1x512 (1 SM) [stands in for v2 1x768]"
+      },
+      "numba_ms": 624.302787000488,
+      "triton_ms": 391.83135050188866,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.0535553513879188,
+      "experiment": "placement",
+      "scene": "sq_2000_center",
+      "config": {
+       "kernel": "pinned",
+       "bare": false,
+       "tpb": 512,
+       "placement": "spread",
+       "label": "pinned 2x512 spread (matched)"
+      },
+      "numba_ms": 11.47800249964348,
+      "triton_ms": 10.894541501329513,
+      "est": false
+     }
+    },
+    "enqueue": {
+     "rows": 26,
+     "ablation_rows": 13,
+     "duplicate_rows": 13,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    }
+   }
+  },
+  "ch03_gpu_1blob_nblock": {
+   "source": "triton_twins/ch03_gpu_1blob_nblock/compare_20261002T211748Z.json",
+   "created_utc": "20261002T211748Z",
+   "git_commit": "6a5d126",
+   "repeats": 4,
+   "caps": [
+    "sq_8000_center dropped from suite, suite_blocks_none and barrier_work: the harness holds a Numba and a Triton result at once (~0.8 GB of host arrays each at 64M px), past the 2.5 GB host-RAM budget"
+   ],
+   "rows": 357,
+   "ablation_rows": 26,
+   "duplicate_rows": 26,
+   "errors": [],
+   "not_comparable_rows": 20,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "own_default_geomean_speedup_kernel": 1.1831367848732752,
+   "geomean_speedup_kernel": 1.2088032016062187,
+   "geomean_speedup_total": 1.1820797613390541,
+   "triton_faster_rows": 279,
+   "best_for_triton": {
+    "speedup": 2.04814125959657,
+    "experiment": "suite",
+    "scene": "sq_256_center",
+    "config": {
+     "variant": "conn4",
+     "connectivity": 4,
+     "tpb": 256,
+     "num_warps": 8,
+     "blocks": 48,
+     "enqueue": "lane",
+     "label": "per_lane",
+     "resolved_blocks": {
+      "numba": 48,
+      "triton": 48
+     }
+    },
+    "numba_ms": 1.5794610008015297,
+    "triton_ms": 0.7711680009379052,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.9622496444402442,
+    "experiment": "suite",
+    "scene": "sq_1024_center",
+    "config": {
+     "variant": "conn8_bare",
+     "connectivity": 8,
+     "bare": true,
+     "tpb": 256,
+     "num_warps": 8,
+     "blocks": 48,
+     "enqueue": "lane",
+     "label": "per_lane",
+     "resolved_blocks": {
+      "numba": 48,
+      "triton": 48
+     }
+    },
+    "numba_ms": 2.3576295025122818,
+    "triton_ms": 2.4501224979758263,
+    "est": false
+   },
+   "first_translation_ablations": {
+    "enqueue": {
+     "first_translation_rows": 26,
+     "paired": 26,
+     "geomean_speedup_kernel_first_translation": 0.9073980346642517,
+     "geomean_speedup_kernel_default": 1.2611611884783507,
+     "geomean_triton_gain": 1.3752503800360962
+    }
+   },
+   "experiments": {
+    "suite": {
+     "rows": 40,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1657328103134137,
+     "geomean_speedup_total": 1.2156512164780522,
+     "triton_faster_rows": 38,
+     "best_for_triton": {
+      "speedup": 2.04814125959657,
+      "experiment": "suite",
+      "scene": "sq_256_center",
+      "config": {
+       "variant": "conn4",
+       "connectivity": 4,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "label": "per_lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 1.5794610008015297,
+      "triton_ms": 0.7711680009379052,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9622496444402442,
+      "experiment": "suite",
+      "scene": "sq_1024_center",
+      "config": {
+       "variant": "conn8_bare",
+       "connectivity": 8,
+       "bare": true,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "label": "per_lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 2.3576295025122818,
+      "triton_ms": 2.4501224979758263,
+      "est": false
+     }
+    },
+    "suite_blocks_none": {
+     "rows": 20,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 20,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 0.8713964266762089
+    },
+    "sweep": {
+     "rows": 210,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2161103062971208,
+     "geomean_speedup_total": 1.1731764477242264,
+     "triton_faster_rows": 208,
+     "best_for_triton": {
+      "speedup": 1.723831977795282,
+      "experiment": "sweep",
+      "scene": "serpentine_256",
+      "config": {
+       "variant": "conn4",
+       "connectivity": 4,
+       "tpb": 512,
+       "num_warps": 16,
+       "blocks": 24,
+       "enqueue": "lane",
+       "label": "per_lane",
+       "resolved_blocks": {
+        "numba": 24,
+        "triton": 24
+       }
+      },
+      "numba_ms": 143.5840134981845,
+      "triton_ms": 83.29350850181072,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.985189047344769,
+      "experiment": "sweep",
+      "scene": "sq_4000_corner",
+      "config": {
+       "variant": "conn8",
+       "connectivity": 8,
+       "tpb": 128,
+       "num_warps": 4,
+       "blocks": 96,
+       "enqueue": "lane",
+       "label": "per_lane",
+       "resolved_blocks": {
+        "numba": 96,
+        "triton": 96
+       }
+      },
+      "numba_ms": 37.61869699883391,
+      "triton_ms": 38.18424199926085,
+      "est": false
+     }
+    },
+    "barrier_work": {
+     "rows": 35,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2152312206404468,
+     "geomean_speedup_total": 1.1979751041555726,
+     "triton_faster_rows": 33,
+     "best_for_triton": {
+      "speedup": 1.870903990498776,
+      "experiment": "barrier_work",
+      "scene": "serpentine_256",
+      "config": {
+       "variant": "wc",
+       "connectivity": 8,
+       "probe_layout": "warp",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "label": "per_lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 114.76879800102324,
+      "triton_ms": 61.34403399846633,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9841991133252749,
+      "experiment": "barrier_work",
+      "scene": "sq_6000_center",
+      "config": {
+       "variant": "r2_bare",
+       "connectivity": 8,
+       "radius": 2,
+       "bare": true,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "label": "per_lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 97.59365599893499,
+      "triton_ms": 99.16047949809581,
+      "est": false
+     }
+    },
+    "enqueue": {
+     "rows": 52,
+     "ablation_rows": 26,
+     "duplicate_rows": 26,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    }
+   }
+  },
+  "ch04_gpu_2blob_nblock": {
+   "source": "triton_twins/ch04_gpu_2blob_nblock/compare_20261002T213219Z.json",
+   "created_utc": "20261002T213219Z",
+   "git_commit": "6a5d126",
+   "repeats": 6,
+   "caps": [],
+   "rows": 100,
+   "ablation_rows": 16,
+   "duplicate_rows": 16,
+   "errors": [],
+   "not_comparable_rows": 8,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "own_default_geomean_speedup_kernel": 1.154136910653062,
+   "geomean_speedup_kernel": 1.2022774941371017,
+   "geomean_speedup_total": 1.1024596851033415,
+   "triton_faster_rows": 58,
+   "best_for_triton": {
+    "speedup": 1.7377704710987312,
+    "experiment": "radius2",
+    "scene": "two_disks_r1400",
+    "config": {
+     "config": "multi8",
+     "mode": "multisource",
+     "connectivity": 8,
+     "tpb": 256,
+     "num_warps": 8,
+     "blocks": 48,
+     "enqueue": "lane",
+     "resolved_blocks": {
+      "numba": 48,
+      "triton": 48
+     }
+    },
+    "numba_ms": 33.51502100122161,
+    "triton_ms": 19.286218495835783,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.8476837341518652,
+    "experiment": "modes",
+    "scene": "two_disks_r1400",
+    "config": {
+     "config": "bare",
+     "mode": "multisource",
+     "bare": true,
+     "tpb": 256,
+     "num_warps": 8,
+     "blocks": 72,
+     "enqueue": "lane",
+     "resolved_blocks": {
+      "numba": 72,
+      "triton": 72
+     }
+    },
+    "numba_ms": 25.562114500644384,
+    "triton_ms": 30.155249500239734,
+    "est": false
+   },
+   "first_translation_ablations": {
+    "enqueue": {
+     "first_translation_rows": 16,
+     "paired": 16,
+     "geomean_speedup_kernel_first_translation": 0.8658038355829251,
+     "geomean_speedup_kernel_default": 1.1636907326656145,
+     "geomean_triton_gain": 1.2964091459016698
+    }
+   },
+   "experiments": {
+    "modes": {
+     "rows": 32,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2069313153068866,
+     "geomean_speedup_total": 1.0916019773542887,
+     "triton_faster_rows": 31,
+     "best_for_triton": {
+      "speedup": 1.6176852953764231,
+      "experiment": "modes",
+      "scene": "two_disks_r1400",
+      "config": {
+       "config": "multi8",
+       "mode": "multisource",
+       "connectivity": 8,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 40.562152502388926,
+      "triton_ms": 25.074192501051584,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8476837341518652,
+      "experiment": "modes",
+      "scene": "two_disks_r1400",
+      "config": {
+       "config": "bare",
+       "mode": "multisource",
+       "bare": true,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 72,
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 72,
+        "triton": 72
+       }
+      },
+      "numba_ms": 25.562114500644384,
+      "triton_ms": 30.155249500239734,
+      "est": false
+     }
+    },
+    "seq_a": {
+     "rows": 4,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2551024448278836,
+     "geomean_speedup_total": 1.13293543299971,
+     "triton_faster_rows": 4,
+     "best_for_triton": {
+      "speedup": 1.381728257222269,
+      "experiment": "seq_a",
+      "scene": "two_sq_2800",
+      "config": {
+       "config": "seq",
+       "mode": "sequential",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "launch": "a",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 29.469868499290897,
+      "triton_ms": 21.328266499040183,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.1074664633987483,
+      "experiment": "seq_a",
+      "scene": "asym_4000_800",
+      "config": {
+       "config": "seq",
+       "mode": "sequential",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "launch": "a",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 36.448588500206824,
+      "triton_ms": 32.91168600117089,
+      "est": false
+     }
+    },
+    "seq_b": {
+     "rows": 4,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2005040844423474,
+     "geomean_speedup_total": 1.061631137906431,
+     "triton_faster_rows": 4,
+     "best_for_triton": {
+      "speedup": 1.2238803973550227,
+      "experiment": "seq_b",
+      "scene": "two_disks_r1400",
+      "config": {
+       "config": "seq",
+       "mode": "sequential",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "launch": "b",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 20.48487499996554,
+      "triton_ms": 16.73764449878945,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.1784421356405292,
+      "experiment": "seq_b",
+      "scene": "two_sq_300",
+      "config": {
+       "config": "seq",
+       "mode": "sequential",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "launch": "b",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 3.6770600017916877,
+      "triton_ms": 3.120272001979174,
+      "est": false
+     }
+    },
+    "packing_tax": {
+     "rows": 4,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1964946231876077,
+     "geomean_speedup_total": 1.2124111786937553,
+     "triton_faster_rows": 4,
+     "best_for_triton": {
+      "speedup": 1.3122505022370345,
+      "experiment": "packing_tax",
+      "scene": "two_sq_300",
+      "config": {
+       "config": "mb_a",
+       "kernel": "ch03 conn4 instrumented, blob A",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 3.6203935014782473,
+      "triton_ms": 2.7589195015025325,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.124056430274173,
+      "experiment": "packing_tax",
+      "scene": "asym_4000_800",
+      "config": {
+       "config": "mb_a",
+       "kernel": "ch03 conn4 instrumented, blob A",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 36.56107799906749,
+      "triton_ms": 32.526016500924015,
+      "est": false
+     }
+    },
+    "blocks_none": {
+     "rows": 8,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 8,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 0.8494775937567289
+    },
+    "radius2": {
+     "rows": 16,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1821271361314964,
+     "geomean_speedup_total": 1.1009671901159364,
+     "triton_faster_rows": 15,
+     "best_for_triton": {
+      "speedup": 1.7377704710987312,
+      "experiment": "radius2",
+      "scene": "two_disks_r1400",
+      "config": {
+       "config": "multi8",
+       "mode": "multisource",
+       "connectivity": 8,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 33.51502100122161,
+      "triton_ms": 19.286218495835783,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9577231584117861,
+      "experiment": "radius2",
+      "scene": "two_sq_300",
+      "config": {
+       "config": "multi8r2",
+       "mode": "multisource",
+       "connectivity": 8,
+       "radius": 2,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 48,
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 1.8324959964957088,
+      "triton_ms": 1.9133879977744073,
+      "est": false
+     }
+    },
+    "enqueue": {
+     "rows": 32,
+     "ablation_rows": 16,
+     "duplicate_rows": 16,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    }
+   }
+  },
+  "ch05_gpu_nblob_nblock": {
+   "source": "triton_twins/ch05_gpu_nblob_nblock/compare_20261002T214348Z.json",
+   "created_utc": "20261002T214348Z",
+   "git_commit": "6a5d126",
+   "repeats": 4,
+   "caps": [
+    "tuning: 8 of tuning.py's 53 configs per scene (fused L8 and I8; r128 and split L1, L8 and I8). The stride axis of the fused build is the seeding experiment (S0..S256), the interior rule is I8 in every build, v1 and ccl are the benchmark rows. 53 configs x 7 scenes x 2 backends would take about 1.5 hours",
+    "asym_4000_800 (22.9 M px, the largest scene; two solid squares like two_sq_2800) runs in benchmark only, not in benchmark_blocks_none, seeding or tuning: GPU-time budget",
+    "benchmark_blocks_none runs the flood_fill runners only; the discovery probes (scan, cclp) are compared at a pinned grid in benchmark",
+    "png: the same 8 tuning configs plus v1 and ccl (png_inputs.py runs all 53)",
+    "png: input_blobs.png (9000 x 9000, 81 M px) is cropped to its top-left 4500 x 4500 quadrant (png columns and rows 0-4499; 655 blobs, 3.4 M red px): a full-size flood_fill result is ~1.7 GB of host arrays (~1 GB slimmed), so two kept results plus one in flight pass the 2.5 GB host-RAM budget, and each backend needs ~2.4 GB of device buffers. input_blocks.png runs whole"
+   ],
+   "rows": 224,
+   "ablation_rows": 30,
+   "duplicate_rows": 30,
+   "errors": [],
+   "not_comparable_rows": 36,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "own_default_geomean_speedup_kernel": 0.9076351006230737,
+   "geomean_speedup_kernel": 0.8685867158326617,
+   "geomean_speedup_total": 1.2153883445378852,
+   "triton_faster_rows": 30,
+   "best_for_triton": {
+    "speedup": 1.7039307979422742,
+    "experiment": "benchmark",
+    "scene": "serpentine_256",
+    "config": {
+     "runner": "ccl_bare",
+     "variant": "ccl_fill",
+     "bare": true,
+     "tpb": 256,
+     "num_warps": 8,
+     "blocks": 72,
+     "enqueue": "lane"
+    },
+    "numba_ms": 174.5066549992771,
+    "triton_ms": 102.4141679990862,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.22470977460414024,
+    "experiment": "benchmark",
+    "scene": "serpentine_256",
+    "config": {
+     "runner": "cclp",
+     "probe": "ccl_fill",
+     "tpb": 256,
+     "num_warps": 8,
+     "blocks": 120,
+     "enqueue": "lane"
+    },
+    "numba_ms": 0.2908495007432066,
+    "triton_ms": 1.2943339970661327,
+    "est": false
+   },
+   "first_translation_ablations": {
+    "enqueue": {
+     "first_translation_rows": 16,
+     "paired": 16,
+     "geomean_speedup_kernel_first_translation": 0.6366519979658374,
+     "geomean_speedup_kernel_default": 0.7648816107258756,
+     "geomean_triton_gain": 1.1994040557721388
+    },
+    "lane_schedule": {
+     "first_translation_rows": 14,
+     "paired": 14,
+     "geomean_speedup_kernel_first_translation": 0.25133194092316297,
+     "geomean_speedup_kernel_default": 0.8322531973301824,
+     "geomean_triton_gain": 3.205252694211681
+    }
+   },
+   "experiments": {
+    "benchmark": {
+     "rows": 42,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.9256469124416498,
+     "geomean_speedup_total": 1.2454187410844995,
+     "triton_faster_rows": 20,
+     "best_for_triton": {
+      "speedup": 1.7039307979422742,
+      "experiment": "benchmark",
+      "scene": "serpentine_256",
+      "config": {
+       "runner": "ccl_bare",
+       "variant": "ccl_fill",
+       "bare": true,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 72,
+       "enqueue": "lane"
+      },
+      "numba_ms": 174.5066549992771,
+      "triton_ms": 102.4141679990862,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.22470977460414024,
+      "experiment": "benchmark",
+      "scene": "serpentine_256",
+      "config": {
+       "runner": "cclp",
+       "probe": "ccl_fill",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 120,
+       "enqueue": "lane"
+      },
+      "numba_ms": 0.2908495007432066,
+      "triton_ms": 1.2943339970661327,
+      "est": false
+     }
+    },
+    "benchmark_blocks_none": {
+     "rows": 18,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 18,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 1.0051671784049006
+    },
+    "seeding": {
+     "rows": 36,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.885934838987252,
+     "geomean_speedup_total": 1.1869843371658355,
+     "triton_faster_rows": 2,
+     "best_for_triton": {
+      "speedup": 1.5102378790359552,
+      "experiment": "seeding",
+      "scene": "comb_2000",
+      "config": {
+       "runner": "S1",
+       "variant": "seed_merge",
+       "lattice": 1,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 24,
+       "enqueue": "lane"
+      },
+      "numba_ms": 25.961595496482914,
+      "triton_ms": 17.19040149691864,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.6617079269204255,
+      "experiment": "seeding",
+      "scene": "blob_grid_100",
+      "config": {
+       "runner": "S1",
+       "variant": "seed_merge",
+       "lattice": 1,
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": 24,
+       "enqueue": "lane"
+      },
+      "numba_ms": 68.2685384999786,
+      "triton_ms": 103.17019899957813,
+      "est": false
+     }
+    },
+    "tuning": {
+     "rows": 48,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 12,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 0.8757992319042387,
+     "geomean_speedup_kernel": 0.8135332920706235,
+     "geomean_speedup_total": 1.1687654758065877,
+     "triton_faster_rows": 7,
+     "best_for_triton": {
+      "speedup": 1.5331602681028031,
+      "experiment": "tuning",
+      "scene": "comb_2000",
+      "config": {
+       "runner": "split_L1",
+       "variant": "seed_merge",
+       "lattice": 1,
+       "build": "split",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": "None",
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 14.396194001164986,
+      "triton_ms": 9.389881997776683,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.4557491715438953,
+      "experiment": "tuning",
+      "scene": "two_sq_2800",
+      "config": {
+       "runner": "split_L1",
+       "variant": "seed_merge",
+       "lattice": 1,
+       "build": "split",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": "None",
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 54.30197349778609,
+      "triton_ms": 119.14881449774839,
+      "est": false
+     }
+    },
+    "png": {
+     "rows": 20,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 6,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 0.9041253617816746,
+     "geomean_speedup_kernel": 0.8071562306859503,
+     "geomean_speedup_total": 1.3274112419332427,
+     "triton_faster_rows": 1,
+     "best_for_triton": {
+      "speedup": 1.125825321889479,
+      "experiment": "png",
+      "scene": "input_blocks",
+      "config": {
+       "runner": "v1",
+       "variant": "seed_merge",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": "None",
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 1.4515885050059296,
+      "triton_ms": 1.2893549974251073,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.59987399779187,
+      "experiment": "png",
+      "scene": "input_blobs_crop4500x4500",
+      "config": {
+       "runner": "r128_L1",
+       "variant": "seed_merge",
+       "lattice": 1,
+       "build": "r128",
+       "tpb": 256,
+       "num_warps": 8,
+       "blocks": "None",
+       "enqueue": "lane",
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       }
+      },
+      "numba_ms": 16.960897999524605,
+      "triton_ms": 28.274100997805363,
+      "est": false
+     }
+    },
+    "lane_schedule": {
+     "rows": 28,
+     "ablation_rows": 14,
+     "duplicate_rows": 14,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    },
+    "enqueue": {
+     "rows": 32,
+     "ablation_rows": 16,
+     "duplicate_rows": 16,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    }
+   }
+  },
+  "ch06_gpu_nblob_runs": {
+   "source": "triton_twins/ch06_gpu_nblob_runs/compare_20261002T214603Z.json",
+   "created_utc": "20261002T214603Z",
+   "git_commit": "6a5d126",
+   "repeats": 10,
+   "caps": [
+    "ch05 head-to-head column of benchmark.py not run: a Numba-only baseline (split_L8, ~55 ms/run at 81 Mpx), outside Numba-vs-Triton",
+    "per-scene clock spin 3 s with both backends alternating (benchmark.py spins 8 s, scaling.py 4 s, per scene, one backend)",
+    "one case per (scene, contract); the harness interleaves the two backends every round instead of the two contracts",
+    "no scene-size caps: the largest scene is 9000x9000 (243 MB RGB). One scene is resident on the device at a time; on the host the decoded input_blobs.png (243 MB) also stays cached while its crops run (one decoded PNG at a time). Peak host RSS is about 2.1-2.3 GB (meta.peak_host_rss_mb has this run's value)",
+    "no scaling.py JSON of its own: its crossings are meta.scaling_crossings, per backend",
+    "figures.py / visualize.py not mirrored (no kernels of their own)",
+    "overview/bench_ch06.py not mirrored (overview phase)",
+    "lane_schedule: the benchmark scenes in the mask contract only (merge and flatten are the same launches in both contracts)"
+   ],
+   "rows": 44,
+   "ablation_rows": 6,
+   "duplicate_rows": 6,
+   "errors": [],
+   "not_comparable_rows": 0,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "geomean_speedup_kernel": 1.4983190282522645,
+   "geomean_speedup_total": 1.4752825805677385,
+   "triton_faster_rows": 32,
+   "best_for_triton": {
+    "speedup": 2.567088775666013,
+    "experiment": "scaling",
+    "scene": "crop_1000",
+    "config": {
+     "contract": "mask",
+     "tpb": 256,
+     "grid": [
+      2048,
+      256
+     ]
+    },
+    "numba_ms": 0.7490559816360474,
+    "triton_ms": 0.29179200530052185,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 1.0663900308038479,
+    "experiment": "scaling",
+    "scene": "crop_7000",
+    "config": {
+     "contract": "rgb",
+     "tpb": 256,
+     "grid": [
+      2048,
+      256
+     ]
+    },
+    "numba_ms": 1.9737600088119507,
+    "triton_ms": 1.8508800268173218,
+    "est": false
+   },
+   "first_translation_ablations": {
+    "lane_schedule": {
+     "first_translation_rows": 6,
+     "paired": 6,
+     "geomean_speedup_kernel_first_translation": 1.5595271708714635,
+     "geomean_speedup_kernel_default": 1.603373526541755,
+     "geomean_triton_gain": 1.0173893435161634
+    }
+   },
+   "experiments": {
+    "benchmark": {
+     "rows": 12,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.502475237491717,
+     "geomean_speedup_total": 1.4768022625373014,
+     "triton_faster_rows": 12,
+     "best_for_triton": {
+      "speedup": 2.1854625635229388,
+      "experiment": "benchmark",
+      "scene": "input_blocks",
+      "config": {
+       "contract": "rgb",
+       "tpb": 256,
+       "grid": [
+        2048,
+        256
+       ]
+      },
+      "numba_ms": 0.6768639981746674,
+      "triton_ms": 0.3097120076417923,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.109167814929895,
+      "experiment": "benchmark",
+      "scene": "blob_grid_100",
+      "config": {
+       "contract": "rgb",
+       "tpb": 256,
+       "grid": [
+        2048,
+        256
+       ]
+      },
+      "numba_ms": 0.8563840091228485,
+      "triton_ms": 0.7720959782600403,
+      "est": false
+     }
+    },
+    "scaling": {
+     "rows": 20,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.4958308233435205,
+     "geomean_speedup_total": 1.4743715221162483,
+     "triton_faster_rows": 20,
+     "best_for_triton": {
+      "speedup": 2.567088775666013,
+      "experiment": "scaling",
+      "scene": "crop_1000",
+      "config": {
+       "contract": "mask",
+       "tpb": 256,
+       "grid": [
+        2048,
+        256
+       ]
+      },
+      "numba_ms": 0.7490559816360474,
+      "triton_ms": 0.29179200530052185,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.0663900308038479,
+      "experiment": "scaling",
+      "scene": "crop_7000",
+      "config": {
+       "contract": "rgb",
+       "tpb": 256,
+       "grid": [
+        2048,
+        256
+       ]
+      },
+      "numba_ms": 1.9737600088119507,
+      "triton_ms": 1.8508800268173218,
+      "est": false
+     }
+    },
+    "lane_schedule": {
+     "rows": 12,
+     "ablation_rows": 6,
+     "duplicate_rows": 6,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": []
+    }
+   }
+  },
+  "overview": {
+   "source": "triton_twins/overview/compare_20261002T214933Z.json",
+   "created_utc": "20261002T214933Z",
+   "git_commit": "ad12321",
+   "repeats": 6,
+   "caps": [
+    "1 heaviest cells run 2 repeats instead of their default to fit the 60-minute budget (meta.reduced_repeats)"
+   ],
+   "rows": 317,
+   "ablation_rows": 0,
+   "duplicate_rows": 0,
+   "errors": [],
+   "not_comparable_rows": 17,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "own_default_geomean_speedup_kernel": 1.1239355298529543,
+   "geomean_speedup_kernel": 1.1290088653815364,
+   "geomean_speedup_total": 1.391009391651812,
+   "triton_faster_rows": 217,
+   "best_for_triton": {
+    "speedup": 2.515672137417346,
+    "experiment": "ch05_merge",
+    "scene": "png_blobs",
+    "config": {
+     "column": "ch05_merge",
+     "cell": "measured",
+     "tpb": 256,
+     "blocks": 48,
+     "caps": {
+      "numba": 48,
+      "triton": 48
+     },
+     "numba_is_bench_launch": true,
+     "resolved_blocks": {
+      "numba": 48,
+      "triton": 48
+     },
+     "resolved_tpb": {
+      "numba": 256,
+      "triton": 256
+     }
+    },
+    "numba_ms": 211.10119599688915,
+    "triton_ms": 83.91443100117613,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.28763168398290506,
+    "experiment": "ch05_split_I1",
+    "scene": "asym_4000_800",
+    "config": {
+     "column": "ch05_split_I1",
+     "cell": "measured",
+     "tpb": 256,
+     "blocks": 48,
+     "caps": {
+      "numba": 48,
+      "triton": 48
+     },
+     "numba_is_bench_launch": true,
+     "resolved_blocks": {
+      "numba": 48,
+      "triton": 48
+     },
+     "resolved_tpb": {
+      "numba": 256,
+      "triton": 256
+     }
+    },
+    "numba_ms": 40.2489605039591,
+    "triton_ms": 139.93229100015014,
+    "est": false
+   },
+   "first_translation_ablations": null,
+   "experiments": {
+    "ch01_ring": {
+     "rows": 14,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1018179739810359,
+     "geomean_speedup_total": 1.3477964211243492,
+     "triton_faster_rows": 11,
+     "best_for_triton": {
+      "speedup": 1.2420706040351654,
+      "experiment": "ch01_ring",
+      "scene": "sq_1024",
+      "config": {
+       "column": "ch01_ring",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 1,
+        "triton": 1
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 4.854235496168258,
+      "triton_ms": 3.9081800023268443,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9099206870733972,
+      "experiment": "ch01_ring",
+      "scene": "random_4000",
+      "config": {
+       "column": "ch01_ring",
+       "cell": "est",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 1,
+        "triton": 1
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 143941.95185129682,
+      "triton_ms": 158191.75659612846,
+      "est": true
+     }
+    },
+    "ch01_spill": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1706131098295243,
+     "geomean_speedup_total": 1.379278614091616,
+     "triton_faster_rows": 14,
+     "best_for_triton": {
+      "speedup": 1.3067249568054018,
+      "experiment": "ch01_spill",
+      "scene": "sq_256",
+      "config": {
+       "column": "ch01_spill",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 1,
+        "triton": 1
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.6450785003835335,
+      "triton_ms": 0.4936605037073605,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8706865382919101,
+      "experiment": "ch01_spill",
+      "scene": "random_4000",
+      "config": {
+       "column": "ch01_spill",
+       "cell": "est",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 1,
+        "triton": 1
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 146233.80740492028,
+      "triton_ms": 167952.3008266533,
+      "est": true
+     }
+    },
+    "ch02_split": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2114045302597516,
+     "geomean_speedup_total": 1.375883827026582,
+     "triton_faster_rows": 17,
+     "best_for_triton": {
+      "speedup": 1.3679539397417937,
+      "experiment": "ch02_split",
+      "scene": "sq_256",
+      "config": {
+       "column": "ch02_split",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 2.327404003153788,
+      "triton_ms": 1.7013760007102974,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.013498222413167,
+      "experiment": "ch02_split",
+      "scene": "random_4000",
+      "config": {
+       "column": "ch02_split",
+       "cell": "est",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 173400.00904759107,
+      "triton_ms": 171090.5902081613,
+      "est": true
+     }
+    },
+    "ch02_global": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.231245282648072,
+     "geomean_speedup_total": 1.4045634946953576,
+     "triton_faster_rows": 16,
+     "best_for_triton": {
+      "speedup": 1.5568722105491837,
+      "experiment": "ch02_global",
+      "scene": "serp_256",
+      "config": {
+       "column": "ch02_global",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 111.4649594965158,
+      "triton_ms": 71.59544549722341,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9691343609927141,
+      "experiment": "ch02_global",
+      "scene": "random_4000",
+      "config": {
+       "column": "ch02_global",
+       "cell": "est",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 149698.31430756132,
+      "triton_ms": 154466.006296816,
+      "est": true
+     }
+    },
+    "ch02_dirsplit": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.2960897523581794,
+     "geomean_speedup_total": 1.4457694886873749,
+     "triton_faster_rows": 16,
+     "best_for_triton": {
+      "speedup": 1.702044308723566,
+      "experiment": "ch02_dirsplit",
+      "scene": "serp_256",
+      "config": {
+       "column": "ch02_dirsplit",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 125.02462550037308,
+      "triton_ms": 73.45556449945434,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.976536553893917,
+      "experiment": "ch02_dirsplit",
+      "scene": "random_4000",
+      "config": {
+       "column": "ch02_dirsplit",
+       "cell": "est",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 151368.89491092914,
+      "triton_ms": 155005.86671062047,
+      "est": true
+     }
+    },
+    "ch02_pinned": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 17,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "own_default_geomean_speedup_kernel": 1.038065131695116
+    },
+    "ch02_pinned_matched": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.0440729332835157,
+     "geomean_speedup_total": 1.2855534132232274,
+     "triton_faster_rows": 12,
+     "best_for_triton": {
+      "speedup": 1.2311464556241907,
+      "experiment": "ch02_pinned_matched",
+      "scene": "random_1000",
+      "config": {
+       "column": "ch02_pinned_matched",
+       "cell": "est",
+       "tpb": 512,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 512,
+        "triton": 512
+       }
+      },
+      "numba_ms": 9332.56470408196,
+      "triton_ms": 7580.3854703463,
+      "est": true
+     },
+     "best_for_numba": {
+      "speedup": 0.9157670334199698,
+      "experiment": "ch02_pinned_matched",
+      "scene": "sq_256",
+      "config": {
+       "column": "ch02_pinned_matched",
+       "cell": "measured",
+       "tpb": 512,
+       "resolved_blocks": {
+        "numba": 2,
+        "triton": 2
+       },
+       "resolved_tpb": {
+        "numba": 512,
+        "triton": 512
+       }
+      },
+      "numba_ms": 3.1642860049032606,
+      "triton_ms": 3.455339501670096,
+      "est": false
+     }
+    },
+    "ch03_conn4": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.3030156905577297,
+     "geomean_speedup_total": 1.3915657203060146,
+     "triton_faster_rows": 17,
+     "best_for_triton": {
+      "speedup": 1.5723866093037429,
+      "experiment": "ch03_conn4",
+      "scene": "serp_128",
+      "config": {
+       "column": "ch03_conn4",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 32.575326004007366,
+      "triton_ms": 20.717122501082486,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.1571076762575203,
+      "experiment": "ch03_conn4",
+      "scene": "two_sq_2800",
+      "config": {
+       "column": "ch03_conn4",
+       "cell": "loop",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 50.35050550213782,
+      "triton_ms": 43.5141055022541,
+      "est": false
+     }
+    },
+    "ch03_conn8": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.178849110504266,
+     "geomean_speedup_total": 1.3846759431887148,
+     "triton_faster_rows": 17,
+     "best_for_triton": {
+      "speedup": 1.6821345035917195,
+      "experiment": "ch03_conn8",
+      "scene": "sq_256",
+      "config": {
+       "column": "ch03_conn8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 3.380435999133624,
+      "triton_ms": 2.0096109983569477,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.0346819808260763,
+      "experiment": "ch03_conn8",
+      "scene": "sq_1024",
+      "config": {
+       "column": "ch03_conn8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 4.018232997623272,
+      "triton_ms": 3.8835439991089515,
+      "est": false
+     }
+    },
+    "ch03_conn8_r2": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1008851270045972,
+     "geomean_speedup_total": 1.3123243853176947,
+     "triton_faster_rows": 13,
+     "best_for_triton": {
+      "speedup": 1.3975957946320203,
+      "experiment": "ch03_conn8_r2",
+      "scene": "serp_256",
+      "config": {
+       "column": "ch03_conn8_r2",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 72
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 180.4743150023569,
+      "triton_ms": 129.13198200476472,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.9621085768677168,
+      "experiment": "ch03_conn8_r2",
+      "scene": "disk_1024",
+      "config": {
+       "column": "ch03_conn8_r2",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 72
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 4.418182503286516,
+      "triton_ms": 4.592187004163861,
+      "est": false
+     }
+    },
+    "ch05_merge": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.9494742369473076,
+     "geomean_speedup_total": 1.2692678271154294,
+     "triton_faster_rows": 10,
+     "best_for_triton": {
+      "speedup": 2.515672137417346,
+      "experiment": "ch05_merge",
+      "scene": "png_blobs",
+      "config": {
+       "column": "ch05_merge",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 211.10119599688915,
+      "triton_ms": 83.91443100117613,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.4981190129831823,
+      "experiment": "ch05_merge",
+      "scene": "disk_1024",
+      "config": {
+       "column": "ch05_merge",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 16.138201499416027,
+      "triton_ms": 32.398284503869945,
+      "est": false
+     }
+    },
+    "ch05_ccl": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1656437558268575,
+     "geomean_speedup_total": 1.4471437236989588,
+     "triton_faster_rows": 14,
+     "best_for_triton": {
+      "speedup": 1.5748465858783305,
+      "experiment": "ch05_ccl",
+      "scene": "serp_256",
+      "config": {
+       "column": "ch05_ccl",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 120
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 166.20442350176745,
+      "triton_ms": 105.53689800144639,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.7530486641175828,
+      "experiment": "ch05_ccl",
+      "scene": "asym_4000_800",
+      "config": {
+       "column": "ch05_ccl",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 120
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 80.92611149913864,
+      "triton_ms": 107.46465050033294,
+      "est": false
+     }
+    },
+    "ch05_fused_L8": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.8865056071094736,
+     "geomean_speedup_total": 1.42847774886945,
+     "triton_faster_rows": 3,
+     "best_for_triton": {
+      "speedup": 1.1497753669088566,
+      "experiment": "ch05_fused_L8",
+      "scene": "comb_24",
+      "config": {
+       "column": "ch05_fused_L8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 24,
+       "caps": {
+        "numba": 24,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 24,
+        "triton": 24
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.45899549877503887,
+      "triton_ms": 0.39920449853525497,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.684152588881752,
+      "experiment": "ch05_fused_L8",
+      "scene": "sq_4000",
+      "config": {
+       "column": "ch05_fused_L8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 24,
+       "caps": {
+        "numba": 24,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 24,
+        "triton": 24
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 14.557061498635449,
+      "triton_ms": 21.277506999467732,
+      "est": false
+     }
+    },
+    "ch05_r128_L8": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.917751093454455,
+     "geomean_speedup_total": 1.4718236957082993,
+     "triton_faster_rows": 4,
+     "best_for_triton": {
+      "speedup": 1.1215203579922948,
+      "experiment": "ch05_r128_L8",
+      "scene": "sq_256",
+      "config": {
+       "column": "ch05_r128_L8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.36995199479861185,
+      "triton_ms": 0.3298664996691514,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.7726645561278623,
+      "experiment": "ch05_r128_L8",
+      "scene": "png_blobs",
+      "config": {
+       "column": "ch05_r128_L8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 47.152825001830934,
+      "triton_ms": 61.02625599669409,
+      "est": false
+     }
+    },
+    "ch05_split_L8": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.9377423282830272,
+     "geomean_speedup_total": 1.477260981746075,
+     "triton_faster_rows": 5,
+     "best_for_triton": {
+      "speedup": 1.1964900544149168,
+      "experiment": "ch05_split_L8",
+      "scene": "comb_24",
+      "config": {
+       "column": "ch05_split_L8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.4769334991578944,
+      "triton_ms": 0.39861050026956946,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.7333787697209649,
+      "experiment": "ch05_split_L8",
+      "scene": "sq_4000",
+      "config": {
+       "column": "ch05_split_L8",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 10.136903998500202,
+      "triton_ms": 13.822194501699414,
+      "est": false
+     }
+    },
+    "ch05_split_I1": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.7316474794167779,
+     "geomean_speedup_total": 1.3338292816462167,
+     "triton_faster_rows": 3,
+     "best_for_triton": {
+      "speedup": 1.3164048603952498,
+      "experiment": "ch05_split_I1",
+      "scene": "random_1000",
+      "config": {
+       "column": "ch05_split_I1",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 3.8632414980384056,
+      "triton_ms": 2.934691001428291,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.28763168398290506,
+      "experiment": "ch05_split_I1",
+      "scene": "asym_4000_800",
+      "config": {
+       "column": "ch05_split_I1",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 48
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 40.2489605039591,
+      "triton_ms": 139.93229100015014,
+      "est": false
+     }
+    },
+    "ch06_rgb": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.623267915999528,
+     "geomean_speedup_total": 1.571518902530945,
+     "triton_faster_rows": 17,
+     "best_for_triton": {
+      "speedup": 2.214126635645972,
+      "experiment": "ch06_rgb",
+      "scene": "comb_24",
+      "config": {
+       "column": "ch06_rgb",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2048,
+        "triton": 2048
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.5406720042228699,
+      "triton_ms": 0.2441919967532158,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.1288384610733742,
+      "experiment": "ch06_rgb",
+      "scene": "sq_4000",
+      "config": {
+       "column": "ch06_rgb",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2048,
+        "triton": 2048
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.8657920062541962,
+      "triton_ms": 0.766975998878479,
+      "est": false
+     }
+    },
+    "ch06_mask": {
+     "rows": 17,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.7752587501247319,
+     "geomean_speedup_total": 1.690789389736622,
+     "triton_faster_rows": 17,
+     "best_for_triton": {
+      "speedup": 2.4078946128888146,
+      "experiment": "ch06_mask",
+      "scene": "serp_128",
+      "config": {
+       "column": "ch06_mask",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2048,
+        "triton": 2048
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 0.4684799909591675,
+      "triton_ms": 0.1945600062608719,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.1213933664252014,
+      "experiment": "ch06_mask",
+      "scene": "asym_4000_800",
+      "config": {
+       "column": "ch06_mask",
+       "cell": "measured",
+       "tpb": 256,
+       "resolved_blocks": {
+        "numba": 2048,
+        "triton": 2048
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 5.472256183624268,
+      "triton_ms": 4.87987208366394,
+      "est": false
+     }
+    },
+    "ch04_seq": {
+     "rows": 7,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.1628371966346842,
+     "geomean_speedup_total": 1.0734332151868309,
+     "triton_faster_rows": 6,
+     "best_for_triton": {
+      "speedup": 1.3233665137380797,
+      "experiment": "ch04_seq",
+      "scene": "png_blobs",
+      "config": {
+       "column": "ch04_seq",
+       "cell": "est_pair",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 2439.0813640729903,
+      "triton_ms": 1843.088319639719,
+      "est": true
+     },
+     "best_for_numba": {
+      "speedup": 0.978740119345275,
+      "experiment": "ch04_seq",
+      "scene": "asym_4000_800",
+      "config": {
+       "column": "ch04_seq",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 43.3517320016108,
+      "triton_ms": 44.293404494965216,
+      "est": false
+     }
+    },
+    "ch04_multi": {
+     "rows": 7,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.0950686998536994,
+     "geomean_speedup_total": 1.0359405724613195,
+     "triton_faster_rows": 5,
+     "best_for_triton": {
+      "speedup": 1.3171467073193823,
+      "experiment": "ch04_multi",
+      "scene": "two_sq_2800",
+      "config": {
+       "column": "ch04_multi",
+       "cell": "measured",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 42.42687799705891,
+      "triton_ms": 32.211201501922915,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.885118023464056,
+      "experiment": "ch04_multi",
+      "scene": "png_blocks",
+      "config": {
+       "column": "ch04_multi",
+       "cell": "est_pair",
+       "tpb": 256,
+       "blocks": 48,
+       "caps": {
+        "numba": 48,
+        "triton": 144
+       },
+       "numba_is_bench_launch": true,
+       "resolved_blocks": {
+        "numba": 48,
+        "triton": 48
+       },
+       "resolved_tpb": {
+        "numba": 256,
+        "triton": 256
+       }
+      },
+      "numba_ms": 5066.748502502378,
+      "triton_ms": 5724.37614892624,
+      "est": true
+     }
+    }
+   }
+  },
+  "scan_multi_blob": {
+   "source": "triton_twins/scan_multi_blob/compare_20261002T204908Z.json",
+   "created_utc": "20261002T204908Z",
+   "git_commit": "6a5d126",
+   "repeats": 50,
+   "caps": [],
+   "rows": 6,
+   "ablation_rows": 0,
+   "duplicate_rows": 0,
+   "errors": [],
+   "not_comparable_rows": 0,
+   "all_outputs_equal": true,
+   "unequal_rows": [],
+   "geomean_speedup_kernel": 1.003588967979764,
+   "geomean_speedup_total": 2.0174838827555086,
+   "triton_faster_rows": 3,
+   "best_for_triton": {
+    "speedup": 1.2261638502319416,
+    "experiment": "small_example",
+    "scene": "square20_seed0",
+    "config": {
+     "kernel": "scan_image_small_example",
+     "threads_per_block": 100,
+     "blocks": 1
+    },
+    "numba_ms": 0.0794830011727754,
+    "triton_ms": 0.06482249591499567,
+    "est": false
+   },
+   "best_for_numba": {
+    "speedup": 0.8700344742222252,
+    "experiment": "early_stop",
+    "scene": "white",
+    "config": {
+     "kernel": "scan_image_small_example",
+     "threads_per_block": 100,
+     "blocks": 1
+    },
+    "numba_ms": 0.17330999980913475,
+    "triton_ms": 0.19919900296372361,
+    "est": false
+   },
+   "first_translation_ablations": null,
+   "experiments": {
+    "small_example": {
+     "rows": 2,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 1.200280886547187,
+     "geomean_speedup_total": 2.3558404243929822,
+     "triton_faster_rows": 2,
+     "best_for_triton": {
+      "speedup": 1.2261638502319416,
+      "experiment": "small_example",
+      "scene": "square20_seed0",
+      "config": {
+       "kernel": "scan_image_small_example",
+       "threads_per_block": 100,
+       "blocks": 1
+      },
+      "numba_ms": 0.0794830011727754,
+      "triton_ms": 0.06482249591499567,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 1.1749442836191775,
+      "experiment": "small_example",
+      "scene": "square20_seed1",
+      "config": {
+       "kernel": "scan_image_small_example",
+       "threads_per_block": 100,
+       "blocks": 1
+      },
+      "numba_ms": 0.07757099956506863,
+      "triton_ms": 0.06602100256714039,
+      "est": false
+     }
+    },
+    "early_stop": {
+     "rows": 2,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.9347050386651865,
+     "geomean_speedup_total": 1.8860832918690111,
+     "triton_faster_rows": 1,
+     "best_for_triton": {
+      "speedup": 1.0041826332078574,
+      "experiment": "early_stop",
+      "scene": "spot1_at_4_95",
+      "config": {
+       "kernel": "scan_image_small_example",
+       "threads_per_block": 100,
+       "blocks": 1
+      },
+      "numba_ms": 0.12520299787865952,
+      "triton_ms": 0.12468150089262053,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8700344742222252,
+      "experiment": "early_stop",
+      "scene": "white",
+      "config": {
+       "kernel": "scan_image_small_example",
+       "threads_per_block": 100,
+       "blocks": 1
+      },
+      "numba_ms": 0.17330999980913475,
+      "triton_ms": 0.19919900296372361,
+      "est": false
+     }
+    },
+    "simple_scan": {
+     "rows": 2,
+     "ablation_rows": 0,
+     "duplicate_rows": 0,
+     "errors": [],
+     "not_comparable_rows": 0,
+     "all_outputs_equal": true,
+     "unequal_rows": [],
+     "geomean_speedup_kernel": 0.9009696503139439,
+     "geomean_speedup_total": 1.8480915625723469,
+     "triton_faster_rows": 0,
+     "best_for_triton": {
+      "speedup": 0.9294934857207495,
+      "experiment": "simple_scan",
+      "scene": "square20_seed0",
+      "config": {
+       "kernel": "simple_scan_kernel",
+       "threads_per_block": 100,
+       "blocks": 1
+      },
+      "numba_ms": 0.18127400107914582,
+      "triton_ms": 0.19502449868014082,
+      "est": false
+     },
+     "best_for_numba": {
+      "speedup": 0.8733211402308911,
+      "experiment": "simple_scan",
+      "scene": "white",
+      "config": {
+       "kernel": "simple_scan_kernel",
+       "threads_per_block": 100,
+       "blocks": 1
+      },
+      "numba_ms": 0.16528999913134612,
+      "triton_ms": 0.18926600023405626,
+      "est": false
+     }
+    }
+   }
+  }
+ },
+ "overall": {
+  "units": 9,
+  "geomean_of_unit_geomeans_kernel": 1.119344308776992,
+  "geomean_of_unit_geomeans_total": 1.3232850309238608,
+  "all_outputs_equal": true
+ }
+}
