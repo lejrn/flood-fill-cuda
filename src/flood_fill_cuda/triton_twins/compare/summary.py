@@ -10,6 +10,12 @@ config, and whether every row's outputs were identical.
 The geometric mean is the right average for ratios: a 2x win and a 2x
 loss cancel to 1.0, where an arithmetic mean would call it 1.25.
 
+Two kinds of rows never enter any average: rows marked
+first_translation=true (the twins' first translation of a construct,
+kept as an ablation: they are summarized on their own, paired with the
+default row they differ from) and rows marked duplicate_of=<experiment>
+(a cell another experiment already measures).
+
 "overall" weighs every unit equally (the geometric mean of the units'
 geometric means), so the grand table's 300-odd cells cannot drown out a
 chapter with 30. Rows marked comparable=false are reported per unit as
@@ -54,12 +60,58 @@ def _extreme(rows, key, pick):
             "est": bool(row.get("est") or row.get("config", {}).get("est"))}
 
 
-def summarize_rows(rows):
+ABLATION_KEYS = ("enqueue", "label", "schedule", "lane_sched", "LANE_SCHED")
+
+
+def _is_ablation(r):
+    return bool(r.get("first_translation"))
+
+
+def _is_duplicate(r):
+    return bool(r.get("duplicate_of"))
+
+
+def _pair_key(r):
+    cfg = {k: v for k, v in r.get("config", {}).items()
+           if k not in ABLATION_KEYS}
+    return (r["experiment"], r["scene"], json.dumps(cfg, sort_keys=True))
+
+
+def ablation(rows):
+    """First-translation rows against the default rows they differ from:
+    same experiment, scene and config apart from the ablated setting."""
     measured = [r for r in rows if "error" not in r]
+    first = [r for r in measured if _is_ablation(r)]
+    if not first:
+        return None
+    default = {}
+    for r in measured:
+        if not _is_ablation(r):
+            default.setdefault(_pair_key(r), r)
+    pairs = [(f, default.get(_pair_key(f))) for f in first]
+    pairs = [(f, d) for f, d in pairs if d is not None]
+    return {
+        "first_translation_rows": len(first),
+        "paired": len(pairs),
+        "geomean_speedup_kernel_first_translation":
+            geomean(f["speedup_kernel"] for f, _ in pairs),
+        "geomean_speedup_kernel_default":
+            geomean(d["speedup_kernel"] for _, d in pairs),
+        "geomean_triton_gain": geomean(
+            f["triton"]["kernel_ms"]["median"] / d["triton"]["kernel_ms"]["median"]
+            for f, d in pairs),
+    }
+
+
+def summarize_rows(rows):
+    measured = [r for r in rows if "error" not in r
+                and not _is_ablation(r) and not _is_duplicate(r)]
     # Not like-for-like rows are reported but never averaged.
     ok = [r for r in measured if r.get("comparable", True)]
     out = {
         "rows": len(rows),
+        "ablation_rows": sum(_is_ablation(r) for r in rows),
+        "duplicate_rows": sum(_is_duplicate(r) for r in rows),
         "errors": [{"experiment": r["experiment"], "scene": r["scene"],
                     "config": r["config"], "error": r["error"]}
                    for r in rows if "error" in r],
@@ -98,6 +150,7 @@ def summarize(root=TWINS_ROOT):
             "repeats": doc["repeats"],
             "caps": doc.get("meta", {}).get("caps"),
             **summarize_rows(rows),
+            "first_translation_ablation": ablation(rows),
             "experiments": {k: summarize_rows(v)
                             for k, v in experiments.items()},
         }
