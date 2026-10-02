@@ -20,8 +20,8 @@ state machines, each lane moving on as a SIMT thread does) or
 
 enqueue picks how an append reserves its queue slot (the kernels' ENQ
 constexpr): "lane" (the default: one relaxed atomic per winning lane,
-which ptxas warp-aggregates into the SASS of Numba's
-_warp_enqueue_global) or "program" (the first translation: tl.cumsum
+which ptxas warp-aggregates into the pattern of Numba's
+_warp_enqueue_global, one leader atomic per warp) or "program" (the first translation: tl.cumsum
 ranks and one atomic per program, kept to measure its cost).
 
 Every (lane_schedule, enqueue) pair gives identical outputs; each is its
