@@ -306,8 +306,10 @@ plus the `enqueue` experiment:
   (label `first_translation`). All eight variants on sq_2000_center,
   disk_4001_r1900 and serpentine_256 at the pinned grid, plus the first
   run's worst sweep cells (1 x 512 on disk_4001_r1900, conn4 and conn8).
-  The `first_translation` rows are `comparable=false` and carry
-  `first_translation=true`, as in ch01, ch02 and ch04. They measure the
+  The `first_translation` rows are `comparable=false` with
+  `config.label` `first_translation`, as in ch01, ch02 and ch04. They also
+  carry `first_translation=true`, as in ch01 and ch02 (ch04 has the label
+  only, so a filter on the label covers every chapter). They measure the
   first translation's cost and stay out of the like-for-like averages.
   An "own default" average over all measured rows must drop them too.
 - In the default run all 26 `per_lane` enqueue rows repeat a cell of

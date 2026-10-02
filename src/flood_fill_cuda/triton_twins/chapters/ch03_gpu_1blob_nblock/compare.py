@@ -36,9 +36,11 @@ enqueue            The twin's two enqueue settings against the same Numba
                    backends and settings, plus the first run's worst sweep
                    cells (one 512-lane program on disk_4001_r1900, conn4
                    and conn8). first_translation rows are comparable=False
-                   and carry first_translation=true, as in ch01, ch02 and
-                   ch04: they measure the first translation's cost and
-                   stay out of the like-for-like averages. In the default
+                   with config.label first_translation (as in ch01, ch02
+                   and ch04) and carry first_translation=true (as in ch01
+                   and ch02; ch04 has the label only): they measure the
+                   first translation's cost and stay out of the
+                   like-for-like averages. In the default
                    run all 26 per_lane rows repeat a cell of suite (12),
                    barrier_work (12) or sweep (2); those carry
                    duplicate_of=<experiment>, so a unit-wide average can
@@ -194,10 +196,11 @@ ENQUEUE_NOTE = (
     "_warp_enqueue_global) and 'program' (label first_translation: tl.sum + "
     "tl.cumsum over the program and one atomic per program per direction, "
     "7 CTA barriers per enqueue site in SASS). Both rows time the same "
-    "Numba kernel. first_translation rows are comparable=false and carry "
-    "first_translation=true (as in ch01, ch02 and ch04), so the "
-    "like-for-like averages describe the default twin only; their "
-    "speedups are the measured cost of the first translation, and an "
+    "Numba kernel. first_translation rows are comparable=false with "
+    "config.label first_translation (as in ch01, ch02 and ch04) and carry "
+    "first_translation=true (as in ch01 and ch02; ch04 has the label "
+    "only), so the like-for-like averages describe the default twin only; "
+    "their speedups are the measured cost of the first translation, and an "
     "'own default' average over all measured rows must drop them too. "
     "per_lane rows whose cell another experiment already measures carry "
     "duplicate_of=<experiment>; a unit-wide average should skip them")
@@ -328,9 +331,10 @@ def make_case(experiment, slot, scene, name, tpb, blocks, notes="",
     blocks=None lets each backend resolve its own grid: both resolved sizes
     go into the config, and the row is comparable only if they agree.
     enqueue picks the Triton twin's enqueue mode (config["enqueue"]); a
-    "program" row is the first translation: comparable=False, label
-    first_translation and first_translation=true, as in ch01, ch02 and
-    ch04 (see ENQUEUE_NOTE)."""
+    "program" row is the first translation: comparable=False and label
+    first_translation (as in ch01, ch02 and ch04), plus
+    first_translation=true (as in ch01 and ch02; ch04 has the label only;
+    see ENQUEUE_NOTE)."""
     kw = {**VARIANTS[name], "threads_per_block": tpb, "blocks": blocks}
     c = caps(name, tpb, enqueue)
 
