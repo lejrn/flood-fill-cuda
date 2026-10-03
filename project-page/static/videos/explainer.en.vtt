@@ -1,0 +1,172 @@
+WEBVTT
+
+1
+00:00:00.534 --> 00:00:04.239
+A CPU fills a blob one pixel at a time.
+
+2
+00:00:04.475 --> 00:00:08.089
+Pure Python: twenty-four seconds
+for the real image.
+
+3
+00:00:08.280 --> 00:00:10.289
+Numba: one point three.
+
+4
+00:00:10.593 --> 00:00:14.446
+The table holds the CPU time
+for seventeen shapes.
+
+5
+00:00:14.607 --> 00:00:20.034
+Every chapter now gets a column,
+and a shape glows when the GPU wins.
+
+6
+00:00:20.367 --> 00:00:21.617
+Chapter one.
+
+7
+00:00:22.045 --> 00:00:27.402
+One block of two hundred fifty-six threads
+floods the whole frontier at once,
+
+8
+00:00:27.609 --> 00:00:31.272
+its queue in shared memory,
+a spill tier behind it.
+
+9
+00:00:31.652 --> 00:00:37.160
+One block is one of twenty-four SMs:
+four percent of the GPU.
+
+10
+00:00:37.398 --> 00:00:41.008
+It beats the CPU only
+on the biggest shapes.
+
+11
+00:00:41.332 --> 00:00:46.713
+Chapter two. Two blocks on two SMs
+share one global queue,
+
+12
+00:00:46.808 --> 00:00:49.487
+with a grid-wide barrier twice per level.
+
+13
+00:00:49.704 --> 00:00:52.741
+Twice as fast as one block on big blobs.
+
+14
+00:00:52.933 --> 00:00:56.087
+The small shapes still belong to the CPU.
+
+15
+00:00:56.441 --> 00:00:59.489
+Chapter three. Any number of blocks.
+
+16
+00:00:59.915 --> 00:01:03.321
+Every block takes the next pixels
+from the same queue,
+
+17
+00:01:03.470 --> 00:01:07.658
+and the hue shows who filled what:
+ownership speckles.
+
+18
+00:01:07.980 --> 00:01:10.941
+Eight blocks here,
+forty-eight in the benchmark.
+
+19
+00:01:11.255 --> 00:01:13.389
+Eight neighbors instead of four.
+
+20
+00:01:13.575 --> 00:01:18.695
+The wave becomes a square and needs
+half the levels, so half the barriers.
+
+21
+00:01:18.925 --> 00:01:22.398
+On the big disk, eleven times the CPU.
+
+22
+00:01:22.739 --> 00:01:26.241
+Chapter four. Two blobs in one launch:
+
+23
+00:01:26.423 --> 00:01:29.213
+the label rides inside the queue entry.
+
+24
+00:01:29.520 --> 00:01:33.530
+But on the real image every blob was
+still its own launch,
+
+25
+00:01:33.756 --> 00:01:38.100
+two and a half thousand launches,
+and the GPU lost.
+
+26
+00:01:38.442 --> 00:01:41.485
+Chapter five. No seeds given.
+
+27
+00:01:42.028 --> 00:01:47.005
+Candidate waves start everywhere and
+colliding waves merge in flight.
+
+28
+00:01:47.210 --> 00:01:52.234
+Two and a half thousand blobs, one launch,
+fifty-eight milliseconds.
+
+29
+00:01:52.360 --> 00:01:54.847
+Now the real image glows too.
+
+30
+00:01:55.206 --> 00:01:58.692
+Chapter six. Why move pixels at all?
+
+31
+00:01:59.156 --> 00:02:02.097
+A red span in a row is one run:
+
+32
+00:02:02.303 --> 00:02:05.004
+twenty-five times fewer things to touch.
+
+33
+00:02:05.290 --> 00:02:08.112
+Seven plain launches, no barrier.
+
+34
+00:02:08.470 --> 00:02:11.767
+Fifty-eight milliseconds becomes
+one and a half.
+
+35
+00:02:12.097 --> 00:02:15.313
+Twenty-four seconds to
+one and a half milliseconds.
+
+36
+00:02:15.405 --> 00:02:17.725
+Sixteen thousand times.
+
+37
+00:02:17.992 --> 00:02:19.804
+Not a smarter algorithm.
+
+38
+00:02:19.984 --> 00:02:21.908
+A better representation.
+

@@ -6,13 +6,15 @@
   --bg: #ffffff;
   --fg: #4a4a4a;
   --heading: #363636;
-  --muted: #7a7a7a;
+  --muted: #6b6b6b;
   --band: #f5f5f5;
   --panel: #f5f5f5;
   --hairline: #dbdbdb;
   --item-border: #bbbbbb;
   --link: #3273dc;
-  --author-link: hsl(204, 86%, 53%);
+  --link-tint: #2b66cc;
+  /* Nerfies uses hsl(204, 86%, 53%), 2.98:1 on white; same hue at 4.7:1 */
+  --author-link: hsl(204, 86%, 40%);
   --pill-bg: #363636;
   --pill-fg: #ffffff;
   --pill-hover: #2f2f2f;
@@ -54,6 +56,7 @@
     --hairline: #33383d;
     --item-border: #3a4046;
     --link: #6ea8ff;
+    --link-tint: #6ea8ff;
     --author-link: hsl(204, 86%, 64%);
     --pill-bg: #e9ebee;
     --pill-fg: #16191c;
@@ -91,6 +94,7 @@
   --hairline: #33383d;
   --item-border: #3a4046;
   --link: #6ea8ff;
+  --link-tint: #6ea8ff;
   --author-link: hsl(204, 86%, 64%);
   --pill-bg: #e9ebee;
   --pill-fg: #16191c;
@@ -423,16 +427,13 @@ video:focus-visible {
 }
 
 .slider-pagination .slider-page {
-  background: var(--item-border) !important;
+  background: var(--muted) !important;
 }
 
 .slider-pagination .slider-page.is-active {
-  background: var(--slider-thumb) !important;
+  background: var(--heading) !important;
 }
 
-.interpolation-panel {
-  padding: 0.75rem;
-}
 
 .interpolation-panel p {
   font-size: 0.9rem;
@@ -551,6 +552,11 @@ input[type="range"].slider.is-info::-moz-range-thumb {
     scroll-behavior: auto !important;
     transition: none !important;
   }
+
+  /* bulma-carousel unlocks only on transitionend, so keep 1 ms of it */
+  .slider-container {
+    transition: transform 1ms linear !important;
+  }
 }
 
 /* ---- scrub panels (Nerfies interpolation panel, generalised) ---- */
@@ -567,7 +573,12 @@ input[type="range"].slider.is-info::-moz-range-thumb {
   -webkit-user-drag: none;
 }
 
-.interpolation-panel {
+.columns.interpolation-panel {
+  margin-bottom: 1.5rem;
+}
+
+.interpolation-panel.scrub-pair {
+  padding: 0.75rem;
   margin: 0 0 1.5rem;
 }
 
@@ -590,7 +601,10 @@ input[type="range"].slider.is-info::-moz-range-thumb {
   display: block;
   width: 100%;
   height: auto;
+  aspect-ratio: 2 / 1;
+  object-fit: contain;
   background: var(--media-bg);
+  border-radius: 10px;
   image-rendering: pixelated;
 }
 
@@ -668,4 +682,257 @@ input[type="range"].slider.is-info::-moz-range-thumb {
 
 .measure-list li + li {
   margin-top: 0.35rem;
+}
+
+/* ---- review round 1: states Bulma leaves untokenized ---- */
+
+a:hover {
+  color: var(--heading);
+}
+
+.has-text-grey {
+  color: var(--muted) !important;
+}
+
+.footer .content p a,
+.table.is-hoverable tbody tr:hover a,
+a.navbar-item:hover,
+.navbar-link:hover {
+  color: var(--link-tint);
+}
+
+/* links inside running text need more than color to stand out */
+.content p a,
+.content li a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 1px;
+}
+
+a.navbar-item:focus,
+a.navbar-item:focus-within,
+a.navbar-item.is-active,
+.navbar-link:focus,
+.navbar-link:focus-within,
+.navbar-link.is-active,
+.navbar-item.has-dropdown:focus .navbar-link,
+.navbar-dropdown a.navbar-item:focus {
+  background: var(--nav-hover);
+  color: var(--link-tint);
+}
+
+.navbar-dropdown {
+  border: 1px solid var(--hairline);
+}
+
+button.navbar-burger {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.button.is-dark:focus {
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+}
+
+.button.is-dark:active {
+  background: var(--pill-hover);
+  color: var(--pill-fg);
+}
+
+.button.copy-button {
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--hairline);
+}
+
+.button.copy-button:hover,
+.button.copy-button:focus {
+  background: var(--bg);
+  color: var(--heading);
+  border-color: var(--item-border);
+}
+
+input[type="range"].slider:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.bibtex-head {
+  margin-bottom: 1.5rem;
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0.5rem;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  background: var(--bg);
+  color: var(--heading);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+}
+
+.scrub-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.figure-block figcaption p + p {
+  margin-top: 0.35rem;
+}
+
+.video-transcript {
+  margin-top: 1rem;
+  text-align: left;
+}
+
+.video-transcript summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  color: var(--heading);
+}
+
+/* ---- review round 1: carousel cards of equal height ---- */
+
+.results-carousel .slider-item {
+  display: flex;
+}
+
+.results-carousel .slider-item > .item {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+@media (max-width: 799px) {
+  /* bulma-carousel hides the dots below 800 px, so drop their room */
+  .results-carousel .item {
+    margin-bottom: 5px;
+  }
+}
+
+/* ---- review round 1: figures ---- */
+
+/* A halo in the page color keeps grid lines from striking through labels. */
+.figure-svg text {
+  paint-order: stroke fill;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.figure-svg text:not([font-family^="ui-monospace"]) {
+  font-family: var(--font-body);
+}
+
+.figure-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.figure-hint {
+  display: none;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 687px) {
+  /* Below this width the 720-unit charts would shrink their labels under
+     9 px; keep them at 640 px and let the chart scroll sideways. */
+  .figure-scroll .figure-svg {
+    min-width: 640px;
+  }
+
+  .figure-hint {
+    display: block;
+  }
+}
+
+/* ---- review round 1: phones ---- */
+
+@media (max-width: 768px) {
+  /* justified text in a 340 px column opens wide gaps between words */
+  .has-text-justified {
+    text-align: left !important;
+  }
+
+  /* comb panel: the scrubbed frame and slider first, Start and End below */
+  .columns.interpolation-panel.scrub {
+    display: flex;
+    flex-wrap: wrap;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .columns.interpolation-panel.scrub > .column {
+    flex: 0 0 50%;
+    max-width: 50%;
+  }
+
+  .columns.interpolation-panel.scrub > .interpolation-video-column {
+    flex-basis: 100%;
+    max-width: 100%;
+    order: -1;
+  }
+}
+
+@media (max-width: 640px) {
+  /* the chapter table becomes one card per chapter */
+  .chain-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .chain-table,
+  .chain-table tbody,
+  .chain-table tr,
+  .chain-table th,
+  .chain-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .chain-table tr {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 0.5rem 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .chain-table th,
+  .chain-table td {
+    border: 0 !important;
+    padding: 0.2rem 0 !important;
+  }
+
+  .chain-table th[scope="row"] {
+    font-size: 1.05rem;
+  }
+
+  .chain-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+  }
+}
+
+@media (min-width: 641px) {
+  .chain-table th[scope="row"] {
+    white-space: nowrap;
+  }
 }
