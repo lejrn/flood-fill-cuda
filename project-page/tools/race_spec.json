@@ -1,0 +1,87 @@
+{
+ "schema": "race_spec/3",
+ "about": "Inputs of project-page/tools/make_race.py. Totals are measured (median of 5, one session); only the split of each total across BFS levels is modelled.",
+ "source": {
+  "json": "src/flood_fill_cuda/results/ch03_gpu_1blob_nblock/benchmark_results/multi_block_20260719T225923Z.json",
+  "session_utc": "2026-07-19T22:59:23Z",
+  "device": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "sm_count": 24,
+  "scene": "sq_8000_center",
+  "meter_scene": "serpentine_256",
+  "note": "The session whose numbers the Chapter 3 README table quotes, so the video and the README quote the same milliseconds. A later session, 20260720T012243Z, gives 2,584 ms for the CPU and 18.8x for 48 blocks, so the speedups are one session's values, not constants."
+ },
+ "scene": {
+  "width": 8000,
+  "height": 8000,
+  "pixels": 64000000,
+  "levels": 8001,
+  "peak_ring": 15998,
+  "seed_xy": [
+   4000,
+   4000
+  ],
+  "connectivity": 4,
+  "level_formula": "level(x, y) = |x - 4000| + |y - 4000|"
+ },
+ "timeline": {
+  "slowdown_x": 6,
+  "fps": 30,
+  "lead_in_s": 0.5,
+  "hold_s": 2.0
+ },
+ "pacing": "Per level k: t_k = o + c * n_k, n_k the exact ring size. o = the lane's meter_scene ms divided by the meter scene's levels (CPU: 0). c = (total_ms - levels * o) / pixels, so each lane ends exactly at its measured total. Inside a level, pixels fill linearly with time.",
+ "lanes": [
+  {
+   "key": "cpu",
+   "label_bold": "CPU",
+   "label_rest": "1 core, @njit",
+   "json_key": "njit_ms",
+   "total_ms": 2041.171814998961,
+   "overhead": "zero",
+   "meter_ms": null,
+   "meter_levels": null
+  },
+  {
+   "key": "ch01",
+   "label_bold": "GPU 1 block",
+   "label_rest": "1 of 24 SMs",
+   "json_key": "v2_kernel_ms",
+   "total_ms": 1062.640599997394,
+   "overhead": "meter",
+   "meter_ms": 57.44937800045591,
+   "meter_levels": 32896
+  },
+  {
+   "key": "ch02",
+   "label_bold": "GPU 2 blocks",
+   "label_rest": "2 of 24 SMs",
+   "json_key": "dual_global_kernel_ms",
+   "total_ms": 516.9324119997327,
+   "overhead": "meter",
+   "meter_ms": 127.15065899828915,
+   "meter_levels": 32896
+  },
+  {
+   "key": "ch03",
+   "label_bold": "GPU 48 blocks",
+   "label_rest": "all 24 SMs",
+   "json_key": "multi_kernel_ms",
+   "total_ms": 133.65124399933848,
+   "overhead": "meter",
+   "meter_ms": 151.55658200092148,
+   "meter_levels": 32896
+  }
+ ],
+ "caveats": [
+  "Only each lane's finish time is measured. How its fill grows in between is a model (see pacing).",
+  "GPU totals are kernel time only (no allocation, no host-device copies). The CPU total is the whole cpu_flood_fill call, which also allocates its arrays.",
+  "The 8000 x 8000 square is the whole image. The page's own demo square is far smaller, where the CPU wins.",
+  "The CPU lane assumes time proportional to pixels visited; the real CPU is probably faster early and slower late.",
+  "The 2-block lane's '2 of 24 SMs' is the placement observed for the same kernel in ch02's dual_block JSON (global_sm_ids [0, 2] in every scene), not recorded for this run."
+ ],
+ "context": {
+  "multi_bare_kernel_ms": 123.25144900023588,
+  "multi_total_ms": 781.0024940008589,
+  "note": "Not drawn. Printed by make_race.py for the page caption: the uninstrumented 48-block kernel and the end-to-end 48-block run (allocation and both copies included)."
+ }
+}
