@@ -54,11 +54,13 @@ from . import registry
 
 (ch01_viz, ch02_viz, ch03_viz, ch04_viz, ch05_viz,
  ch06_viz) = registry.CHAPTERS
+(triton_viz,) = registry.EXTRAS
 
 OUT_DIR = results_paths.results_dir("dashboard")
 OUT_PATH = os.path.join(OUT_DIR, "project_dashboard.html")
 
-PROJECT_TILES = [t for ch in registry.CHAPTERS for t in getattr(ch, "TILES", [])]
+PROJECT_TILES = [t for ch in registry.CHAPTERS + registry.EXTRAS
+                 for t in getattr(ch, "TILES", [])]
 project_tiles_html = "".join(
     f'<div class="tile"><div class="tile-v">{v}</div>'
     f'<div class="tile-l">{l}</div><div class="tile-src">{s}</div></div>'
@@ -84,7 +86,8 @@ domain: single blob (§1.1 one block → §1.2 two blocks → §1.3 N blocks →
 blob (§2), seed discovery (§3: no host-provided seeds — the GPU
 finds, labels and fills every blob itself), then runs instead of pixels
 (§4: the same job with the run as the unit, measured against the
-machine's own read/write peaks). Every subsection reports
+machine's own read/write peaks), then every chapter rebuilt in Triton and
+timed against its Numba original (§5). Every subsection reports
 its own speedup from its own benchmark session; §1.3 chains them into one
 multiplier from single block to N blocks. 4-connectivity throughout
 except where 8-direction twins are charted explicitly · placement
@@ -105,6 +108,7 @@ observed via %smid</div>
 {ch04_viz.SECTION_2}
 {ch05_viz.SECTION_3}
 {ch06_viz.SECTION_4}
+{triton_viz.SECTION_5}
 <div id="tooltip"></div>
 </div>
 <script>{JS}</script>
@@ -123,10 +127,12 @@ observed via %smid</div>
                 else " (no seed_discovery JSON — §3 omitted)")
     _rn_part = (f" + {os.path.basename(ch06_viz.RN_PATH)}" if ch06_viz.RN_PATH
                 else " (no runs JSON — §4 omitted)")
+    _tw_part = (" + triton_twins compare JSON" if triton_viz.SECTION_5
+                else " (no triton_twins compare JSON - §5 omitted)")
     print(f"rendered {os.path.basename(ch03_viz.MB_PATH)} + "
           f"{os.path.basename(ch02_viz.DUAL_PATH)} + "
           f"{os.path.basename(ch01_viz.JSON_PATH)}{_nb_part}{_db_part}{_dbr2_part}"
-          f"{_sd_part}{_rn_part} -> {OUT_PATH} ({len(html):,} bytes)")
+          f"{_sd_part}{_rn_part}{_tw_part} -> {OUT_PATH} ({len(html):,} bytes)")
 
 
 if __name__ == "__main__":
