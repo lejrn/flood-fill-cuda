@@ -44,8 +44,9 @@ THIRD_PARTY_NOTICES.md     licenses of the bundled CSS, JS and icons
 static/css/                Bulma 0.9.1, bulma-carousel, bulma-slider (MIT), index.css
 static/js/                 bulma-carousel, index.js (no jQuery)
 static/images/             favicon, posters, the ch06 before/after still
-static/videos/             teaser, carousel clips, the two side-by-side clips, explainer and its captions
-static/scrub/              frame sequences for the two scrub sliders
+static/videos/             teaser, carousel clips, side-by-side clips, the race, the ch06 runs explainer,
+                           the narrated explainer and its captions
+static/scrub/              frame sequence for the comb scrub slider
 tools/                     scripts that rebuild everything above from the repo
 ```
 
@@ -56,8 +57,10 @@ Every asset comes from a committed result or from the video pipeline.
 | what | script | source |
 |---|---|---|
 | inline figures in `index.html` | `tools/build_figures.py` | `results/ch06_gpu_nblob_runs/figures/*.svg` |
-| teaser, carousel and side-by-side clips | `tools/make_clips.sh` | the chapters' wavefront GIFs, the video's `s07_runs` clip |
-| scrub frames | `tools/make_scrub_frames.py` | ch01 and ch05 wavefront GIFs |
+| teaser, carousel and side-by-side clips | `tools/make_clips.sh` | the chapters' wavefront GIFs |
+| comb scrub frames | `tools/make_scrub_frames.py` | ch05 comb wavefront GIFs |
+| CPU vs GPU race | `tools/make_race.py` (data in `tools/race_spec.json`) | ch03 benchmark JSON, scene `sq_8000_center` |
+| ch06 runs explainer and its carousel loop | `tools/make_runs_explainer.sh` (scene drawn with Pillow in `tools/runs_explainer.py`, blob in `tools/runs_blob.json`) | one real blob of `input_blobs.png` |
 | explainer web cut | `tools/make_explainer.sh` | `video/out/final_landscape_elevenlabs.mp4` |
 
 Run them from the repo root:
@@ -67,13 +70,14 @@ export PYTHONDONTWRITEBYTECODE=1
 python project-page/tools/build_figures.py
 FFMPEG=video/.venv/bin/ffmpeg PYTHON=.venv/bin/python bash project-page/tools/make_clips.sh
 .venv/bin/python project-page/tools/make_scrub_frames.py
+FFMPEG=video/.venv/bin/ffmpeg .venv/bin/python project-page/tools/make_race.py
+FFMPEG=video/.venv/bin/ffmpeg PYTHON=.venv/bin/python bash project-page/tools/make_runs_explainer.sh
 FFMPEG=video/.venv/bin/ffmpeg bash project-page/tools/make_explainer.sh
 ```
 
-`video/out` and `video/media` are gitignored. Only the ch06 "runs" clip
-and the explainer need a checkout where the video has been rendered;
-point `VIDEO_DIR` at it if it lives elsewhere. Without it, `make_clips.sh`
-skips the runs clip and builds everything else.
+`video/out` is gitignored. Only the narrated explainer needs a checkout
+where the video has been rendered; point `VIDEO_DIR` at it if it lives
+elsewhere. Every other script builds from committed files.
 
 `static/videos/explainer.en.vtt` holds the captions, timed against the
 audio of the web cut. Rebuild them by hand if the narration changes.

@@ -1,4 +1,4 @@
-"""Frame sequences for the two wavefront scrub sliders on the project page.
+"""Frame sequence for the wavefront scrub slider on the project page.
 
 Run from the repo root (the folder that holds src/ and project-page/):
 
@@ -8,7 +8,7 @@ Run from the repo root (the folder that holds src/ and project-page/):
 Needs PIL (with WebP) and numpy only. No GPU code, no ffmpeg. The inputs
 are committed GIFs, so nothing comes from VIDEO_DIR.
 
-A. The comb merge (main slider), from the ch05 wavefront GIFs
+The comb merge, from the ch05 wavefront GIFs
    comb96_merge_prov.gif and comb96_merge_final.gif (384x256 = a 96x64
    scene drawn at 4x). Each has 71 frames: frame i (0..69) shows every
    pixel with BFS depth <= i and flashes depth == i in a light tint, then
@@ -32,18 +32,6 @@ A. The comb merge (main slider), from the ch05 wavefront GIFs
    holds on). Flash pixels and unfilled pixels come from frame i itself.
    Every colour still comes from an extracted GIF frame. --raw skips this.
 
-B. The ch01 CPU vs GPU pair (one slider moves both), from
-   square256_cpu_order.gif and square256_b1_t256.gif (512x512 = a 256x256
-   scene at 2x, 97 frames). Frames 0..95 sample the run at i/95 of the way
-   through: GPU frame i shows BFS depth <= round(i * 220 / 95), so 2 or 3
-   levels per step; CPU frame i shows visits 0..round(i * 48399 / 95), so
-   509 or 510 visits per step. Frame 96 is the settled hold (same pixels
-   as frame 95, cursor, trail and flash removed); it adds no progress, so
-   both sides drop it and keep 96 frames each. Kept at 512x512:
-
-     static/scrub/ch01_cpu/NNN.webp
-     static/scrub/ch01_gpu/NNN.webp
-
 Frames come from PIL (im.seek(i); im.convert('RGB')), which composites
 each GIF frame in full, never from raw GIF deltas. Output is lossless
 WebP, method 6. The script asserts every assumption above, so a
@@ -63,7 +51,6 @@ from PIL import Image
 
 RESULTS = Path("src/flood_fill_cuda/results")
 COMB_DIR = RESULTS / "ch05_gpu_nblob_nblock/wavefront"
-CH01_DIR = RESULTS / "ch01_gpu_1blob_1block/wavefront"
 OUT = Path("project-page/static/scrub")
 
 FRAME_MS = 60
@@ -71,7 +58,6 @@ HOLD_MS = 1500
 SIZE_BUDGET = 6 * 1024 * 1024  # bytes, all of static/scrub/
 
 RED = (255, 0, 0)
-CURSOR = (0x0B, 0x0F, 0x14)  # ch01 CPU cursor square
 
 WEBP = dict(format="WEBP", lossless=True, quality=100, method=6, exact=True)
 
@@ -195,47 +181,6 @@ def make_comb(raw: bool, written: list[Path]) -> dict:
     }
 
 
-# ---- B. ch01 CPU vs GPU ------------------------------------------------
-
-
-def make_ch01(written: list[Path]) -> dict:
-    out = {}
-    for side, stem in (("cpu", "square256_cpu_order"), ("gpu", "square256_b1_t256")):
-        frames, durations = load_gif(CH01_DIR / f"{stem}.gif")
-        check_timing(f"ch01 {side}", frames, durations, 97, (512, 512))
-        last = len(frames) - 1  # settled hold
-        # The hold adds no progress: frame 95 already has no unfilled red.
-        check(not is_colour(frames[last - 1], RED).any(), f"ch01 {side}: frame {last - 1} still has red")
-        check(not (frames[last] == frames[last - 1]).all(), f"ch01 {side}: hold is a pixel copy")
-        # Filled pixels keep their colour once settled (no GIF quantization);
-        # only the CPU cursor may pass over them.
-        for i in range(1, last + 1):
-            was = (frames[i - 1] == frames[last]).all(-1) & filled(frames[i - 1])
-            now = (frames[i] == frames[last]).all(-1)
-            if side == "cpu":
-                now |= is_colour(frames[i], CURSOR)
-            check(not (was & ~now).any(), f"ch01 {side}: settled pixels change at frame {i}")
-
-        d = OUT / f"ch01_{side}"
-        fresh_dir(d)
-        for i in range(last):
-            save(frames[i], d / f"{i:03d}.webp", 1, written)
-        out[side] = last
-        del frames
-    check(out["cpu"] == out["gpu"], "ch01: CPU and GPU frame counts differ")
-
-    # What one step means, from the generator's own formulas
-    # (ch01 benchmarks/wavefront.py: thresholds = unique(round(linspace(0, top, 96)))).
-    levels, visits = 221, 220 * 220
-    tg = np.unique(np.linspace(0, levels - 1, 96).round().astype(int))
-    tc = np.unique(np.linspace(0, visits - 1, 96).round().astype(int))
-    check(len(tg) == len(tc) == out["cpu"], "ch01: threshold count does not match frame count")
-    for key, t in (("gpu_step", tg), ("cpu_step", tc)):
-        steps, n = np.unique(np.diff(t), return_counts=True)
-        out[key] = {int(s): int(c) for s, c in zip(steps, n)}
-    return out
-
-
 # ---- main --------------------------------------------------------------
 
 
@@ -250,7 +195,6 @@ def main() -> None:
 
     written: list[Path] = []
     comb = make_comb(args.raw, written)
-    ch01 = make_ch01(written)
 
     sizes = [p.stat().st_size for p in written]
     seq = [p.stat().st_size for p in written if p.parent != OUT]
@@ -258,8 +202,6 @@ def main() -> None:
     print(f"comb: {comb['frames']} frames (one BFS level each), colour lock {comb['lock']}, "
           f"max shift vs GIF frame {comb['max_shift_vs_gif']}")
     print(f"      scene px per level, first 3 / last 3: {comb['new_px_first_last']}")
-    print(f"ch01: {ch01['cpu']} frames per side; GPU levels per step {ch01['gpu_step']}, "
-          f"CPU visits per step {ch01['cpu_step']}")
     print(f"wrote {len(written)} files, {sum(sizes):,} B; median sequence frame {statistics.median(seq):,.0f} B")
     print(f"static/scrub total: {total:,} B (budget {SIZE_BUDGET:,} B)")
     check(total < SIZE_BUDGET, "static/scrub is over the size budget")

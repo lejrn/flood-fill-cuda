@@ -936,3 +936,24 @@ input[type="range"].slider:focus-visible {
     white-space: nowrap;
   }
 }
+
+/* ---- time-true race and the chapter 6 explainer ---- */
+
+.race-video,
+.explainer-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 1px solid var(--item-border);
+  border-radius: 10px;
+  background: var(--media-bg);
+}
+
+.race-video {
+  max-width: 640px;
+}
+
+.explainer-video {
+  aspect-ratio: 16 / 9;
+}

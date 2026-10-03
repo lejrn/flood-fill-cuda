@@ -300,7 +300,7 @@
     wireBurger();
     calmVideos();
     wireCarousel();
-    playWhenVisible(document.querySelectorAll('#results-carousel video, video.stacked-video'));
+    playWhenVisible(document.querySelectorAll('#results-carousel video, video.stacked-video, video.race-video, video.explainer-video'));
     wireScrub();
     wireCopy();
   }

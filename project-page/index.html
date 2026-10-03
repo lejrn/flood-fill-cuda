@@ -259,10 +259,10 @@
         </div>
         <div class="item item-runs">
           <video poster="./static/images/carousel/runs.webp" controls muted loop playsinline preload="none"
-                 width="720" height="720" aria-label="A row of red pixels collapsing into run bars.">
+                 width="720" height="720" aria-label="A blob whose 34 runs light up along one line of memory as paint writes them.">
             <source src="./static/videos/carousel/runs.mp4" type="video/mp4">
           </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 6</span>Each red span in a row becomes one run. The GPU labels runs, not pixels, so there is no wave to watch.</p>
+          <p class="carousel-caption"><span class="chapter-tag">Ch 6</span>Each red span in a row is one run, one unbroken stretch of memory. Paint writes each of this blob's 34 runs as one grouped write.</p>
         </div>
       </div>
     </div>
@@ -486,10 +486,10 @@
       <!--/ Merge. -->
     </div>
 
-    <!-- Scrubbing. -->
+    <!-- Watching. -->
     <div class="columns is-centered">
       <div class="column is-full-width">
-        <h2 class="title is-3">Scrubbing the Wavefront</h2>
+        <h2 class="title is-3">Watching the Wavefront</h2>
 
         <!-- Comb merge. -->
         <h3 class="title is-4">Watching labels merge</h3>
@@ -529,44 +529,29 @@
         <h3 class="title is-4">The CPU walks, the GPU sweeps</h3>
         <div class="content has-text-justified">
           <p>
-            The same square, filled by the CPU reference and by one GPU block.
-            One slider moves both; each step is 1/95 of each run, counted in the unit shown under it.
-            The CPU works at one moving point, the GPU on the whole ring.
+            The same 8000&nbsp;×&nbsp;8000 square, filled by one CPU core and by the GPU of chapters 1 to 3, on one shared clock.
+            Each lane stops at the time measured for it in one benchmark session; the fill in between is modeled.
+          </p>
+          <p>
+            One block is only 1.9× faster than the CPU, and two blocks 3.9×.
+            With all 24 SMs the GPU finishes in 134&nbsp;ms, 15.3× faster than the CPU's 2,041&nbsp;ms.
           </p>
         </div>
-        <div class="interpolation-panel scrub scrub-pair"
-             data-readout="step {i} of {last}">
-          <div class="columns is-mobile is-vcentered">
-            <div class="column has-text-centered">
-              <div class="scrub-frames" data-base="./static/scrub/ch01_cpu" data-count="96">
-                <img src="./static/scrub/ch01_cpu/048.webp" width="512" height="512" draggable="false"
-                     alt="The CPU reference fill at the selected step, gray by visit order."/>
-              </div>
-              <p class="scrub-label">CPU: 509 or 510 pixel visits per step</p>
-            </div>
-            <div class="column has-text-centered">
-              <div class="scrub-frames" data-base="./static/scrub/ch01_gpu" data-count="96">
-                <img src="./static/scrub/ch01_gpu/048.webp" width="512" height="512" draggable="false"
-                     alt="The one-block GPU fill at the selected step, blue by BFS level."/>
-              </div>
-              <p class="scrub-label">GPU: 2 or 3 BFS levels per step</p>
-            </div>
-          </div>
-          <div class="scrub-slider-row">
-            <input class="slider is-fullwidth is-large is-info scrub-slider"
-                   id="ch01-slider" aria-label="Progress through the CPU and GPU fills"
-                   step="1" min="0" max="95" value="48" type="range">
-            <p class="slider-readout"></p>
-          </div>
-        </div>
+        <video class="race-video" controls muted loop playsinline preload="none"
+               width="1080" height="1362" poster="./static/images/race_poster.webp"
+               aria-label="Four lanes fill the same square on one clock: one CPU core, then the GPU with one block, two blocks and 48 blocks. The 48-block lane finishes first, at 134 ms; the CPU finishes last, at 2,041 ms.">
+          <source src="./static/videos/race.mp4" type="video/mp4">
+        </video>
         <p class="scrub-note">
-          Steps show progress, not wall-clock time.
-          On a square this small the CPU is still faster; one block pulls ahead only on blobs of millions of pixels.
+          The video plays 6× slower than real time. GPU lanes show kernel time; the CPU lane is the whole call, allocation included.
+        </p>
+        <p class="scrub-note mt-2">
+          Size matters. At a million pixels one block is still slower than the CPU (0.75-0.81×), and it wins in every committed run only from 16 million pixels.
         </p>
         <!--/ CPU vs GPU. -->
       </div>
     </div>
-    <!--/ Scrubbing. -->
+    <!--/ Watching. -->
 
     <!-- Runs. -->
     <div class="columns is-centered" id="runs">
@@ -579,6 +564,17 @@
             That is 25× fewer things to label, with the same information.
           </p>
         </div>
+        <figure class="figure-block">
+          <video class="explainer-video" controls muted loop playsinline preload="none"
+                 width="1280" height="720" poster="./static/images/runs_explainer_poster.webp"
+                 aria-label="One real blob of 301 red pixels goes through chapter 6: its rows become 34 runs stored as contiguous stretches of one line of memory, runs that touch across rows join, and paint writes each run as one grouped write.">
+            <source src="./static/videos/runs_explainer.mp4" type="video/mp4">
+          </video>
+          <figcaption>
+            <p>One real blob of the test image, 301 red pixels, goes through chapter 6 step by step. Its rows become 34 runs, and each run is one unbroken stretch of the row-major image in memory.</p>
+            <p>Runs that touch in the next row join one group, all runs at once. Paint then writes each run as one grouped write instead of pixel by pixel.</p>
+          </figcaption>
+        </figure>
         <figure class="figure-block">
           <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
 <!-- figure:runs_vs_pixels:start -->

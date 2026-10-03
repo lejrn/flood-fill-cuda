@@ -4,13 +4,11 @@
 #
 # Run from the repo root (the directory that holds src/ and project-page/):
 #
-#   FFMPEG=/path/to/ffmpeg PYTHON=/path/to/python VIDEO_DIR=/path/to/video \
+#   FFMPEG=/path/to/ffmpeg PYTHON=/path/to/python \
 #     bash project-page/tools/make_clips.sh
 #
 # FFMPEG    ffmpeg with libx264 (default: ffmpeg on PATH)
 # PYTHON    python with Pillow built with WebP support (default: python)
-# VIDEO_DIR the video/ folder that holds the gitignored Manim renders
-#           (default: video). Only the ch06 "runs" clip needs it.
 #
 # Outputs (all under project-page/static/):
 #   videos/teaser.mp4, images/teaser_poster.webp
@@ -28,8 +26,6 @@
 #   Three 512 px clips with pixel-level hue noise are also scaled 2x (see 2.).
 # - RGB is converted to yuv420p with the BT.709 matrix (limited range) and
 #   the stream is tagged BT.709, so browsers decode the colours as intended.
-# - Runs.mp4 is an untagged Manim render encoded with the BT.601 matrix, so
-#   it is decoded as BT.601 before it is re-encoded as tagged BT.709.
 # - Posters are written by Pillow as lossless WebP. No .png or .jpg is ever
 #   written into the repo (the repo gitignores them).
 
@@ -37,12 +33,10 @@ set -euo pipefail
 
 FFMPEG=${FFMPEG:-ffmpeg}
 PYTHON=${PYTHON:-python}
-VIDEO_DIR=${VIDEO_DIR:-video}
 
 RES=src/flood_fill_cuda/results
 VID=project-page/static/videos
 IMG=project-page/static/images
-RUNS_SRC=$VIDEO_DIR/media/landscape/videos/s07_runs/1080p30/Runs.mp4
 
 if [[ ! -d $RES || ! -d project-page ]]; then
     echo "make_clips.sh: run me from the repo root (no $RES or project-page here)" >&2
@@ -92,21 +86,6 @@ rgb.save(out, lossless=True, quality=100, method=6)
 PY
 }
 
-# png_stdin_to_webp OUT: read one PNG frame from stdin (a pipe, never a file
-# in the repo) and save it as lossless WebP.
-# The code goes in -c, not a heredoc, because stdin carries the PNG.
-png_stdin_to_webp() {
-    "$PYTHON" -c '
-import io
-import sys
-from PIL import Image
-
-Image.open(io.BytesIO(sys.stdin.buffer.read())).convert("RGB").save(
-    sys.argv[1], lossless=True, quality=100, method=6
-)
-' "$1"
-}
-
 # 1. Teaser: the ch05 wavefront over 2,522 blobs, 900x900 native.
 TEASER_SRC=$RES/ch05_gpu_nblob_nblock/wavefront/input_blobs_final.gif
 gif_clip "$TEASER_SRC" "$VID/teaser.mp4" 20
@@ -134,32 +113,8 @@ for row in "${CAROUSEL[@]}"; do
     gif_poster "$RES/$rel" "$IMG/carousel/$name.webp" "$up"
 done
 
-# 3. ch06 "runs": a square crop of the centre pane of the Manim scene.
-# The box (600x600 at x=796, y=316 of 1920x1080) holds only the row of
-# pixel cells, the teal run bars and the recoloured crop. The tables, the
-# thumbnail labels and the caption with timings all sit outside it.
-# Window 2.0-7.5 s: empty pane, cells wipe in (2.5 s), cells collapse into
-# runs left to right (3.8-5.0 s), the recoloured crop appears (6.0 s) and holds.
-# Poster: source frame 134 (4.467 s, clip frame 74), mid-collapse. The first
-# two runs are already teal bars and the last run still shows crisp red
-# pixel cells, so the still shows "cells become runs" on its own. For the
-# finished state instead (run bars plus the recoloured crop), use frame 210.
-RUNS_POSTER_FRAME=134
-RUNS_CROP="crop=600:600:796:316"
-RUNS_RGB="scale=in_color_matrix=bt601:in_range=tv:flags=lanczos+accurate_rnd+full_chroma_int,format=gbrp,scale=720:720:flags=lanczos+accurate_rnd"
-if [[ -f $RUNS_SRC ]]; then
-    echo "clip   $VID/carousel/runs.mp4  <- $RUNS_SRC 2.0-7.5 s (crf 22)"
-    ff -ss 2.0 -t 5.5 -i "$RUNS_SRC" \
-        -vf "$RUNS_CROP,$RUNS_RGB,$TO_YUV" -r 30 "${X264[@]}" -crf 22 \
-        "$VID/carousel/runs.mp4"
-    echo "poster $IMG/carousel/runs.webp  <- $RUNS_SRC frame $RUNS_POSTER_FRAME"
-    "$FFMPEG" -hide_banner -loglevel error -nostdin -i "$RUNS_SRC" \
-        -vf "select='eq(n\,$RUNS_POSTER_FRAME)',$RUNS_CROP,$RUNS_RGB,format=rgb24" \
-        -fps_mode passthrough -frames:v 1 -f image2pipe -c:v png - \
-        | png_stdin_to_webp "$IMG/carousel/runs.webp"
-else
-    echo "skip   runs: $RUNS_SRC not found (set VIDEO_DIR to the main checkout's video/)" >&2
-fi
+# 3. The ch06 "runs" carousel loop is not built here: it comes from
+#    tools/make_runs_explainer.sh, with the 45 s runs explainer.
 
 # 4. Still: the ch06 before/after figure, one 1536x380 frame, lossless.
 gif_poster "$RES/ch06_gpu_nblob_runs/figures/before_after.gif" "$IMG/before_after.webp"
