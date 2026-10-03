@@ -10,20 +10,27 @@ blue.  With CONVERGE=True a program keeps sweeping its own tile until it
 stops changing, so one launch advances the frontier by up to a whole tile
 (and often further, because ``.cg`` loads observe sibling programs' stores
 through L2 mid-launch).  With CONVERGE=False each launch performs exactly one
-lock-step BFS level — the naive baseline.
+lock-step BFS level: the naive baseline.
 
 Races between tiles are benign: a pixel only ever transitions RED -> BLUE,
 and a stale read can only *delay* a fill, never corrupt one.  The host
 relaunches until a launch converts nothing, which is exact convergence: a
 launch that changed nothing observed a fully settled image (kernel launch
 boundaries order memory), so no red pixel with a blue neighbour existed.
+
+The scan mode (``run_flood_fill_scan``) works on whole lines instead:
+``scan_line_step`` floods every red run that touches blue along a row or a
+column with a segmented max-scan, and ``gather_dirty`` compacts the lines
+that may still change, so each pass launches one program per dirty line.
 """
 
 import cupy as cp
 import triton
 import triton.language as tl
 
-from cupy_bridge import t
+# The shared Triton runtime: importing it installs the CuPy driver once
+# per process (the Triton twins use the same one).
+from flood_fill_cuda.triton_twins.runtime import t
 
 BACKGROUND = 0
 RED = 1
@@ -132,7 +139,7 @@ def scan_line_step(
     A line can only gain new fills after a perpendicular pass lands a blue
     on it, so each fill marks the crossing line dirty; the host compacts
     dirty lines with ``gather_dirty`` and launches exactly one program per
-    dirty line — settled lines cost nothing.  (The scan must stay outside
+    dirty line, so settled lines cost nothing.  (The scan must stay outside
     conditionals: Triton 3.7 miscompiles tl.associative_scan inside an if.)
     """
     pid = tl.program_id(0)
@@ -160,24 +167,36 @@ def run_flood_fill_scan(grid_dev, changed_dev, *, max_rounds: int = 100_000):
 
     Each round floods entire horizontal then vertical runs, so convergence
     takes roughly one round per bend in the blob's geodesics rather than one
-    launch per tile of distance.  Dirty flags keep settled lines nearly free.
+    launch per tile of distance.  Each pass first compacts its dirty lines
+    with ``gather_dirty`` (``changed_dev`` doubles as the count), then
+    launches one program per dirty line.  When neither pass finds a dirty
+    line, no red pixel can still reach blue: converged.
     Returns ``(kernel_launches, converged)``.
     """
     H, W = grid_dev.shape
     dirty_rows = cp.ones(H, dtype=cp.uint8)
     dirty_cols = cp.ones(W, dtype=cp.uint8)
-    row_pass = ((H,), (dirty_rows, dirty_cols, W, W, 1), triton.next_power_of_2(W))
-    col_pass = ((W,), (dirty_cols, dirty_rows, H, 1, W), triton.next_power_of_2(H))
-    for rounds in range(1, max_rounds + 1):
-        changed_dev.fill(0)
-        for launch_grid, (mine, cross, line_len, line_stride, elem_stride), L in (
-            row_pass,
-            col_pass,
-        ):
-            scan_line_step[launch_grid](
+    line_list = cp.empty(max(H, W), dtype=cp.int32)
+    # (own flags, crossing flags, lines, line_len, line_stride, elem_stride, L)
+    passes = (
+        (dirty_rows, dirty_cols, H, W, W, 1, triton.next_power_of_2(W)),
+        (dirty_cols, dirty_rows, W, H, 1, W, triton.next_power_of_2(H)),
+    )
+    launches = 0
+    for _ in range(max_rounds):
+        any_dirty = False
+        for mine, cross, n_lines, line_len, line_stride, elem_stride, L in passes:
+            changed_dev.fill(0)
+            gather_dirty[(triton.cdiv(n_lines, 1024),)](
+                t(mine), t(line_list), t(changed_dev), n_lines, BLOCK=1024)
+            launches += 1
+            n_dirty = int(changed_dev[0])  # D2H read; also syncs the stream
+            if n_dirty == 0:
+                continue
+            any_dirty = True
+            scan_line_step[(n_dirty,)](
                 t(grid_dev),
-                t(changed_dev),
-                t(mine),
+                t(line_list),
                 t(cross),
                 line_len,
                 line_stride,
@@ -187,9 +206,10 @@ def run_flood_fill_scan(grid_dev, changed_dev, *, max_rounds: int = 100_000):
                 BLUE_V=BLUE,
                 num_warps=4,
             )
-        if int(changed_dev[0]) == 0:
-            return 2 * rounds, True
-    return 2 * max_rounds, False
+            launches += 1
+        if not any_dirty:
+            return launches, True
+    return launches, False
 
 
 def run_flood_fill(

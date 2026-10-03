@@ -9,7 +9,7 @@ red pixel from which the fill starts.
 import cv2
 import numpy as np
 
-from kernels import RED
+from .kernels import RED
 
 
 def make_disc(size: int, rng: np.random.Generator):
@@ -41,7 +41,7 @@ def make_amoeba(size: int, rng: np.random.Generator):
 def make_spiral(size: int, rng: np.random.Generator):
     """Archimedean spiral arm: one blob with a very long geodesic path.
 
-    Worst case for level-synchronous BFS — the wavefront must crawl along
+    Worst case for level-synchronous BFS: the wavefront must crawl along
     the whole arm even though the blob is compact on screen.
     """
     c = size // 2

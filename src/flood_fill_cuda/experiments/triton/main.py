@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""GPU flood fill of a single big blob with Triton — pixels/second benchmark.
+"""GPU flood fill of a single big blob with Triton: pixels/second benchmark.
 
 Fills one connected red blob starting from a seed pixel, turning it blue with
-a parallel BFS wavefront kernel written in Triton (no torch — Triton runs on
-CuPy memory via cupy_bridge).  Reports converted pixels/second, verifies the
-result against OpenCV's CPU floodFill, and saves before/after PNGs.
+parallel Triton kernels (no torch: Triton runs on CuPy memory through the
+shared runtime, flood_fill_cuda.triton_twins.runtime).  Reports converted
+pixels/second, verifies the result against OpenCV's CPU floodFill, and saves
+before/after PNGs.
 
-Usage (from the repo root):
+Usage (from the repo root), as a module or as a script:
 
-    uv run python src/flood_fill_cuda/experiments/triton/main.py
+    uv run python -m flood_fill_cuda.experiments.triton.main
     uv run python src/flood_fill_cuda/experiments/triton/main.py --size 8192 --shape spiral
-    uv run python src/flood_fill_cuda/experiments/triton/main.py --mode both --repeats 5
+    uv run python src/flood_fill_cuda/experiments/triton/main.py --mode all --repeats 5
 """
 
 import argparse
@@ -18,7 +19,10 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+if __package__ in (None, ""):
+    # Run as a script: make the flood_fill_cuda package importable even
+    # without the editable install (src/ is three levels up).
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import cupy as cp
 import cv2
@@ -27,9 +31,11 @@ from PIL import Image
 from rich.console import Console
 from rich.table import Table
 
-from blobs import GENERATORS, make_blob
-from cupy_bridge import install_cupy_driver
-from kernels import BLUE, RED, run_flood_fill, run_flood_fill_scan
+from flood_fill_cuda.experiments.triton.blobs import GENERATORS, make_blob
+from flood_fill_cuda.experiments.triton.kernels import (
+    BLUE, RED, run_flood_fill, run_flood_fill_scan,
+)
+from flood_fill_cuda.triton_twins.runtime import install
 
 # background -> white, red -> red, blue -> blue
 PALETTE = [255, 255, 255, 220, 60, 54, 38, 110, 210]
@@ -104,7 +110,7 @@ def main() -> int:
     args = p.parse_args()
 
     console = Console()
-    install_cupy_driver()
+    install()  # idempotent: importing the runtime already installed it
 
     initial, seed = make_blob(args.shape, args.size, args.rng_seed)
     blob_px = int(np.count_nonzero(initial == RED))
@@ -132,7 +138,7 @@ def main() -> int:
         args.out_dir.mkdir(parents=True, exist_ok=True)
         save_png(initial, args.out_dir / f"{args.shape}_{args.size}_initial.png")
 
-    table = Table(title=f"Triton flood fill — {args.shape} {args.size}x{args.size}")
+    table = Table(title=f"Triton flood fill: {args.shape} {args.size}x{args.size}")
     for col in ("mode", "filled MPx", "launches", "best ms", "mean ms", "MPx/s", "vs CPU"):
         table.add_column(col, justify="right")
 
