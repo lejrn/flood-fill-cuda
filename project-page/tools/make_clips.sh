@@ -167,15 +167,20 @@ gif_poster "$RES/ch06_gpu_nblob_runs/figures/before_after.gif" "$IMG/before_afte
 # 5. Side-by-side clips (Nerfies' "stacked" videos). Each pair was rendered
 # by one generator on one clock with the same frame count and delays, so
 # frame i of the left GIF and frame i of the right GIF line up.
-# stack_clip LEFT RIGHT OUT UPSCALE GAP
+# stack_clip LEFT RIGHT OUT UPSCALE GAP [RIGHT_PTS]
+# RIGHT_PTS rescales the right clip's timestamps (e.g. 180/241 plays it
+# faster). When the right clip ends first, hstack holds its last frame.
 stack_clip() {
-    local left=$1 right=$2 out=$3 up=$4 gap=$5 sc=""
+    local left=$1 right=$2 out=$3 up=$4 gap=$5 pts=${6:-1} sc="" rt=""
     if (( up > 1 )); then
         sc=",scale=iw*$up:ih*$up:flags=neighbor"
     fi
-    echo "stack  $out  <- $left | $right (x$up, gap $gap)"
+    if [[ $pts != 1 ]]; then
+        rt="setpts=PTS*$pts,"
+    fi
+    echo "stack  $out  <- $left | $right (x$up, gap $gap, right pts x$pts)"
     ff -i "$left" -i "$right" -filter_complex \
-        "[0:v]fps=30,format=rgb24$sc,pad=iw+$gap:ih:0:0:white[l];[1:v]fps=30,format=rgb24$sc[r];[l][r]hstack=inputs=2,$TO_YUV" \
+        "[0:v]fps=30,format=rgb24$sc,pad=iw+$gap:ih:0:0:white[l];[1:v]${rt}fps=30,format=rgb24$sc[r];[l][r]hstack=inputs=2,$TO_YUV" \
         "${X264[@]}" -crf 18 "$out"
 }
 
@@ -206,9 +211,13 @@ PY
 
 # ch04: two launches one after the other (left) vs one shared launch (right).
 # The sequential GIF replays the multisource depth map on a sequential clock.
+# Each GIF spreads its whole clock over 96 frames: 242 ticks (levels
+# 181 + 61) on the left, 181 on the right. Frames sample ticks 0..n-1, so
+# playing the right clip at 180/241 of its length gives one BFS level the
+# same screen time on both sides, and the one-launch side finishes first.
 SEQ=$RES/ch04_gpu_2blob_nblock/wavefront/asym384_b8_t32_sequential.gif
 MULTI=$RES/ch04_gpu_2blob_nblock/wavefront/asym384_b8_t32_multisource.gif
-stack_clip "$SEQ" "$MULTI" "$VID/two_blobs_ab.mp4" 1 16
+stack_clip "$SEQ" "$MULTI" "$VID/two_blobs_ab.mp4" 1 16 180/241
 stack_poster "$SEQ" "$MULTI" "$IMG/two_blobs_ab.webp" 1 16
 
 # ch05: provisional labels (left) vs final labels after the merge (right).

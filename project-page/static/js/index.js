@@ -36,15 +36,24 @@
   }
 
   // ---- navbar burger (Nerfies) -------------------------------------------
+  // The burger is a real <button>, so Enter and Space already click it.
   function wireBurger() {
     var burger = document.querySelector('.navbar-burger');
     var menu = document.querySelector('.navbar-menu');
     if (!burger || !menu) return;
-    burger.addEventListener('click', function () {
-      var open = burger.classList.toggle('is-active');
+    function setOpen(open) {
+      burger.classList.toggle('is-active', open);
       menu.classList.toggle('is-active', open);
       burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    burger.addEventListener('click', function () {
+      setOpen(!burger.classList.contains('is-active'));
     });
+    // Close the opened menu after a jump to a section of this page.
+    var links = menu.querySelectorAll('a[href^="#"]');
+    for (var i = 0; i < links.length; i++) {
+      links[i].addEventListener('click', function () { setOpen(false); });
+    }
   }
 
   // ---- reduced motion ----------------------------------------------------
@@ -61,6 +70,34 @@
     }
   }
 
+  // ---- clips play only while on screen -----------------------------------
+  // The carousel and the side-by-side clips carry preload="none" and no
+  // autoplay. Each one loads and plays when a quarter of it is visible and
+  // pauses when it leaves, so off-screen and cloned slides cost nothing.
+  function playWhenVisible(videos) {
+    if (!videos.length) return;
+    if (!('IntersectionObserver' in window)) {
+      if (!reduceMotion) {
+        for (var i = 0; i < videos.length; i++) videos[i].autoplay = true;
+      }
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      for (var e = 0; e < entries.length; e++) {
+        var v = entries[e].target;
+        if (entries[e].isIntersecting) {
+          if (!reduceMotion) {
+            var p = v.play();
+            if (p && p.catch) p.catch(function () {});
+          }
+        } else {
+          v.pause();
+        }
+      }
+    }, { threshold: 0.25 });
+    for (var j = 0; j < videos.length; j++) io.observe(videos[j]);
+  }
+
   // ---- results carousel (Nerfies options) --------------------------------
   function wireCarousel() {
     if (typeof bulmaCarousel === 'undefined') return;
@@ -72,8 +109,60 @@
       autoplay: false,
       autoplaySpeed: 3000
     });
-    // the carousel clones items for the infinite loop; keep clones calm too
-    calmVideos();
+
+    var root = document.querySelector('#results-carousel .slider');
+    if (!root) return;
+    root.setAttribute('role', 'region');
+    root.setAttribute('aria-roledescription', 'carousel');
+    root.setAttribute('aria-label', 'Clips by chapter. Use the arrow keys to move.');
+
+    // The library draws its arrows as plain divs: make them buttons.
+    var arrows = [
+      ['.slider-navigation-previous', 'Previous clip'],
+      ['.slider-navigation-next', 'Next clip']
+    ];
+    for (var a = 0; a < arrows.length; a++) {
+      var el = root.querySelector(arrows[a][0]);
+      if (!el) continue;
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', arrows[a][1]);
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          this.click();
+        }
+      });
+    }
+    var dots = root.querySelector('.slider-pagination');
+    if (dots) dots.setAttribute('aria-hidden', 'true');
+
+    // Clones exist only for the endless loop; hide them from assistive tech
+    // and from the tab order.
+    var clones = root.querySelectorAll('.slider-item[data-cloned="true"]');
+    for (var c = 0; c < clones.length; c++) {
+      clones[c].setAttribute('aria-hidden', 'true');
+      clones[c].inert = true;
+    }
+
+    // Arrow keys inside a clip seek the clip; do not also move the carousel.
+    var vids = root.querySelectorAll('video');
+    for (var v = 0; v < vids.length; v++) {
+      vids[v].addEventListener('keyup', function (e) { e.stopPropagation(); });
+    }
+
+    // Slides scrolled out of view leave the tab order too.
+    if ('IntersectionObserver' in window) {
+      var view = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          var item = entries[i].target;
+          if (item.getAttribute('data-cloned') === 'true') continue;
+          item.inert = entries[i].intersectionRatio < 0.5;
+        }
+      }, { root: root, threshold: [0, 0.5, 1] });
+      var items = root.querySelectorAll('.slider-item');
+      for (var k = 0; k < items.length; k++) view.observe(items[k]);
+    }
   }
 
   // ---- wavefront scrub (Nerfies "interpolating states") ------------------
@@ -183,20 +272,25 @@
 
     button.addEventListener('click', function () {
       var text = code.innerText;
-      var done = function (msg) {
+      var status = document.getElementById('bibtex-status');
+      var done = function (msg, spoken) {
         if (label) label.textContent = msg;
-        setTimeout(function () { if (label) label.textContent = 'Copy'; }, 1800);
+        if (status) status.textContent = spoken;
+        setTimeout(function () {
+          if (label) label.textContent = 'Copy';
+          if (status) status.textContent = '';
+        }, 1800);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function () {
-          done('Copied');
+          done('Copied', 'BibTeX copied to the clipboard');
         }, function () {
           selectCode();
-          done('Selected');
+          done('Selected', 'BibTeX selected, press Control C to copy');
         });
       } else {
         selectCode();
-        done('Selected');
+        done('Selected', 'BibTeX selected, press Control C to copy');
       }
     });
   }
@@ -206,6 +300,7 @@
     wireBurger();
     calmVideos();
     wireCarousel();
+    playWhenVisible(document.querySelectorAll('#results-carousel video, video.stacked-video'));
     wireScrub();
     wireCopy();
   }
