@@ -1,0 +1,3683 @@
+{
+ "schema": 1,
+ "chapter": "ch01_gpu_1blob_1block",
+ "created_utc": "20261002T133927Z",
+ "gpu": {
+  "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "sm_count": 24,
+  "max_threads_per_sm": 1536
+ },
+ "versions": {
+  "python": "3.10.12",
+  "numba": "0.65.1",
+  "triton": "3.7.1",
+  "cupy": "14.1.1",
+  "cuda_driver": "13.3"
+ },
+ "git_commit": "46f7e7e",
+ "clocks_idle": {
+  "sm_mhz": 375,
+  "max_sm_mhz": 3105,
+  "power_w": 9.92,
+  "temp_c": 60
+ },
+ "spin_up_seconds": 8.0,
+ "repeats": 6,
+ "method": "Both backends warmed per case; repeats rounds with the run order flipping each round (N,T then T,N); outputs compared on every run. kernel_ms/total_ms are each driver's own perf_counter + synchronize measurements, launch overhead included. speedup = numba_ms / triton_ms (>1: Triton faster). kernel_ms is primary; total_ms also compares the allocators (CuPy pool vs Numba cuMemAlloc). Rows with comparable=false are not like-for-like and stay out of the summary's averages.",
+ "meta": {
+  "source_benchmark": "chapters/ch01_gpu_1blob_1block/benchmarks/benchmark.py",
+  "quick": false,
+  "threads_per_block": 256,
+  "tpb_sweep": {
+   "scene": "sq_2000_center",
+   "tpbs": [
+    64,
+    128,
+    256,
+    512,
+    1024
+   ],
+   "variant": "ring"
+  },
+  "ring_trip_scenes": [
+   "sq_2600_full_center",
+   "sq_4000_center",
+   "sq_5000_center",
+   "sq_6000_center"
+  ],
+  "only": null,
+  "caps": [],
+  "measured_peak_host_rss_gb_sq_6000_center": 1.56,
+  "notes": [
+   "Grid is 1 block (Numba [1, tpb]) = 1 program (Triton (1,), num_warps = tpb // 32) on both sides.",
+   "The Triton ring (8192 int32) and its rear/overflow/spill-rear scalars live in global scratch (Triton has no user-addressable shared memory); Numba's live in shared memory.",
+   "v1 ticket atomics: one per winning lane in the source on both sides; ptxas warp-aggregates both (one ATOMS per warp in Numba, one ATOMG per warp in Triton), so the executed atomic counts match. v2: Numba aggregates per warp in the source, Triton per program (one atomic per tier per chunk per direction).",
+   "Use speedup_kernel for Numba vs Triton. total_ms and speedup_total add host-library costs that differ by stack: CuPy's pool and lighter .set/.get calls vs Numba's fresh cuMemAlloc and copy_to_device. On small scenes speedup_total exceeds speedup_kernel and can flip its direction (spill rows).",
+   "phases_ms (per row, per backend): alloc/h2d/d2h of the warm-up call (cold: the harness releases both pools before each case) and the medians of the timed rounds.",
+   "ring_tripwire rows: kernel_ms = the driver's kernel bracket (launch + synchronize) up to the overflow abort; total_ms = the driver's first stamp to the RuntimeError; d2h_ms = the counters copy and the raise. Taken from the drivers' own perf_counter stamps, so kernel_ms is the same bracket as in the other rows."
+  ]
+ },
+ "rows": [
+  {
+   "experiment": "scenes",
+   "scene": "sq_256_center",
+   "pixels": 65536,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "128^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 0.36515,
+      "h2d_ms": 0.757563,
+      "d2h_ms": 0.554016
+     },
+     "timed_median": {
+      "alloc_ms": 0.575479,
+      "h2d_ms": 1.0019335,
+      "d2h_ms": 0.8246625
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 0.169069,
+      "h2d_ms": 0.312314,
+      "d2h_ms": 0.417315
+     },
+     "timed_median": {
+      "alloc_ms": 0.154524,
+      "h2d_ms": 0.39636150000000003,
+      "d2h_ms": 0.593604
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 16384,
+    "levels": 129,
+    "peak_level": 254,
+    "peak_occupancy": 506,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 16384,
+    "cas_attempts": 32512,
+    "thread_util_pct": 49.6124031007752,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.57,
+    "temp_c": 66
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 0.6773485001758672,
+     "min": 0.6044969995855354,
+     "max": 0.7556029995612334,
+     "samples": [
+      0.630894,
+      0.680662,
+      0.604497,
+      0.745335,
+      0.674035,
+      0.755603
+     ]
+    },
+    "total_ms": {
+     "median": 3.395461000764044,
+     "min": 2.443896999466233,
+     "max": 3.8336950019584037,
+     "samples": [
+      3.833695,
+      3.477379,
+      2.443897,
+      3.795572,
+      3.093781,
+      3.313543
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 0.5966464996163268,
+     "min": 0.4898709994449746,
+     "max": 0.6971010006964207,
+     "samples": [
+      0.489871,
+      0.594187,
+      0.697101,
+      0.595675,
+      0.609253,
+      0.597618
+     ]
+    },
+    "total_ms": {
+     "median": 1.87952800115454,
+     "min": 1.3110050022078212,
+     "max": 2.037082002061652,
+     "samples": [
+      1.311005,
+      1.562455,
+      2.037082,
+      1.880443,
+      2.002145,
+      1.878613
+     ]
+    }
+   },
+   "speedup_kernel": 1.135259321242035,
+   "speedup_total": 1.806549835213048,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_256_center",
+   "pixels": 65536,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "128^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 0.469337,
+      "h2d_ms": 0.694169,
+      "d2h_ms": 0.859737
+     },
+     "timed_median": {
+      "alloc_ms": 0.5531305,
+      "h2d_ms": 1.0767404999999999,
+      "d2h_ms": 0.6839935
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 0.742737,
+      "h2d_ms": 0.329644,
+      "d2h_ms": 0.611239
+     },
+     "timed_median": {
+      "alloc_ms": 0.15971200000000002,
+      "h2d_ms": 0.4546165,
+      "d2h_ms": 0.6962905
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 16384,
+    "levels": 129,
+    "peak_level": 254,
+    "peak_occupancy": 506,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 16384,
+    "cas_attempts": 32512,
+    "thread_util_pct": 49.6124031007752,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 16.63,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 0.7174834991019452,
+     "min": 0.6385080014297273,
+     "max": 1.1945129990635905,
+     "samples": [
+      0.695165,
+      1.194513,
+      0.896647,
+      0.739802,
+      0.638508,
+      0.674052
+     ]
+    },
+    "total_ms": {
+     "median": 2.9575694989034673,
+     "min": 2.2745780006516725,
+     "max": 4.853665999689838,
+     "samples": [
+      2.618203,
+      4.853666,
+      4.335198,
+      2.654234,
+      2.274578,
+      3.260905
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 0.7959910017234506,
+     "min": 0.7305100007215515,
+     "max": 1.23583199820132,
+     "samples": [
+      0.73051,
+      0.864719,
+      0.784699,
+      0.807283,
+      1.235832,
+      0.752738
+     ]
+    },
+    "total_ms": {
+     "median": 2.0386724991112715,
+     "min": 1.8600829971546773,
+     "max": 4.888337000011234,
+     "samples": [
+      1.860083,
+      2.269554,
+      2.048345,
+      2.029,
+      4.888337,
+      1.961604
+     ]
+    }
+   },
+   "speedup_kernel": 0.9013713692095465,
+   "speedup_total": 1.4507330138571914,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_512_center",
+   "pixels": 262144,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "256^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 1.913688,
+      "h2d_ms": 1.150059,
+      "d2h_ms": 2.167412
+     },
+     "timed_median": {
+      "alloc_ms": 1.650347,
+      "h2d_ms": 1.319632,
+      "d2h_ms": 2.2102545
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 1.791486,
+      "h2d_ms": 0.75842,
+      "d2h_ms": 2.272603
+     },
+     "timed_median": {
+      "alloc_ms": 0.521191,
+      "h2d_ms": 0.75575,
+      "d2h_ms": 2.00894
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 65536,
+    "levels": 257,
+    "peak_level": 510,
+    "peak_occupancy": 1018,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 65536,
+    "cas_attempts": 130560,
+    "thread_util_pct": 74.71121108949416,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 15.96,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 1.8560179978521774,
+     "min": 1.3885370026400778,
+     "max": 5.100162998132873,
+     "samples": [
+      1.455778,
+      1.388537,
+      1.746857,
+      1.965179,
+      5.100163,
+      2.132037
+     ]
+    },
+    "total_ms": {
+     "median": 7.155155499276589,
+     "min": 6.6765150004357565,
+     "max": 10.619304001011187,
+     "samples": [
+      6.938324,
+      6.676515,
+      8.436942,
+      7.111037,
+      10.619304,
+      7.199274
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 1.6259674994216766,
+     "min": 1.1310999980196357,
+     "max": 4.469339000934269,
+     "samples": [
+      1.165427,
+      1.1311,
+      1.811778,
+      1.460716,
+      1.791219,
+      4.469339
+     ]
+    },
+    "total_ms": {
+     "median": 5.122587501318776,
+     "min": 3.9722000001347624,
+     "max": 7.617201001266949,
+     "samples": [
+      5.056318,
+      3.9722,
+      5.321859,
+      4.672753,
+      5.188857,
+      7.617201
+     ]
+    }
+   },
+   "speedup_kernel": 1.141485299375495,
+   "speedup_total": 1.3967854131207211,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_512_center",
+   "pixels": 262144,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "256^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 2.09905,
+      "h2d_ms": 1.21779,
+      "d2h_ms": 2.151526
+     },
+     "timed_median": {
+      "alloc_ms": 1.5572105,
+      "h2d_ms": 1.1106500000000001,
+      "d2h_ms": 2.146299
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 1.715892,
+      "h2d_ms": 2.720447,
+      "d2h_ms": 2.132145
+     },
+     "timed_median": {
+      "alloc_ms": 0.482346,
+      "h2d_ms": 0.7415805,
+      "d2h_ms": 1.9117305
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 65536,
+    "levels": 257,
+    "peak_level": 510,
+    "peak_occupancy": 1018,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 65536,
+    "cas_attempts": 130560,
+    "thread_util_pct": 74.71121108949416,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 1530,
+    "max_sm_mhz": 3105,
+    "power_w": 14.97,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 1.9359184989298228,
+     "min": 1.7931209986272734,
+     "max": 2.2993630009295885,
+     "samples": [
+      1.953879,
+      1.934916,
+      1.936921,
+      2.299363,
+      1.793121,
+      1.807352
+     ]
+    },
+    "total_ms": {
+     "median": 6.6591659997357056,
+     "min": 6.320070002402645,
+     "max": 9.552741001243703,
+     "samples": [
+      7.041638,
+      6.76725,
+      6.391396,
+      9.552741,
+      6.551082,
+      6.32007
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 2.668556500793784,
+     "min": 2.2166679991642013,
+     "max": 2.805595999234356,
+     "samples": [
+      2.677969,
+      2.659144,
+      2.805596,
+      2.679758,
+      2.280957,
+      2.216668
+     ]
+    },
+    "total_ms": {
+     "median": 5.612550499790814,
+     "min": 5.125561001477763,
+     "max": 6.4543019980192184,
+     "samples": [
+      6.198848,
+      5.53938,
+      6.454302,
+      5.685721,
+      5.445649,
+      5.125561
+     ]
+    }
+   },
+   "speedup_kernel": 0.7254553157686442,
+   "speedup_total": 1.1864776985051448,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_1024_center",
+   "pixels": 1048576,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "512^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 3.623986,
+      "h2d_ms": 2.873069,
+      "d2h_ms": 4.553578
+     },
+     "timed_median": {
+      "alloc_ms": 3.4441534999999996,
+      "h2d_ms": 2.6652815,
+      "d2h_ms": 4.3483715
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 2.249462,
+      "h2d_ms": 2.150954,
+      "d2h_ms": 5.022412
+     },
+     "timed_median": {
+      "alloc_ms": 1.732808,
+      "h2d_ms": 2.3459715,
+      "d2h_ms": 4.288278999999999
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 262144,
+    "levels": 513,
+    "peak_level": 1022,
+    "peak_occupancy": 2042,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 262144,
+    "cas_attempts": 523264,
+    "thread_util_pct": 87.33095760233918,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 1530,
+    "max_sm_mhz": 3105,
+    "power_w": 13.61,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 5.183555000257911,
+     "min": 5.057611000665929,
+     "max": 5.372551997425035,
+     "samples": [
+      5.3712,
+      5.372552,
+      5.094763,
+      5.263392,
+      5.057611,
+      5.103718
+     ]
+    },
+    "total_ms": {
+     "median": 15.750412001580116,
+     "min": 14.358170999912545,
+     "max": 17.082480997487437,
+     "samples": [
+      15.150968,
+      16.802731,
+      14.358171,
+      17.082481,
+      14.599941,
+      16.349856
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 4.497926000112784,
+     "min": 4.206838999380125,
+     "max": 4.640328003006289,
+     "samples": [
+      4.640328,
+      4.330328,
+      4.467878,
+      4.527974,
+      4.571081,
+      4.206839
+     ]
+    },
+    "total_ms": {
+     "median": 12.88565100003325,
+     "min": 11.549081998964539,
+     "max": 14.519051001116168,
+     "samples": [
+      14.519051,
+      12.25783,
+      13.513472,
+      11.742498,
+      13.962141,
+      11.549082
+     ]
+    }
+   },
+   "speedup_kernel": 1.1524322543607732,
+   "speedup_total": 1.2223217904581984,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_1024_center",
+   "pixels": 1048576,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "512^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 2.304728,
+      "h2d_ms": 2.768465,
+      "d2h_ms": 4.470449
+     },
+     "timed_median": {
+      "alloc_ms": 3.3248895,
+      "h2d_ms": 2.6523440000000003,
+      "d2h_ms": 4.535563
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 3.766542,
+      "h2d_ms": 2.319172,
+      "d2h_ms": 4.270416
+     },
+     "timed_median": {
+      "alloc_ms": 1.4403285000000001,
+      "h2d_ms": 2.333171,
+      "d2h_ms": 4.5872685
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 262144,
+    "levels": 513,
+    "peak_level": 1022,
+    "peak_occupancy": 2042,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 262144,
+    "cas_attempts": 523264,
+    "thread_util_pct": 87.33095760233918,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 13.38,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 4.8681714997655945,
+     "min": 4.8368630014010705,
+     "max": 5.224697000812739,
+     "samples": [
+      4.879615,
+      4.836863,
+      4.86445,
+      4.844832,
+      4.871893,
+      5.224697
+     ]
+    },
+    "total_ms": {
+     "median": 15.494721499635489,
+     "min": 14.39657800074201,
+     "max": 17.684130001725862,
+     "samples": [
+      15.126356,
+      15.863087,
+      14.396578,
+      15.906318,
+      14.525594,
+      17.68413
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 6.54046049749013,
+     "min": 6.230445000255713,
+     "max": 10.944285000732634,
+     "samples": [
+      6.390506,
+      9.242446,
+      6.690415,
+      6.230445,
+      6.299125,
+      10.944285
+     ]
+    },
+    "total_ms": {
+     "median": 16.67383200219774,
+     "min": 13.400456002273131,
+     "max": 19.1709169994283,
+     "samples": [
+      14.818998,
+      16.926782,
+      19.170917,
+      13.400456,
+      16.420882,
+      18.709484
+     ]
+    }
+   },
+   "speedup_kernel": 0.7443163217075818,
+   "speedup_total": 0.9292837721762558,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "1000^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 8.005443,
+      "h2d_ms": 9.614906,
+      "d2h_ms": 21.320898
+     },
+     "timed_median": {
+      "alloc_ms": 9.009307,
+      "h2d_ms": 8.420626,
+      "d2h_ms": 15.5229365
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 4.549938,
+      "h2d_ms": 8.073554,
+      "d2h_ms": 20.378192
+     },
+     "timed_median": {
+      "alloc_ms": 5.5302215,
+      "h2d_ms": 8.094656,
+      "d2h_ms": 12.9043665
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 93.50727397602398,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 15.15,
+    "temp_c": 65
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 18.253923999509425,
+     "min": 16.962390996923205,
+     "max": 21.825410000019474,
+     "samples": [
+      19.219692,
+      21.493174,
+      21.82541,
+      17.142253,
+      17.288156,
+      16.962391
+     ]
+    },
+    "total_ms": {
+     "median": 51.71963500106358,
+     "min": 42.54264599876478,
+     "max": 62.72388299839804,
+     "samples": [
+      50.556912,
+      62.723883,
+      52.882358,
+      49.978441,
+      42.542646,
+      53.404546
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 14.820107498962898,
+     "min": 13.747836997936247,
+     "max": 19.402357000217307,
+     "samples": [
+      19.178867,
+      19.402357,
+      14.740477,
+      13.747837,
+      14.657234,
+      14.899738
+     ]
+    },
+    "total_ms": {
+     "median": 44.559572997968644,
+     "min": 36.2487290003628,
+     "max": 59.036890997958835,
+     "samples": [
+      59.036891,
+      47.438843,
+      50.350237,
+      36.248729,
+      41.680303,
+      37.648954
+     ]
+    }
+   },
+   "speedup_kernel": 1.2316998375880084,
+   "speedup_total": 1.1606851574502597,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "1000^2 blob",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 6.359552,
+      "h2d_ms": 8.486076,
+      "d2h_ms": 13.095417
+     },
+     "timed_median": {
+      "alloc_ms": 9.549879,
+      "h2d_ms": 8.667353,
+      "d2h_ms": 15.031306
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 11.98192,
+      "h2d_ms": 7.827429,
+      "d2h_ms": 12.523923
+     },
+     "timed_median": {
+      "alloc_ms": 6.902373,
+      "h2d_ms": 8.041251500000001,
+      "d2h_ms": 15.442976
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 93.50727397602398,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 15.48,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 23.853553999288124,
+     "min": 18.34997800324345,
+     "max": 26.699946000007913,
+     "samples": [
+      18.349978,
+      21.736421,
+      25.607526,
+      22.915308,
+      24.7918,
+      26.699946
+     ]
+    },
+    "total_ms": {
+     "median": 57.26472000060312,
+     "min": 45.080103001964744,
+     "max": 67.75520399969537,
+     "samples": [
+      45.080103,
+      57.272758,
+      55.501566,
+      64.301772,
+      57.256682,
+      67.755204
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 33.08687349999673,
+     "min": 26.188690000708448,
+     "max": 39.75578300014604,
+     "samples": [
+      26.960048,
+      26.18869,
+      39.755783,
+      31.902288,
+      36.922191,
+      34.271459
+     ]
+    },
+    "total_ms": {
+     "median": 60.952525500397314,
+     "min": 50.95273700135294,
+     "max": 80.10450599977048,
+     "samples": [
+      58.713593,
+      50.952737,
+      80.104506,
+      61.174016,
+      70.198006,
+      60.731035
+     ]
+    }
+   },
+   "speedup_kernel": 0.7209370809632553,
+   "speedup_total": 0.9394970845011146,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_4000_corner",
+   "pixels": 16000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "16M px, corner seed - peak occupancy ~7999 proves the 8192 capacity math",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 24.470053,
+      "h2d_ms": 32.892734,
+      "d2h_ms": 83.095946
+     },
+     "timed_median": {
+      "alloc_ms": 13.477333999999999,
+      "h2d_ms": 21.129427,
+      "d2h_ms": 44.3385545
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 12.690413,
+      "h2d_ms": 34.290294,
+      "d2h_ms": 96.517806
+     },
+     "timed_median": {
+      "alloc_ms": 11.1172825,
+      "h2d_ms": 17.1205565,
+      "d2h_ms": 43.198208
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 16000000,
+    "levels": 7999,
+    "peak_level": 4000,
+    "peak_occupancy": 7999,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 16000000,
+    "cas_attempts": 31992000,
+    "thread_util_pct": 96.81210151268908,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 20.15,
+    "temp_c": 64
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 228.6838189993432,
+     "min": 224.3609329998435,
+     "max": 271.68281500053126,
+     "samples": [
+      271.682815,
+      230.302018,
+      226.264273,
+      263.39,
+      224.360933,
+      227.06562
+     ]
+    },
+    "total_ms": {
+     "median": 320.81634450150887,
+     "min": 299.161096001626,
+     "max": 369.82124100177316,
+     "samples": [
+      369.821241,
+      339.612305,
+      299.757993,
+      343.438218,
+      299.161096,
+      302.020384
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 222.9238224990695,
+     "min": 204.3090500010294,
+     "max": 234.1766559984535,
+     "samples": [
+      204.30905,
+      208.2864,
+      222.70053,
+      234.176656,
+      228.597531,
+      223.147115
+     ]
+    },
+    "total_ms": {
+     "median": 296.5699609994772,
+     "min": 272.55082999909064,
+     "max": 363.8122500015015,
+     "samples": [
+      285.711131,
+      272.55083,
+      298.399782,
+      308.102781,
+      363.81225,
+      294.74014
+     ]
+    }
+   },
+   "speedup_kernel": 1.0258384071998305,
+   "speedup_total": 1.0817560329452058,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_4000_corner",
+   "pixels": 16000000,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "16M px, corner seed - peak occupancy ~7999 proves the 8192 capacity math",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 13.097074,
+      "h2d_ms": 19.226919,
+      "d2h_ms": 35.187897
+     },
+     "timed_median": {
+      "alloc_ms": 12.6122015,
+      "h2d_ms": 20.318756999999998,
+      "d2h_ms": 40.8584655
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 11.363135,
+      "h2d_ms": 19.119745,
+      "d2h_ms": 39.287038
+     },
+     "timed_median": {
+      "alloc_ms": 10.025885,
+      "h2d_ms": 15.812583499999999,
+      "d2h_ms": 38.3527615
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 16000000,
+    "levels": 7999,
+    "peak_level": 4000,
+    "peak_occupancy": 7999,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 16000000,
+    "cas_attempts": 31992000,
+    "thread_util_pct": 96.81210151268908,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.07,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 236.54793749847158,
+     "min": 235.7255979986803,
+     "max": 261.23498999731964,
+     "samples": [
+      235.856466,
+      261.23499,
+      236.790682,
+      236.51029,
+      236.585585,
+      235.725598
+     ]
+    },
+    "total_ms": {
+     "median": 322.3213279998163,
+     "min": 304.10912099978304,
+     "max": 426.40600400045514,
+     "samples": [
+      304.109121,
+      334.692611,
+      309.950045,
+      425.894367,
+      305.388464,
+      426.406004
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 337.068636501499,
+     "min": 335.54973999707727,
+     "max": 346.0691450018203,
+     "samples": [
+      335.706517,
+      343.877751,
+      336.491361,
+      346.069145,
+      335.54974,
+      337.645912
+     ]
+    },
+    "total_ms": {
+     "median": 404.372629500358,
+     "min": 399.4802989982418,
+     "max": 452.6611649998813,
+     "samples": [
+      452.661165,
+      407.555079,
+      399.480299,
+      448.084698,
+      400.00228,
+      401.19018
+     ]
+    }
+   },
+   "speedup_kernel": 0.7017797323229141,
+   "speedup_total": 0.7970898732638652,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "serpentine_256",
+   "pixels": 65536,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "worst case: ~1-wide frontier starves the block",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 1.218207,
+      "h2d_ms": 0.620842,
+      "d2h_ms": 0.70424
+     },
+     "timed_median": {
+      "alloc_ms": 0.36954,
+      "h2d_ms": 0.5931485,
+      "d2h_ms": 0.6708935
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 0.171074,
+      "h2d_ms": 0.189571,
+      "d2h_ms": 0.455776
+     },
+     "timed_median": {
+      "alloc_ms": 0.113534,
+      "h2d_ms": 0.2549195,
+      "d2h_ms": 0.655664
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 32896,
+    "levels": 32896,
+    "peak_level": 1,
+    "peak_occupancy": 2,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 32896,
+    "cas_attempts": 32895,
+    "thread_util_pct": 0.390625,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.81,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 36.52867799974047,
+     "min": 36.328163998405216,
+     "max": 37.04565099906176,
+     "samples": [
+      36.590551,
+      37.045651,
+      36.939518,
+      36.328164,
+      36.466805,
+      36.389114
+     ]
+    },
+    "total_ms": {
+     "median": 38.26988549917587,
+     "min": 37.81058800086612,
+     "max": 38.934999000048265,
+     "samples": [
+      38.760331,
+      38.934999,
+      38.456667,
+      37.810588,
+      38.083104,
+      38.064426
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 38.37585400106036,
+     "min": 38.23578400260885,
+     "max": 38.47053000208689,
+     "samples": [
+      38.324917,
+      38.445926,
+      38.426791,
+      38.47053,
+      38.261359,
+      38.235784
+     ]
+    },
+    "total_ms": {
+     "median": 39.43106449878542,
+     "min": 39.1152720003447,
+     "max": 39.60154300148133,
+     "samples": [
+      39.115272,
+      39.431328,
+      39.430801,
+      39.273149,
+      39.597511,
+      39.601543
+     ]
+    }
+   },
+   "speedup_kernel": 0.9518661916613281,
+   "speedup_total": 0.9705516700000499,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "serpentine_256",
+   "pixels": 65536,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "worst case: ~1-wide frontier starves the block",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 0.376997,
+      "h2d_ms": 0.621168,
+      "d2h_ms": 0.606301
+     },
+     "timed_median": {
+      "alloc_ms": 0.46816199999999997,
+      "h2d_ms": 0.673493,
+      "d2h_ms": 0.7734544999999999
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 0.165143,
+      "h2d_ms": 0.207625,
+      "d2h_ms": 1.058013
+     },
+     "timed_median": {
+      "alloc_ms": 0.1388945,
+      "h2d_ms": 0.3204225,
+      "d2h_ms": 0.6668235
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 32896,
+    "levels": 32896,
+    "peak_level": 1,
+    "peak_occupancy": 2,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 32896,
+    "cas_attempts": 32895,
+    "thread_util_pct": 0.390625,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.91,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 55.01620799986995,
+     "min": 51.105475999065675,
+     "max": 60.5591879975691,
+     "samples": [
+      51.156782,
+      59.993661,
+      60.559188,
+      58.875634,
+      51.105476,
+      51.155609
+     ]
+    },
+    "total_ms": {
+     "median": 57.79347849966143,
+     "min": 52.74074099725112,
+     "max": 62.339715001144214,
+     "samples": [
+      54.521092,
+      61.974797,
+      62.339715,
+      61.065865,
+      53.569064,
+      52.740741
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 81.76066200030618,
+     "min": 79.06147500034422,
+     "max": 94.12153499943088,
+     "samples": [
+      79.061475,
+      84.068393,
+      94.073921,
+      94.121535,
+      79.452931,
+      79.321267
+     ]
+    },
+    "total_ms": {
+     "median": 82.84294150143978,
+     "min": 80.1578860009613,
+     "max": 95.86782800033689,
+     "samples": [
+      80.184989,
+      85.033757,
+      95.521331,
+      95.867828,
+      80.652126,
+      80.157886
+     ]
+    }
+   },
+   "speedup_kernel": 0.672893377498141,
+   "speedup_total": 0.6976270693944034,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "disk_1024",
+   "pixels": 1048576,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "radius-480 disk",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 3.592245,
+      "h2d_ms": 1.924156,
+      "d2h_ms": 4.383038
+     },
+     "timed_median": {
+      "alloc_ms": 2.445817,
+      "h2d_ms": 1.8284025000000002,
+      "d2h_ms": 1.8490039999999999
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 2.334848,
+      "h2d_ms": 1.642967,
+      "d2h_ms": 4.488316
+     },
+     "timed_median": {
+      "alloc_ms": 0.632167,
+      "h2d_ms": 1.3124535000000002,
+      "d2h_ms": 1.5826155
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 723749,
+    "levels": 679,
+    "peak_level": 1920,
+    "peak_occupancy": 3836,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 723749,
+    "cas_attempts": 1445576,
+    "thread_util_pct": 95.10366807805596,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.8,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 10.317615000531077,
+     "min": 10.299917001248104,
+     "max": 15.198729997791816,
+     "samples": [
+      10.315082,
+      10.320148,
+      10.299917,
+      10.362644,
+      10.301347,
+      15.19873
+     ]
+    },
+    "total_ms": {
+     "median": 16.602293500909582,
+     "min": 15.436259996931767,
+     "max": 23.17917700202088,
+     "samples": [
+      16.390134,
+      15.932438,
+      15.43626,
+      16.814453,
+      18.922212,
+      23.179177
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 9.542458998112124,
+     "min": 8.564544998080237,
+     "max": 10.140209000383038,
+     "samples": [
+      9.578037,
+      8.606828,
+      9.571456,
+      8.564545,
+      9.513462,
+      10.140209
+     ]
+    },
+    "total_ms": {
+     "median": 13.025713498791447,
+     "min": 11.865630000102101,
+     "max": 14.689662999444408,
+     "samples": [
+      13.191315,
+      12.016378,
+      12.860112,
+      11.86563,
+      13.586447,
+      14.689663
+     ]
+    }
+   },
+   "speedup_kernel": 1.0812323115637499,
+   "speedup_total": 1.2745784330700947,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "disk_1024",
+   "pixels": 1048576,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "radius-480 disk",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 2.827278,
+      "h2d_ms": 2.351296,
+      "d2h_ms": 2.200613
+     },
+     "timed_median": {
+      "alloc_ms": 2.658221,
+      "h2d_ms": 2.1677215,
+      "d2h_ms": 1.9850995
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 2.186443,
+      "h2d_ms": 1.21799,
+      "d2h_ms": 2.358817
+     },
+     "timed_median": {
+      "alloc_ms": 0.5987985,
+      "h2d_ms": 1.3645505,
+      "d2h_ms": 1.9820289999999998
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 723749,
+    "levels": 679,
+    "peak_level": 1920,
+    "peak_occupancy": 3836,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 723749,
+    "cas_attempts": 1445576,
+    "thread_util_pct": 95.10366807805596,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.06,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 13.634720500704134,
+     "min": 11.549292001291178,
+     "max": 15.28293099909206,
+     "samples": [
+      15.282931,
+      15.002897,
+      14.857795,
+      11.549292,
+      12.411646,
+      11.763426
+     ]
+    },
+    "total_ms": {
+     "median": 20.743237000715453,
+     "min": 17.147743001260096,
+     "max": 24.579975000960985,
+     "samples": [
+      24.579975,
+      22.549946,
+      22.365084,
+      17.147743,
+      18.481242,
+      19.12139
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 18.01554049961851,
+     "min": 15.438651000295067,
+     "max": 22.82492799713509,
+     "samples": [
+      22.824928,
+      22.374113,
+      19.186447,
+      15.438651,
+      16.844634,
+      15.524152
+     ]
+    },
+    "total_ms": {
+     "median": 22.15701800014358,
+     "min": 18.89708199814777,
+     "max": 27.178884996828856,
+     "samples": [
+      27.178885,
+      26.937792,
+      22.975619,
+      18.897082,
+      21.338417,
+      19.147958
+     ]
+    }
+   },
+   "speedup_kernel": 0.756831053777868,
+   "speedup_total": 0.9361926320852849,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "ring_tripwire",
+   "scene": "sq_2600_full_center",
+   "pixels": 6760000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "v1's tripwire scene (6.8M px, center seed) - the spill tier completes it. v1 trips on both backends.",
+   "comparable": true,
+   "timing": "kernel_ms = the driver's kernel bracket (launch + synchronize) up to the overflow abort; total_ms = the driver's first stamp to the RuntimeError; d2h_ms = the counters copy and the raise",
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 9.141395,
+      "h2d_ms": 7.691501,
+      "d2h_ms": 0.347799
+     },
+     "timed_median": {
+      "alloc_ms": 6.45073,
+      "h2d_ms": 8.605027,
+      "d2h_ms": 0.32096650000000004
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 5.83741,
+      "h2d_ms": 7.14611,
+      "d2h_ms": 0.216424
+     },
+     "timed_median": {
+      "alloc_ms": 4.236506,
+      "h2d_ms": 7.9623135,
+      "d2h_ms": 0.2509555
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "tripped": true,
+    "peak_occupancy": 8188,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.19,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 32.704806499168626,
+     "min": 31.56178100107354,
+     "max": 34.033298998110695,
+     "samples": [
+      33.473297,
+      34.033299,
+      31.561781,
+      31.861243,
+      31.936316,
+      33.707323
+     ]
+    },
+    "total_ms": {
+     "median": 48.272317500959616,
+     "min": 45.58942100265995,
+     "max": 51.19069100328488,
+     "samples": [
+      49.912777,
+      50.05722,
+      45.589421,
+      46.15939,
+      46.631858,
+      51.190691
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 27.87292000175512,
+     "min": 27.46333799950662,
+     "max": 30.268218000855995,
+     "samples": [
+      27.570781,
+      29.318684,
+      27.728815,
+      30.268218,
+      27.463338,
+      28.017025
+     ]
+    },
+    "total_ms": {
+     "median": 40.73402699941653,
+     "min": 38.12342399760382,
+     "max": 43.155924999155104,
+     "samples": [
+      40.205105,
+      41.078479,
+      38.123424,
+      43.155925,
+      40.389575,
+      41.407127
+     ]
+    }
+   },
+   "speedup_kernel": 1.1733541551121751,
+   "speedup_total": 1.1850612634407853,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_2600_full_center",
+   "pixels": 6760000,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "v1's tripwire scene (6.8M px, center seed) - the spill tier completes it",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 5.56718,
+      "h2d_ms": 7.891878,
+      "d2h_ms": 22.553633
+     },
+     "timed_median": {
+      "alloc_ms": 12.931362499999999,
+      "h2d_ms": 8.3480635,
+      "d2h_ms": 17.76638
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 26.686078,
+      "h2d_ms": 9.530864,
+      "d2h_ms": 18.931495
+     },
+     "timed_median": {
+      "alloc_ms": 10.798344,
+      "h2d_ms": 7.364753,
+      "d2h_ms": 18.781953
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 6760000,
+    "levels": 2601,
+    "peak_level": 5198,
+    "peak_occupancy": 10394,
+    "spilled": 304702,
+    "peak_spill_window": 1102,
+    "processed": 6760000,
+    "cas_attempts": 13514800,
+    "thread_util_pct": 97.50126153402537,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.27,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 106.7086785005813,
+     "min": 103.5886620011297,
+     "max": 117.30632900071214,
+     "samples": [
+      103.900689,
+      103.588662,
+      106.891257,
+      117.306329,
+      116.496137,
+      106.5261
+     ]
+    },
+    "total_ms": {
+     "median": 151.67621600085113,
+     "min": 133.66132100054529,
+     "max": 194.35846000124002,
+     "samples": [
+      133.661321,
+      194.35846,
+      137.784084,
+      166.238022,
+      153.679181,
+      149.673251
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 155.89754200118477,
+     "min": 153.9006299972243,
+     "max": 174.18722300135414,
+     "samples": [
+      153.96793,
+      156.201094,
+      170.347582,
+      174.187223,
+      155.59399,
+      153.90063
+     ]
+    },
+    "total_ms": {
+     "median": 204.1832635004539,
+     "min": 181.2325709979632,
+     "max": 222.87504700216232,
+     "samples": [
+      193.517496,
+      222.875047,
+      217.228417,
+      212.431042,
+      195.935485,
+      181.232571
+     ]
+    }
+   },
+   "speedup_kernel": 0.6844795442622844,
+   "speedup_total": 0.7428435288992917,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "ring_tripwire",
+   "scene": "sq_4000_center",
+   "pixels": 16000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "16M px center seed; peak occupancy ~16000 = 2x ring capacity. v1 trips on both backends.",
+   "comparable": true,
+   "timing": "kernel_ms = the driver's kernel bracket (launch + synchronize) up to the overflow abort; total_ms = the driver's first stamp to the RuntimeError; d2h_ms = the counters copy and the raise",
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 12.618568,
+      "h2d_ms": 19.213183,
+      "d2h_ms": 0.341453
+     },
+     "timed_median": {
+      "alloc_ms": 11.597929,
+      "h2d_ms": 18.113562,
+      "d2h_ms": 0.2982705
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 13.198411,
+      "h2d_ms": 18.808946,
+      "d2h_ms": 0.21088
+     },
+     "timed_median": {
+      "alloc_ms": 7.78943,
+      "h2d_ms": 16.012694500000002,
+      "d2h_ms": 0.253742
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "tripped": true,
+    "peak_occupancy": 8188,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.2,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 31.91307950146438,
+     "min": 31.64796000055503,
+     "max": 32.126794998475816,
+     "samples": [
+      31.771763,
+      31.874911,
+      31.64796,
+      32.126795,
+      32.020058,
+      31.951248
+     ]
+    },
+    "total_ms": {
+     "median": 61.98067849800282,
+     "min": 60.28721800248604,
+     "max": 64.27423000059207,
+     "samples": [
+      60.287218,
+      62.093501,
+      60.446175,
+      64.27423,
+      61.867856,
+      64.252388
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 27.739949498936767,
+     "min": 27.408064001065213,
+     "max": 29.835737997927936,
+     "samples": [
+      27.451996,
+      29.210501,
+      27.408064,
+      29.835738,
+      27.604804,
+      27.875095
+     ]
+    },
+    "total_ms": {
+     "median": 53.230117498969776,
+     "min": 51.08160700183362,
+     "max": 53.845593000005465,
+     "samples": [
+      51.234426,
+      53.845593,
+      51.081607,
+      53.830176,
+      53.365875,
+      53.09436
+     ]
+    }
+   },
+   "speedup_kernel": 1.150437548658391,
+   "speedup_total": 1.164391164441867,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_4000_center",
+   "pixels": 16000000,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "16M px center seed; peak occupancy ~16000 = 2x ring capacity",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 10.192075,
+      "h2d_ms": 19.538987,
+      "d2h_ms": 137.409542
+     },
+     "timed_median": {
+      "alloc_ms": 13.8020635,
+      "h2d_ms": 20.317681,
+      "d2h_ms": 54.805735
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 12.209722,
+      "h2d_ms": 18.128883,
+      "d2h_ms": 76.602608
+     },
+     "timed_median": {
+      "alloc_ms": 10.685029499999999,
+      "h2d_ms": 17.743294,
+      "d2h_ms": 59.128727999999995
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 16000000,
+    "levels": 4001,
+    "peak_level": 7998,
+    "peak_occupancy": 15994,
+    "spilled": 3810302,
+    "peak_spill_window": 3902,
+    "processed": 16000000,
+    "cas_attempts": 31992000,
+    "thread_util_pct": 98.37560141214696,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.97,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 246.56147299901932,
+     "min": 243.53901099675568,
+     "max": 249.94001000231947,
+     "samples": [
+      246.074076,
+      247.977501,
+      243.539011,
+      247.04887,
+      245.295816,
+      249.94001
+     ]
+    },
+    "total_ms": {
+     "median": 342.5911020003696,
+     "min": 314.9010929992073,
+     "max": 437.34751699957997,
+     "samples": [
+      354.990407,
+      355.634401,
+      330.191797,
+      328.272808,
+      314.901093,
+      437.347517
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 375.81685350050975,
+     "min": 372.58271899918327,
+     "max": 394.7351909991994,
+     "samples": [
+      374.179521,
+      377.02659,
+      384.572454,
+      394.735191,
+      372.582719,
+      374.607117
+     ]
+    },
+    "total_ms": {
+     "median": 468.7802259995806,
+     "min": 434.4144659989979,
+     "max": 515.8117579994723,
+     "samples": [
+      477.705796,
+      458.231515,
+      515.811758,
+      470.232382,
+      434.414466,
+      467.32807
+     ]
+    }
+   },
+   "speedup_kernel": 0.6560681637942692,
+   "speedup_total": 0.7308138931625415,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "ring_tripwire",
+   "scene": "sq_5000_center",
+   "pixels": 25000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "25M px center seed. v1 trips on both backends.",
+   "comparable": true,
+   "timing": "kernel_ms = the driver's kernel bracket (launch + synchronize) up to the overflow abort; total_ms = the driver's first stamp to the RuntimeError; d2h_ms = the counters copy and the raise",
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 19.827724,
+      "h2d_ms": 26.784412,
+      "d2h_ms": 0.370632
+     },
+     "timed_median": {
+      "alloc_ms": 17.142629,
+      "h2d_ms": 28.7264175,
+      "d2h_ms": 0.29128350000000003
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 19.247865,
+      "h2d_ms": 30.113923,
+      "d2h_ms": 0.365592
+     },
+     "timed_median": {
+      "alloc_ms": 14.9669415,
+      "h2d_ms": 24.995902,
+      "d2h_ms": 0.2018085
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "tripped": true,
+    "peak_occupancy": 8188,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.79,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 32.46280100029253,
+     "min": 32.210110999585595,
+     "max": 34.43792100006249,
+     "samples": [
+      34.437921,
+      34.121593,
+      32.395013,
+      32.530589,
+      32.210111,
+      32.340821
+     ]
+    },
+    "total_ms": {
+     "median": 79.16311599910841,
+     "min": 75.22967900149524,
+     "max": 83.72554999732529,
+     "samples": [
+      83.72555,
+      81.374551,
+      77.416156,
+      75.229679,
+      80.244164,
+      78.082068
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 28.13595349834941,
+     "min": 28.07668800232932,
+     "max": 28.231052001501666,
+     "samples": [
+      28.101829,
+      28.231052,
+      28.217782,
+      28.076688,
+      28.085635,
+      28.170078
+     ]
+    },
+    "total_ms": {
+     "median": 68.75435050096712,
+     "min": 66.22585199875175,
+     "max": 73.14840700200875,
+     "samples": [
+      73.148407,
+      69.234321,
+      68.457633,
+      66.225852,
+      67.156274,
+      69.051068
+     ]
+    }
+   },
+   "speedup_kernel": 1.1537835745355833,
+   "speedup_total": 1.1513906454253375,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_5000_center",
+   "pixels": 25000000,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "25M px center seed",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 18.538269,
+      "h2d_ms": 30.821104,
+      "d2h_ms": 179.25322
+     },
+     "timed_median": {
+      "alloc_ms": 18.134613,
+      "h2d_ms": 30.319879,
+      "d2h_ms": 87.958838
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 17.241289,
+      "h2d_ms": 29.217608,
+      "d2h_ms": 265.142398
+     },
+     "timed_median": {
+      "alloc_ms": 14.806561,
+      "h2d_ms": 25.071969,
+      "d2h_ms": 57.5856875
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 25000000,
+    "levels": 5001,
+    "peak_level": 9998,
+    "peak_occupancy": 19994,
+    "spilled": 8714302,
+    "peak_spill_window": 5902,
+    "processed": 25000000,
+    "cas_attempts": 49990000,
+    "thread_util_pct": 98.70041616676664,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 19.43,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 388.8261194988445,
+     "min": 387.87438299914356,
+     "max": 395.6222609995166,
+     "samples": [
+      389.512334,
+      388.406742,
+      388.095771,
+      389.245497,
+      395.622261,
+      387.874383
+     ]
+    },
+    "total_ms": {
+     "median": 530.8638174992666,
+     "min": 489.7491310002806,
+     "max": 574.7775990021182,
+     "samples": [
+      491.955761,
+      574.777599,
+      489.749131,
+      547.965498,
+      513.762137,
+      550.708869
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 601.2676995014772,
+     "min": 594.2536999973527,
+     "max": 611.3434519975272,
+     "samples": [
+      597.936775,
+      611.343452,
+      608.612851,
+      594.558485,
+      594.2537,
+      604.598624
+     ]
+    },
+    "total_ms": {
+     "median": 705.0816404989746,
+     "min": 688.7967380025657,
+     "max": 885.420234000776,
+     "samples": [
+      885.420234,
+      713.968406,
+      706.853323,
+      691.007506,
+      688.796738,
+      703.309958
+     ]
+    }
+   },
+   "speedup_kernel": 0.6466772118662417,
+   "speedup_total": 0.7529111339838364,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "ring_tripwire",
+   "scene": "sq_6000_center",
+   "pixels": 36000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "36M px center seed - host RAM is this laptop's ceiling, not the queue. v1 trips on both backends.",
+   "comparable": true,
+   "timing": "kernel_ms = the driver's kernel bracket (launch + synchronize) up to the overflow abort; total_ms = the driver's first stamp to the RuntimeError; d2h_ms = the counters copy and the raise",
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 25.217422,
+      "h2d_ms": 39.334339,
+      "d2h_ms": 0.584755
+     },
+     "timed_median": {
+      "alloc_ms": 26.6248905,
+      "h2d_ms": 41.111162500000006,
+      "d2h_ms": 0.333016
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 26.419498,
+      "h2d_ms": 40.19104,
+      "d2h_ms": 0.295482
+     },
+     "timed_median": {
+      "alloc_ms": 21.4932275,
+      "h2d_ms": 35.9710205,
+      "d2h_ms": 0.249448
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "tripped": true,
+    "peak_occupancy": 8188,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.61,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 33.3494789992983,
+     "min": 32.91925200028345,
+     "max": 34.78347400232451,
+     "samples": [
+      34.375798,
+      32.985075,
+      33.386811,
+      33.312147,
+      34.783474,
+      32.919252
+     ]
+    },
+    "total_ms": {
+     "median": 100.43504249915713,
+     "min": 99.29287299746647,
+     "max": 103.85967000183882,
+     "samples": [
+      103.02432,
+      103.85967,
+      100.008479,
+      99.292873,
+      100.861606,
+      99.781795
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 28.635844000746147,
+     "min": 28.354709000268485,
+     "max": 31.64546900006826,
+     "samples": [
+      31.645469,
+      30.599271,
+      28.703838,
+      28.47748,
+      28.56785,
+      28.354709
+     ]
+    },
+    "total_ms": {
+     "median": 86.84566000010818,
+     "min": 82.22943000146188,
+     "max": 92.383413000789,
+     "samples": [
+      90.531881,
+      92.383413,
+      82.22943,
+      83.827912,
+      88.791194,
+      84.900126
+     ]
+    }
+   },
+   "speedup_kernel": 1.1646061138770463,
+   "speedup_total": 1.1564773933324017,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "scenes",
+   "scene": "sq_6000_center",
+   "pixels": 36000000,
+   "config": {
+    "variant": "spill",
+    "threads_per_block": 256
+   },
+   "notes": "36M px center seed - host RAM is this laptop's ceiling, not the queue",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 22.517946,
+      "h2d_ms": 43.121714,
+      "d2h_ms": 198.107879
+     },
+     "timed_median": {
+      "alloc_ms": 25.806928499999998,
+      "h2d_ms": 42.5209315,
+      "d2h_ms": 96.076916
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 26.858552,
+      "h2d_ms": 41.530144,
+      "d2h_ms": 215.658353
+     },
+     "timed_median": {
+      "alloc_ms": 22.7176445,
+      "h2d_ms": 38.3553575,
+      "d2h_ms": 139.91544199999998
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 36000000,
+    "levels": 6001,
+    "peak_level": 11998,
+    "peak_occupancy": 23994,
+    "spilled": 15618302,
+    "peak_spill_window": 7902,
+    "processed": 36000000,
+    "cas_attempts": 71988000,
+    "thread_util_pct": 98.9169773787702,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 64,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 40,
+     "n_spills": 0,
+     "shared_bytes": 32
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.49,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 546.448863000478,
+     "min": 545.6834389988217,
+     "max": 610.4315720003797,
+     "samples": [
+      607.00553,
+      546.808142,
+      545.683439,
+      545.747907,
+      546.089584,
+      610.431572
+     ]
+    },
+    "total_ms": {
+     "median": 741.1317215010058,
+     "min": 688.3818000023894,
+     "max": 841.5588639982161,
+     "samples": [
+      775.458501,
+      706.804942,
+      688.3818,
+      797.780612,
+      698.337057,
+      841.558864
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 904.7099400013394,
+     "min": 880.0664500013227,
+     "max": 950.9304050006904,
+     "samples": [
+      933.798798,
+      880.06645,
+      950.930405,
+      890.644884,
+      918.774996,
+      884.788534
+     ]
+    },
+    "total_ms": {
+     "median": 1100.3038544986339,
+     "min": 1022.4393149983371,
+     "max": 1222.071058997244,
+     "samples": [
+      1166.042139,
+      1022.439315,
+      1222.071059,
+      1029.070619,
+      1124.614855,
+      1075.992854
+     ]
+    }
+   },
+   "speedup_kernel": 0.6040044867857526,
+   "speedup_total": 0.6735700492830783,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "tpb_sweep",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 64
+   },
+   "notes": "the benchmark's threads-per-block sweep (ring kernel)",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 5.027001,
+      "h2d_ms": 4.392895,
+      "d2h_ms": 11.20041
+     },
+     "timed_median": {
+      "alloc_ms": 7.909423500000001,
+      "h2d_ms": 4.9475535,
+      "d2h_ms": 10.9857345
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 4.507167,
+      "h2d_ms": 4.521494,
+      "d2h_ms": 9.67533
+     },
+     "timed_median": {
+      "alloc_ms": 5.4815095,
+      "h2d_ms": 4.3255015,
+      "d2h_ms": 10.732887999999999
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 98.30482017982018,
+    "numba": {
+     "grid": [
+      1,
+      64
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 64,
+     "num_warps": 2,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.36,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 41.40032850045827,
+     "min": 39.55451700312551,
+     "max": 43.47082999811391,
+     "samples": [
+      39.554517,
+      43.143107,
+      43.47083,
+      41.364998,
+      41.435659,
+      41.307
+     ]
+    },
+    "total_ms": {
+     "median": 66.85936550093174,
+     "min": 57.95481200038921,
+     "max": 79.27206199747161,
+     "samples": [
+      57.954812,
+      79.272062,
+      63.556752,
+      70.508935,
+      61.208649,
+      70.161979
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 41.88241450174246,
+     "min": 36.130584001512034,
+     "max": 46.89170900019235,
+     "samples": [
+      41.816836,
+      46.891709,
+      43.645147,
+      36.489412,
+      41.947993,
+      36.130584
+     ]
+    },
+    "total_ms": {
+     "median": 65.3202590001456,
+     "min": 53.39815799743519,
+     "max": 67.7323960007925,
+     "samples": [
+      66.173925,
+      66.910992,
+      67.732396,
+      55.042377,
+      64.466593,
+      53.398158
+     ]
+    }
+   },
+   "speedup_kernel": 0.9884895365508565,
+   "speedup_total": 1.0235624678215485,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "tpb_sweep",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 128
+   },
+   "notes": "the benchmark's threads-per-block sweep (ring kernel)",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 4.09399,
+      "h2d_ms": 4.754428,
+      "d2h_ms": 10.207339
+     },
+     "timed_median": {
+      "alloc_ms": 8.3459295,
+      "h2d_ms": 4.9503495,
+      "d2h_ms": 10.701841000000002
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 10.843034,
+      "h2d_ms": 5.002272,
+      "d2h_ms": 9.978014
+     },
+     "timed_median": {
+      "alloc_ms": 6.6029405,
+      "h2d_ms": 4.4975415000000005,
+      "d2h_ms": 10.4810625
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 96.70485764235764,
+    "numba": {
+     "grid": [
+      1,
+      128
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 128,
+     "num_warps": 4,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 18.36,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 23.606181001014193,
+     "min": 23.334895999141736,
+     "max": 25.767813000129536,
+     "samples": [
+      23.790331,
+      23.422031,
+      23.334896,
+      25.580838,
+      25.767813,
+      23.414139
+     ]
+    },
+    "total_ms": {
+     "median": 51.15147749893367,
+     "min": 42.80458799985354,
+     "max": 52.49579000155791,
+     "samples": [
+      42.804588,
+      51.280436,
+      43.096864,
+      52.344326,
+      51.022519,
+      52.49579
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 21.18689799863205,
+     "min": 19.580946001951816,
+     "max": 22.352202999172732,
+     "samples": [
+      22.351176,
+      19.580946,
+      22.28657,
+      19.66168,
+      22.352203,
+      20.087226
+     ]
+    },
+    "total_ms": {
+     "median": 43.48611250134127,
+     "min": 36.40270899995812,
+     "max": 51.626831002067775,
+     "samples": [
+      47.073599,
+      37.251852,
+      47.600675,
+      36.402709,
+      51.626831,
+      39.898626
+     ]
+    }
+   },
+   "speedup_kernel": 1.114187692909946,
+   "speedup_total": 1.1762715624983948,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "tpb_sweep",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 256
+   },
+   "notes": "the benchmark's threads-per-block sweep (ring kernel)",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 4.53197,
+      "h2d_ms": 5.346406,
+      "d2h_ms": 12.315672
+     },
+     "timed_median": {
+      "alloc_ms": 7.711133,
+      "h2d_ms": 4.8687035000000005,
+      "d2h_ms": 10.699132
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 13.729239,
+      "h2d_ms": 5.033644,
+      "d2h_ms": 11.486705
+     },
+     "timed_median": {
+      "alloc_ms": 5.423984,
+      "h2d_ms": 4.858168,
+      "d2h_ms": 11.0990675
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 93.50727397602398,
+    "numba": {
+     "grid": [
+      1,
+      256
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 256,
+     "num_warps": 8,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.94,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 15.900105001492193,
+     "min": 15.238226002111332,
+     "max": 18.51618000000599,
+     "samples": [
+      16.186674,
+      15.238226,
+      15.960675,
+      15.800778,
+      15.839535,
+      18.51618
+     ]
+    },
+    "total_ms": {
+     "median": 39.78178400029719,
+     "min": 35.24351499800105,
+     "max": 53.08286600120482,
+     "samples": [
+      38.244188,
+      41.31938,
+      35.243515,
+      42.891292,
+      36.116358,
+      53.082866
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 14.696630500111496,
+     "min": 13.249047999124741,
+     "max": 17.556782000610838,
+     "samples": [
+      13.872762,
+      15.520499,
+      13.54842,
+      13.249048,
+      17.556782,
+      16.598913
+     ]
+    },
+    "total_ms": {
+     "median": 37.062985999000375,
+     "min": 31.531231998087605,
+     "max": 45.18269900290761,
+     "samples": [
+      41.15714,
+      33.188433,
+      37.35034,
+      31.531232,
+      45.182699,
+      36.775632
+     ]
+    }
+   },
+   "speedup_kernel": 1.0818877838271546,
+   "speedup_total": 1.0733561511036953,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "tpb_sweep",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 512
+   },
+   "notes": "the benchmark's threads-per-block sweep (ring kernel)",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 6.330899,
+      "h2d_ms": 7.124976,
+      "d2h_ms": 20.565396
+     },
+     "timed_median": {
+      "alloc_ms": 9.56511,
+      "h2d_ms": 6.230206,
+      "d2h_ms": 13.3951625
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 12.997446,
+      "h2d_ms": 4.895577,
+      "d2h_ms": 18.993384
+     },
+     "timed_median": {
+      "alloc_ms": 7.426036,
+      "h2d_ms": 5.211135,
+      "d2h_ms": 13.0129345
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 87.11327734765234,
+    "numba": {
+     "grid": [
+      1,
+      512
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 512,
+     "num_warps": 16,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.0,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 17.07100049861765,
+     "min": 14.98189099947922,
+     "max": 17.43400300256326,
+     "samples": [
+      14.981891,
+      15.984172,
+      16.825128,
+      17.368815,
+      17.434003,
+      17.316873
+     ]
+    },
+    "total_ms": {
+     "median": 43.49914049817016,
+     "min": 35.54988699761452,
+     "max": 53.61811900002067,
+     "samples": [
+      35.549887,
+      44.747061,
+      42.25122,
+      53.618119,
+      42.03461,
+      52.662178
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 11.460378500487423,
+     "min": 10.141916998691158,
+     "max": 12.620008001249516,
+     "samples": [
+      10.649018,
+      10.141917,
+      12.494761,
+      11.037379,
+      12.620008,
+      11.883378
+     ]
+    },
+    "total_ms": {
+     "median": 35.27771400149504,
+     "min": 30.86619199893903,
+     "max": 43.70122599721071,
+     "samples": [
+      36.188745,
+      30.866192,
+      41.779894,
+      33.688218,
+      43.701226,
+      34.366683
+     ]
+    }
+   },
+   "speedup_kernel": 1.489566901991204,
+   "speedup_total": 1.2330487314548415,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  },
+  {
+   "experiment": "tpb_sweep",
+   "scene": "sq_2000_center",
+   "pixels": 4000000,
+   "config": {
+    "variant": "ring",
+    "threads_per_block": 1024
+   },
+   "notes": "the benchmark's threads-per-block sweep (ring kernel)",
+   "comparable": true,
+   "phases_ms": {
+    "numba": {
+     "warmup": {
+      "alloc_ms": 4.371378,
+      "h2d_ms": 5.604754,
+      "d2h_ms": 12.735708
+     },
+     "timed_median": {
+      "alloc_ms": 9.447778,
+      "h2d_ms": 5.865757,
+      "d2h_ms": 13.0724015
+     },
+     "timed_runs": 6
+    },
+    "triton": {
+     "warmup": {
+      "alloc_ms": 11.780742,
+      "h2d_ms": 6.282287,
+      "d2h_ms": 11.849493
+     },
+     "timed_median": {
+      "alloc_ms": 6.4340055,
+      "h2d_ms": 5.0179945,
+      "d2h_ms": 12.552993
+     },
+     "timed_runs": 6
+    }
+   },
+   "info": {
+    "filled": 1000000,
+    "levels": 1001,
+    "peak_level": 1998,
+    "peak_occupancy": 3994,
+    "spilled": 0,
+    "peak_spill_window": 0,
+    "processed": 1000000,
+    "cas_attempts": 1998000,
+    "thread_util_pct": 74.32586944305694,
+    "numba": {
+     "grid": [
+      1,
+      1024
+     ],
+     "regs_per_thread": 37,
+     "shared_bytes": 32776,
+     "local_bytes_per_thread": 0
+    },
+    "triton": {
+     "grid": [
+      1
+     ],
+     "BLOCK": 1024,
+     "num_warps": 32,
+     "n_regs": 38,
+     "n_spills": 0,
+     "shared_bytes": 0
+    }
+   },
+   "clocks_after": {
+    "sm_mhz": 2070,
+    "max_sm_mhz": 3105,
+    "power_w": 17.04,
+    "temp_c": 63
+   },
+   "numba": {
+    "kernel_ms": {
+     "median": 12.573985999551951,
+     "min": 10.721400001784787,
+     "max": 13.105480000376701,
+     "samples": [
+      12.556541,
+      10.7214,
+      10.894924,
+      12.677608,
+      12.591431,
+      13.10548
+     ]
+    },
+    "total_ms": {
+     "median": 39.43518350024533,
+     "min": 32.394731999374926,
+     "max": 49.61192900009337,
+     "samples": [
+      36.916422,
+      41.816915,
+      32.394732,
+      47.065898,
+      37.053452,
+      49.611929
+     ]
+    }
+   },
+   "triton": {
+    "kernel_ms": {
+     "median": 10.096414500367246,
+     "min": 8.729883000341943,
+     "max": 12.92811600069399,
+     "samples": [
+      9.362146,
+      8.729883,
+      9.168184,
+      12.928116,
+      10.830683,
+      11.324401
+     ]
+    },
+    "total_ms": {
+     "median": 35.348714500287315,
+     "min": 27.89302200108068,
+     "max": 41.80416900271666,
+     "samples": [
+      34.557003,
+      27.893022,
+      37.063051,
+      35.007216,
+      41.804169,
+      35.690213
+     ]
+    }
+   },
+   "speedup_kernel": 1.2453912227053066,
+   "speedup_total": 1.1156044585419025,
+   "outputs_equal": true,
+   "mismatched_runs": 0
+  }
+ ]
+}
