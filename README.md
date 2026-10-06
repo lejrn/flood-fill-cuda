@@ -224,6 +224,12 @@ uv run python -m flood_fill_cuda.overview.bench    # ~5-10 min GPU session
 uv run python -m flood_fill_cuda.overview.build
 ```
 
+The project page, in the style of the Nerfies page, with the chapter
+clips, two scrub sliders and the explainer video, is
+[`project-page/index.html`](project-page/index.html). Open it in a
+browser; [`project-page/README.md`](project-page/README.md) explains how
+to rebuild and publish it.
+
 > **Never** run a benchmark and the web service at the same time, and
 > never `--workers > 1`. Concurrent cooperative launches wedge the GPU
 > under WSL2.
