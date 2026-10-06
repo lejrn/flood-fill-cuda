@@ -14,7 +14,8 @@ from manim import (
 )
 from manim.constants import RESAMPLING_ALGORITHMS
 
-from scenes.style import ASSETS, GREY, GRID, INK_SOFT, RED_PX, TEAL, is_vertical, label
+from scenes.style import ASSETS, GREY, GRID, INK, INK_SOFT, PURPLE, RED_PX, TEAL, is_vertical, label
+from scenes.panes import data
 from scenes.panes.geometry import Box
 
 THUMB_W = 0.44
@@ -121,6 +122,24 @@ def runs_row(box: Box, collapsed: bool):
     return VGroup(*parts), spans, bars
 
 
+def triton_card(box: Box) -> VGroup:
+    """The Triton stage's big area: the language pair, the overall ratio, how
+    many like-for-like rows Triton wins, and the chapter where it still
+    loses. Numbers from data.load_twins(); lines 1-2 and 3-4 enter apart."""
+    tw = data.load_twins()
+    lines = [
+        label("Numba → Triton", size=26, color=INK, mono=True),
+        label(f"{data.fmt_twin(tw.overall)}×", size=64, color=PURPLE, mono=True),
+        label(f"faster in {tw.rows_faster:,} of {tw.rows_like:,} cases", size=16, color=INK_SOFT),
+        label(f"chapter 5 still slower: {data.fmt_twin(tw.ch05)}×", size=14, color=GREY),
+    ]
+    for m, dy in zip(lines, (1.15, 0.2, -0.75, -1.08)):
+        m.move_to(box.at(box.cx, box.cy + dy))
+        if m.width > box.w - 0.2:
+            m.scale_to_fit_width(box.w - 0.2)
+    return VGroup(*lines)
+
+
 class MiddlePane:
     """Strip of thumbs + tags, the big picture (image and optional extra), captions."""
 
@@ -132,7 +151,11 @@ class MiddlePane:
         self.tags = VGroup(*[tag(box, i, t) for i, (_, t) in enumerate(thumbs)])
         self.caption = captions(box, caption1, caption2)
         self.big_image = big_image(box, ASSETS / big_source, fit_wh, dy) if big_source else None
-        self.big_extra = runs_row(box, collapsed=True)[0] if extra == "runs_row" else None
+        self.big_extra = None
+        if extra == "runs_row":
+            self.big_extra = runs_row(box, collapsed=True)[0]
+        elif extra == "triton":
+            self.big_extra = triton_card(box)
 
     def all(self) -> list:
         out = [self.tags, self.caption]

@@ -1,8 +1,8 @@
 # Scene brief
 
-One scene per stage in `scenes/`, `s00_cpu.py` ... `s08_outro.py`, each
+One scene per stage in `scenes/`, `s00_cpu.py` ... `s09_outro.py`, each
 with one class (`Cpu`, `OneBlock`, `TwoBlocks`, `NBlocks`, `Conn8`,
-`TwoBlobs`, `NBlobs`, `Runs`, `Outro`) that subclasses
+`TwoBlobs`, `NBlobs`, `Runs`, `Triton`, `Outro`) that subclasses
 `scenes.stage.StageScene` and sets `k`. Everything a stage shows is
 declared in `scenes/panes/config.py` (`STAGES`); the narration text and
 per-beat timing live in `narration/script.md` and `out/<voice>/timing.json`
@@ -51,6 +51,12 @@ matrix takes the bottom row:
   when the chapter cannot run the row. Every revealed column prints its
   ms in a 4-character form (`1.3s`, `269`, `12.7`, `0.87`) and keeps it
   for the rest of the video; estimated and n/a cells print nothing.
+  In the Triton stage the same cells flip in place to Numba time ÷
+  Triton time (`1.16`), from the twins' grand table: both backends
+  re-timed in one session, each at its fastest like-for-like variant of
+  the chapter. Purple when Triton is faster (brighter for a bigger gap),
+  grey when Numba is; the CPU column has no twin and turns hollow. The
+  outro flips the matrix back to ms.
 - **Middle, the blob.** The current stage's replay, big. Every finished
   stage is a thumbnail in the strip at the top, with a two-line tag.
   A stage begins by sweeping the previous blob up into the next slot.
@@ -106,8 +112,16 @@ Stages with hooks:
 - 07: a 36-cell pixel row fades in, its red spans collapse into teal
   runs, then the recoloured right half of `before_after` fades in below
   and the caption swaps to the ms line.
-- 08: the ch06 still sweeps up (8 thumbs), three centre lines fade in,
-  and the scene fades out at the end (the only fade-out).
+- 08, Triton: the ch06 still sweeps up (8 thumbs), the GPU turns purple
+  (one Triton program per block, no shared memory), the caption and the
+  matrix flip together (title and legend, then the cells column by
+  column, 1.6 s), then "Numba → Triton", the overall ratio at 64% of the
+  beat, and the rows-faster and ch05 lines at 82% (where both voices
+  reach those words). No thumb: the strip stays at 8.
+- 09, outro: the Triton card, caption and GPU go out while the GPU comes
+  back as ch06 and the matrix flips back to ms (1.6 s, no sweep), three
+  centre lines fade in, and the scene fades out at the end (the only
+  fade-out).
 
 ## Data on screen (all from JSON; see `data.py --help`)
 
@@ -118,6 +132,9 @@ Stages with hooks:
 | pure Python 24,083 ms, @njit 1,346 ms | overview row `png_blobs` |
 | ch05 58.51 ms, ch06 1.46 / 2.96 ms, 2,522 blobs, 13,451,960 red px, 539,207 runs | `results/ch06_gpu_nblob_runs/benchmark_results/runs_20260725T161448Z.json`, scene `input_blobs` |
 | 16,000x | 24,083 / 1.455, floored to two figures |
+| Triton matrix cells | `results/triton_twins/overview/compare_20261002T214933Z.json` (the grand table), Numba and Triton kernel medians |
+| Triton 1.12×, ch05 0.87× | `results/triton_twins/summary.json`: the geometric mean of the 9 unit means, and ch05's unit mean |
+| faster in 738 of 934 cases | every unit's compare JSON named in `summary.json`, like-for-like rows (no ablation, no repeat, comparable) |
 | 24 SMs, 1,536 threads per SM, ring 8,192, grids per chapter | chapter code, quoted in `config.py` |
 
 ## Verify loop

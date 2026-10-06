@@ -1,4 +1,4 @@
-"""Stage 8, outro: the strip and the matrix are complete; the one number."""
+"""Stage 9, outro: the matrix back in ms, the strip complete; the one number."""
 from __future__ import annotations
 
 import numpy as np
@@ -9,7 +9,7 @@ from scenes.stage import StageScene, fr
 
 
 class Outro(StageScene):
-    k = 8
+    k = 9
 
     def stage(self) -> None:
         box = self.geo.middle

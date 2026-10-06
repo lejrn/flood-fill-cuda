@@ -15,6 +15,13 @@ Rules:
   row (pure Python, @njit) and from ch06's own session
   `runs_20260725T161448Z.json` (ch05 58.51 ms, ch06 1.46 / 2.96 ms), the
   session the READMEs quote.
+- The Triton stage reads the twins' grand table
+  (`results/triton_twins/overview/compare_*.json`): Numba and Triton
+  re-timed on the same 17 shapes in one session. A twin cell is
+  `numba_ms / triton_ms` (above 1: Triton faster), each side at its own
+  fastest like-for-like variant of the chapter. Its headline (overall
+  ratio, rows faster, ch05) comes from `results/triton_twins/summary.json`
+  and the per-unit compare JSONs it names.
 
 No manim import here, so `uv run python scenes/panes/data.py` prints the
 matrix as text for auditing before anything is rendered.
@@ -35,6 +42,7 @@ REPO = VIDEO_DIR.parent
 RESULTS = REPO / "src" / "flood_fill_cuda" / "results"
 OVERVIEW_DIR = RESULTS / "overview" / "benchmark_results"
 CH06_DIR = RESULTS / "ch06_gpu_nblob_runs" / "benchmark_results"
+TWINS_DIR = RESULTS / "triton_twins"
 
 
 # ------------------------------------------------------------------ specs
@@ -61,6 +69,20 @@ COLUMNS: tuple[ColSpec, ...] = (
     ColSpec("ch06", ("runs", ""), ("ch06_mask",), "runs", final=True),
 )
 COL_INDEX = {c.key: i for i, c in enumerate(COLUMNS)}
+
+# matrix column -> the grand table's columns for that chapter, like-for-like
+# only. ch02_pinned (2 x 768 threads) has no twin: Triton runs power-of-2
+# blocks, so its like-for-like column is ch02_pinned_matched (2 x 512 both).
+TWIN_VARIANTS = {
+    "ch01": ("ch01_ring", "ch01_spill"),
+    "ch02": ("ch02_split", "ch02_global", "ch02_dirsplit", "ch02_pinned_matched"),
+    "ch03_conn4": ("ch03_conn4",),
+    "ch03_conn8": ("ch03_conn8",),
+    "ch04": ("ch04_multi",),
+    "ch05": ("ch05_merge", "ch05_ccl", "ch05_fused_L8", "ch05_r128_L8",
+             "ch05_split_L8", "ch05_split_I1"),
+    "ch06": ("ch06_mask",),
+}
 
 # row key -> (short display name, glyph kind)
 ROW_LABELS = {
@@ -165,6 +187,56 @@ class Headline:
         return self.pure_ms / self.ch06_mask_ms
 
 
+@dataclass(frozen=True)
+class TwinCell:
+    """One matrix cell of the Triton stage: Numba against Triton, same session."""
+    col: str
+    numba_ms: float | None
+    triton_ms: float | None
+    est: bool
+    numba_variant: str | None
+    triton_variant: str | None
+
+    @property
+    def ratio(self) -> float | None:
+        """numba_ms / triton_ms: above 1, Triton is faster."""
+        if self.numba_ms is None or self.triton_ms is None:
+            return None
+        return self.numba_ms / self.triton_ms
+
+    @property
+    def kind(self) -> str:
+        """fast (Triton faster) | slow | est | na. The CPU has no twin: na."""
+        if self.ratio is None:
+            return "est" if self.est else "na"
+        return "fast" if self.ratio > 1 else "slow"
+
+    @property
+    def glows(self) -> bool:
+        return self.kind == "fast"
+
+
+@dataclass(frozen=True)
+class Twins:
+    cells: dict                    # (row key, col key) -> TwinCell
+    source: str                    # the grand table's compare JSON
+    summary_source: str
+    overall: float                 # geometric mean of the unit means, kernel time
+    units: int
+    unit_kernel: dict              # unit -> geometric mean, kernel time
+    rows_timed: int
+    rows_like: int                 # like-for-like: the rows every mean uses
+    rows_faster: int               # like-for-like rows where Triton is faster
+    all_equal: bool                # outputs identical on every timed run
+
+    def cell(self, row_key: str, col_key: str) -> TwinCell:
+        return self.cells[(row_key, col_key)]
+
+    @property
+    def ch05(self) -> float:
+        return self.unit_kernel["ch05_gpu_nblob_nblock"]
+
+
 # ------------------------------------------------------------------ loading
 def _newest(folder: Path, pattern: str, exclude: str | None = None) -> Path | None:
     paths = sorted(glob.glob(str(folder / pattern)))
@@ -261,6 +333,67 @@ def headline() -> Headline:
                  "ch06_rgb_ms": f"{runs_path.name}:input_blobs.ch06.rgb"})
 
 
+def _like(r: dict) -> bool:
+    """A like-for-like row, as triton_twins/compare/summary.py counts them."""
+    cfg = r.get("config", {})
+    return ("error" not in r and not r.get("first_translation")
+            and not (r.get("duplicate_of") or cfg.get("duplicate_of"))
+            and r.get("comparable", True))
+
+
+def _twin_cell(by: dict, row: str, col: str) -> TwinCell:
+    """Each backend's fastest measured like-for-like variant of the chapter;
+    estimated (dashed) when only per-blob estimates ran; else n/a."""
+    if col == "cpu":
+        return TwinCell(col, None, None, False, None, None)
+    cands = [by[(row, v)] for v in TWIN_VARIANTS[col] if (row, v) in by]
+    cands = [r for r in cands if _like(r)]
+    measured = [r for r in cands if not r.get("est")]
+    if not measured:
+        return TwinCell(col, None, None, bool(cands), None, None)
+    n = min(measured, key=lambda r: r["numba"]["kernel_ms"]["median"])
+    t = min(measured, key=lambda r: r["triton"]["kernel_ms"]["median"])
+    return TwinCell(col, float(n["numba"]["kernel_ms"]["median"]),
+                    float(t["triton"]["kernel_ms"]["median"]), False,
+                    n["config"]["column"], t["config"]["column"])
+
+
+@lru_cache(maxsize=1)
+def load_twins() -> Twins:
+    grand_path = _newest(TWINS_DIR / "overview", "compare_*.json")
+    summary_path = TWINS_DIR / "summary.json"
+    if grand_path is None or not summary_path.exists():
+        raise FileNotFoundError(f"no grand table or summary.json under {TWINS_DIR}")
+    grand, summary = _load(grand_path), _load(summary_path)
+    rel = grand_path.relative_to(RESULTS).as_posix()
+    if summary["units"]["overview"]["source"] != rel:
+        raise ValueError(f"summary.json was built from {summary['units']['overview']['source']}, "
+                         f"not {rel}: re-run triton_twins.compare.summary")
+    by = {}
+    for r in grand["rows"]:
+        key = (r["row"], r["config"]["column"])
+        if key in by:
+            raise ValueError(f"two grand-table rows for {key}")
+        by[key] = r
+    bench = load_bench()
+    cells = {(row.key, c.key): _twin_cell(by, row.key, c.key)
+             for row in bench.rows for c in COLUMNS}
+    timed = like = faster = 0
+    for u in summary["units"].values():
+        rows = _load(RESULTS / u["source"])["rows"]
+        ok = [r for r in rows if _like(r)]
+        timed += len(rows)
+        like += len(ok)
+        faster += sum(r["speedup_kernel"] > 1 for r in ok)
+    return Twins(
+        cells=cells, source=grand_path.name, summary_source=summary_path.name,
+        overall=float(summary["overall"]["geomean_of_unit_geomeans_kernel"]),
+        units=int(summary["overall"]["units"]),
+        unit_kernel={k: float(u["geomean_speedup_kernel"]) for k, u in summary["units"].items()},
+        rows_timed=timed, rows_like=like, rows_faster=faster,
+        all_equal=bool(summary["overall"]["all_outputs_equal"]))
+
+
 # ------------------------------------------------------------------ formatting
 def fmt_cell_ms(ms: float) -> str:
     """At most 4 characters, for a matrix cell: 24s, 1.3s, 269, 22.9, 0.15."""
@@ -303,6 +436,16 @@ def fmt_ratio_round(x: float) -> str:
 def glow_opacity(speedup: float) -> float:
     """1x -> 0.25, 10x -> 0.62, 100x and above -> 1.0."""
     return 0.25 + 0.75 * min(1.0, max(0.0, math.log10(speedup)) / 2.0)
+
+
+def fmt_twin(ratio: float) -> str:
+    """A twin cell, 4 characters: 1.16, 0.73, 2.41."""
+    return f"{ratio:.2f}" if ratio < 9.995 else f"{ratio:.1f}"
+
+
+def twin_glow_opacity(ratio: float) -> float:
+    """The gaps are small, so the scale is too: x1 -> 0.25, x2.5 and above -> 1.0."""
+    return 0.25 + 0.75 * min(1.0, max(0.0, math.log(ratio) / math.log(2.5)))
 
 
 # ------------------------------------------------------------------ CLI audit
@@ -359,6 +502,38 @@ def main() -> int:
         print(f"  matrix png_blobs ch06 mask = {m.ms:.3f} ms ({b.source_ch06}) vs headline "
               f"{h.ch06_mask_ms:.3f} ms: {diff * 100:.0f}% apart"
               + ("   <- more than 10%" if diff > 0.10 else ""))
+
+    tw = load_twins()
+    print(f"\nTriton stage: {tw.source} + {tw.summary_source}   cell = numba_ms / triton_ms, "
+          f"each side's fastest like-for-like variant")
+    print(f"{'row':12s}" + "".join(f" {c.key:>11s}" for c in COLUMNS[1:]))
+    for r in b.rows:
+        line = f"{r.key:12s}"
+        for c in COLUMNS[1:]:
+            t, cell = tw.cell(r.key, c.key), r.cells[c.key]
+            if t.kind in ("fast", "slow"):
+                same = "" if t.numba_variant == t.triton_variant else "/"
+                txt = f"{'*' if t.glows else ' '}{fmt_twin(t.ratio)}{same}"
+            else:
+                txt = "~est" if t.kind == "est" else "n/a"
+            # the stage flips the ms matrix in place: the same cells must carry a number
+            ms_kind = {"fast": "num", "slow": "num"}.get(cell.kind, cell.kind)
+            tw_kind = {"fast": "num", "slow": "num"}.get(t.kind, t.kind)
+            if ms_kind != tw_kind:
+                txt += "!!"
+                bad.append(r.key)
+            line += f" {txt:>11s}"
+        print(line)
+    print("  * = Triton faster (glows)   / = Numba's and Triton's fastest variants differ"
+          "   !! = not the ms matrix's cell kind")
+    shown = [tw.cell(r.key, c.key) for r in b.rows for c in COLUMNS[1:]]
+    shown = [t for t in shown if t.ratio is not None]
+    print(f"  on screen: {sum(t.glows for t in shown)} of {len(shown)} cells faster in Triton")
+    print(f"  headline: {fmt_twin(tw.overall)}× overall ({tw.units} units), Triton faster in "
+          f"{tw.rows_faster:,} of {tw.rows_like:,} like-for-like rows ({tw.rows_timed:,} timed), "
+          f"ch05 {fmt_twin(tw.ch05)}×, outputs identical: {tw.all_equal}")
+    if not tw.all_equal:
+        bad.append("twins outputs")
     if bad:
         print(f"\nMISMATCH rows: {sorted(set(bad))}")
         return 1

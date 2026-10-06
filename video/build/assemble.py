@@ -46,7 +46,8 @@ BEATS = [
     ("s05_two_blobs", "TwoBlobs", "05_two_blobs"),
     ("s06_n_blobs", "NBlobs", "06_n_blobs"),
     ("s07_runs", "Runs", "07_runs"),
-    ("s08_outro", "Outro", "08_outro"),
+    ("s08_triton", "Triton", "08_triton"),
+    ("s09_outro", "Outro", "09_outro"),
 ]
 
 SR = 48_000

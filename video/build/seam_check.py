@@ -32,7 +32,7 @@ from assemble import clip_list, duration  # noqa: E402
 VIDEO = Path(__file__).resolve().parents[1]
 MEAN_MAX, FRAC_MAX, LEVELS = 1.5, 0.0005, 16
 BOX = 4
-FADES_OUT = {"s_intro", "s08_outro"}     # these clips end on a fade, so their tails jump
+FADES_OUT = {"s_intro", "s09_outro"}     # these clips end on a fade, so their tails jump
 
 
 def frames_at_edges(path: Path, n_tail: int = 1) -> tuple:

@@ -10,6 +10,11 @@ grid shapes, block counts) are quoted from the chapter code:
   ch05 flood_fill.py: 48 x 256 cooperative + a plain (256, 256) cleanup grid
   ch06 recolor.py: PHASE_BLOCKS count 256 / emit 512 / merge 512 /
        flatten 512 / paint 1024 at 256 tpb, pack on a 2D grid, scan 1 x 1024
+The Triton stage quotes the twins' README (triton_twins/README.md): a
+Triton program has no user-addressable shared memory (queues, rings and
+block clocks live in global scratch), it launches on CuPy memory, the
+grand table pins both backends to Numba's own grid, and every twin passes
+the Numba chapter's tests against the same CPU oracles.
 """
 from __future__ import annotations
 
@@ -31,7 +36,8 @@ class GpuSpec:
     mode: str = "gpu"                          # "cpu" | "gpu"
     sm_blocks: tuple = sm_blocks(0)            # 24 tuples of block ids
     tpb: int = 256
-    palette: str = "golden"                    # single | pair | golden | teal
+    palette: str = "golden"                    # single | pair | golden | teal | purple
+    unit: str = "block"                        # the inset's word for a block ("program" in Triton)
     coop: bool = False
     shared: tuple = ()                         # lines under the block inset
     memory: tuple = ("image", "visited / depth")
@@ -58,6 +64,7 @@ class Stage:
     big_fit: tuple = (4.1, 4.1)                # max (w, h) of the big image
     big_dy: float = 0.0                        # vertical offset of the big image
     extra: str | None = None                   # extra builder for the big area
+    matrix: str = "ms"                         # the matrix view: "ms" | "triton" (Numba / Triton)
 
 
 GPU_CPU = GpuSpec(
@@ -104,6 +111,12 @@ GPU_CH06 = GpuSpec(
     memory=("image", "mask, 1 bit / px", "run table", "labels"),
     lines=("plain launches, no barrier", "1 warp per row, per run", "32 lanes = 128 B, coalesced"),
 )
+GPU_TRITON = GpuSpec(
+    sm_blocks=sm_blocks(48, per_sm=2), tpb=256, palette="purple", unit="program",
+    shared=("no shared memory: queues live in L2",),
+    memory=("image", "labels", "queues and rings"), memory_title="global memory, CuPy arrays",
+    lines=("same grids, same shapes", "same tests, same oracles", "outputs identical"),
+)
 
 STAGES: tuple = (
     Stage(0, "00_cpu", "CPU", "cpu", "ch00_cpu_square", 16.0,
@@ -146,7 +159,12 @@ STAGES: tuple = (
           "a red span is one run",
           "{mask} from a packed mask · {rgb} from RGB",
           GPU_CH06, 13.0, big_fit=(4.1, 2.4), big_dy=-0.75, extra="runs_row"),
-    Stage(8, "08_outro", "", None, None, 0.0,
+    Stage(8, "08_triton", "Triton", None, None, 0.0,
+          "",
+          "every chapter, rebuilt in Triton",
+          "same tests · outputs identical on every run",
+          GPU_TRITON, 12.0, extra="triton", matrix="triton"),
+    Stage(9, "09_outro", "", None, None, 0.0,
           "",
           "", None,
           GPU_CH06, 9.0),
