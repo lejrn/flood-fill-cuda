@@ -16,25 +16,20 @@ address bar, so it is never written into this folder.
 
 ## Publish
 
-GitHub Pages can publish a branch only from the repo root or `/docs`, and
-this page lives in `project-page/`. Publish it with a GitHub Actions
-workflow instead:
+`.github/workflows/pages.yml` publishes this folder to GitHub Pages at
+`<owner>.github.io/<repo>/`. It runs on every push to `main` that touches
+`project-page/`, and by hand from the Actions tab ("Project page", Run
+workflow). The repo's Settings, Pages, Source is set to "GitHub Actions".
 
-1. Add `.github/workflows/pages.yml` that runs on pushes to the default
-   branch touching `project-page/**`, with `contents: read`,
-   `pages: write` and `id-token: write`. Its steps are
-   `actions/checkout`, `actions/configure-pages`,
-   `actions/upload-pages-artifact` with `path: project-page`, and
-   `actions/deploy-pages`.
-2. In Settings, Pages, set Source to "GitHub Actions".
+GitHub Pages can publish a branch only from the repo root or `/docs`,
+which is why a workflow uploads this folder instead.
 
-The site then lives at `<owner>.github.io/<repo>/`, the shape the link
-rewriting expects. On a custom domain or a user site the relative `../`
-links stay as they are and lead nowhere, so point them at github.com by
-hand there.
+On a custom domain or a user site the relative `../` links stay as they
+are and lead nowhere, so point them at github.com by hand there.
 
-Publish from a clean checkout, not by copying this folder from disk: a
-local `tools/__pycache__/` holds bytecode with local paths in it.
+The workflow publishes from a clean checkout. Do not publish by copying
+this folder from disk: a local `tools/__pycache__/` holds bytecode with
+local paths in it.
 
 ## Layout
 
