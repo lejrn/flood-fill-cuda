@@ -1,15 +1,19 @@
 # The flood-fill-cuda explainer video: summary and handoff
 
-Status on 2026-10-02. Branch `video-explainer` (PR #4), folder `video/`,
-version 0.4.0. Two layouts and two voices make four cuts in `out/`.
+Status on 2026-10-06. Branch `video-triton` (off `main`), folder `video/`,
+version 0.5.0. Two layouts and two voices make four cuts in `out/`.
 `out/` and `media/` are gitignored; only sources are tracked.
 
-| file | frame | voice | length |
-|---|---|---|---|
-| `final_landscape_kokoro.mp4` | 1920x1080 | Kokoro `am_adam`, local | 134.5 s |
-| `final_landscape_elevenlabs.mp4` | 1920x1080 | ElevenLabs "Peter Baker", `eleven_v4` | 185.7 s |
-| `final_vertical_kokoro.mp4` | 1080x1920 | Kokoro `am_adam`, local | 134.5 s |
-| `final_vertical_elevenlabs.mp4` | 1080x1920 | ElevenLabs "Peter Baker", `eleven_v4` | 185.7 s |
+| file | frame | voice | length | Triton beat |
+|---|---|---|---|---|
+| `final_landscape_kokoro.mp4` | 1920x1080 | Kokoro `am_adam`, local | 134.5 s | not yet |
+| `final_landscape_elevenlabs.mp4` | 1920x1080 | ElevenLabs "Peter Baker", `eleven_v4` | 185.7 s | not yet |
+| `final_vertical_kokoro.mp4` | 1080x1920 | Kokoro `am_adam`, local | 146.5 s | yes |
+| `final_vertical_elevenlabs.mp4` | 1080x1920 | ElevenLabs "Peter Baker", `eleven_v4` | 200.9 s | yes |
+
+The landscape cuts predate the Triton beat (2026-10-06). The scenes
+render it in both layouts and the layout check passes for both, so
+`assemble.py --render` in landscape picks it up.
 
 Both voices were chosen by the user by ear. The other 12 Kokoro voice
 cuts were deleted on 2026-10-02.
@@ -21,7 +25,8 @@ cuts were deleted on 2026-10-02.
 | intro, beat `intro_problem` | ~16 / 21 s | a drone light show (real footage), then its filter output beside it, then the frame budget: 30 fps, one frame every 33 ms |
 | intro, beat `intro_budget` | ~17 / 22 s | the CPU stuck on frame 1 with a real-time stopwatch, the GPU labelling every frame with a live blob counter and a 3 s sparkline, then the verdict: budget 33 ms, pure Python 24,083 ms, @njit 1,346 ms, GPU 1.46 ms |
 | stages 00-07 | ~94 / 132 s | three panes for the rest of the video (below) |
-| stage 08, outro | ~8 / 10 s | the full strip and matrix, "24,083 ms -> 1.46 ms", "16,000x" |
+| stage 08, Triton | ~12 / 15 s | the matrix flips to Numba time ÷ Triton time (one session), the GPU turns purple, "Numba → Triton", "1.12×", "faster in 738 of 934 cases", "chapter 5 still slower: 0.87×" |
+| stage 09, outro | ~8 / 10 s | the matrix back in ms, the full strip, "24,083 ms -> 1.46 ms", "16,000x" |
 
 The three panes, after the intro:
 
@@ -47,6 +52,7 @@ row, and the intro's four footage panels become two rows of two.
 
 ```
 benchmarks (JSON, committed)  ->  scenes/panes/data.py  ->  matrix cells, captions
+triton_twins JSON (committed) ->  data.load_twins()    ->  the Triton stage's cells and card
 chapter GIFs (committed)      ->  assets/extract_gifs.py -> assets/<name>/frame_NNN.png
 drone-show Short (yt-dlp)     ->  assets/make_drone_frames.py (+ gpu_tracker.py) -> drones_{sky,mask,labels}/
 narration/script.md           ->  narration/tts_kokoro.py -> out/kokoro/<beat>.wav + timing.json
@@ -73,7 +79,8 @@ video/
   narration/
     script.md                   11 beats; each ```text block is one TTS call
     common.py                   parses script.md, trims edge silence, writes timing.json
-    tts_kokoro.py               -> out/<--out>/<beat>.wav + timing.json (default voice am_adam)
+    tts_kokoro.py               -> out/<--out>/<beat>.wav + timing.json (default voice am_adam);
+                                --only <beat> voices one beat and keeps the other wavs
     import_audio.py             a folder of <beat>.mp3/.wav from any TTS -> out/<--out>/ in the same form
     tts_elevenlabs.py           the same narration through the API (Peter Baker, eleven_v4); needs
                                 ELEVENLABS_API_KEY in .env, unused so far (the connector made it)
@@ -83,7 +90,9 @@ video/
                                 makes the frame 8 x 14.22 units so text keeps its landscape size
     stage.py                    fr(), Replay (lazy frames), State, build_state(), StageScene
     s_intro.py                  the problem: four vertical footage panels, two beats in one clip
-    s00_cpu.py .. s08_outro.py  one thin scene per stage (k = stage index)
+    s00_cpu.py .. s07_runs.py   one thin scene per stage (k = stage index)
+    s08_triton.py               the Triton card; the transition flips the matrix to Numba / Triton
+    s09_outro.py                flips the matrix back to ms, then the three centre lines
     snapshot.py                 STAGE=k [LIVE=1] -> one PNG of a pane state with `-s`
     panes/geometry.py           the pane boxes: three columns (landscape) or two rows (vertical)
     panes/config.py             STAGES: beat, tag, replay set, captions, GpuSpec per stage
@@ -124,6 +133,7 @@ uv run python scenes/panes/data.py                             # the matrix as t
 uv run build/audit_numbers.py                                  # every on-screen number vs the JSON
 uv run build/layout_check.py --layout landscape                # then --layout vertical; both must exit 0
 uv run narration/tts_kokoro.py                                 # Kokoro am_adam into out/kokoro/
+uv run narration/tts_kokoro.py --only 08_triton                # one beat; the others keep their wavs
 uv run narration/import_audio.py --src out/elevenlabs_raw --out elevenlabs \
     --voice "elevenlabs:Peter Baker (Ix8C14HEHgIQkJswik2o) eleven_v4"
 uv run build/assemble.py --render --check                      # landscape, Kokoro
@@ -141,7 +151,10 @@ model `eleven_v4`, one take each. Download each result's mp3 to
 script is about 2,300 credits.
 
 Changing a spoken sentence: edit `script.md` and re-voice that beat in
-both voices. Then run `assemble.py --render --check` for each cut you
+both voices (`tts_kokoro.py --only <beat>`; one ElevenLabs take into
+`out/elevenlabs_raw/<beat>.mp3`, then `import_audio.py`, which rebuilds
+every beat from its mp3 exactly). Renaming a beat means renaming its
+wav and mp3 too: the 2026-10-06 outro went from `08_outro` to `09_outro`. Then run `assemble.py --render --check` for each cut you
 want. Clip lengths follow the narration, so every cut is a full
 re-render: 6-8 minutes each.
 
@@ -189,7 +202,10 @@ the outro fade. Rules that keep this true:
 3. `uv run build/assemble.py --check --layout <layout> --voice <voice>`
    (or with `--render`): every cut `OK`, no `JUMP` inside a hold, no
    `OVERRUN` you did not expect, total length printed. On 2026-10-02 the
-   four cuts passed 36 of 36 seams.
+   four cuts passed 36 of 36 seams; on 2026-10-06 the two vertical cuts
+   with the Triton beat passed 22 of 22. A hold "jump" of about 0.65
+   with nothing moving is an I-frame landing on a clip's last frame
+   (Peter Baker's s05): encoder noise over the whole picture, not content.
 4. Look at contact sheets (`build/review.py`) of any scene you touched,
    and at the final file around the seams and at 20-30 s (the counter).
 5. After touching the tracker: `make_drone_frames.py ... --tracker both`
@@ -241,6 +257,16 @@ the outro fade. Rules that keep this true:
   are identical, but one near-tie in frame 1 shifts every later track id,
   so 63% of blob pixels change colour. Re-render `s_intro` to pick up the
   new frames; nothing else changes.
+- **The Triton stage flips the matrix in place.** Its cells must sit
+  where the ms cells sit, dashed and hollow included: `data.py` flags any
+  cell whose kind differs (`!!`). `flip_matrix` fades the old pieces out
+  one by one, never through a wrapper `VGroup`: FadeOut's clean-up
+  removes its own mobject, and a wrapper is not in the scene, so the old
+  cells would come back at full opacity.
+- **Two sessions on screen in the Triton stage.** The ms matrix is the
+  July overview; the twin cells are both backends re-timed on
+  2026-10-02. A twin ratio is never one of the ms cells divided by
+  another.
 - **The ch06 overview column lives in `ch06_overview_*.json`** on purpose:
   `overview/build.py` and ch06's `figures.py` glob `overview_*.json`.
 - **Two narration numbers for the real image.** The matrix's ch06 cell is
@@ -286,6 +312,15 @@ the outro fade. Rules that keep this true:
 - Peter Baker reads the script 38% slower than Kokoro am_adam at speed
   1.1: 185.3 s of narration against 134.2 s.
 
+- Triton (2026-10-06, `results/triton_twins/`): a twin cell is
+  `numba_ms / triton_ms` of the grand table's kernel medians, each side
+  at its own fastest like-for-like variant of the chapter (ch02 pinned
+  is the 2 x 512 twin). 74 of the 89 numbered cells are faster in
+  Triton; ch05 is the grey column. The card's 1.12× is the report's
+  headline (geometric mean of the 9 unit means, 1.1193), "738 of 934"
+  its like-for-like rows, 0.87× ch05's unit mean. The narration says
+  "twelve percent faster", and the audit checks that wording.
+
 ## 9. How it got here (one line per step)
 
 1. First cut: seven two-panel scenes (rejected: no persistent story).
@@ -302,12 +337,16 @@ the outro fade. Rules that keep this true:
 9. The 9:16 layout, the layout check, the counter's fade fixed, and
    "the table" instead of "on the left" in beat 00.
 10. Tracking on the GPU, identical to the host tracker on every frame.
+11. The Triton beat before the outro (vertical cuts re-rendered; the
+    landscape cuts not yet).
 
 ## 10. Open items and ideas
 
-- The Peter Baker cuts run 3:06. YouTube Shorts and Instagram Reels cap
-  at 3 minutes, so the 9:16 one needs about 6 s less: a slightly faster
-  voice setting, or a shorter line somewhere.
+- The 9:16 Peter Baker cut runs 3:21 with the Triton beat.
+  YouTube Shorts and Instagram Reels cap at 3 minutes, so it needs about
+  21 s less: a faster voice setting, shorter lines, or the
+  Kokoro cut (2:27) for Shorts.
+- Re-render the landscape cuts to add the Triton beat.
 - The top-hat filter (6.3 ms on the host) is now the largest stage of the
   footage pipeline. A GPU opening (a 9 x 9 min, then max) would put the
   whole frame near 3 ms.

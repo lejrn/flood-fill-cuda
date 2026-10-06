@@ -14,7 +14,7 @@ from manim import (
     Dot, Line, Rectangle, RoundedRectangle, Square, VGroup, LEFT, RIGHT,
 )
 
-from scenes.style import BLUE, GREEN, GREY, GRID, INK, INK_SOFT, RED_PX, TEAL, label
+from scenes.style import BLUE, GREEN, GREY, GRID, INK, INK_SOFT, PURPLE, RED_PX, TEAL, label
 from scenes.panes.config import GpuSpec
 from scenes.panes.geometry import Box
 
@@ -43,6 +43,8 @@ def chip_color(palette: str, b: int) -> str:
         return (BLUE, GREEN)[b % 2]
     if palette == "teal":
         return TEAL
+    if palette == "purple":
+        return PURPLE
     return block_hex(b)
 
 
@@ -106,8 +108,11 @@ class GpuPane:
             for c in range(32):
                 g.add(Dot(self.box.at(x0 + c * pitch, y - r * pitch), radius=0.028, color=color))
         y_label = y - rows * pitch - 0.08
-        g.add(label(f"1 block = {spec.tpb} threads = {rows} warp{'s' if rows > 1 else ''} × 32 lanes",
-                    size=SMALL_FONT, color=INK_SOFT).move_to(self.box.at(self.box.cx, y_label)))
+        what = label(f"1 {spec.unit} = {spec.tpb} threads = {rows} warp{'s' if rows > 1 else ''} × 32 lanes",
+                     size=SMALL_FONT, color=INK_SOFT)
+        if what.width > self.box.w + 0.3:          # "program" is longer than "block"
+            what.scale_to_fit_width(self.box.w + 0.3)
+        g.add(what.move_to(self.box.at(self.box.cx, y_label)))
         y_next = y_label - 0.2
         for line in spec.shared:
             g.add(label(line, size=SMALL_FONT, color=BLUE).move_to(self.box.at(self.box.cx, y_next)))

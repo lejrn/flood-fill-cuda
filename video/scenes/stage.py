@@ -15,6 +15,9 @@ clip per beat and concatenates them. So:
 - Whole-frame timing: a rendered play of `fr(n)` seconds lasts exactly
   n frames at 15 fps (2n at 30); a frozen hold of `n/15 + EPS` too.
   (`np.arange` rounds a play up, `int()` rounds a frozen wait down.)
+- A stage with no thumb (Triton, the outro) adds nothing to the strip,
+  and a stage whose matrix view differs from the previous one's flips
+  the matrix in place (`flip_matrix`).
 """
 from __future__ import annotations
 
@@ -87,9 +90,10 @@ def build_state(k: int, geo: Geometry, bench: data.Bench) -> State:
         return State(None, None, None)
     prev = STAGES[k - 1]
     ctx = caption_ctx(bench)
-    left = MatrixPane(bench, geo.left, n_cols=min(k, len(data.COLUMNS)), current=k - 1)
+    left = MatrixPane(bench, geo.left, n_cols=min(k, len(data.COLUMNS)), current=k - 1,
+                      view=prev.matrix)
     right = GpuPane(geo.right, prev.gpu, sm_count=bench.sm_count)
-    thumbs = [(STAGES[i].thumb, STAGES[i].tag) for i in range(k - 1)]
+    thumbs = [(s.thumb, s.tag) for s in STAGES[:k - 1] if s.thumb]
     c1, c2 = stage_captions(prev, ctx)
     middle = MiddlePane(geo.middle, thumbs, prev.thumb, c1, c2,
                         fit_wh=prev.big_fit, dy=prev.big_dy, extra=prev.extra)
@@ -101,9 +105,10 @@ def build_live(k: int, geo: Geometry, bench: data.Bench, frame: int = 48) -> Sta
     st = STAGES[k]
     ctx = caption_ctx(bench)
     n_cols = min(k + 1, len(data.COLUMNS)) if st.col else min(k, len(data.COLUMNS))
-    left = MatrixPane(bench, geo.left, n_cols=n_cols, current=(k if st.col else k - 1))
+    left = MatrixPane(bench, geo.left, n_cols=n_cols, current=(k if st.col else k - 1),
+                      view=st.matrix)
     right = GpuPane(geo.right, st.gpu, sm_count=bench.sm_count)
-    thumbs = [(STAGES[i].thumb, STAGES[i].tag) for i in range(k)]
+    thumbs = [(s.thumb, s.tag) for s in STAGES[:k] if s.thumb]
     c1, c2 = stage_captions(st, ctx)
     src = f"{st.frames}/frame_{frame:03d}.png" if st.frames else st.thumb
     middle = MiddlePane(geo.middle, thumbs, src or None, c1, c2,
@@ -263,6 +268,18 @@ class StageScene(BeatScene):
             run_time=fr(18),
         )
 
+    def flip_matrix(self, view: str) -> list:
+        """Animations that turn the matrix into `view` in place: the title and
+        legend cross-fade, then the cells column by column (24 frames). The
+        old pieces are top-level scene mobjects, so FadeOut removes them."""
+        old = self.state.left
+        new = MatrixPane(self.bench, self.geo.left, n_cols=old.n_cols, current=old.current, view=view)
+        cols = [AnimationGroup(FadeOut(oc), FadeOut(on), FadeIn(VGroup(nc, nn)))
+                for oc, on, nc, nn in zip(old.cols, old.nums, new.cols, new.nums)]
+        return [FadeOut(old.title, run_time=fr(9)), FadeOut(old.legend, run_time=fr(9)),
+                FadeIn(new.title, run_time=fr(9)), FadeIn(new.legend, run_time=fr(9)),
+                LaggedStart(*cols, lag_ratio=0.12, run_time=fr(24))]
+
     # ---- the three phases
     def intro(self) -> None:
         """Stage 0: the panes appear, then the CPU column."""
@@ -289,12 +306,14 @@ class StageScene(BeatScene):
         gpu_changes = cfg.gpu is not pcfg.gpu
         if gpu_changes:
             outs.append(FadeOut(prev.right.dynamic))
-        self.play(
-            prev.middle.big_image.animate.scale_to_fit_width(THUMB_W).move_to(slot_center(box, k - 1)),
-            FadeIn(tag(box, k - 1, pcfg.tag)),
-            *outs,
-            run_time=fr(9),
-        )
+        if prev.middle.big_image is not None:
+            self.play(
+                prev.middle.big_image.animate.scale_to_fit_width(THUMB_W).move_to(slot_center(box, k - 1)),
+                FadeIn(tag(box, k - 1, pcfg.tag)),
+                *outs,
+                run_time=fr(9),
+            )
+            outs = []
         ins = []
         replay = self.new_replay()
         if replay is not None:
@@ -306,8 +325,12 @@ class StageScene(BeatScene):
         if gpu_changes:
             new_gpu = GpuPane(self.geo.right, cfg.gpu, sm_count=self.bench.sm_count)
             ins.append(FadeIn(new_gpu.dynamic))
-        if ins:
-            self.play(*ins, run_time=fr(9))
+        if cfg.matrix != pcfg.matrix:
+            # with nothing to sweep, the old caption and GPU go out here too
+            quick = [a.set_run_time(fr(9)) for a in outs + ins]
+            self.play(*quick, *self.flip_matrix(cfg.matrix))
+        elif outs or ins:
+            self.play(*outs, *ins, run_time=fr(9))
         if replay is not None:
             self.start_replay(replay, cfg.replay_fps)
         if cfg.col is not None:

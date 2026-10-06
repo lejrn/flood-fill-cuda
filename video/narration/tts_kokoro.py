@@ -2,9 +2,12 @@
 
 Usage (from video/):
     uv run narration/tts_kokoro.py [--voice am_adam] [--gap 0.6]
+    uv run narration/tts_kokoro.py --only 08_triton      # one new beat, keep the rest
 
 Writes one wav per beat, a joined narration.wav with `gap` seconds of
-silence between beats, and timing.json for the assembly step.
+silence between beats, and timing.json for the assembly step. Kokoro is
+not bit-reproducible, so `--only` voices just the named beats and reads
+every other beat from its existing wav.
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ def main() -> None:
     ap.add_argument("--gap", type=float, default=0.4, help="silence between beats, seconds")
     ap.add_argument("--speed", type=float, default=1.1, help="Kokoro reads slowly at 1.0")
     ap.add_argument("--out", default="kokoro", help="folder under out/ (the VOICE the scenes read)")
+    ap.add_argument("--only", nargs="+", default=None, help="voice only these beats; the rest keep their wavs")
     args = ap.parse_args()
 
     # This laptop has 6 GB of RAM. Loading the 327 MB checkpoint the normal
@@ -56,10 +60,22 @@ def main() -> None:
     durations: dict[str, float] = {}
     joined: list[np.ndarray] = []
     silence = np.zeros(int(SR * args.gap), dtype=np.float32)
-    for beat in load_beats():
-        audio = np.concatenate([a for _, _, a in pipe(beat.text, voice=args.voice, speed=args.speed)])
-        audio = trim_edges(audio.astype(np.float32), SR)
-        sf.write(out / f"{beat.name}.wav", audio, SR)
+    beats = load_beats()
+    unknown = set(args.only or ()) - {b.name for b in beats}
+    if unknown:
+        raise SystemExit(f"no such beat in script.md: {sorted(unknown)}")
+    for beat in beats:
+        wav = out / f"{beat.name}.wav"
+        if args.only is None or beat.name in args.only:
+            audio = np.concatenate([a for _, _, a in pipe(beat.text, voice=args.voice, speed=args.speed)])
+            audio = trim_edges(audio.astype(np.float32), SR)
+            sf.write(wav, audio, SR)
+        else:
+            if not wav.exists():
+                raise SystemExit(f"missing {wav}: voice it too, or drop --only")
+            audio, sr = sf.read(str(wav), dtype="float32")
+            if sr != SR:
+                raise SystemExit(f"{wav.name}: {sr} Hz, expected {SR}")
         durations[beat.name] = len(audio) / SR
         joined += [audio, silence]
         print(f"{beat.name:20s} {durations[beat.name]:5.2f} s")

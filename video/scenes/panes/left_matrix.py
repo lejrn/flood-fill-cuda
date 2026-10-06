@@ -5,6 +5,12 @@ chapter's fastest measured variant beats the CPU @njit time on that row;
 estimated cells are dashed and never glow; n/a cells are hollow. Every
 revealed column keeps its ms printed (measured cells only), so the pane
 reads as a growing table.
+
+The Triton view (`view="triton"`) keeps the rows, headers and cell places
+and swaps what the cells say: Numba time / Triton time on that row, from
+one session. Purple when Triton is faster, grey when Numba is; the CPU
+column has no twin and is hollow. Same dashed and hollow cells as the ms
+view, so a stage can flip one view into the other in place.
 """
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ from manim import (
     LEFT, RIGHT,
 )
 
-from scenes.style import BLUE, GREY, INK, INK_SOFT, RED_PX, TEAL, label
+from scenes.style import BLUE, GREY, INK, INK_SOFT, PURPLE, RED_PX, TEAL, label
 from scenes.panes import data
 from scenes.panes.geometry import Box
 
@@ -58,6 +64,15 @@ def row_glyph(kind: str) -> VMobject:
     return VGroup(frame, Square(0.06, **fill).shift(LEFT * 0.03 + np.array([0, -0.02, 0])))
 
 
+def empty_cell(kind: str) -> VMobject:
+    """The dashed (estimated) or hollow (n/a) cell, shared by both views."""
+    kw = dict(width=CELL_W, height=CELL_H)
+    if kind == "est":
+        base = Rectangle(**kw, stroke_width=1.0, stroke_color=GREY, fill_opacity=0)
+        return DashedVMobject(base, num_dashes=12, dashed_ratio=0.55, color=GREY)
+    return Rectangle(**kw, stroke_width=0.8, stroke_color=GREY, stroke_opacity=0.5, fill_opacity=0)
+
+
 def cell_mobject(cell: data.Cell, final: bool, centre: np.ndarray) -> VMobject:
     kw = dict(width=CELL_W, height=CELL_H)
     kind = cell.kind
@@ -71,11 +86,19 @@ def cell_mobject(cell: data.Cell, final: bool, centre: np.ndarray) -> VMobject:
             m = Rectangle(**kw, stroke_width=0, fill_color=RED_PX, fill_opacity=0.22)
         else:
             m = Rectangle(**kw, stroke_width=0, fill_color=GREY, fill_opacity=0.15)
-    elif kind == "est":
-        base = Rectangle(**kw, stroke_width=1.0, stroke_color=GREY, fill_opacity=0)
-        m = DashedVMobject(base, num_dashes=12, dashed_ratio=0.55, color=GREY)
-    else:  # na
-        m = Rectangle(**kw, stroke_width=0.8, stroke_color=GREY, stroke_opacity=0.5, fill_opacity=0)
+    else:  # est | na
+        m = empty_cell(kind)
+    return m.move_to(centre)
+
+
+def twin_mobject(cell: data.TwinCell, centre: np.ndarray) -> VMobject:
+    kw = dict(width=CELL_W, height=CELL_H, stroke_width=0)
+    if cell.kind == "fast":
+        m = Rectangle(**kw, fill_color=PURPLE, fill_opacity=data.twin_glow_opacity(cell.ratio))
+    elif cell.kind == "slow":
+        m = Rectangle(**kw, fill_color=GREY, fill_opacity=0.15)
+    else:
+        m = empty_cell(cell.kind)
     return m.move_to(centre)
 
 
@@ -86,10 +109,30 @@ def cell_number(cell: data.Cell, centre: np.ndarray) -> VMobject:
     return label(data.fmt_cell_ms(cell.ms), size=NUM_FONT, color=color, mono=True).move_to(centre)
 
 
+def twin_number(cell: data.TwinCell, centre: np.ndarray) -> VMobject:
+    if cell.ratio is None:
+        return VGroup()
+    color = INK if cell.kind == "fast" else INK_SOFT
+    return label(data.fmt_twin(cell.ratio), size=NUM_FONT, color=color, mono=True).move_to(centre)
+
+
+# view -> (title, legend line 1, legend line 2)
+VIEW_TEXT = {
+    "ms": ("ms on 17 shapes · CPU @njit vs each chapter",
+           "glow = faster than the CPU · brighter = bigger win",
+           "dashed = estimated, one launch per blob · hollow = n/a"),
+    "triton": ("Numba time ÷ Triton time · one session, 17 shapes",
+               "glow = Triton faster · brighter = bigger gap",
+               "grey = Numba faster · dashed = estimated · hollow = n/a"),
+}
+
+
 class MatrixPane:
-    def __init__(self, bench: data.Bench, box: Box, n_cols: int, current: int | None):
+    def __init__(self, bench: data.Bench, box: Box, n_cols: int, current: int | None,
+                 view: str = "ms"):
         self.bench, self.box = bench, box
-        self.n_cols, self.current = n_cols, current
+        self.n_cols, self.current, self.view = n_cols, current, view
+        self.twins = data.load_twins() if view == "triton" else None
         self.x_glyph = box.x0 + 0.14
         self.x_name = box.x0 + 0.34
         self.x_col0 = box.x0 + 1.34 + CELL_W / 2
@@ -98,6 +141,7 @@ class MatrixPane:
         self.y_row0 = box.y1 - 1.00
         self.y_legend = box.y0 + 0.16
         self.static = self._static()
+        self.title, self.legend = self._title(), self._legend()
         self.headers = [self.header(j) for j in range(n_cols)]
         self.cols = [self.col_group(j) for j in range(n_cols)]
         self.nums = [self.num_group(j) if self.shows_numbers(j) else VGroup()
@@ -119,21 +163,25 @@ class MatrixPane:
 
     # ---- builders (pure: same input, same mobjects)
     def _static(self) -> VGroup:
+        """The row glyphs and names: the same in both views."""
         g = VGroup()
-        title = label("ms on 17 shapes · CPU @njit vs each chapter", size=TITLE_FONT, color=INK_SOFT)
-        title.move_to(self.box.at(self.box.x0, self.y_title), aligned_edge=LEFT)
-        g.add(title)
         for r, row in enumerate(self.bench.rows):
             y = self.row_y(r)
             g.add(row_glyph(row.glyph).move_to(self.box.at(self.x_glyph, y)))
             g.add(label(row.name, size=NAME_FONT, color=INK_SOFT)
                   .move_to(self.box.at(self.x_name, y), aligned_edge=LEFT))
-        l1 = label("glow = faster than the CPU · brighter = bigger win", size=LEGEND_FONT, color=GREY)
-        l2 = label("dashed = estimated, one launch per blob · hollow = n/a", size=LEGEND_FONT, color=GREY)
+        return g
+
+    def _title(self) -> VMobject:
+        title = label(VIEW_TEXT[self.view][0], size=TITLE_FONT, color=INK_SOFT)
+        return title.move_to(self.box.at(self.box.x0, self.y_title), aligned_edge=LEFT)
+
+    def _legend(self) -> VGroup:
+        l1 = label(VIEW_TEXT[self.view][1], size=LEGEND_FONT, color=GREY)
+        l2 = label(VIEW_TEXT[self.view][2], size=LEGEND_FONT, color=GREY)
         l1.move_to(self.box.at(self.box.x0, self.y_legend + 0.09), aligned_edge=LEFT)
         l2.move_to(self.box.at(self.box.x0, self.y_legend - 0.09), aligned_edge=LEFT)
-        g.add(l1, l2)
-        return g
+        return VGroup(l1, l2)
 
     def header(self, j: int) -> VGroup:
         col = data.COLUMNS[j]
@@ -147,13 +195,19 @@ class MatrixPane:
 
     def col_group(self, j: int) -> VGroup:
         col = data.COLUMNS[j]
+        if self.twins is not None:
+            return VGroup(*[twin_mobject(self.twins.cell(row.key, col.key), self.cell_centre(r, j))
+                            for r, row in enumerate(self.bench.rows)])
         return VGroup(*[cell_mobject(row.cells[col.key], col.final, self.cell_centre(r, j))
                         for r, row in enumerate(self.bench.rows)])
 
     def num_group(self, j: int) -> VGroup:
         col = data.COLUMNS[j]
+        if self.twins is not None:
+            return VGroup(*[twin_number(self.twins.cell(row.key, col.key), self.cell_centre(r, j))
+                            for r, row in enumerate(self.bench.rows)])
         return VGroup(*[cell_number(row.cells[col.key], self.cell_centre(r, j))
                         for r, row in enumerate(self.bench.rows)])
 
     def all(self) -> list:
-        return [self.static, *self.headers, *self.cols, *self.nums]
+        return [self.static, self.title, self.legend, *self.headers, *self.cols, *self.nums]

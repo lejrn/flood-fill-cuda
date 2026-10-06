@@ -6,6 +6,9 @@ CPU). Middle, the blob of the current chapter, with every finished chapter
 swept up into a strip. Right, the GPU: which SMs, blocks, threads and
 memory each chapter uses.
 
+Then one more beat, the same chapters rebuilt in Triton: the matrix
+flips to Numba time ÷ Triton time, then back to ms for the outro.
+
 Target: about 2 minutes. English voice, Kokoro `am_adam` (male; chosen by ear from
 `build/variants.py`, which renders one cut per male voice). Every number below is on screen and
 comes from a committed benchmark JSON via `scenes/panes/data.py`
@@ -95,10 +98,18 @@ Chapter six. Why move pixels at all? A red span in a row is one run: twenty-five
 
 On screen: a pixel row collapses into runs, the recoloured real image; the kernel strip pack to paint; column "runs" in teal.
 
-## beat 08_outro
+## beat 08_triton
+
+```text
+How much of that is Numba? Every chapter was rebuilt in Triton, a second GPU language: same tests, identical outputs. Triton is twelve percent faster overall, and still trails in chapter five.
+```
+
+On screen: the ch06 still sweeps up (8 thumbs); the GPU turns purple (one Triton program per block, no shared memory); the matrix flips in place to Numba time ÷ Triton time from the twins' grand table (one session, each side's fastest variant; purple = Triton faster); then Numba → Triton, 1.12× (geometric mean of the 9 units), faster in 738 of 934 cases, chapter 5 still slower: 0.87×.
+
+## beat 09_outro
 
 ```text
 Twenty-four seconds to one and a half milliseconds. Sixteen thousand times. Not a smarter algorithm. A better representation.
 ```
 
-On screen: the full strip and the full matrix; centre lines 24,083 ms → 1.46 ms, 16,000×, flood-fill-cuda.
+On screen: the matrix flips back to ms, the GPU back to ch06; the full strip; centre lines 24,083 ms → 1.46 ms, 16,000×, flood-fill-cuda.
