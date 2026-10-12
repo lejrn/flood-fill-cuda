@@ -1,4 +1,4 @@
-"""Shared helpers for the TTS scripts: parse script.md into beats, write timing."""
+"""Shared helpers for the TTS scripts: parse a script into beats, write timing and words."""
 from __future__ import annotations
 
 import json
@@ -36,19 +36,59 @@ def load_beats(path: Path = SCRIPT) -> list[Beat]:
     return beats
 
 
-def trim_edges(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float = 0.12) -> np.ndarray:
-    """Cut leading/trailing silence, keeping `keep` seconds of air on each side."""
+def trim_bounds(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float = 0.12) -> tuple[int, int]:
+    """(lo, hi) sample bounds that cut leading/trailing silence, keeping `keep` s of air."""
     if audio.size == 0:
-        return audio
+        return 0, 0
     amp = np.abs(audio)
     floor = amp.max() * (10 ** (thresh_db / 20))
     loud = np.flatnonzero(amp > floor)
     if loud.size == 0:
-        return audio
+        return 0, audio.size
     pad = int(sr * keep)
-    lo = max(0, loud[0] - pad)
-    hi = min(audio.size, loud[-1] + pad)
+    return max(0, loud[0] - pad), min(audio.size, loud[-1] + pad)
+
+
+def trim_edges(audio: np.ndarray, sr: int, thresh_db: float = -45.0, keep: float = 0.12) -> np.ndarray:
+    """Cut leading/trailing silence, keeping `keep` seconds of air on each side."""
+    lo, hi = trim_bounds(audio, sr, thresh_db, keep)
     return audio[lo:hi]
+
+
+def script_path(arg: str | None) -> Path:
+    """--script value -> path; relative paths are taken from narration/."""
+    if not arg:
+        return SCRIPT
+    p = Path(arg)
+    return p if p.is_absolute() else HERE / p
+
+
+def estimate_words(text: str, seconds: float) -> list:
+    """[word, start, end] spread over `seconds` by character count: a stand-in
+    for voices without timestamps (ElevenLabs via the connector)."""
+    words = text.split()
+    weights = [len(w) + 1 for w in words]
+    total = float(sum(weights)) or 1.0
+    rows, t = [], 0.0
+    for w, n in zip(words, weights):
+        d = seconds * n / total
+        rows.append([w, round(t, 3), round(t + d, 3)])
+        t += d
+    return rows
+
+
+def write_words(out_dir: Path, words: dict, source: str) -> Path:
+    """words.json: per beat, [word, start, end] in seconds from the trimmed wav's start."""
+    p = out_dir / "words.json"
+    p.write_text(json.dumps({"source": source, "beats": words}, indent=1), encoding="utf-8")
+    return p
+
+
+def read_words(out_dir: Path) -> dict:
+    p = out_dir / "words.json"
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text(encoding="utf-8"))["beats"]
 
 
 def write_timing(out_dir: Path, voice: str, durations: dict[str, float], gap: float) -> Path:

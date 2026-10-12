@@ -3,6 +3,7 @@
 Usage (from video/):
     uv run build/review.py s03_n_blocks NBlocks --times 0,0.3,0.6,1.0,1.5,2.6,5,end
     uv run build/review.py s03_n_blocks NBlocks --every 1.0 [--layout landscape] [--quality 480p15]
+    uv run build/review.py c04_gate Gate --cut chain --look iso --layout vertical --every 1
 
 Frames land in media/review/<stem>/t_<sec>.png and a contact sheet in
 media/review/<stem>/sheet.png (frames scaled to 640 px wide, 3 per row).
@@ -21,13 +22,8 @@ VIDEO = Path(__file__).resolve().parents[1]
 FFMPEG = VIDEO / ".venv" / "bin" / "ffmpeg"
 
 
-def newest_render(layout: str, stem: str, cls: str, quality: str | None) -> Path:
-    folder = VIDEO / "media" / layout / "videos" / stem
-    pattern = f"{quality}/{cls}.mp4" if quality else f"*/{cls}.mp4"
-    hits = sorted(folder.glob(pattern), key=lambda p: p.stat().st_mtime)
-    if not hits:
-        raise SystemExit(f"no render for {stem}/{cls} under {folder}")
-    return hits[-1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from assemble import CUTS, LOOKS, newest_render  # noqa: E402
 
 
 def duration(path: Path) -> float:
@@ -45,9 +41,11 @@ def main() -> int:
     ap.add_argument("--layout", default="landscape")
     ap.add_argument("--quality", default=None, help="e.g. 480p15 or 1080p30; default newest")
     ap.add_argument("--cols", type=int, default=3)
+    ap.add_argument("--cut", choices=sorted(CUTS), default="panes")
+    ap.add_argument("--look", choices=LOOKS, default="flat")
     args = ap.parse_args()
 
-    clip = newest_render(args.layout, args.stem, args.cls, args.quality)
+    clip = newest_render(args.layout, args.stem, args.cls, args.cut, args.look, args.quality)
     dur = duration(clip)
     if args.times:
         times = [dur - 0.02 if t.strip() == "end" else float(t) for t in args.times.split(",")]
@@ -58,7 +56,8 @@ def main() -> int:
             times.append(t)
             t += step
         times.append(dur - 0.02)
-    out = VIDEO / "media" / "review" / args.stem
+    sub = args.stem if args.cut == "panes" else f"chain_{args.look}_{args.layout}_{Path(args.stem).name}"
+    out = VIDEO / "media" / "review" / sub
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("*.png"):
         old.unlink()

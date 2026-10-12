@@ -7,8 +7,11 @@ Usage (from video/):
     uv run build/assemble.py --voice elevenlabs
     uv run build/assemble.py --render --only s03_n_blocks   # one clip
     uv run build/assemble.py --no-audio --check              # silent cut + seam check
+    uv run build/assemble.py --cut chain --look iso --layout vertical --render --check
 
-Output: out/final_<layout>_<voice>.mp4
+Output: out/final_<layout>_<voice>.mp4 for the three-pane cut, and
+out/final_chain_<look>_<layout>_<voice>.mp4 for the chain cut (narration
+from out/<voice>_chain/, clips in media/chain_<look>/<layout>/).
 
 Each scene is exactly `beat + gap` seconds long (see style.BeatScene.finish),
 so the narration wavs are placed at the cumulative start of each scene as
@@ -35,7 +38,7 @@ PY = VIDEO / ".venv" / "bin" / "python"
 FFMPEG = VIDEO / ".venv" / "bin" / "ffmpeg"
 
 # (scene file stem, class name, beat name) in narrative order.
-BEATS = [
+PANES = [
     ("s_intro", "Intro", "intro_problem"),
     ("s_intro", "Intro", "intro_budget"),
     ("s00_cpu", "Cpu", "00_cpu"),
@@ -49,15 +52,33 @@ BEATS = [
     ("s08_triton", "Triton", "08_triton"),
     ("s09_outro", "Outro", "09_outro"),
 ]
+BEATS = PANES
+
+# The problem -> fix chain cut (narration/script_chain.md, scenes/chain/).
+CHAIN = [
+    ("chain/c00_job", "Job", "c00_job"),
+    ("chain/c01_one_worker", "OneWorker", "c01_one_worker"),
+    ("chain/c02_team", "Team", "c02_team"),
+    ("chain/c03_more_teams", "MoreTeams", "c03_more_teams"),
+    ("chain/c04_gate", "Gate", "c04_gate"),
+    ("chain/c05_diagonals", "Diagonals", "c05_diagonals"),
+    ("chain/c06_real_picture", "RealPicture", "c06_real_picture"),
+    ("chain/c07_tags", "Tags", "c07_tags"),
+    ("chain/c08_seeds", "Seeds", "c08_seeds"),
+    ("chain/c09_runs", "Runs", "c09_runs"),
+    ("chain/c10_reveal", "Reveal", "c10_reveal"),
+]
+CUTS = {"panes": PANES, "chain": CHAIN}
+LOOKS = ("flat", "iso")
 
 SR = 48_000
 GAP = 0.4          # seconds between beats inside a clip (style.BeatScene.finish tail)
 
 
-def clip_list() -> list:
-    """[(stem, cls, [beats])]: consecutive BEATS entries of one scene share a clip."""
+def clip_list(cut: str = "panes") -> list:
+    """[(stem, cls, [beats])]: consecutive entries of one scene share a clip."""
     clips = []
-    for stem, cls, beat in BEATS:
+    for stem, cls, beat in CUTS[cut]:
         if clips and clips[-1][0] == stem and clips[-1][1] == cls:
             clips[-1][2].append(beat)
         else:
@@ -65,19 +86,27 @@ def clip_list() -> list:
     return clips
 
 
-def media_dir(layout: str) -> Path:
-    return VIDEO / "media" / layout
+def media_dir(layout: str, cut: str = "panes", look: str = "flat") -> Path:
+    if cut == "panes":
+        return VIDEO / "media" / layout
+    return VIDEO / "media" / f"chain_{look}" / layout
 
 
-def render(layout: str, voice: str, quality: str, only: list[str] | None = None) -> None:
-    env = dict(os.environ, VOICE=voice, VIDEO_LAYOUT=layout)
-    for stem, cls, _ in clip_list():
-        if only and stem not in only:
+def voice_dir(voice: str, cut: str = "panes") -> str:
+    """The folder under out/ that a cut's narration lives in (the scenes' VOICE)."""
+    return voice if cut == "panes" else f"{voice}_chain"
+
+
+def render(layout: str, voice: str, quality: str, only: list[str] | None = None,
+           cut: str = "panes", look: str = "flat") -> None:
+    env = dict(os.environ, VOICE=voice_dir(voice, cut), VIDEO_LAYOUT=layout, LOOK=look)
+    for stem, cls, _ in clip_list(cut):
+        if only and stem not in only and Path(stem).name not in only:
             continue
         # --disable_caching: a cached play skips update_mobjects(0), so end
         # states can differ from an uncached render. Always render fresh.
         cmd = [str(PY), "-m", "manim", "render", f"-q{quality}", "--fps", "30", "--disable_caching",
-               "--media_dir", str(media_dir(layout))]
+               "--media_dir", str(media_dir(layout, cut, look))]
         if layout == "vertical":
             cmd += ["-r", "1080,1920"]
         cmd += [str(SCENES / f"{stem}.py"), cls]
@@ -85,10 +114,14 @@ def render(layout: str, voice: str, quality: str, only: list[str] | None = None)
         subprocess.run(cmd, cwd=VIDEO, env=env, check=True)
 
 
-def newest_render(layout: str, stem: str, cls: str) -> Path:
-    hits = sorted((media_dir(layout) / "videos" / stem).glob(f"*/{cls}.mp4"), key=lambda p: p.stat().st_mtime)
+def newest_render(layout: str, stem: str, cls: str, cut: str = "panes", look: str = "flat",
+                  quality: str | None = None) -> Path:
+    """The newest clip of a scene (Manim names the folder after the file's stem)."""
+    folder = media_dir(layout, cut, look) / "videos" / Path(stem).name
+    pattern = f"{quality}/{cls}.mp4" if quality else f"*/{cls}.mp4"
+    hits = sorted(folder.glob(pattern), key=lambda p: p.stat().st_mtime)
     if not hits:
-        raise SystemExit(f"no render for {stem}/{cls} under {media_dir(layout)}; run with --render")
+        raise SystemExit(f"no render for {stem}/{cls} under {folder}; run with --render")
     return hits[-1]
 
 
@@ -123,20 +156,24 @@ def main() -> None:
     ap.add_argument("--no-audio", action="store_true", help="video-only cut, no narration needed")
     ap.add_argument("--check", action="store_true", help="run build/seam_check.py on the clips")
     ap.add_argument("--strict", action="store_true", help="fail outside the 60-120 s target")
+    ap.add_argument("--cut", choices=sorted(CUTS), default="panes", help="panes (three-pane) or chain")
+    ap.add_argument("--look", choices=LOOKS, default="flat", help="chain cut only: flat or iso (2.5D)")
     args = ap.parse_args()
+    vdir = voice_dir(args.voice, args.cut)
+    name = f"{args.layout}_{args.voice}" if args.cut == "panes" else f"chain_{args.look}_{args.layout}_{args.voice}"
 
     if args.render:
-        render(args.layout, args.voice, args.quality, args.only)
+        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look)
         if args.only:
             print("rendered", args.only)
             return
 
-    groups = clip_list()
-    clips = [newest_render(args.layout, stem, cls) for stem, cls, _ in groups]
+    groups = clip_list(args.cut)
+    clips = [newest_render(args.layout, stem, cls, args.cut, args.look) for stem, cls, _ in groups]
     durs = [duration(p) for p in clips]
     starts = np.concatenate([[0.0], np.cumsum(durs)[:-1]])
     total = float(sum(durs))
-    timing = OUT / args.voice / "timing.json"
+    timing = OUT / vdir / "timing.json"
     beat_len = {}
     if timing.exists():
         beat_len = {r["beat"]: float(r["seconds"]) for r in json.loads(timing.read_text())["beats"]}
@@ -151,7 +188,7 @@ def main() -> None:
             slot = sum(beat_len[b] + GAP for b in beats)
             note = f"  beats {slot - GAP * len(beats):5.2f} + gaps = {slot:5.2f}" + \
                    ("  OVERRUN" if d > slot + 0.05 else "")
-        print(f"{stem:16s} start {t0:6.2f}  len {d:5.2f}{note}   [{', '.join(beats)}]")
+        print(f"{Path(stem).name:18s} start {t0:6.2f}  len {d:5.2f}{note}   [{', '.join(beats)}]")
     print(f"total {total:.2f} s")
     if not 60.0 <= total <= 150.0:
         msg = f"total {total:.1f} s is outside the 60-150 s target"
@@ -160,10 +197,10 @@ def main() -> None:
         print("warning:", msg)
     if args.check:
         subprocess.run([str(PY), str(VIDEO / "build" / "seam_check.py"), "--layout", args.layout,
-                        "--intra"], check=True)
+                        "--cut", args.cut, "--look", args.look, "--intra"], check=True)
 
     OUT.mkdir(exist_ok=True)
-    work = OUT / f"work_{args.layout}_{args.voice}"
+    work = OUT / f"work_{name}"
     work.mkdir(exist_ok=True)
 
     # 1. video-only concat (re-encode so every clip shares one timebase)
@@ -176,15 +213,16 @@ def main() -> None:
 
     # 2. narration laid at each scene's measured start
     if args.no_audio:
-        final = OUT / f"final_{args.layout}_silent.mp4"
+        silent = args.layout if args.cut == "panes" else f"chain_{args.look}_{args.layout}"
+        final = OUT / f"final_{silent}_silent.mp4"
         subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-i", str(video_only), "-c:v", "copy",
                         "-movflags", "+faststart", str(final)], check=True)
         print(f"->  {final}  ({duration(final):.2f} s, no audio)")
         return
     track = np.zeros(int(np.ceil(total * SR)) + SR, dtype=np.float32)
-    for _, _, beat in BEATS:
+    for _, _, beat in CUTS[args.cut]:
         t0 = beat_starts[beat]
-        wav = OUT / args.voice / f"{beat}.wav"
+        wav = OUT / vdir / f"{beat}.wav"
         if not wav.exists():
             raise SystemExit(f"missing narration {wav}; run narration/tts_{args.voice}.py")
         a = load_wav(wav, SR)
@@ -204,7 +242,7 @@ def main() -> None:
     sf.write(str(aligned), track[: int(np.ceil(total * SR))], SR)
 
     # 3. mux
-    final = OUT / f"final_{args.layout}_{args.voice}.mp4"
+    final = OUT / f"final_{name}.mp4"
     subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-i", str(video_only), "-i", str(aligned),
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest",
                     str(final)], check=True)

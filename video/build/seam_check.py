@@ -14,7 +14,8 @@ below 1.5 (preview-quality speckle images reach 0.95) and fewer than
 
 Usage (from video/):
     uv run build/seam_check.py [--layout landscape] [--quality 1080p30] [--intra]
-Writes media/review/seams/<k>_<k+1>.png (A | B | 8x diff) for every pair.
+    uv run build/seam_check.py --cut chain --look iso --layout vertical --intra
+Writes media/review/seams[_chain_<look>]/<k>_<k+1>.png (A | B | 8x diff) for every pair.
 """
 from __future__ import annotations
 
@@ -27,12 +28,12 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from assemble import clip_list, duration  # noqa: E402
+from assemble import CUTS, LOOKS, clip_list, duration, newest_render  # noqa: E402
 
 VIDEO = Path(__file__).resolve().parents[1]
 MEAN_MAX, FRAC_MAX, LEVELS = 1.5, 0.0005, 16
 BOX = 4
-FADES_OUT = {"s_intro", "s09_outro"}     # these clips end on a fade, so their tails jump
+FADES_OUT = {"s_intro", "s09_outro", "chain/c10_reveal"}     # these clips end on a fade, so their tails jump
 
 
 def frames_at_edges(path: Path, n_tail: int = 1) -> tuple:
@@ -72,18 +73,15 @@ def main() -> int:
     ap.add_argument("--layout", default="landscape")
     ap.add_argument("--quality", default=None)
     ap.add_argument("--intra", action="store_true")
+    ap.add_argument("--cut", choices=sorted(CUTS), default="panes")
+    ap.add_argument("--look", choices=LOOKS, default="flat")
     args = ap.parse_args()
 
-    out = VIDEO / "media" / "review" / "seams"
+    sub = "seams" if args.cut == "panes" else f"seams_chain_{args.look}_{args.layout}"
+    out = VIDEO / "media" / "review" / sub
     out.mkdir(parents=True, exist_ok=True)
-    clips = []
-    for stem, cls, beats in clip_list():
-        folder = VIDEO / "media" / args.layout / "videos" / stem
-        pattern = f"{args.quality}/{cls}.mp4" if args.quality else f"*/{cls}.mp4"
-        hits = sorted(folder.glob(pattern), key=lambda p: p.stat().st_mtime)
-        if not hits:
-            raise SystemExit(f"no render for {stem}/{cls}")
-        clips.append((stem, hits[-1]))
+    clips = [(stem, newest_render(args.layout, stem, cls, args.cut, args.look, args.quality))
+             for stem, cls, _ in clip_list(args.cut)]
 
     n_tail = 12 if args.intra else 1
     edges = [frames_at_edges(p, n_tail) for _, p in clips]
@@ -95,7 +93,7 @@ def main() -> int:
         verdict = "OK" if (mean < MEAN_MAX and frac < FRAC_MAX) else "SEAM"
         ok &= verdict == "OK"
         save_sheet(a, b, d, out / f"{i}_{i + 1}.png")
-        print(f"{clips[i][0]:14s} -> {clips[i + 1][0]:14s} raw {raw:6.3f}  box {mean:6.3f}  "
+        print(f"{Path(clips[i][0]).name:16s} -> {Path(clips[i + 1][0]).name:16s} raw {raw:6.3f}  box {mean:6.3f}  "
               f">{LEVELS}: {frac * 100:6.3f}%  {verdict}")
     if args.intra:
         for (beat, _), (_, tail) in zip(clips, edges):
@@ -105,7 +103,7 @@ def main() -> int:
             worst = max(jumps) if jumps else 0.0
             flag = "" if worst < MEAN_MAX else "  JUMP"
             ok &= worst < MEAN_MAX
-            print(f"{beat:14s} largest jump in the last {len(tail)} frames: {worst:6.3f}{flag}")
+            print(f"{Path(beat).name:16s} largest jump in the last {len(tail)} frames: {worst:6.3f}{flag}")
     total = sum(duration(p) for _, p in clips)
     print(f"total {total:.2f} s")
     return 0 if ok else 1

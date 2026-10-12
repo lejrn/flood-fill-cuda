@@ -1,13 +1,16 @@
-"""Render every beat of script.md with Kokoro (local, free) into out/kokoro/.
+"""Render every beat of a narration script with Kokoro (local, free) into out/kokoro/.
 
 Usage (from video/):
     uv run narration/tts_kokoro.py [--voice am_adam] [--gap 0.6]
     uv run narration/tts_kokoro.py --only 08_triton      # one new beat, keep the rest
+    uv run narration/tts_kokoro.py --script script_chain.md --out kokoro_chain
 
 Writes one wav per beat, a joined narration.wav with `gap` seconds of
-silence between beats, and timing.json for the assembly step. Kokoro is
-not bit-reproducible, so `--only` voices just the named beats and reads
-every other beat from its existing wav.
+silence between beats, timing.json for the assembly step, and words.json
+(every word's start and end from Kokoro's own duration predictions, in
+seconds from the trimmed wav's start) for scenes that cue on a word.
+Kokoro is not bit-reproducible, so `--only` voices just the named beats
+and reads every other beat from its existing wav.
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 
-from common import HERE, load_beats, trim_edges, write_timing  # noqa: E402
+from common import HERE, load_beats, read_words, script_path, trim_bounds, write_timing, write_words  # noqa: E402
 
 SR = 24_000
 
@@ -34,6 +37,7 @@ def main() -> None:
     ap.add_argument("--speed", type=float, default=1.1, help="Kokoro reads slowly at 1.0")
     ap.add_argument("--out", default="kokoro", help="folder under out/ (the VOICE the scenes read)")
     ap.add_argument("--only", nargs="+", default=None, help="voice only these beats; the rest keep their wavs")
+    ap.add_argument("--script", default=None, help="narration file under narration/ (default script.md)")
     args = ap.parse_args()
 
     # This laptop has 6 GB of RAM. Loading the 327 MB checkpoint the normal
@@ -60,17 +64,33 @@ def main() -> None:
     durations: dict[str, float] = {}
     joined: list[np.ndarray] = []
     silence = np.zeros(int(SR * args.gap), dtype=np.float32)
-    beats = load_beats()
+    script = script_path(args.script)
+    beats = load_beats(script)
     unknown = set(args.only or ()) - {b.name for b in beats}
     if unknown:
-        raise SystemExit(f"no such beat in script.md: {sorted(unknown)}")
+        raise SystemExit(f"no such beat in {script.name}: {sorted(unknown)}")
+    old_words = read_words(out)
+    words: dict[str, list] = {}
     for beat in beats:
         wav = out / f"{beat.name}.wav"
         if args.only is None or beat.name in args.only:
-            audio = np.concatenate([a for _, _, a in pipe(beat.text, voice=args.voice, speed=args.speed)])
-            audio = trim_edges(audio.astype(np.float32), SR)
+            chunks, rows, t0 = [], [], 0.0
+            for res in pipe(beat.text, voice=args.voice, speed=args.speed):
+                a = res.audio.numpy() if hasattr(res.audio, "numpy") else np.asarray(res.audio)
+                for tk in res.tokens or ():
+                    if tk.start_ts is not None and tk.end_ts is not None and any(c.isalnum() for c in tk.text):
+                        rows.append([tk.text, t0 + tk.start_ts, t0 + tk.end_ts])
+                chunks.append(a)
+                t0 += len(a) / SR
+            audio = np.concatenate(chunks).astype(np.float32)
+            lo, hi = trim_bounds(audio, SR)
+            audio = audio[lo:hi]
+            shift = lo / SR
+            words[beat.name] = [[w, round(a - shift, 3), round(b - shift, 3)] for w, a, b in rows]
             sf.write(wav, audio, SR)
         else:
+            if beat.name in old_words:
+                words[beat.name] = old_words[beat.name]
             if not wav.exists():
                 raise SystemExit(f"missing {wav}: voice it too, or drop --only")
             audio, sr = sf.read(str(wav), dtype="float32")
@@ -83,6 +103,7 @@ def main() -> None:
     track = np.concatenate(joined[:-1])
     sf.write(out / "narration.wav", track, SR)
     timing = write_timing(out, f"kokoro:{args.voice}", durations, args.gap)
+    write_words(out, words, f"kokoro:{args.voice} duration predictions")
     print(f"total {len(track) / SR:.2f} s  ->  {out / 'narration.wav'}\n{timing}")
 
 
