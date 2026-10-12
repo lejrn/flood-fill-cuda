@@ -21,8 +21,8 @@ Mechanics copied from the reference:
 - One "the obvious fix did not work" beat (`c03` + `c04`: more teams, then
   the hidden reason). It is the "wrong blade angle" moment.
 - One object that grows: every fix stays on screen as a part.
-- The last fix removes the crutch: in `c09` the queue, the whistle and
-  the gate come OFF the machine. Nothing waits any more.
+- The last fix removes the crutch: in `c09` the queue, the room fence
+  and the gate come OFF the machine. Nothing waits any more.
 - The name comes only at the end: "a connected-component labeller", and
   it is not a flood fill any more.
 
@@ -52,14 +52,14 @@ side. Narration never says where a thing is on screen.
 | beat | part slides in | part leaves |
 |---|---|---|
 | c01 | the CPU worker and its queue, beside a dark chip | |
-| c02 | one room lit: a team of 256, its shelf (ring of 8,192 slots), the whistle (syncthreads) | the CPU worker |
+| c02 | one room lit: a team of 256, its shelf (ring of 8,192 slots), the room fence (syncthreads) | the CPU worker |
 | c03 | all 24 rooms lit, 2 teams each (48 x 256); one long queue along the chip | the shelf |
-| c04 | the gate across the whole chip (grid.sync) | |
+| c04 | the gate: the same fence, around the whole chip (grid.sync) | |
 | c05 | the stencil badge: 4 arrows become 8 | |
 | c06 | a launch counter | |
 | c07 | the tag printer on the queue (label in the entry) | |
 | c08 | seed sparks and the "min" unit (atomicMin) | the tag printer (labels move to a label map) |
-| c09 | the run table and a strip of 6 short kernels | the queue, the whistle, the gate, the launch counter |
+| c09 | the run table and a strip of 6 short kernels | the queue, the room fence, the gate, the launch counter |
 
 What is left at the end is the sum of the fixes that survived: all rooms
 busy, 8-connectivity (ch06 links runs with it), labels, the min merge,
@@ -71,7 +71,7 @@ and runs.
 |---|---|---|
 | red | an unpainted pixel | `RED_PX` |
 | blue | a worker that is working; a painted pixel | `BLUE` |
-| amber | a worker that is waiting: at the whistle, the gate, between launches | `GOLD` |
+| amber | a worker that is waiting: at the room fence, the gate, between launches | `GOLD` |
 | grey | the parts of the machine nobody uses | `GREY` |
 | one hue per blob | the blob's tag or label (c07, c08) | `GREEN`, `PURPLE`, ... |
 | teal | the final answer (c09, c10) | `TEAL` |
@@ -99,11 +99,10 @@ Paths under `src/flood_fill_cuda/results/`.
 | c02 | "twice the CPU" | ch01 v2 596.5 vs 1,211.5 ms = 2.03x at 36 Mpx (`sq_6000_center`) | `ch01_.../single_block_shared_20260719T041848Z.json` |
 | c02 | 4% | 1 of 24 SMs = 4.17% | ch01 `sm_utilization_pct` |
 | c03 | "two teams, twice as fast" | 280.3 vs 589.8 ms = 2.10x at 36 Mpx | `ch02_.../dual_block_20260719T163033Z.json` |
-| c03 | "forty-eight teams: fifteen times" | 48 x 256, 132.2 vs 2,026.0 ms = 15.3x at 64 Mpx (`sq_8000_center`) | `ch03_.../multi_block_20260719T222127Z.json` |
-| c03 | "more teams get slower" | 192-384 blocks: 8-42% slower than the best | ch03 sweeps `_225923Z` |
-| c03 | "forty-eight teams lose to one" | snake 48 x 256: 145.1 ms vs ch01's one block 70.9 ms | `multi_block_20260719T222127Z.json`, `serpentine_256` |
+| c03 | "forty-eight teams: eighteen times" | 48 x 256, 137.8 vs 2,584.0 ms = 18.75x at 64 Mpx (`sq_8000_center`) | `ch03_.../multi_block_20260720T012243Z.json` |
+| c03 | "forty-eight teams lose to one" | snake 48 x 256: 143.4 ms vs ch01's one block 61.7 ms | same, `serpentine_256` |
 | c04 | "twelve thousand wait" | 48 x 256 = 12,288 threads, 0.008% busy on the snake | same, `multi_thread_util_pct` |
-| c04 | 65,792 gates, about 2 us each | 2 x 32,896 levels; 145.1 ms / 65,792 = 2.2 us (derived) | same |
+| c04 | 65,792 gates, about 2 us each | 2 x 32,896 levels; 143.4 ms / 65,792 = 2.2 us (derived) | same |
 | c05 | half the rings | squares only: 8,001 to 4,001 levels (disk x0.71); the toy is a square | `multi_block_20260720T012243Z.json` |
 | c05 | "twenty-five times the CPU" | 64 Mpx 8-conn 100.3 ms vs the same session's @njit 2,584 ms = 25.8x | same |
 | c06 | ~2,181 ms | ch03 8-conn, one launch per blob: an ESTIMATE (`est: true`) | `overview_...json`, `png_blobs` |
@@ -115,8 +114,11 @@ Paths under `src/flood_fill_cuda/results/`.
 | c09 | 1.46 ms, 6 kernels | packed-mask path 1.455 ms, 40.2x vs 58.51 (RGB in: 7 kernels, 2.96 ms) | same |
 | c10 | 24,083 ms, 16,000x | pure Python 24,083.0 / 1.455 = 16,551x (two sessions, as in the three-pane cut) | OV + R61 |
 
-Every number above goes through `scenes/panes/data.py` and
-`build/audit_numbers.py` when built; none is typed into a scene.
+Beats c03 to c05 read one ch03 session (`_012243Z`), so the
+8-connectivity gain (18.75x to 25.8x, 1.37x) is not inflated by another
+session's CPU time. `uv run python -m scenes.chain.numbers` prints every
+value with its file and key, and checks each sentence above; no number
+is typed into a scene.
 
 ## beat c00_job
 
@@ -145,12 +147,13 @@ Start simple: one worker paints a pixel and queues its red neighbours. Congratul
 ## beat c02_team
 
 ```text
-So, being clever, you hire a GPU team: two hundred fifty-six workers paint the ring in one step, then wait for a whistle. Twice the CPU. But the chip has twenty-four rooms, and your team uses one.
+So, being clever, you hire a GPU team: two hundred fifty-six workers paint the ring in one step, then wait for the slowest. Twice the CPU. But the chip has twenty-four rooms, and your team uses one.
 ```
 
 - Fix: the worker becomes a team of 256 dots and moves into room 0. On the
   floor the wave now grows one ring per tick (a diamond). After each
-  ring the whistle flashes and the team blinks amber.
+  ring the room's fence flashes amber while the team waits for the
+  slowest. The gate in `c04` is the same fence around the whole chip.
 - Exposes: the other 23 rooms go grey; "1 of 24 = 4%".
 - Caption: "team", "2x" (label: "one 36 Mpx blob"), "4%".
 - Cut on purpose: the shelf overflowing and the spill tier behind it.
@@ -160,15 +163,18 @@ So, being clever, you hire a GPU team: two hundred fifty-six workers paint the r
 ## beat c03_more_teams
 
 ```text
-Easy: more teams. Two, twice as fast. Forty-eight: fifteen times the CPU. Then more teams get slower, and on a thin snake, forty-eight teams lose to one.
+Easy: more teams. Two, twice as fast. Forty-eight: eighteen times the CPU. But on a thin snake, forty-eight teams lose to one.
 ```
 
 - The obvious fix. Rooms light up: 2, then all 24 with two teams each.
   The shelf goes; one long queue runs along the chip. The caption climbs
-  "2x", "15x".
-- Then it fails: a bar for "more teams" shrinks, and the floor turns
-  into the snake: "48 teams: 145 ms", "1 team: 71 ms".
-- Caption: "more", "15x", "slower?".
+  "2x", "18x" (label: "one 64 Mpx blob").
+- Then it fails: the floor turns into the snake, "48 teams: 143 ms",
+  "1 team: 62 ms".
+- Caption: "more", "18x", "slower?".
+- Cut on purpose: "more teams get slower". At 256 threads per team, 48
+  teams is already the most the chip holds; the slower grids (192 x 64,
+  384 x 32) use more, smaller teams, which breaks the picture.
 
 ## beat c04_gate
 
@@ -246,7 +252,7 @@ So you look at one row: red pixels come in spans. Thirteen million pixels, half 
 
 - The loop closes (the reference's turbine). Zoom into one row of the
   floor: red cells collapse into teal bars, "25x fewer". The queue, the
-  whistle and the gate slide OFF the machine; a strip of 6 kernels
+  room fence and the gate slide OFF the machine; a strip of 6 kernels
   slides on (count, scan, emit, merge, flatten, paint) and the runs flow
   through it once.
 - Goal chip: "1.46 ms", teal. No amber left anywhere.
