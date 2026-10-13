@@ -98,17 +98,20 @@ def voice_dir(voice: str, cut: str = "panes") -> str:
 
 
 def render(layout: str, voice: str, quality: str, only: list[str] | None = None,
-           cut: str = "panes", look: str = "flat") -> None:
+           cut: str = "panes", look: str = "flat", preview: bool = False) -> None:
     env = dict(os.environ, VOICE=voice_dir(voice, cut), VIDEO_LAYOUT=layout, LOOK=look)
     for stem, cls, _ in clip_list(cut):
         if only and stem not in only and Path(stem).name not in only:
             continue
         # --disable_caching: a cached play skips update_mobjects(0), so end
         # states can differ from an uncached render. Always render fresh.
-        cmd = [str(PY), "-m", "manim", "render", f"-q{quality}", "--fps", "30", "--disable_caching",
-               "--media_dir", str(media_dir(layout, cut, look))]
-        if layout == "vertical":
-            cmd += ["-r", "1080,1920"]
+        cmd = [str(PY), "-m", "manim", "render", "--disable_caching", "--media_dir", str(media_dir(layout, cut, look))]
+        if preview:     # 480 px, 15 fps: for checking timing and layout, never for a cut
+            cmd += ["-ql", "-r", "480,854" if layout == "vertical" else "854,480"]
+        else:
+            cmd += [f"-q{quality}", "--fps", "30"]
+            if layout == "vertical":
+                cmd += ["-r", "1080,1920"]
         cmd += [str(SCENES / f"{stem}.py"), cls]
         print("render", stem, cls, flush=True)
         subprocess.run(cmd, cwd=VIDEO, env=env, check=True)
@@ -158,12 +161,13 @@ def main() -> None:
     ap.add_argument("--strict", action="store_true", help="fail outside the 60-120 s target")
     ap.add_argument("--cut", choices=sorted(CUTS), default="panes", help="panes (three-pane) or chain")
     ap.add_argument("--look", choices=LOOKS, default="flat", help="chain cut only: flat or iso (2.5D)")
+    ap.add_argument("--preview", action="store_true", help="render at 480 px and 15 fps (checks only)")
     args = ap.parse_args()
     vdir = voice_dir(args.voice, args.cut)
     name = f"{args.layout}_{args.voice}" if args.cut == "panes" else f"chain_{args.look}_{args.layout}_{args.voice}"
 
     if args.render:
-        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look)
+        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look, args.preview)
         if args.only:
             print("rendered", args.only)
             return

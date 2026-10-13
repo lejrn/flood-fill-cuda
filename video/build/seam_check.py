@@ -11,6 +11,9 @@ below 1.5 (preview-quality speckle images reach 0.95) and fewer than
 0.05% of averaged pixels above 16 levels.
 `--intra` also checks the last frames of every clip for a jump (a bad
 `snap()`); clips that end on a fade (intro, outro) are skipped there.
+Chain clips animate up to their snap and write `<clip>.snap.json` with
+the snap time, so for them `--intra` compares exactly the frame before
+the snap with the frame after it.
 
 Usage (from video/):
     uv run build/seam_check.py [--layout landscape] [--quality 1080p30] [--intra]
@@ -48,6 +51,21 @@ def frames_at_edges(path: Path, n_tail: int = 1) -> tuple:
             if len(tail) > n_tail:
                 tail.pop(0)
     return first, tail
+
+
+def frames_around(path: Path, t: float) -> tuple:
+    """(frame before scene time t, frame at t), decoding once."""
+    with av.open(str(path)) as c:
+        st = c.streams.video[0]
+        fps = float(st.average_rate)
+        i = int(round(t * fps))
+        prev = None
+        for k, fr in enumerate(c.decode(video=0)):
+            arr = fr.to_ndarray(format="rgb24")
+            if k == i:
+                return prev, arr
+            prev = arr
+    return prev, prev
 
 
 def box_avg(a: np.ndarray) -> np.ndarray:
@@ -96,8 +114,17 @@ def main() -> int:
         print(f"{Path(clips[i][0]).name:16s} -> {Path(clips[i + 1][0]).name:16s} raw {raw:6.3f}  box {mean:6.3f}  "
               f">{LEVELS}: {frac * 100:6.3f}%  {verdict}")
     if args.intra:
-        for (beat, _), (_, tail) in zip(clips, edges):
+        for (beat, path), (_, tail) in zip(clips, edges):
             if beat in FADES_OUT:
+                continue
+            side = Path(str(path) + ".snap.json")
+            if side.exists():
+                import json
+                before, after = frames_around(path, json.loads(side.read_text())["snap_s"])
+                worst = diff_stats(before, after)[1]
+                flag = "" if worst < MEAN_MAX else "  JUMP"
+                ok &= worst < MEAN_MAX
+                print(f"{Path(beat).name:16s} jump across its snap: {worst:6.3f}{flag}")
                 continue
             jumps = [diff_stats(tail[j], tail[j + 1])[1] for j in range(len(tail) - 1)]
             worst = max(jumps) if jumps else 0.0
