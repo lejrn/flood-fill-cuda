@@ -34,15 +34,15 @@ def frame() -> Frame:
         return Frame(
             floor_c=np.array([0.0, 2.55, 0]), floor_wh=(7.2, 6.3),
             machine_c=np.array([0.0, -4.35, 0]), machine_wh=(7.4, 4.9),
-            caption_c=np.array([0.0, -0.95, 0]),
+            caption_c=np.array([0.0, -1.3, 0]),
             goal_c=np.array([0.0, h / 2 - 0.55, 0]),
             note_c=np.array([0.0, -0.2, 0]),
             vertical=True,
         )
     return Frame(
-        floor_c=np.array([-3.45, 0.35, 0]), floor_wh=(6.4, 6.1),
-        machine_c=np.array([3.55, 0.25, 0]), machine_wh=(6.6, 5.6),
-        caption_c=np.array([0.0, -h / 2 + 0.62, 0]),
+        floor_c=np.array([-3.45, 0.6, 0]), floor_wh=(6.2, 5.7),
+        machine_c=np.array([3.55, 0.5, 0]), machine_wh=(6.6, 5.3),
+        caption_c=np.array([0.0, -h / 2 + 0.72, 0]),
         goal_c=np.array([w / 2 - 1.75, h / 2 - 0.42, 0]),
         note_c=np.array([-3.45, -3.0, 0]),
         vertical=False,

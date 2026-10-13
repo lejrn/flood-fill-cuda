@@ -21,7 +21,7 @@ from manim.constants import RESAMPLING_ALGORITHMS
 from PIL import Image
 
 from scenes.chain.iso import Box, Placement, box_faces, plane_corners
-from scenes.style import BG, BLUE, GOLD, GRID, INK
+from scenes.style import BG, BLUE, GOLD, GRID, INK, RED_PX
 
 N = 24                      # toy grid size
 HALF = 3.0                  # the floor plane is [-3, 3] x [-3, 3] at z = 0
@@ -59,11 +59,14 @@ def _index_maps(rpx: int, n: int):
 
 
 def toy_raster(colors: np.ndarray, rpx: int, dots: np.ndarray | None = None,
-               ring: np.ndarray | None = None) -> np.ndarray:
+               ring: np.ndarray | None = None, boxes=()) -> np.ndarray:
     """(rpx, rpx, 4) uint8 from (n, n, 3) uint8 cell colours.
 
-    dots: (n, n) int, 0 none, 1 a working worker (blue), 2 a waiting one (amber).
+    dots: (n, n) int, 0 none, 1 a working worker (blue), 2 a waiting one (amber),
+          3 a seed (white).
     ring: (n, n) bool, cells outlined in white (the wave's edge).
+    boxes: (r, c0, c1) spans drawn as one bar: inner grid lines removed, a
+           white border around the whole span (a ch06 run).
     """
     n = colors.shape[0]
     idx, off, edge = _index_maps(rpx, n)
@@ -78,18 +81,35 @@ def toy_raster(colors: np.ndarray, rpx: int, dots: np.ndarray | None = None,
         r_off = np.abs(off)
         near = (r_off[:, None] > 0.36) | (r_off[None, :] > 0.36)
         out[rr & near, :3] = rgb(INK)
+    if boxes:
+        cell = rpx / n
+        white = rgb(INK)
+        for r, c0, c1 in boxes:
+            y0, y1 = int(round(r * cell)), int(round((r + 1) * cell))
+            x0, x1 = int(round(c0 * cell)), int(round((c1 + 1) * cell))
+            out[y0 + 1:y1 - 1, x0 + 1:x1 - 1, :3] = colors[r, c0]
+            t = max(2, int(cell * 0.09))
+            out[y0:y0 + t, x0:x1, :3] = white
+            out[y1 - t:y1, x0:x1, :3] = white
+            out[y0:y1, x0:x0 + t, :3] = white
+            out[y0:y1, x1 - t:x1, :3] = white
     if dots is not None and dots.any():
         d = dots[idx][:, idx]
         dist = off[:, None] ** 2 + off[None, :] ** 2
         inside = dist < 0.27 ** 2
         out[(d == 1) & inside, :3] = rgb("#cfe3ff")
         out[(d == 2) & inside, :3] = rgb(GOLD)
+        out[(d == 3) & (dist < 0.2 ** 2), :3] = rgb(INK)
     return out
 
 
-def picture_raster(rgb_img: np.ndarray, rpx: int) -> np.ndarray:
-    """A real picture (white background) on the dark floor, resized to rpx."""
-    im = Image.fromarray(rgb_img).resize((rpx, rpx), Image.BILINEAR)
+def picture_raster(rgb_img: np.ndarray, rpx: int, nearest: bool = False) -> np.ndarray:
+    """A real picture (white background) on the dark floor, resized to rpx
+    (nearest: every source pixel a sharp square, for zooms)."""
+    src = rgb_img.copy()
+    red = (src[..., 0] > 200) & (src[..., 1] < 90) & (src[..., 2] < 90)
+    src[red] = rgb(RED_PX)                       # the toy's red, not (255, 0, 0)
+    im = Image.fromarray(src).resize((rpx, rpx), Image.NEAREST if nearest else Image.BILINEAR)
     a = np.asarray(im).astype(np.float32)
     white = a.min(axis=2) / 255.0                 # 1 on the white background
     bg = rgb(EMPTY).astype(np.float32)

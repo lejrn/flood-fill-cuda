@@ -155,11 +155,15 @@ class Merge:
     index, colliding waves union by min. `frames[k]` is the provisional
     label map after level k (-1 = unclaimed); `unions[k]` the label pairs
     that met during level k; `final` the canonical labels (each blob's
-    minimum linear index, exactly what ch05's flatten produces)."""
+    minimum linear index, exactly what ch05's flatten produces).
+    `resolved[k]` is frame k with every union so far applied: what the
+    picture looks like if each merge recoloured at once (the video's
+    simplification; the kernel defers the paint to its flatten pass)."""
     seeds: list
     frames: list
     unions: list
     final: np.ndarray
+    resolved: list = field(default_factory=list)
 
 
 def merge_fill(m: np.ndarray, seeds, conn: int = 8) -> Merge:
@@ -180,6 +184,14 @@ def merge_fill(m: np.ndarray, seeds, conn: int = 8) -> Merge:
         parent[r * W + c] = r * W + c
         front.append((r, c))
     frames, unions = [lab.copy()], [[]]
+
+    def resolve(a: np.ndarray) -> np.ndarray:
+        out = a.copy()
+        for r, c in zip(*np.nonzero(a >= 0)):
+            out[r, c] = find(int(a[r, c]))
+        return out
+
+    resolved = [resolve(lab)]
     nb = neighbours(conn)
     while front:
         nxt, met = [], []
@@ -201,10 +213,11 @@ def merge_fill(m: np.ndarray, seeds, conn: int = 8) -> Merge:
         if front or met:
             frames.append(lab.copy())
             unions.append(met)
+            resolved.append(resolve(lab))
     final = np.full(m.shape, -1, np.int64)
     for r, c in zip(*np.nonzero(m)):
         final[r, c] = find(int(lab[r, c]))
-    return Merge(seeds, frames, unions, final)
+    return Merge(seeds, frames, unions, final, resolved)
 
 
 def canonical(m: np.ndarray, conn: int = 8) -> np.ndarray:
@@ -299,7 +312,9 @@ def selftest() -> None:
         ref = canonical(shape)
         assert np.array_equal(paint_runs(shape), ref), "runs + min merge == canonical labels"
         seeds = list(zip(*np.nonzero(candidates(shape) | lattice(shape, 4))))
-        assert np.array_equal(merge_fill(shape, seeds).final, ref), "seed_merge == canonical labels"
+        mf = merge_fill(shape, seeds)
+        assert np.array_equal(mf.final, ref), "seed_merge == canonical labels"
+        assert np.array_equal(mf.resolved[-1], ref)
         # every blob's minimum pixel is a candidate (at least one seed per blob)
         H, W = shape.shape
         mins = {int(v) for v in np.unique(ref[ref >= 0])}

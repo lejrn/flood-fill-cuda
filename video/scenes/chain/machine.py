@@ -1,10 +1,11 @@
 """The machine: a GPU board that gains a part with every fix.
 
 `Spec` says which parts are on the board; `build(spec, pl)` draws it.
-Every face of every part is sorted once, far to near, and gets that rank
-as its `z_index`, so a part can fade in or out later without breaking
-the 3D order. `Machine.parts[name]` holds a part's faces and labels for
-the scenes to animate; `Machine.group` holds everything.
+Every face's `z_index` comes from its own layer and depth only (never
+from the other parts in the build), so a part kept from one build and a
+part from the next one still draw in the right 3D order. `Machine.parts[name]` holds a part's faces and labels; a
+scene adds every part as its own top-level mobject (`mobs()`), because
+FadeOut on a member of a group restores it afterwards.
 
 World layout (x right, y away from the viewer, z up), board 7.6 x 5.6:
 
@@ -29,7 +30,7 @@ from scenes.style import BLUE, FONT, GOLD, GREY, INK, INK_SOFT, MONO, RED_PX, TE
 BOARD = "#121820"
 CHIP = "#1b222b"
 ROOM_OFF = "#262d36"
-ROOM_IDLE = "#353d47"
+ROOM_IDLE = "#424b57"
 ROOM_LIT = "#22405f"
 ROOM_WAIT = "#5a4519"
 FENCE_REST = "#4d3c17"
@@ -88,11 +89,21 @@ class Spec:
 
 @dataclass
 class Machine:
-    group: VGroup
-    parts: dict = field(default_factory=dict)
+    spec: "Spec"
+    parts: dict = field(default_factory=dict)       # name -> VGroup, each face in one part
 
     def part(self, name: str) -> VGroup:
         return self.parts.get(name, VGroup())
+
+    def mobs(self) -> list:
+        return list(self.parts.values())
+
+    @property
+    def group(self) -> VGroup:
+        return VGroup(*self.parts.values())
+
+    def rooms(self) -> VGroup:
+        return VGroup(*[v for k, v in self.parts.items() if k.startswith("room") and k[4:].isdigit()])
 
 
 def placement(P, centre, size) -> Placement:
@@ -199,16 +210,16 @@ def _labels(spec: Spec, pl: Placement) -> list[tuple[str, object, float]]:
     if spec.cpu:
         out.append(("cpu", on_plane(label("CPU", 30, INK), pl, (-3.24, sy1 - 0.2), 0.32, width=0.42), 0.4))
     if spec.queue:
-        out.append(("queue", on_plane(label("queue", 26, INK_SOFT), pl, (slot_x(SLOTS - 1) + 0.6, sy0 + 0.55), 0.0,
-                                      width=0.62), 0.1))
+        out.append(("queue", on_plane(label("queue", 26, INK_SOFT), pl, (slot_x(SLOTS - 1) + 0.72, sy0 + 0.55), 0.0,
+                                      width=0.9), 0.1))
     if spec.printer:
         out.append(("printer", on_plane(label("tag", 30, INK), pl, (-3.24, (sy0 + sy1) / 2), 0.5, width=0.4), 0.6))
     if spec.kernels:
         w, g = 0.74, 0.11
         for j, name in enumerate(("count", "scan", "emit", "merge", "flatten", "paint")):
             # one text height for all six; "flatten" is the widest and sets it
-            t = label(name, 26, INK, mono=True)
-            t.scale(0.6 / label("flatten", 26, INK, mono=True).width)
+            t = label(name, 26, INK)
+            t.scale(0.68 / label("flatten", 26, INK).width)
             out.append(("kernels", on_plane(t, pl, (-3.55 + j * (w + g) + w / 2, (sy0 + sy1) / 2), 0.22), 0.3))
     s0, s1 = SIDE_X
     if spec.stencil:
@@ -223,27 +234,30 @@ def _labels(spec: Spec, pl: Placement) -> list[tuple[str, object, float]]:
     return out
 
 
+def _depth_range(pl: Placement) -> tuple[float, float]:
+    lo, hi = BOARD_LO, (BOARD_HI[0], BOARD_HI[1], EXTENT_HI_Z)
+    ds = [pl.P.depth((x, y, z)) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    return min(ds), max(ds)
+
+
 def build(spec: Spec, pl: Placement, z0: float = 100.0) -> Machine:
-    """Draw the board for `spec`. Faces get z_index z0 + their painter rank."""
+    """Draw the board for `spec`. A face's z_index is z0 + 10 * layer + its
+    nearness within the board (0..9), and labels sit at z0 + 95."""
     boxes = _boxes(spec)
-    order = sorted(range(len(boxes)), key=lambda i: (boxes[i][1].layer, -pl.P.depth(boxes[i][1].centre)))
+    dmin, dmax = _depth_range(pl)
     parts: dict[str, VGroup] = {}
-    group = VGroup()
-    rank = 0
-    for i in order:
-        name, b = boxes[i]
-        for face in box_faces(b, pl):
-            face.set_z_index(z0 + rank * 0.01)
-            rank += 1
-            parts.setdefault(name, VGroup()).add(face)
-            group.add(face)
+    for name, _ in boxes:                        # part order = first appearance, stable
+        parts.setdefault(name, VGroup())
+    for name, b in boxes:
+        near = 9.0 * (dmax - pl.P.depth(b.centre)) / (dmax - dmin)
+        for j, face in enumerate(box_faces(b, pl)):
+            face.set_z_index(z0 + 10 * b.layer + near + 0.001 * j)
+            parts[name].add(face)
     for name, mob, z in _labels(spec, pl):
-        mob.set_z_index(z0 + rank * 0.01 + 1)
+        for m in mob.get_family():
+            m.set_z_index(z0 + 95 + z)
         parts.setdefault(name, VGroup()).add(mob)
-        group.add(mob)
-    # convenience groups
-    parts["rooms"] = VGroup(*[f for k, v in parts.items() if k.startswith("room") and k[4:].isdigit() for f in v])
-    return Machine(group, parts)
+    return Machine(spec, parts)
 
 
 def with_rooms(spec: Spec, state: str, rooms=None) -> Spec:
