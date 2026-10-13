@@ -1,8 +1,9 @@
 # Narration script: the chain cut ("you build it")
 
-Status: DRAFT beat sheet for approval, 2026-10-13. Nothing is voiced or
-rendered yet. The three-pane cut (`script.md`) stays as it is; this is a
-second, separate cut.
+Status 2026-10-13: approved by the user (full chain, both looks, both
+layouts, Kokoro first), voiced with Kokoro `am_adam` and built
+(`scenes/chain/`). The three-pane cut (`script.md`) stays as it is; this
+is a second, separate cut.
 
 ## The idea
 
@@ -40,7 +41,8 @@ Two things on screen for the whole video, plus a caption:
   (the SMs). Parts attach to it beat by beat (table below).
 - **The caption**: one word or one number, large, centre screen, timed to
   the word in the narration. A small mono label under it says what the
-  number is ("x the CPU, one 36 Mpx blob").
+  number is ("x the CPU, one 36 Mpx blob"). A beat's last caption crosses
+  the cut and stays until the next beat's first one.
 - **The goal chip** (top corner): "goal 33 ms, one camera frame" and the
   real picture's current time beside it. It turns teal only in `c09`.
 
@@ -52,7 +54,7 @@ side. Narration never says where a thing is on screen.
 | beat | part slides in | part leaves |
 |---|---|---|
 | c01 | the CPU worker and its queue, beside a dark chip | |
-| c02 | one room lit: a team of 256, its shelf (ring of 8,192 slots), the room fence (syncthreads) | the CPU worker |
+| c02 | one room lit: a team of 256, its shelf (ring of 8,192 slots), the room fence (syncthreads) | the CPU worker and its queue |
 | c03 | all 24 rooms lit, 2 teams each (48 x 256); one long queue along the chip | the shelf |
 | c04 | the gate: the same fence, around the whole chip (grid.sync) | |
 | c05 | the stencil badge: 4 arrows become 8 | |
@@ -82,10 +84,9 @@ last frames have no amber at all.
 
 ## Length
 
-370 words. The vertical three-pane cuts run at 2.99 words/s (Kokoro
-`am_adam`) and 2.18 words/s (Peter Baker), holds and gaps included. So
-this cut would be about 2:04 with Kokoro and 2:50 with Peter Baker, both
-under the 3-minute Shorts cap. Peter Baker costs about 1,900 ElevenLabs
+365 words. With Kokoro `am_adam` the cut runs 119.0 s (narration 118.6 s
+plus the gaps). Peter Baker reads about 38% slower, so about 2:45, under
+the 3-minute Shorts cap. Peter Baker costs about 1,900 ElevenLabs
 credits for the whole script (2,300 for the 438-word three-pane script).
 
 ## Numbers (checked against the JSON on 2026-10-13)
@@ -278,13 +279,20 @@ Twenty-four seconds became one and a half milliseconds. Congratulations: you've 
 - The spill tier, the four ch02 partitioning designs, the seeding
   lattice's tuning, the RGB vs packed-mask contracts.
 
-## How it would be built (after approval)
+## How it is built
 
-- `narration/tts_kokoro.py` and `import_audio.py` get `--script`, so this
-  file voices into `out/kokoro_chain/` and `out/elevenlabs_chain/`.
-- Scenes in `scenes/chain/`, one per beat, with a pure `machine_state(k)`
-  builder like `build_state(k)`, so clips still join at the seams.
+- `narration/tts_kokoro.py --script script_chain.md --out kokoro_chain`
+  voices this file into `out/kokoro_chain/`, with `words.json` (Kokoro's
+  word times). `tts_elevenlabs.py --script script_chain.md --out
+  elevenlabs_chain` does the same for Peter Baker, with the API's
+  character times.
+- Scenes in `scenes/chain/`, one per beat, on `base.ChainScene`; the pure
+  `state.chain_state(k)` is the picture between beats, so separate clips
+  join at the seams. `LOOK=flat|iso` picks the projection.
 - `scenes/chain/toy.py` computes the toy waves, seeds, merges and runs
-  with the real rules, in numpy.
-- `build/assemble.py --cut chain` writes `out/final_chain_<layout>_<voice>.mp4`.
-  The three-pane cut keeps its file names.
+  with the chapters' rules; `numbers.py` holds every number with its
+  source and checks each spoken claim.
+- `build/assemble.py --cut chain --look <flat|iso> --layout <layout>
+  --voice kokoro [--render] [--preview]` writes
+  `out/final_chain_<look>_<layout>_<voice>.mp4`. The three-pane cut
+  keeps its file names.

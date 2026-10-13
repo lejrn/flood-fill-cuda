@@ -1,8 +1,10 @@
 # The flood-fill-cuda explainer video: summary and handoff
 
-Status on 2026-10-06. Branch `video-triton` (off `main`), folder `video/`,
-version 0.5.0. Two layouts and two voices make four cuts in `out/`.
-`out/` and `media/` are gitignored; only sources are tracked.
+Status on 2026-10-13. Branch `video-chain` (off `main`), folder `video/`,
+version 0.6.0. Two cuts of the same story: the three-pane cut (sections
+1-10, four files below) and the chain cut (section 11, a problem -> fix
+chain in two looks). `out/` and `media/` are gitignored; only sources
+are tracked.
 
 | file | frame | voice | length | Triton beat |
 |---|---|---|---|---|
@@ -353,3 +355,93 @@ the outro fade. Rules that keep this true:
 - A Hungarian or Kalman tracker for crossings in a dense swarm.
 - Add the ch06 column to the README grand table (`overview/build.py`).
 - Background music (`--music`) and captions.
+
+## 11. The chain cut (2026-10-13)
+
+| file | frame | look | voice | length |
+|---|---|---|---|---|
+| `final_chain_flat_vertical_kokoro.mp4` | 1080x1920 | flat | Kokoro `am_adam` | 118.9 s |
+| `final_chain_iso_vertical_kokoro.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam` | 118.9 s |
+| `final_chain_flat_landscape_kokoro.mp4` | 1920x1080 | flat | Kokoro `am_adam` | 118.9 s |
+| `final_chain_iso_landscape_kokoro.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam` | 118.9 s |
+
+At 1080p30 the 2.5D cuts pass 10 of 10 seams and 10 of 10 snaps. The
+flat cuts flag only c09 -> c10 (0.06% of pixels against 0.05%): the
+speckled teal picture, max 66 levels, spread over the whole frame, i.e.
+keyframe noise, not content.
+
+A second cut, beside the three-pane one, told like the turbojet Short
+(youtube.com/shorts/dLLCr_N-WPM): "you" build a machine, every beat is a
+problem, a fix that slides onto the machine as a part, and the problem
+the fix exposes. Amber always means "someone is waiting". The name
+("a connected-component labeller, not a flood fill any more") comes only
+at the end. Beat sheet, numbers table and narration:
+`narration/script_chain.md`.
+
+| beat | the link |
+|---|---|
+| c00 | the job: 81 Mpx, 2,522 blobs, one camera frame (33 ms) |
+| c01 | one worker walks the blob; its queue is the wave's edge, a ring of independent cells |
+| c02 | a team of 256 paints a ring per step, waits for the slowest; 2x, but 1 room of 24 |
+| c03 | the obvious fix, more teams: 18x, but on the snake 48 teams lose to one |
+| c04 | why: a gate (grid.sync) after every ring; 1 works, 12,287 wait, 65,792 times |
+| c05 | step diagonally: half the rings, half the gates; 25x |
+| c06 | the twist: on the real picture, one launch per blob, slower than the CPU (~2,181 ms) |
+| c07 | tags in the queue: two blobs per launch, rings max(a, b); but seeds are handed in |
+| c08 | seeds found on the GPU, waves merge by min; 58.5 ms, still over one frame |
+| c09 | runs, not pixels; queue, gate and launches come off, 6 kernels go on; 1.46 ms |
+| c10 | 24 s -> 1.46 ms, 16,000x, and the name |
+
+What it is made of (`scenes/chain/`):
+
+- `iso.py`: one geometry, two looks. Every part is 3D boxes; `LOOK=flat`
+  projects straight down, `LOOK=iso` turns the camera 26 degrees and
+  raises it to 40, shading the sides. Text is laid on the part's plane.
+- `machine.py`: the board (`Spec` -> parts). A face's `z_index` comes
+  from its layer and depth only, so parts from different builds still
+  draw in 3D order.
+- `floor.py`: the toy picture as one raster at the output size (grid
+  lines stay one pixel). In the iso look it is warped with one affine
+  transform, because Cairo ignores shear on images.
+- `toy.py`: the chapters' rules on 24 x 24 toys (BFS rings in 4- and
+  8-connectivity, the ch05 seed rule, merge by min, ch06 runs), with a
+  self-test against a reference labelling. The toy is shown transposed
+  like the repo's images, so a toy row is a memory row.
+- `numbers.py`: every number with its file and key, pinned files, and
+  a check of each spoken claim (`uv run python -m scenes.chain.numbers`).
+- `state.py`: `chain_state(k)`, the pure picture between beats,
+  including the caption that crosses the cut.
+- `base.py`: `ChainScene`. Cues come from `words.json`; floor waves and
+  flashes run on the renderer's clock (summing `dt` loses a frame per
+  play); `settle()` draws one frozen frame after the hooks finish (a
+  play's last update is never drawn); each clip writes
+  `<clip>.snap.json` for the seam check.
+
+Commands (from `video/`):
+
+```bash
+uv run narration/tts_kokoro.py --script script_chain.md --out kokoro_chain
+uv run narration/tts_elevenlabs.py --script script_chain.md --out elevenlabs_chain   # needs ELEVENLABS_API_KEY in .env
+uv run python -m scenes.chain.toy && uv run python -m scenes.chain.numbers
+uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro --render --preview   # 480 px, 15 fps
+uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro --render             # 1080p30
+uv run build/seam_check.py --cut chain --look iso --layout vertical --intra
+STATE=7 LOOK=iso VIDEO_LAYOUT=vertical .venv/bin/python -m manim render -s -qh --disable_caching \
+    -r 1080,1920 --media_dir media/chain_preview scenes/chain/snapshot.py Snapshot
+```
+
+Gotchas found while building it:
+
+- An updater must be a plain function, never a bound method of the
+  scene: `FadeIn` deep-copies the mobject, and copying a bound method
+  copies the scene's thread lock. The render then crashes and hangs.
+- Do not pipe a render into `head`: an early exit can leave Manim
+  blocked on its console.
+- At 480 px the seam check flags busy pictures (the snake's grid, the
+  teal picture) by a hair: encoder noise between a clip's last P-frame
+  and the next clip's I-frame. Judge seams at 1080p30.
+- On 2026-10-13 `assemble.py` without `--render` rebuilt
+  `final_vertical_kokoro.mp4` from the newest clips in `media/vertical/`,
+  which were Peter Baker's (section 7, "Voices share the media folder").
+  It was restored with a full re-render (146.53 s, 10 of 10 seams OK).
+
