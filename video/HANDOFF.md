@@ -1,9 +1,9 @@
 # The flood-fill-cuda explainer video: summary and handoff
 
-Status on 2026-10-13. Branch `video-chain` (off `main`), folder `video/`,
-version 0.6.0. Two cuts of the same story: the three-pane cut (sections
-1-10, four files below) and the chain cut (section 11, a problem -> fix
-chain in two looks). `out/` and `media/` are gitignored; only sources
+Status on 2026-10-14. Branch `video-chain` (off `main`), folder `video/`,
+version 0.7.0. Two cuts of the same story: the three-pane cut (sections
+1-10, four files below) and the chain cut (section 11, a "But... So"
+chain in two acts, size then count, 2.5D). `out/` and `media/` are gitignored; only sources
 are tracked.
 
 | file | frame | voice | length | Triton beat |
@@ -356,66 +356,77 @@ the outro fade. Rules that keep this true:
 - Add the ch06 column to the README grand table (`overview/build.py`).
 - Background music (`--music`) and captions.
 
-## 11. The chain cut (2026-10-13)
+## 11. The chain cut (v2 on 2026-10-14; v1 on 2026-10-13)
+
+A second cut beside the three-pane one, told as a chain of "But... So"
+rungs in the style of the Infinite Desk Shorts (`reference/infinite-desk/`,
+whose README distils 21 of them). v2 is the current version; v1 ("you
+build a machine", 11 beats, flat and 2.5D) is in git history and its four
+renders are kept in `out/chain_v1/`.
 
 | file | frame | look | voice | length |
 |---|---|---|---|---|
-| `final_chain_flat_vertical_kokoro.mp4` | 1080x1920 | flat | Kokoro `am_adam` | 118.9 s |
-| `final_chain_iso_vertical_kokoro.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam` | 118.9 s |
-| `final_chain_flat_landscape_kokoro.mp4` | 1920x1080 | flat | Kokoro `am_adam` | 118.9 s |
-| `final_chain_iso_landscape_kokoro.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam` | 118.9 s |
+| `final_chain_iso_vertical_kokoro.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam` | 115.9 s |
+| `final_chain_iso_landscape_kokoro.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam` | 115.9 s |
 
-At 1080p30 the 2.5D cuts pass 10 of 10 seams and 10 of 10 snaps. The
-flat cuts flag only c09 -> c10 (0.06% of pixels against 0.05%): the
-speckled teal picture, max 66 levels, spread over the whole frame, i.e.
-keyframe noise, not content.
+At 1080p30 both cuts pass all 11 snaps (largest 0.97) and 11 of 12 seams.
+The flagged seam, r10 -> r11 (0.09% / 0.08% of pixels against 0.05%), is
+the speckled teal picture: at most 79 levels, spread over the whole frame,
+i.e. keyframe noise, not content (v1's only flag was the same picture).
 
-A second cut, beside the three-pane one, told like the turbojet Short
-(youtube.com/shorts/dLLCr_N-WPM): "you" build a machine, every beat is a
-problem, a fix that slides onto the machine as a part, and the problem
-the fix exposes. Amber always means "someone is waiting". The name
-("a connected-component labeller, not a flood fill any more") comes only
-at the end. Beat sheet, numbers table and narration:
-`narration/script_chain.md`.
+The story (v2, "size, then count"): a drone show opens it. On frames that
+small the compiled CPU keeps up (measured: 3.1 ms vs the GPU's 0.93 ms per
+drone frame), but at 81 Mpx it needs 1.3 s against a 33 ms budget. "Where
+does the GPU win? Two places: size and count." The video zooms into one
+real drone (119 px), walks it on the CPU, races one GPU block against it
+(the CPU still wins on one small blob), then earns the two wins: act 1,
+SIZE, on one giant 64 Mpx blob (1 block, 2 blocks, 48 blocks and the gate
+on a thin snake, diagonal steps: 25.8x); act 2, COUNT (one launch per blob
+loses, tags, seeds found on the GPU, runs: 2.96 ms). A three-row CPU vs
+GPU scoreboard fills as the acts are won, and the reveal answers the
+opening question on the live drones. The name is on the title card only.
 
 | beat | the link |
 |---|---|
-| c00 | the job: 81 Mpx, 2,522 blobs, one camera frame (33 ms) |
-| c01 | one worker walks the blob; its queue is the wave's edge, a ring of independent cells |
-| c02 | a team of 256 paints a ring per step, waits for the slowest; 2x, but 1 room of 24 |
-| c03 | the obvious fix, more teams: 18x, but on the snake 48 teams lose to one |
-| c04 | why: a gate (grid.sync) after every ring; 1 works, 12,287 wait, 65,792 times |
-| c05 | step diagonally: half the rings, half the gates; 25x |
-| c06 | the twist: on the real picture, one launch per blob, slower than the CPU (~2,181 ms) |
-| c07 | tags in the queue: two blobs per launch, rings max(a, b); but seeds are handed in |
-| c08 | seeds found on the GPU, waves merge by min; 58.5 ms, still over one frame |
-| c09 | runs, not pixels; queue, gate and launches come off, 6 kernels go on; 1.46 ms |
-| c10 | 24 s -> 1.46 ms, 16,000x, and the name |
+| intro (i0, i1) | drones, 33 ms; drone card CPU 3.1 / GPU 0.93 ms; 81 Mpx card CPU 1.3 s; "size and count" |
+| r00 zoom | one drone, 119 pixels |
+| r01 CPU | one pixel per step, one core, 24 SMs idle |
+| r02 one block | a whole ring per step, but on one small blob the CPU wins (0.15 vs 0.37 ms); row 1 |
+| r03 giant | one block on 64 Mpx: 2.46x the CPU; 1 of 24 SMs |
+| r04 two blocks | twice as fast (5.0x); 22 SMs dark |
+| r05 all blocks | 48 blocks, 18x; on the snake they lose to one: the gate, twice per ring, ~2 us |
+| r06 diagonals | half the rings, half the gates (on a square): 25.8x; row 2 |
+| r07 real frame | size is won, now count: 2,522 launches, ~2,181 ms (estimate), slower than the CPU |
+| r08 tags | two per launch, ~1,368 ms (estimate); 64 tags max, seeds handed in |
+| r09 seeds | the GPU finds its seeds, waves merge by min: 51.0 ms, still over 33 ms |
+| r10 runs | spans, not pixels; no queue, no ring loop, six kernels: 2.96 ms (1.46 from a packed mask); row 3 |
+| r11 reveal | the full scoreboard; every drone, every frame |
 
-What it is made of (`scenes/chain/`):
+Files: narration `narration/script_chain.md`; the approved design with
+every source `narration/chain_v2_proposal.md`; scenes `scenes/chain/`
+(`intro.py`, `r00_zoom.py` ... `r11_reveal.py` on `base.ChainScene`;
+`state.py` is the boundary table, `overlays.py` the meter, scoreboard,
+gauge, inset and act tag); numbers and claim checks
+`scenes/chain/numbers.py` (28 checks). The drone-frame benchmark is
+`src/flood_fill_cuda/overview/bench_drones.py`, results
+`results/overview/benchmark_results/drones_20261014T023648Z.json`.
 
-- `iso.py`: one geometry, two looks. Every part is 3D boxes; `LOOK=flat`
-  projects straight down, `LOOK=iso` turns the camera 26 degrees and
-  raises it to 40, shading the sides. Text is laid on the part's plane.
-- `machine.py`: the board (`Spec` -> parts). A face's `z_index` comes
-  from its layer and depth only, so parts from different builds still
-  draw in 3D order.
-- `floor.py`: the toy picture as one raster at the output size (grid
-  lines stay one pixel). In the iso look it is warped with one affine
-  transform, because Cairo ignores shear on images.
-- `toy.py`: the chapters' rules on 24 x 24 toys (BFS rings in 4- and
-  8-connectivity, the ch05 seed rule, merge by min, ch06 runs), with a
-  self-test against a reference labelling. The toy is shown transposed
-  like the repo's images, so a toy row is a memory row.
-- `numbers.py`: every number with its file and key, pinned files, and
-  a check of each spoken claim (`uv run python -m scenes.chain.numbers`).
-- `state.py`: `chain_state(k)`, the pure picture between beats,
-  including the caption that crosses the cut.
-- `base.py`: `ChainScene`. Cues come from `words.json`; floor waves and
-  flashes run on the renderer's clock (summing `dt` loses a frame per
-  play); `settle()` draws one frozen frame after the hooks finish (a
-  play's last update is never drawn); each clip writes
-  `<clip>.snap.json` for the seam check.
+How v2 was made: a design workflow (6 readers, 4 drafts, 3 judges, 3
+adversarial verifiers), a revision workflow after the user's answers, a
+committed drone benchmark, then a build workflow (a builder, an
+adversarial reviewer and a fixer per group of scenes) on a foundation of
+states and overlays.
+
+Numbers worth knowing (all in `numbers.py` with file:key):
+- Drone frames (Oct 14, one session, 240 frames, all crosschecks OK):
+  @njit label + fill 3.14 ms median, 5.13 max; ch06 RGB 0.93 / 1.81 ms;
+  pure Python 68 ms median. The host CPU ran about 3x slower than on Jul 24
+  (png_blocks @njit 35.8 vs 11.2 ms), so the video never claims that pure
+  Python misses the drone budget.
+- Scoreboard: one small blob (16 K px) CPU 0.15 vs best GPU 0.37 ms (one
+  session); one huge blob (64 Mpx) CPU 2,584 vs GPU 100 ms, 25.8x (one
+  session, kernel time); many blobs (1 Mpx, 47,655 blobs) CPU 22.9 vs GPU
+  0.65 ms, 35x (two sessions).
 
 Commands (from `video/`):
 
@@ -426,22 +437,26 @@ uv run python -m scenes.chain.toy && uv run python -m scenes.chain.numbers
 uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro --render --preview   # 480 px, 15 fps
 uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro --render             # 1080p30
 uv run build/seam_check.py --cut chain --look iso --layout vertical --intra
+uv run build/chain_snapcheck.py r05_all_blocks AllBlocks --layout vertical                            # one clip
 STATE=7 LOOK=iso VIDEO_LAYOUT=vertical .venv/bin/python -m manim render -s -qh --disable_caching \
     -r 1080,1920 --media_dir media/chain_preview scenes/chain/snapshot.py Snapshot
 ```
 
-Gotchas found while building it:
-
+Gotchas found while building the chain cut:
 - An updater must be a plain function, never a bound method of the
   scene: `FadeIn` deep-copies the mobject, and copying a bound method
   copies the scene's thread lock. The render then crashes and hangs.
+- Hooks read the renderer's clock: a play's time steps start at t = 0,
+  so summing dt loses a frame per play (a one-frame wait never advances).
+- A play's last update is never drawn, so `settle()` draws one frozen
+  frame after the hooks finish; without it a snap jumps.
+- Cairo ignores shear on images: the iso floor warps its raster itself.
 - Do not pipe a render into `head`: an early exit can leave Manim
   blocked on its console.
-- At 480 px the seam check flags busy pictures (the snake's grid, the
-  teal picture) by a hair: encoder noise between a clip's last P-frame
-  and the next clip's I-frame. Judge seams at 1080p30.
+- At 480 px the seam check can flag busy pictures by a hair (encoder
+  noise between a clip's last P-frame and the next clip's I-frame).
+  Judge seams at 1080p30.
 - On 2026-10-13 `assemble.py` without `--render` rebuilt
   `final_vertical_kokoro.mp4` from the newest clips in `media/vertical/`,
   which were Peter Baker's (section 7, "Voices share the media folder").
   It was restored with a full re-render (146.53 s, 10 of 10 seams OK).
-
