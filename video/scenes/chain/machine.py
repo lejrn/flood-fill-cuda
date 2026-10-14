@@ -155,7 +155,7 @@ GOLDEN_ANGLE = 137.508              # degrees, as ch03's benchmarks/wavefront.py
 # (blocks 0 and 1), the red of unpainted pixels, the amber of waiting and
 # the teal of the final answer.
 HUE_BANDS = ((211.0, 12.0), (128.0, 12.0), (5.0, 20.0), (38.0, 32.0), (175.0, 14.0))
-DIM_MIX = 0.62                      # a dim cube: its hue this far towards the die's colour
+DIM_MIX = 0.78                      # a dim cube: its hue this far towards the die's colour
 
 
 def _hls(hex_: str) -> tuple:
