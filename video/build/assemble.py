@@ -54,8 +54,9 @@ PANES = [
 ]
 BEATS = PANES
 
-# The problem -> fix chain cut, v2 "size, then count" (narration/script_chain.md,
-# scenes/chain/). The intro clip voices two beats, like the three-pane intro.
+# The problem -> fix chain cut, v4 "size, then count: the memory story"
+# (narration/script_chain.md, scenes/chain/). The intro clip voices two beats,
+# like the three-pane intro.
 CHAIN = [
     ("chain/intro", "Intro", "i0_problem"),
     ("chain/intro", "Intro", "i1_compare"),
@@ -63,8 +64,10 @@ CHAIN = [
     ("chain/r01_cpu", "Cpu", "r01_cpu"),
     ("chain/r02_one_block", "OneBlock", "r02_one_block"),
     ("chain/r03_giant", "Giant", "r03_giant"),
+    ("chain/r03b_one_sm", "OneSm", "r03b_one_sm"),
     ("chain/r04_two_blocks", "TwoBlocks", "r04_two_blocks"),
     ("chain/r05_all_blocks", "AllBlocks", "r05_all_blocks"),
+    ("chain/r05b_snake", "Snake", "r05b_snake"),
     ("chain/r06_diagonals", "Diagonals", "r06_diagonals"),
     ("chain/r07_real_frame", "RealFrame", "r07_real_frame"),
     ("chain/r08_tags", "Tags", "r08_tags"),
@@ -198,8 +201,9 @@ def main() -> None:
                    ("  OVERRUN" if d > slot + 0.05 else "")
         print(f"{Path(stem).name:18s} start {t0:6.2f}  len {d:5.2f}{note}   [{', '.join(beats)}]")
     print(f"total {total:.2f} s")
-    if not 60.0 <= total <= 150.0:
-        msg = f"total {total:.1f} s is outside the 60-150 s target"
+    hi = 300.0 if args.cut == "chain" else 150.0          # the chain cut may run to five minutes (v4)
+    if not 60.0 <= total <= hi:
+        msg = f"total {total:.1f} s is outside the 60-{hi:.0f} s target"
         if args.strict:
             raise SystemExit(msg)
         print("warning:", msg)

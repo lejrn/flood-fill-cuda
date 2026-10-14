@@ -119,7 +119,7 @@ class LaunchPill:
 
 
 class RealFrame(ChainScene):
-    k = 9
+    k = 11
 
     def beat_anim(self) -> None:
         t = toys()

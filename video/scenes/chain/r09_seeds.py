@@ -9,7 +9,7 @@ meet, both keep the smaller label (the colours merge). The counter shows
 3 launches, the needle stops at 51 ms. But the queue in VRAM still
 carries every red pixel.
 
-Starts on chain_state(11), ends on chain_state(12).
+Starts on chain_state(13), ends on chain_state(14).
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ HUES = tuple(h for h in BLOB_HUES if np.abs(fl.rgb(h).astype(int) - fl.rgb(GOLD)
 
 
 class Seeds(ChainScene):
-    k = 11
+    k = 13
 
     def fill_tokens(self, spec: mc.Spec, frames: int) -> None:
         """The queue fills: the new tokens drop in one after another; the

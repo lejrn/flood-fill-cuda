@@ -96,7 +96,7 @@ def score_card(G, rows: tuple, highlight: tuple = (), footnote: str | None = Non
 
 
 class Reveal(ChainScene):
-    k = 13
+    k = 15
 
     def card(self, rows_lit: tuple) -> tuple:
         """The full scoreboard and a frame round the named rows (grey: the

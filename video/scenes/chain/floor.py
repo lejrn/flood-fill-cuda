@@ -58,9 +58,19 @@ def _index_maps(rpx: int, n: int):
     return idx, off, edge
 
 
+@lru_cache(maxsize=8)
+def _fine_index(rpx: int, m: int) -> np.ndarray:
+    """Per output pixel: the index on a fine grid of m points across."""
+    return np.minimum(((np.arange(rpx) + 0.5) * m / rpx).astype(int), m - 1)
+
+
 def toy_raster(colors: np.ndarray, rpx: int, dots: np.ndarray | None = None,
-               ring: np.ndarray | None = None, boxes=()) -> np.ndarray:
+               ring: np.ndarray | None = None, boxes=(), fine: np.ndarray | None = None) -> np.ndarray:
     """(rpx, rpx, 4) uint8 from (n, n, 3) uint8 cell colours.
+
+    fine: (n * k, n * k, 3) uint8: a k x k mosaic inside each cell (the owner
+          maps: a dot per real pixel sampled); it replaces `colors` as the
+          fill, the cell grid stays.
 
     dots: (n, n) int, 0 none, 1 a working worker (blue), 2 a waiting one (amber),
           3 a seed (white).
@@ -71,7 +81,11 @@ def toy_raster(colors: np.ndarray, rpx: int, dots: np.ndarray | None = None,
     n = colors.shape[0]
     idx, off, edge = _index_maps(rpx, n)
     out = np.empty((rpx, rpx, 4), np.uint8)
-    out[..., :3] = colors[idx][:, idx]
+    if fine is None:
+        out[..., :3] = colors[idx][:, idx]
+    else:
+        fi = _fine_index(rpx, fine.shape[0])
+        out[..., :3] = fine[fi][:, fi]
     out[..., 3] = 255
     grid = rgb(GRID)
     out[edge, :, :3] = grid

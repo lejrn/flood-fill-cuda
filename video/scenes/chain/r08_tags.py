@@ -52,7 +52,7 @@ def along(pts: list, s: float) -> np.ndarray:
 
 
 class Tags(ChainScene):
-    k = 10
+    k = 12
 
     def beat_anim(self) -> None:
         t = toys()

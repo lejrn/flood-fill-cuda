@@ -70,7 +70,23 @@ SM = {
     "lit":  ("#1d3554", "#7fb2ea", "#8a6a3f", "#2f6f7d", "#4c8fd6", "#3a74b4", "#7a4848", "#2f5f78", "#3d5d92", "#6b6835"),
     "wait": ("#3b2f1a", "#d99a2b", "#8a6a3f", "#4a4430", "#9b7124", "#7e5d1f", "#6a4630", "#4b4632", "#4e4632", "#6b6835"),
 }
-SHELF_LIT = "#2aa198"        # the shared memory in use (one block's queue)
+# The L1 / shared-memory strip has three states: off (the SM's own colour),
+# full (the queue's red, style.RED_PX: one block's queue lives there) and
+# empty (outlined, no fill: a block's region with nothing in it).
+SHELVES = ("off", "full", "empty")
+SHELF_FULL = "#e2645a"
+SHELF_EDGE = "#e2645a"
+
+
+def shelf_state(shelf) -> str:
+    """'off', 'full' or 'empty'; v3's bool still reads (True = full)."""
+    if shelf is True:
+        return "full"
+    if not shelf:
+        return "off"
+    if shelf not in SHELVES:
+        raise ValueError(f"shelf must be one of {SHELVES}, not {shelf!r}")
+    return shelf
 
 CPU_COL = {
     "die": "#171c23", "edge": "#38414c",
@@ -228,8 +244,9 @@ class Canvas:
         return np.asarray(self.im.resize((w // SS, h // SS), Image.LANCZOS)).copy()
 
 
-def _sm(c: Canvas, r: R, state: str, shelf: bool = False) -> None:
-    """One SM in NVIDIA's layout: four partitions over L1, texture units, RT core."""
+def _sm(c: Canvas, r: R, state: str, shelf="off") -> None:
+    """One SM in NVIDIA's layout: four partitions over L1, texture units, RT
+    core. `shelf` is the L1 / shared-memory strip's state (SHELVES)."""
     frame, edge, sched, regs, cores, tensor, ldst, l1, tex, rt = SM[state]
     c.rect(r, frame, edge, 0.012)
     p = 0.018
@@ -245,7 +262,13 @@ def _sm(c: Canvas, r: R, state: str, shelf: bool = False) -> None:
         tw = (inner.w - 3 * 0.008) / 4
         c.rect(R(inner.x + q * (tw + 0.008), y, tw, tex_d), tex)
     y += tex_d + 0.008
-    c.rect(R(inner.x, y, inner.w, l1_d), SHELF_LIT if shelf else l1)
+    sh = shelf_state(shelf)
+    if sh == "full":
+        c.rect(R(inner.x, y, inner.w, l1_d), SHELF_FULL)
+    elif sh == "empty":
+        c.rect(R(inner.x, y, inner.w, l1_d), frame, SHELF_EDGE, 0.008)
+    else:
+        c.rect(R(inner.x, y, inner.w, l1_d), l1)
     y += l1_d + 0.008
     pw, pd = (inner.w - 0.012) / 2, (part_d - 0.012) / 2
     for a in range(2):
@@ -301,14 +324,14 @@ def gpu_raster(ppw: float) -> np.ndarray:
 
 
 @lru_cache(maxsize=64)
-def sm_tile(state: str, ppw: float, shelf: bool = False) -> np.ndarray:
+def sm_tile(state: str, ppw: float, shelf="off") -> np.ndarray:
     c = Canvas(SM_W, SM_D, ppw, None)
-    _sm(c, R(0, 0, SM_W, SM_D), state, shelf)
+    _sm(c, R(0, 0, SM_W, SM_D), state, shelf_state(shelf))
     return c.done()
 
 
 @lru_cache(maxsize=4)
-def sm_detail(ppw: float, shelf: bool = False) -> np.ndarray:
+def sm_detail(ppw: float, shelf="off") -> np.ndarray:
     """One SM, lit, drawn large like NVIDIA's SM figure, with its few labels:
     32 lanes in each of the four partitions, the shared memory, the RT core."""
     c = Canvas(SM_W, SM_D, ppw, None)

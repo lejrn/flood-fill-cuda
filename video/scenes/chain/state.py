@@ -1,4 +1,4 @@
-"""The picture between beats of the chain cut v2: `chain_state(k)` is what
+"""The picture between beats of the chain cut (v4): `chain_state(k)` is what
 the screen shows when beat k starts (k = index into BEATS). The intro clip
 voices beats 0 and 1, so the first chain state is k = 2. Scene k starts on
 `chain_state(k)` and snaps to `chain_state(k + 1)` at its end, so its
@@ -25,8 +25,8 @@ from scenes.chain.geo import Frame, frame
 from scenes.chain.iso import Proj, proj
 from scenes.style import ASSETS, BLUE, GOLD, GREEN, PURPLE, RED_PX, TEAL
 
-BEATS = ("i0_problem", "i1_compare", "r00_zoom", "r01_cpu", "r02_one_block", "r03_giant",
-         "r04_two_blocks", "r05_all_blocks", "r06_diagonals", "r07_real_frame", "r08_tags",
+BEATS = ("i0_problem", "i1_compare", "r00_zoom", "r01_cpu", "r02_one_block", "r03_giant", "r03b_one_sm",
+         "r04_two_blocks", "r05_all_blocks", "r05b_snake", "r06_diagonals", "r07_real_frame", "r08_tags",
          "r09_seeds", "r10_runs", "r11_reveal")
 FIRST = 2                                   # the first beat with its own chain clip
 
@@ -34,7 +34,9 @@ Z_FLOOR, Z_MACHINE, Z_OVER = 10.0, 100.0, ov.Z_OVER
 
 # ---- colours of painted cells ----
 LEVEL_LO, LEVEL_HI = "#9cc3ec", "#1f4f86"      # a wave's rings, first to last
-BLOB_HUES = (BLUE, GREEN, "#d36ac2", "#e0a13a", "#5fc9d6", PURPLE)
+# act 2: one hue per blob. The fourth sits at 84 deg, at least 30 deg from
+# amber (waiting) and from the other five (v3's "#e0a13a" was amber's twin).
+BLOB_HUES = (BLUE, GREEN, "#d36ac2", "#99cb4d", "#5fc9d6", PURPLE)
 fmt_ms = ov.fmt_ms
 
 
@@ -54,6 +56,34 @@ def level_colors(m: np.ndarray, level: np.ndarray, upto: int | None = None, top:
     for r, c in zip(*np.nonzero(reached)):
         out[r, c] = mix(lo, hi, level[r, c] / top)
     return out
+
+
+def owner_colors(m: np.ndarray, level: np.ndarray, owner: np.ndarray, upto: int | None = None,
+                 top: int | None = None) -> np.ndarray:
+    """level_colors on the fine grid (D4): a reached cell is a k x k mosaic of
+    its real owner dots, each dot its block's ring ramp at the cell's ring
+    (the hue is the block, the lightness the ring); unreached cells red,
+    off the mask empty. owner: (n * k, n * k) block ids, -1 off the shape.
+    Pass the result as toy_raster's `fine`."""
+    n = m.shape[0]
+    k = owner.shape[0] // n
+    out = np.repeat(np.repeat(level_colors(m, np.full(m.shape, -1)), k, 0), k, 1)
+    top = max(int(level.max()) if top is None else top, 1)
+    reached = (level >= 0) & (level <= (top if upto is None else upto))
+    sel = np.repeat(np.repeat(reached, k, 0), k, 1) & (owner >= 0)
+    t = np.repeat(np.repeat(np.clip(level, 0, None) / top, k, 0), k, 1)[sel][:, None]
+    lo, hi = _block_ramps(int(owner.max()) + 1)
+    o = owner[sel]
+    out[sel] = (lo[o] * (1 - t) + hi[o] * t).astype(np.uint8)
+    return out
+
+
+@lru_cache(maxsize=None)
+def _block_ramps(blocks: int) -> tuple[np.ndarray, np.ndarray]:
+    """Each block's ring ramp (first ring, last ring) as float RGB rows."""
+    ramps = [mc.block_ramp(b, LEVEL_LO, LEVEL_HI) for b in range(blocks)]
+    return (np.array([fl.rgb(a) for a, _ in ramps], np.float32),
+            np.array([fl.rgb(b) for _, b in ramps], np.float32))
 
 
 def label_colors(m: np.ndarray, lab: np.ndarray, order: list | None = None) -> np.ndarray:
@@ -88,6 +118,39 @@ def toys() -> dict:
         "two": two, "two_lab": toy.canonical(two),
         "many": many, "many_lab": toy.canonical(many),
     }
+
+
+OWNER_FLOORS = {"square_own2": ("two", "square4"), "square_own48": ("c4", "square4"),
+                "square_own48_8": ("c8", "square8")}     # floor: (owner-map launch, the toy fill it paints)
+
+
+@lru_cache(maxsize=None)
+def owner_fine(key: str) -> np.ndarray:
+    """The owner map of launch `key` ("two", "c4", "c8") on the toy square's
+    fine grid: (24 k, 24 k) block ids, -1 off the square, k dots per cell
+    side. Dot (a, b) of toy cell (r, c) is the real pixel sampled at
+    [k (r - 1) + a, k (c - 1) + b] (the repo's [x, y] is the toy's [row, col])."""
+    own = nb.owner_map()
+    g = own["grid"]
+    k, o, side = int(g["dots_per_cell"]), int(g["toy_offset"]), int(g["toy_side"])
+    n = toys()["square"].shape[0]
+    sq = toys()["square"]
+    assert int(g["toy_n"]) == n and sq[o:o + side, o:o + side].all() and int(sq.sum()) == side * side
+    out = np.full((n * k, n * k), -1, np.int16)
+    out[o * k:(o + side) * k, o * k:(o + side) * k] = own[key]["owner_samples"]
+    return out
+
+
+def owner_crop(key: str, crop: str = "ring") -> np.ndarray:
+    """A full-resolution crop of launch `key`'s owner map (64 x 64; 192 x 192
+    for "seed_wide"), each pixel its block's ring ramp at the crop's middle
+    depth: the lens's picture (D4, Q4). (row, col) = the repo's [x, y]."""
+    own = nb.owner_map()[key]
+    ids = own[f"crop_{crop}"].astype(int)
+    meta = own["crops"][crop]
+    t = (meta["depth_min"] + meta["depth_max"]) / 2 / max(own["levels"] - 1, 1)
+    lo, hi = _block_ramps(max(int(ids.max()) + 1, 2))
+    return (lo[ids] * (1 - t) + hi[ids] * t).astype(np.uint8)
 
 
 @lru_cache(maxsize=None)
@@ -201,48 +264,67 @@ def boundary(k: int) -> Boundary:
                 cap=(f"{int(n['sm'])} SMs", "streaming multiprocessors"))
     if k == 4:
         return b
-    one = mc.Spec(cpu="lit", rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23)
+    # r02: one block on SM 0, its queue in the SM's shared memory (shelf "full")
+    one = mc.Spec(cpu="lit", rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23, shelves=("full",))
     b = replace(b, floors=("drone_cpu", "drone_gpu"), machine=one, rows=(small, "?", "?"),
                 cap=("CPU wins", "one small blob"))
     if k == 5:
         return b
-    b = replace(b, floors=("square4",),
-                machine=mc.Spec(rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23, shelf=True,
-                                room_fence="rest"),
-                inset="stress test", tag=("SIZE", False), cap=(f"1 of {int(n['sm'])} SMs", None))
+    # r03_giant: the giant square; the queue overflows the shared memory and
+    # its overflow spills to VRAM (a few tokens in chip 0's slots, no label)
+    giant = mc.Spec(rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23, shelves=("full",), room_fence="rest",
+                    spill=True)
+    b = replace(b, floors=("square4",), machine=giant, inset="stress test", tag=("SIZE", False),
+                cap=("spill", "to global memory"))
     if k == 6:
         return b
-    b = replace(b, machine=mc.Spec(rooms=("lit", "lit") + ("off",) * 22, teams=(1, 1) + (0,) * 22,
-                                   queue=True, gate="rest"),
-                cap=(f"{int(n['sm']) - 2} SMs idle", None))
+    # r03b: over twice the CPU, but one SM of twenty-four
+    b = replace(b, cap=(f"1 of {int(n['sm'])} SMs", None))
     if k == 7:
         return b
-    full = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, queue=True, gate="rest")
-    b = replace(b, floors=("snake",), machine=full, cap=(f"{int(d['snake_stops']):,} stops", "~2 µs each"))
+    # r04: block 1 on SM 2 (measured), green; the whole queue in VRAM, the
+    # gate at rest; the floor is who painted what (blue and green, mixed)
+    two_ids = tuple(int(i) for i in n["two_sm_ids"])
+    two = mc.place_blocks(mc.with_rooms(mc.Spec(queue=True, tokens=(RED_PX,) * 6, gate="rest"), "lit", two_ids),
+                          two_ids, hues=mc.block_hues(len(two_ids)))
+    b = replace(b, floors=("square_own2",), machine=two, cap=(f"{int(n['sm']) - 2} SMs idle", None))
     if k == 8:
         return b
-    b = replace(b, floors=("square8",), machine=full, rows=(small, huge, "?"),
-                tag=("SIZE", True), cap=(f"{d['big_8ways_x']:.1f}×", "vs the CPU, kernel time"))
+    # r05: 48 blocks, two per SM in the measured order, each in its block's hue
+    full = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, queue=True, gate="rest")
+    hued = mc.place_blocks(full, [int(i) for i in n["big_sm_ids"]], hues=mc.block_hues(int(n["big_blocks"])))
+    b = replace(b, floors=("square_own48",), machine=hued,
+                cap=(f"+{round(100 * (d['sweep_x'] - 1))}% at best", f"{round(n['q1_px'] / 1e6)} Mpx square"))
     if k == 9:
         return b
+    # r05b: the snake, 48 lose to 1; the gate
+    b = replace(b, floors=("snake",), cap=(f"{int(d['snake_stops']):,} stops", "~2 µs each"))
+    if k == 10:
+        return b
+    # r06: 8 ways; the floor is the 8-way owner map
+    b = replace(b, floors=("square_own48_8",), rows=(small, huge, "?"),
+                tag=("SIZE", True), cap=(f"{d['big_8ways_x']:.1f}×", "vs the CPU, kernel time"))
+    if k == 11:
+        return b
+    # act 2 (from r07's pull-back): one hue per blob, so the cubes are plain blue again
     m9 = replace(full, launches=f"{int(n['est_ch03_calls']):,}")
     b = replace(b, floors=("frame_filled",), machine=m9,
                 goal=ov.GoalSpec(needle_ms=n["est_ch03_ms"], needle_text="~" + fmt_ms(n["est_ch03_ms"])),
                 tag=("COUNT", False), inset="drone frame", cap=("~" + fmt_ms(n["est_ch03_ms"]), "estimate"))
-    if k == 10:
+    if k == 12:
         return b
     m10 = replace(m9, launches=f"{int(n['est_ch04_calls']):,}", tokens=(RED_PX,) * 6,
                   tag_tokens=(BLUE, GREEN, BLUE, BLUE, GREEN, BLUE))
     b = replace(b, floors=("two",), machine=m10,
                 goal=ov.GoalSpec(needle_ms=n["est_ch04_ms"], needle_text="~" + fmt_ms(n["est_ch04_ms"])),
-                cap=("64 tags max", None))
-    if k == 11:
+                cap=("2 seeds", "per launch"))
+    if k == 13:
         return b
     m11 = replace(full, launches="3", tokens=(RED_PX,) * mc.SLOTS)
     b = replace(b, floors=("frame_labels",), machine=m11,
                 goal=ov.GoalSpec(needle_ms=n["ch05_ms"], needle_text=fmt_ms(n["ch05_ms"])),
                 cap=(fmt_ms(n["ch05_ms"]), "still over 33 ms"))
-    if k == 12:
+    if k == 14:
         return b
     m12 = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, kernels=True, seams=True)
     return replace(b, floors=("frame_teal",), machine=m12,
@@ -266,6 +348,10 @@ def floor_raster(name: str, rpx: int) -> np.ndarray:
         return fl.toy_raster(level_colors(t["square"], t["square8"].level), rpx)
     if name == "snake":
         return fl.toy_raster(level_colors(t["snake"], t["snake4"].level), rpx)
+    if name in OWNER_FLOORS:
+        key, fill = OWNER_FLOORS[name]
+        lv = t[fill].level
+        return fl.toy_raster(level_colors(t["square"], lv), rpx, fine=owner_colors(t["square"], lv, owner_fine(key)))
     if name == "two":
         return fl.toy_raster(label_colors(t["two"], t["two_lab"]), rpx)
     if name == "frame_filled":

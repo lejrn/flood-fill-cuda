@@ -11,8 +11,8 @@ ring at a time and the whole machine goes amber twice per ring (the gate
 rises); a "grid.sync" tag sits by the GPU board from "gate"; then the
 rings race to the end with the gate up.
 
-Starts on chain_state(7) (two SMs lit, the square painted), ends on
-chain_state(8) (all SMs lit, two blocks each, the snake painted, the gate
+Starts on chain_state(8) (two SMs lit, the square painted), ends on
+chain_state(9) (all SMs lit, two blocks each, the snake painted, the gate
 at rest).
 """
 from __future__ import annotations
@@ -137,7 +137,7 @@ def sync_tag(G, pl) -> VGroup:
 
 
 class AllBlocks(ChainScene):
-    k = 7
+    k = 8
 
     def beat_anim(self) -> None:
         t = toys()
@@ -145,7 +145,7 @@ class AllBlocks(ChainScene):
         sn, lv = t["snake"], t["snake4"].level
         n4 = int(l4.max()) + 1
         top = int(lv.max())
-        full = boundary(8).machine
+        full = boundary(self.k + 1).machine
         pl = self.Lay.machine_pl
         n = self.num
         b = int(n["big_blocks"])

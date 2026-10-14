@@ -32,6 +32,15 @@ class Frame:
     inset_c: np.ndarray        # centre of the "you are here" inset
     tag_c: np.ndarray          # centre of the act tag
     vertical: bool
+    # v4's call-out panels (chain_v4_proposal.md, "Where the new panels sit"),
+    # each as (centre, (w, h)). Act 1's (D1) sit in 9:16 in the band between
+    # the caption and the CPU board's back edge, in 16:9 above the CPU board.
+    # The VRAM close-up (D2, act 2) sits under the launch pill (over the dark
+    # CPU board), which the proposal's spot would cover.
+    gauge: tuple = ()          # D1, the shelf gauge (r03_giant)
+    cards: tuple = ()          # D1, the shelf cards: ((SM 0's centre, SM 2's centre), (w, h)), SM 0's lower (r04)
+    vram: tuple = ()           # D2, the VRAM close-up (r08, r10_runs)
+    side_card: tuple = ()      # the corner beside the floor's front tip, ((x0, y0), (x1, y1)): r05's cards
 
     def split(self, side: str) -> tuple:
         """(centre, (w, h)) of the left or right half of the floor box."""
@@ -54,6 +63,10 @@ def frame() -> Frame:
             inset_c=np.array([-2.95, 4.5, 0]),
             tag_c=np.array([3.2, 4.3, 0]),
             vertical=True,
+            gauge=((-2.62, -2.62), (2.7, 1.2)),
+            cards=(((-2.70, -3.15), (-2.70, -2.25)), (2.3, 0.8)),
+            vram=((0.0, 1.65), (6.8, 3.9)),           # over the floor area, under the inset and the act tag
+            side_card=((-3.5, -0.3), (3.5, 3.6)),     # r05's sweep card, over the floor area
         )
     top = h / 2
     return Frame(
@@ -66,4 +79,8 @@ def frame() -> Frame:
         inset_c=np.array([-6.05, 1.95, 0]),
         tag_c=np.array([-0.9, 2.3, 0]),
         vertical=False,
+        gauge=((1.30, 2.05), (2.5, 1.2)),
+        cards=(((1.20, 1.30), (1.20, 2.25)), (2.1, 0.85)),
+        vram=((-2.75, -0.45), (5.1, 3.9)),       # over the floor area, clear of the inset
+        side_card=((-5.3, -2.4), (-0.2, 1.5)),     # r05's sweep card, over the floor area
     )

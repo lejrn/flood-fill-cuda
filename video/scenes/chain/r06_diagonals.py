@@ -7,8 +7,8 @@ The stencil is an algorithm, not hardware: a small 3 x 3 glyph beside the
 floor shows the neighbours one step reaches (4 arrows, then 8). It is an
 extra and leaves with the last caption; the machine does not change.
 
-Starts on chain_state(8) (the snake painted, "65,792 stops"), ends on
-chain_state(9) (the square painted in 8 ways, row 2 filled, "25.8×").
+Starts on chain_state(10) (the snake painted, "65,792 stops"), ends on
+chain_state(11) (the square painted in 8 ways, row 2 filled, "25.8×").
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def stencil(pl) -> tuple[VGroup, VGroup, VGroup]:
 
 
 class Diagonals(ChainScene):
-    k = 8
+    k = 10
 
     def wave(self, m, lv, n: int):
         """keyfn and render for a fill ring by ring: key -1 is all red, n - 1 all painted."""

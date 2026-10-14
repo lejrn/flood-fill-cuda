@@ -244,3 +244,99 @@ def inset(G: Frame, line: str) -> Group:
     for m in g.get_family():
         m.set_z_index(Z_OVER - 5)
     return g
+
+
+# ---- r05: the launch-shape sweep card -------------------------------------
+
+SWEEP_GREYS = ("#c9d1d9", "#98a2ad", "#6b7580", "#454d57", "#2c323a")   # bins, the top bin first
+
+
+def sweep_card(G: Frame, grid_ms, rows, cols, default: tuple, best_ms: float, bin_of, box=None,
+               blocks_across: bool = True) -> VGroup:
+    """CH03's launch-shape sweep (16 Mpx square, 4 ways, kernel time) as a
+    small grid: a cell per (blocks, threads per block), a neutral grey ramp
+    in bins (blue already means block 0 and working), cells past the
+    cooperative cap empty (an outline: not slow, never run). No numbers
+    and no tick labels: two axis words; the default cell is outlined.
+
+    grid_ms: row-major over `rows` (block counts) x `cols` (threads per
+    block), NaN when not run, None for a "max" cell drawn in its own row
+    (no cell there); bin_of(ms, best_ms) -> 0 (top) .. 4.
+    blocks_across: block counts along x and threads per block along y
+    (the card's corner is wide and low; False draws rows of blocks).
+    Fits in `box` ((x0, y0), (x1, y1)), default G.side_card."""
+    from manim import Rectangle
+
+    (x0, y0), (x1, y1) = box or G.side_card
+    nr, nc = len(rows), len(cols)
+    across, down = (nr, nc) if blocks_across else (nc, nr)
+    # the axis words, both level: the x word under the grid, the y word left of it
+    word_x = lbl("blocks" if blocks_across else "threads per block", 13, INK_SOFT)
+    ys = ("threads", "per block") if blocks_across else ("blocks",)
+    word_y = VGroup(*[lbl(t, 13, INK_SOFT) for t in ys]).arrange(DOWN, buff=0.04, aligned_edge=RIGHT)
+    pad, gap = 0.1, 0.022
+    gw = (x1 - x0) - 2 * pad - word_y.width - 0.08
+    gh = (y1 - y0) - 2 * pad - word_x.height - 0.06
+    cell = min(gw / across, gh / down)
+    cells = VGroup()
+    outline = None
+    for i, b in enumerate(rows):
+        for j, t in enumerate(cols):
+            ms = grid_ms[i * nc + j]
+            if ms is None:                                       # the cap is a row: drawn there
+                continue
+            a, d = (i, j) if blocks_across else (j, i)
+            centre = [(a + 0.5) * cell, (d + 0.5) * cell, 0]     # threads (or blocks) grow upwards
+            if ms != ms:                                         # NaN: past the cap, never run
+                r = Rectangle(width=cell - gap, height=cell - gap, stroke_color=GRID, stroke_width=1.2,
+                              fill_opacity=0)
+            else:
+                r = Rectangle(width=cell - gap, height=cell - gap, stroke_width=0,
+                              fill_color=SWEEP_GREYS[bin_of(ms, best_ms)], fill_opacity=1)
+            cells.add(r.move_to(centre))
+            if (b, t) == default:
+                outline = Rectangle(width=cell + 0.02, height=cell + 0.02, stroke_color=INK,
+                                    stroke_width=2.5).move_to(centre)
+    if outline is not None:
+        cells.add(outline)
+    word_x.next_to(cells, DOWN, buff=0.06)
+    word_y.next_to(cells, LEFT, buff=0.08).align_to(cells, UP)
+    body = VGroup(cells, word_x, word_y)
+    box_ = RoundedRectangle(corner_radius=0.1, width=body.width + 2 * pad, height=body.height + 2 * pad,
+                            fill_color=PANEL, fill_opacity=0.95, stroke_color=GRID, stroke_width=2)
+    box_.move_to(body)
+    g = VGroup(box_, body)
+    g.move_to([(x0 + x1) / 2, (y0 + y1) / 2, 0])
+    return _z(g, Z_OVER + 4)
+
+
+# ---- r05: the lens on the owner map ---------------------------------------
+
+def owner_lens(rgb: np.ndarray, centre, radius: float, target=None, z: float = Z_OVER - 4) -> Group:
+    """A round lens showing a full-resolution crop of the owner map (one
+    pixel a square), with a ring; with `target` (a frame point on the
+    floor) a thin leader and a small ring there: the lens's window is a
+    sliver of one floor cell. Pass state.owner_crop(...) as rgb."""
+    from manim import Circle, Line
+
+    n = rgb.shape[0]
+    px = max(1, int(round(2 * radius * config.pixel_width / config.frame_width / n))) * n
+    up = np.repeat(np.repeat(rgb, px // n, 0), px // n, 1)
+    yy, xx = np.mgrid[0:px, 0:px]
+    inside = (xx + 0.5 - px / 2) ** 2 + (yy + 0.5 - px / 2) ** 2 <= (px / 2) ** 2
+    arr = np.dstack([up, np.where(inside, 255, 0).astype(np.uint8)])
+    img = ImageMobject(arr)
+    img.set_resampling_algorithm(RESAMPLING_ALGORITHMS["nearest"])
+    img.set_height(2 * radius)
+    c = np.array([centre[0], centre[1], 0.0])
+    img.move_to(c)
+    ring = Circle(radius=radius, stroke_color=INK, stroke_width=3).move_to(c)
+    g = Group(img, ring)
+    if target is not None:
+        t = np.array([target[0], target[1], 0.0])
+        d = (t - c) / max(np.linalg.norm(t - c), 1e-9)
+        g.add(Line(c + d * radius, t - d * 0.06, stroke_color=INK, stroke_width=1.5),
+              Circle(radius=0.06, stroke_color=INK, stroke_width=2).move_to(t))
+    for m in g.get_family():
+        m.set_z_index(z)
+    return g

@@ -7,7 +7,7 @@ boards, with 5 seams where the gate was, and light one by one while the
 real frame turns teal. About three milliseconds: the needle crosses the
 budget, then the strip's last pill fills (r11 opens the full card).
 
-Starts on chain_state(12), ends on chain_state(13).
+Starts on chain_state(14), ends on chain_state(15).
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ HUES = tuple(h for h in BLOB_HUES if np.abs(fl.rgb(h).astype(int) - fl.rgb(GOLD)
 
 
 class Runs(ChainScene):
-    k = 12
+    k = 14
 
     def show(self, raster: np.ndarray) -> None:
         """Put one raster on the floor now (on the shared clock)."""

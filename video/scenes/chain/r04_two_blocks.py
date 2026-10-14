@@ -11,7 +11,7 @@ again" (kernel time) at "twice". At "twenty-two" the 22 dark SMs ripple
 idle, the carried "22 SMs idle" lands on "SMs", and at "dark" they go
 dark again.
 
-Starts on chain_state(6) and ends on chain_state(7).
+Starts on chain_state(7) and ends on chain_state(8).
 """
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def images(part: Group) -> list:
 
 
 class TwoBlocks(ChainScene):
-    k = 6
+    k = 7
 
     def adopt(self, spec: mc.Spec, name: str):
         """Part `name` of spec's build becomes the machine's own, added
@@ -88,7 +88,7 @@ class TwoBlocks(ChainScene):
         n = sq.shape[0]
         top = int(lv.max())
         f = self.floor
-        b6, b7 = boundary(6), boundary(7)
+        b6, b7 = boundary(self.k), boundary(self.k + 1)
         pl = self.Lay.machine_pl
         painted = floor_raster("square4", f.rpx)
         red = self.toy(level_colors(sq, np.full(sq.shape, -1)))
