@@ -85,6 +85,8 @@ class Spec:
     min_unit: bool = False              # atomicMin (c08)
     kernels: bool = False               # the ch06 kernel strip (c09)
     kernel_lit: int = -1
+    seams: bool = False                 # 5 thin seams between the kernels (what is left of the gate)
+    rack: bool = False                  # the tag rack, "64 max" (v2 r08)
 
 
 @dataclass
@@ -171,6 +173,13 @@ def _boxes(spec: Spec) -> list[tuple[str, Box]]:
         for j in range(6):
             colr = TEAL if j == spec.kernel_lit else KERNEL
             out.append(("kernels", Box(x0 + j * (w + g), sy0 + 0.15, 0.0, w, sy1 - sy0 - 0.3, 0.22, colr, layer=2)))
+        if spec.seams:
+            for j in range(5):
+                xs = x0 + (j + 1) * (w + g) - g / 2 - 0.015
+                out.append(("seams", Box(xs, sy0 + 0.1, 0.0, 0.03, sy1 - sy0 - 0.2, 0.3, GREY, layer=3)))
+    if spec.rack:
+        # the rack never coexists with the min unit (tags leave when min arrives): same slot
+        out.append(("rack", Box(SIDE_X[0] + 0.1, -1.35, 0.0, SIDE_X[1] - SIDE_X[0] - 0.2, 1.05, 0.1, "#3b3355", layer=2)))
     s0, s1 = SIDE_X
     if spec.stencil:
         out.append(("stencil", Box(s0, 1.3, 0.0, s1 - s0, 1.15, 0.08, CHIP, layer=2)))
@@ -231,6 +240,10 @@ def _labels(spec: Spec, pl: Placement) -> list[tuple[str, object, float]]:
         out.append(("launches", on_plane(txt, pl, ((s0 + s1) / 2, 0.52), 0.08, width=1.2), 0.2))
     if spec.min_unit:
         out.append(("min", on_plane(label("min", 36, INK, mono=True), pl, ((s0 + s1) / 2, -0.83), 0.38, width=0.6), 0.5))
+    if spec.rack:
+        txt = VGroup(label("tags", 24, INK_SOFT), label("64 max", 34, INK, mono=True))
+        txt.arrange(direction=np.array([0, -1, 0]), buff=0.06)
+        out.append(("rack", on_plane(txt, pl, ((s0 + s1) / 2, -0.82), 0.1, width=1.0), 0.2))
     return out
 
 

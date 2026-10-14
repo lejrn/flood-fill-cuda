@@ -1,10 +1,12 @@
 """Where things sit in the frame, per layout. Nothing else in the chain
 cut uses frame coordinates.
 
-16:9 (14.22 x 8): the floor left, the machine right, the caption at the
-bottom centre, the goal chip top right.
-9:16 (8 x 14.22): the goal chip on top, the floor, the caption in the
-middle of the frame, the machine below.
+9:16 (8 x 14.22), top to bottom: the goal meter, the scoreboard strip,
+the floor (inset top left, act tag top right), the caption, the room
+gauge, the machine.
+16:9 (14.22 x 8): the scoreboard top left, the goal meter top right,
+the floor left, the machine right (room gauge above it), the caption at
+the bottom centre.
 """
 from __future__ import annotations
 
@@ -23,27 +25,49 @@ class Frame:
     machine_c: np.ndarray
     machine_wh: tuple
     caption_c: np.ndarray      # centre of the big caption word
-    goal_c: np.ndarray         # centre of the goal chip
-    note_c: np.ndarray         # small notes under the floor (bars, counters)
+    goal_c: np.ndarray         # centre of the goal meter
+    goal_w: float              # its width
+    score_c: np.ndarray        # centre of the collapsed scoreboard strip
+    score_w: float
+    card_c: np.ndarray         # centre of the expanded scoreboard card
+    gauge_c: np.ndarray        # centre of the room gauge
+    inset_c: np.ndarray        # centre of the "you are here" inset
+    tag_c: np.ndarray          # centre of the act tag
     vertical: bool
+
+    def split(self, side: str) -> tuple:
+        """(centre, (w, h)) of the left or right half of the floor box."""
+        w, h = self.floor_wh
+        dx = -w / 4 if side == "left" else w / 4
+        return self.floor_c + np.array([dx, 0, 0]), (w / 2 - 0.15, h * 0.8)
 
 
 def frame() -> Frame:
     w, h = config.frame_width, config.frame_height
     if is_vertical():
+        top = h / 2
         return Frame(
-            floor_c=np.array([0.0, 2.55, 0]), floor_wh=(7.2, 6.3),
-            machine_c=np.array([0.0, -4.35, 0]), machine_wh=(7.4, 4.9),
-            caption_c=np.array([0.0, -1.3, 0]),
-            goal_c=np.array([0.0, h / 2 - 0.55, 0]),
-            note_c=np.array([0.0, -0.2, 0]),
+            floor_c=np.array([0.0, 2.05, 0]), floor_wh=(7.4, 5.0),
+            machine_c=np.array([0.0, -4.55, 0]), machine_wh=(7.4, 4.4),
+            caption_c=np.array([0.0, -1.15, 0]),
+            goal_c=np.array([0.0, top - 0.62, 0]), goal_w=7.4,
+            score_c=np.array([0.0, top - 1.55, 0]), score_w=7.4,
+            card_c=np.array([0.0, 2.05, 0]),
+            gauge_c=np.array([0.0, -2.45, 0]),
+            inset_c=np.array([-3.1, 4.25, 0]),
+            tag_c=np.array([3.2, 4.3, 0]),
             vertical=True,
         )
+    top = h / 2
     return Frame(
-        floor_c=np.array([-3.45, 0.6, 0]), floor_wh=(6.2, 5.7),
-        machine_c=np.array([3.55, 0.5, 0]), machine_wh=(6.6, 5.3),
-        caption_c=np.array([0.0, -h / 2 + 0.72, 0]),
-        goal_c=np.array([w / 2 - 1.75, h / 2 - 0.42, 0]),
-        note_c=np.array([-3.45, -3.0, 0]),
+        floor_c=np.array([-3.5, -0.05, 0]), floor_wh=(6.6, 5.1),
+        machine_c=np.array([3.6, -0.35, 0]), machine_wh=(6.4, 4.6),
+        caption_c=np.array([0.0, -h / 2 + 0.6, 0]),
+        goal_c=np.array([3.55, top - 0.55, 0]), goal_w=6.6,
+        score_c=np.array([-3.5, top - 0.68, 0]), score_w=6.6,
+        card_c=np.array([0.0, 0.2, 0]),
+        gauge_c=np.array([3.6, 2.15, 0]),
+        inset_c=np.array([-6.2, 1.9, 0]),
+        tag_c=np.array([-0.9, 2.3, 0]),
         vertical=False,
     )

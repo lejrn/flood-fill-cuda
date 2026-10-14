@@ -1,22 +1,22 @@
-"""ChainScene: one beat of the chain cut.
+"""ChainScene: one beat of the chain cut (v2).
 
 A scene starts on `chain_state(k)`, plays its beat on a timeline cued by
 the spoken words, and ends with `snap()` to `chain_state(k + 1)`, held to
-the narration's length + 0.4 s. Rules (as in the three-pane cut):
+the narration's length + the beat's silent hold + 0.4 s. Rules (as in
+the three-pane cut):
 
 - Plays last whole frames (`fr(n)`: n frames at 15 fps, 2n at 30), holds
   go through `until()`.
-- Text never changes in place: captions and the goal chip fade out and in.
+- Text never changes in place: captions and overlays fade out and in
+  (out first, then in, so two never overlap).
 - The machine changes part by part (`machine_to`): a new part slides in,
   a removed part fades out, a changed part cross-fades, an unchanged part
   is left alone. Every part is a top-level mobject.
-- Floor animations and amber flashes run on one clock (`tick`), a hook
-  called every rendered frame, so a wave's rings and the gate's flashes
-  stay in step. While a hook runs, holds are live (updaters run). The
-  clock is an updater on the floor itself: during a play the Cairo
-  renderer caches every mobject that is neither animated nor updated, and
-  the floor changes by swapping its pixels. The floor is added after the
-  machine, so the machine stays cached while only the floor moves.
+- Floor animations and amber flashes run on one clock: hooks called every
+  rendered frame from an updater on the first floor (during a play the
+  Cairo renderer caches every mobject that is neither animated nor
+  updated, and a floor changes by swapping its pixels). The hooks read
+  the renderer's clock, never a sum of dt.
 - Cues come from out/<VOICE>/words.json (`cue("gate")`), so the same
   scene fits every voice.
 """
@@ -34,13 +34,17 @@ from narration.common import read_words
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import numbers as nb
-from scenes.chain.state import (
-    BEATS, Z_OVER, chain_state, goal_chip, layout,
-)
+from scenes.chain import overlays as ov
+from scenes.chain.state import BEATS, Z_OVER, boundary, carry_caption, chain_state, layout, nums
 from scenes.style import INK, INK_SOFT, OUT, BeatScene, beat_seconds, label, voice
 
 F = 1 / 15
 EPS = 1e-6
+
+# Silent seconds after a beat's narration, for pictures that need the time
+# (the zoom, the scoreboard card, the reveal's last look at the drones).
+HOLD = {"r00_zoom": 1.5, "r02_one_block": 1.2, "r03_giant": 0.8, "r06_diagonals": 1.2,
+        "r10_runs": 1.5, "r11_reveal": 2.5}
 
 
 def fr(n: int) -> float:
@@ -61,7 +65,7 @@ def caption_group(G, text: str, sub: str | None = None) -> VGroup:
     g = VGroup(big)
     room = config.frame_width - 0.8
     if sub:
-        small = label(sub, 24, INK_SOFT, mono=True)
+        small = label(sub, 22, INK_SOFT, mono=True)
         g.add(small)
         if G.vertical:
             g.arrange(DOWN, buff=0.14)
@@ -81,7 +85,7 @@ def caption_group(G, text: str, sub: str | None = None) -> VGroup:
 
 
 class ChainScene(BeatScene):
-    k: int = 0
+    k: int = 2
 
     # ---- setup
     def setup(self) -> None:
@@ -89,16 +93,16 @@ class ChainScene(BeatScene):
         self.beat = BEATS[self.k]
         self.Lay = layout()
         self.G = self.Lay.G
-        self.num = {key: v.value for key, v in nb.load().items()}
+        self.num = nums()
         self.der = nb.derived()
         self.words = read_words(OUT / voice()).get(self.beat, [])
         self.state = chain_state(self.k, self.Lay)
         self.add(*self.state.mobs())
-        self.floor = self.state.floor
+        self.floors = list(self.state.floors)
         self.machine = self.state.machine
-        self.goal = self.state.goal
-        self.cap: VGroup | None = self.state.cap      # carried over the cut
-        self.extras: list = []          # transient mobjects to clear before snap
+        self.over = dict(self.state.over)
+        self.cap: VGroup | None = self.state.cap
+        self.extras: list = []
         self._hooks: list = []
         self._clock = None
 
@@ -109,10 +113,14 @@ class ChainScene(BeatScene):
             scene._tick(m, dt)
 
         self._tick_fn = tick
-        self.adopt_floor(self.floor)
+        self._attach_clock()
+
+    @property
+    def floor(self):
+        return self.floors[0] if self.floors else None
 
     def target_seconds(self) -> float:
-        return beat_seconds(self.beat, default=10.0)
+        return beat_seconds(self.beat, default=8.0) + HOLD.get(self.beat, 0.0)
 
     # ---- words
     def cue(self, word: str, n: int = 1, end: bool = False, after: float = 0.0) -> float:
@@ -120,10 +128,13 @@ class ChainScene(BeatScene):
         want = _norm(word)
         hits = [w for w in self.words if _norm(w[0]) == want and w[1] >= after]
         if len(hits) < n:
-            if not self.words:          # no words.json: spread cues by guess
+            if not self.words:
                 return min(self.elapsed() + 0.5, self.target_seconds())
             raise ValueError(f"{self.beat}: no occurrence {n} of {word!r} after {after}")
         return float(hits[n - 1][2] if end else hits[n - 1][1])
+
+    def speech_end(self) -> float:
+        return float(self.words[-1][2]) if self.words else beat_seconds(self.beat, 8.0)
 
     # ---- time
     def until(self, t: float) -> None:
@@ -136,23 +147,24 @@ class ChainScene(BeatScene):
         else:
             self.wait(n / fps + EPS, frozen_frame=True)
 
-    def adopt_floor(self, floor) -> None:
-        """Move the clock to `floor` (or to an empty mobject while there is none)."""
+    def _attach_clock(self) -> None:
         if self._clock is not None:
             self._clock.remove_updater(self._tick_fn)
-            if self._clock is not self.floor and self._clock in self.mobjects:
+            if self._clock not in self.floors and self._clock in self.mobjects:
                 self.remove(self._clock)
-        self.floor = floor
-        self._clock = floor if floor is not None else Mobject()
+        self._clock = self.floors[0] if self.floors else Mobject()
         self._clock.add_updater(self._tick_fn)
-        if floor is None:
+        if not self.floors:
             self.add(self._clock)
 
+    def set_floors(self, floors: list) -> None:
+        """Replace the scene's floor list (the caller adds/removes mobjects)."""
+        self.floors = list(floors)
+        self._attach_clock()
+
     def _tick(self, m, dt: float) -> None:
-        # The renderer's clock, not a sum of dt: a play's time steps start at
-        # t = 0, so summing dt loses one frame per play (and a one-frame wait
-        # never advances at all). Inside an update, renderer.time is exactly
-        # the time of the frame about to be drawn.
+        # the renderer's clock: a play's time steps start at t = 0, so summing
+        # dt loses one frame per play (and a one-frame wait never advances)
         now = self.elapsed()
         keep = []
         for h in self._hooks:
@@ -177,20 +189,18 @@ class ChainScene(BeatScene):
         self._hooks.append(hook)
 
     def settle(self) -> None:
-        """Wait (live) until every hook has finished, then draw one frame.
-
-        A play ends with one more update after its last drawn frame, so a
-        hook can reach its end state there and never be drawn; the frozen
-        frame makes the end state the frame before whatever comes next."""
+        """Wait (live) until every hook has finished, then draw one frame:
+        a play's last update is never drawn, so a hook can reach its end
+        state there; the frozen frame makes that the frame before a snap."""
         while self._hooks:
             self.wait(1 / config.frame_rate - EPS, frozen_frame=False)
         self.wait(1 / config.frame_rate + EPS, frozen_frame=True)
 
-    # ---- floor
-    def floor_play(self, keyfn, render, seconds: float) -> None:
-        """Show render(keyfn(p)) on the floor as p goes 0 -> 1; renders only on a new key."""
+    # ---- floors
+    def floor_play(self, keyfn, render, seconds: float, floor=None) -> None:
+        """Show render(keyfn(p)) on a floor as p goes 0 -> 1; renders only on a new key."""
         last = {"key": object()}
-        f = self.floor
+        f = floor or self.floor
 
         def step(p: float) -> None:
             key = keyfn(p)
@@ -200,28 +210,26 @@ class ChainScene(BeatScene):
 
         self.run(step, seconds)
 
-    def floor_show(self, raster: np.ndarray) -> None:
-        self.floor.show_raster(raster)
+    def toy(self, colors, dots=None, ring=None, boxes=(), floor=None) -> np.ndarray:
+        return fl.toy_raster(colors, (floor or self.floor).rpx, dots=dots, ring=ring, boxes=boxes)
 
-    def toy(self, colors, dots=None, ring=None, boxes=()) -> np.ndarray:
-        return fl.toy_raster(colors, self.floor.rpx, dots=dots, ring=ring, boxes=boxes)
+    def pic(self, rgb, floor=None, nearest: bool = False) -> np.ndarray:
+        return fl.picture_raster(rgb, (floor or self.floor).rpx, nearest=nearest)
 
-    def pic(self, rgb) -> np.ndarray:
-        return fl.picture_raster(rgb, self.floor.rpx)
-
-    def floor_blend(self, a: np.ndarray, b: np.ndarray, frames: int = 8) -> None:
-        """Cross-fade the floor from raster a to raster b over `frames` (15 fps) frames."""
+    def floor_blend(self, a: np.ndarray, b: np.ndarray, frames: int = 8, floor=None) -> None:
         af, bf = a.astype(np.float32), b.astype(np.float32)
         self.floor_play(lambda p: round(p * frames), lambda i: (af + (bf - af) * (i / frames)).astype(np.uint8),
-                        seconds=fr(frames) + EPS)
+                        seconds=fr(frames) + EPS, floor=floor)
 
     # ---- machine
-    def machine_anims(self, spec: mc.Spec, slide: float = 0.3) -> list:
+    def machine_anims(self, spec: mc.Spec | None, slide: float = 0.3) -> list:
         """Animations from the current machine to `spec`, part by part."""
-        new = mc.build(spec, self.Lay.machine_pl, z0=100.0)
         old = self.machine
-        anims = []
-        keep = {}
+        if spec is None:
+            self.machine = None
+            return [FadeOut(p) for p in (old.mobs() if old else [])]
+        new = mc.build(spec, self.Lay.machine_pl, z0=100.0)
+        anims, keep = [], {}
         names = list(dict.fromkeys(list(old.parts) if old else []) | dict.fromkeys(new.parts))
         for name in names:
             o = old.parts.get(name) if old else None
@@ -238,19 +246,37 @@ class ChainScene(BeatScene):
         self.machine = mc.Machine(spec, {k: keep[k] for k in new.parts if k in keep})
         return anims
 
-    def machine_to(self, spec: mc.Spec, frames: int = 6, slide: float = 0.3, extra=()) -> None:
+    def machine_to(self, spec: mc.Spec | None, frames: int = 6, slide: float = 0.3, extra=()) -> None:
         anims = self.machine_anims(spec, slide)
         if anims or extra:
             self.play(*anims, *extra, run_time=fr(frames))
 
-    # ---- goal chip
-    def goal_to(self, value, frames: int = 6, extra=()) -> None:
-        new = goal_chip(self.G, value)
-        anims = [FadeIn(new)]
-        if self.goal is not None:
-            anims.append(FadeOut(self.goal))
-        self.play(*anims, *extra, run_time=fr(frames))
-        self.goal = new
+    # ---- overlays (goal meter, scoreboard strip, gauge, inset, act tag)
+    def over_anims(self, name: str, new) -> list:
+        old = self.over.get(name)
+        anims = []
+        if old is not None:
+            anims.append(FadeOut(old))
+        if new is not None:
+            anims.append(FadeIn(new))
+        self.over[name] = new
+        return anims
+
+    def over_to(self, frames: int = 6, extra=(), **news) -> None:
+        anims = list(extra)
+        for name, new in news.items():
+            anims += self.over_anims(name, new)
+        if anims:
+            self.play(*anims, run_time=fr(frames))
+
+    def goal(self, spec: ov.GoalSpec):
+        return ov.goal_meter(self.G, spec, self.num)
+
+    def strip(self, rows: tuple):
+        return ov.score_strip(self.G, rows)
+
+    def gauge(self, busy: int, note: str = ""):
+        return ov.room_gauge(self.G, busy, int(self.num["sm"]), note)
 
     # ---- captions
     def say(self, text: str, sub: str | None = None, at: float | None = None, frames: int = 5, extra=()) -> None:
@@ -264,8 +290,6 @@ class ChainScene(BeatScene):
 
     def say_last(self, at: float | None = None, frames: int = 5) -> None:
         """The beat's last caption: the one `chain_state(k + 1)` carries over the cut."""
-        from scenes.chain.state import carry_caption
-
         cc = carry_caption(self.k + 1)
         if cc is None:
             raise ValueError(f"{self.beat}: no carried caption for state {self.k + 1}")
@@ -283,16 +307,25 @@ class ChainScene(BeatScene):
     def snap(self) -> None:
         """Replace everything with the pure picture of the next state."""
         self._hooks = []
+        if self._clock is not None:
+            self._clock.remove_updater(self._tick_fn)
         for m in list(self.mobjects):
             self.remove(m)
-        self._clock.remove_updater(self._tick_fn)
         self.state = chain_state(self.k + 1, self.Lay)
         self.add(*self.state.mobs())
         self._clock = None
-        self.floor = self.state.floor
+        self.floors = list(self.state.floors)
 
     def beat_anim(self) -> None:
         raise NotImplementedError
+
+    def write_snap_time(self) -> None:
+        """<clip>.snap.json beside the clip: build/seam_check.py --cut chain
+        compares the frames on both sides of the snap."""
+        fw = getattr(self.renderer, "file_writer", None)
+        path = getattr(fw, "movie_file_path", None)
+        if path:
+            Path(str(path) + ".snap.json").write_text(json.dumps({"snap_s": self.elapsed()}), encoding="utf-8")
 
     def construct(self) -> None:
         self.beat_anim()
@@ -307,14 +340,6 @@ class ChainScene(BeatScene):
             self.finish(fade=0)
         else:
             self.finish(fade=0.5)
-
-    def write_snap_time(self) -> None:
-        """<clip>.snap.json beside the clip: build/seam_check.py --cut chain
-        compares the frames on both sides of the snap."""
-        fw = getattr(self.renderer, "file_writer", None)
-        path = getattr(fw, "movie_file_path", None)
-        if path:
-            Path(str(path) + ".snap.json").write_text(json.dumps({"snap_s": self.elapsed()}), encoding="utf-8")
 
 
 def _same(a: VGroup, b: VGroup) -> bool:

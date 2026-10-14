@@ -54,19 +54,23 @@ PANES = [
 ]
 BEATS = PANES
 
-# The problem -> fix chain cut (narration/script_chain.md, scenes/chain/).
+# The problem -> fix chain cut, v2 "size, then count" (narration/script_chain.md,
+# scenes/chain/). The intro clip voices two beats, like the three-pane intro.
 CHAIN = [
-    ("chain/c00_job", "Job", "c00_job"),
-    ("chain/c01_one_worker", "OneWorker", "c01_one_worker"),
-    ("chain/c02_team", "Team", "c02_team"),
-    ("chain/c03_more_teams", "MoreTeams", "c03_more_teams"),
-    ("chain/c04_gate", "Gate", "c04_gate"),
-    ("chain/c05_diagonals", "Diagonals", "c05_diagonals"),
-    ("chain/c06_real_picture", "RealPicture", "c06_real_picture"),
-    ("chain/c07_tags", "Tags", "c07_tags"),
-    ("chain/c08_seeds", "Seeds", "c08_seeds"),
-    ("chain/c09_runs", "Runs", "c09_runs"),
-    ("chain/c10_reveal", "Reveal", "c10_reveal"),
+    ("chain/intro", "Intro", "i0_problem"),
+    ("chain/intro", "Intro", "i1_compare"),
+    ("chain/r00_zoom", "Zoom", "r00_zoom"),
+    ("chain/r01_cpu", "Cpu", "r01_cpu"),
+    ("chain/r02_one_block", "OneBlock", "r02_one_block"),
+    ("chain/r03_giant", "Giant", "r03_giant"),
+    ("chain/r04_two_blocks", "TwoBlocks", "r04_two_blocks"),
+    ("chain/r05_all_blocks", "AllBlocks", "r05_all_blocks"),
+    ("chain/r06_diagonals", "Diagonals", "r06_diagonals"),
+    ("chain/r07_real_frame", "RealFrame", "r07_real_frame"),
+    ("chain/r08_tags", "Tags", "r08_tags"),
+    ("chain/r09_seeds", "Seeds", "r09_seeds"),
+    ("chain/r10_runs", "Runs", "r10_runs"),
+    ("chain/r11_reveal", "Reveal", "r11_reveal"),
 ]
 CUTS = {"panes": PANES, "chain": CHAIN}
 LOOKS = ("flat", "iso")

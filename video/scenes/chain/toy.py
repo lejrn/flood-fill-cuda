@@ -341,3 +341,27 @@ if __name__ == "__main__":
               f"8-conn {bfs(shape, [centre_seed(shape)], 8).n_levels:3d}  "
               f"seeds {int(seeds.sum()):2d}  runs {len(runs(shape)):3d}")
     print("selftest OK")
+
+
+# ---- the real drone (chain cut v2) ---------------------------------------
+
+DRONE_FRAME = 216
+DRONE_CENTRE = (110, 70)          # (row, col) in the 1024 x 576 mask, the box rows 104-116, cols 64-77
+
+
+def drone(n: int = 24) -> np.ndarray:
+    """The chosen drone's own pixels (its 8-connected blob only), in an n x n
+    window of the camera mask, screen orientation (row = image y)."""
+    from pathlib import Path
+
+    from PIL import Image
+
+    path = Path(__file__).resolve().parents[2] / "assets" / "drones_mask" / f"frame_{DRONE_FRAME:03d}.png"
+    m = np.asarray(Image.open(path).convert("L")) > 127
+    r0, c0 = DRONE_CENTRE[0] - n // 2, DRONE_CENTRE[1] - n // 2
+    win = m[r0:r0 + n, c0:c0 + n]
+    # keep only the blob nearest the window centre
+    rs, cs = np.nonzero(win)
+    i = int(np.argmin((rs - n / 2) ** 2 + (cs - n / 2) ** 2))
+    f = bfs(win, [(int(rs[i]), int(cs[i]))], 8)
+    return f.level >= 0
