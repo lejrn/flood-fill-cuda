@@ -98,7 +98,7 @@ def goal_meter(G: Frame, spec: GoalSpec, nums: dict) -> VGroup:
         xn = _track_x(G, spec.needle_ms, x0, x1)
         tri = Polygon([xn, y - 0.02, 0], [xn - 0.09, y - 0.2, 0], [xn + 0.09, y - 0.2, 0],
                       fill_color=spec.needle_color, fill_opacity=1, stroke_width=0)
-        val = label(spec.needle_text, 15, spec.needle_color, mono=True).move_to([xn, y - 0.33, 0])
+        val = label(spec.needle_text, 14, spec.needle_color, mono=True).move_to([xn, y - 0.29, 0])
         if val.get_right()[0] > box.get_right()[0] - 0.05:
             val.shift(LEFT * (val.get_right()[0] - box.get_right()[0] + 0.05))
         g.add(tri, val)
@@ -154,15 +154,15 @@ def score_strip(G: Frame, rows: tuple) -> VGroup:
     if len(g):
         head.next_to(g, UP, buff=0.05).align_to(g, LEFT)
         g.add(head)
-    return _z(g)
+    return _z(g, Z_OVER + 1)
 
 
 def score_card(G: Frame, rows: tuple, highlight: int | None = None, footnote: str | None = None) -> VGroup:
     """The expanded scoreboard: picture | CPU | GPU | winner per row."""
     filled = [r for r in rows if isinstance(r, Row)]
     lines = VGroup()
-    head = VGroup(label("", 16, INK_SOFT), label("CPU", 16, INK_SOFT), label("GPU", 16, INK_SOFT),
-                  label("winner", 16, INK_SOFT))
+    blank = Rectangle(width=0.01, height=0.01, stroke_width=0, fill_opacity=0)   # an empty cell with points
+    head = VGroup(blank, label("CPU", 16, INK_SOFT), label("GPU", 16, INK_SOFT), label("winner", 16, INK_SOFT))
     lines.add(head)
     for i, r in enumerate(rows):
         if r is None:
@@ -248,9 +248,9 @@ def inset(G: Frame, line1: str, line2: str = "") -> Group:
                      stroke_color=RED_PX, stroke_width=2.5).move_to([cx, cy, 0])
     frame_box = Rectangle(width=img.width + 0.04, height=img.height + 0.04, stroke_color=GRID,
                           stroke_width=1.5).move_to(img)
-    txt = VGroup(label(line1, 13, INK_SOFT))
+    txt = VGroup(label(line1, 14, INK_SOFT, mono=True))
     if line2:
-        txt.add(label(line2, 11, INK_SOFT))
+        txt.add(label(line2, 12, INK_SOFT, mono=True))
     txt.arrange(DOWN, buff=0.03).next_to(frame_box, DOWN, buff=0.06)
     g = Group(img, frame_box, ring, txt)
     for m in g.get_family():

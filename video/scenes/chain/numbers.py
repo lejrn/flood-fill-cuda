@@ -82,6 +82,7 @@ def load() -> dict[str, Num]:
         put(key.replace("_ms", "_calls"), c[col]["calls"], f"{OV.name}:png_blobs.{col}.calls")
     put("ch05_ms", c["ch05_split_L8"]["ms"], f"{OV.name}:png_blobs.ch05_split_L8.ms")
     put("sm", ov["sm_count"], f"{OV.name}:sm_count")
+    put("small_tpb", ov["tpb"], f"{OV.name}:tpb")
 
     # ch06 on the 81 Mpx frame (Jul 25, CUDA events)
     s = _scene(_load(R61), "input_blobs")
@@ -178,7 +179,7 @@ def facts() -> list[tuple[str, bool]]:
         ("i1 eighty-one megapixels", round(n["n_pixels"] / 1e6) == 81),
         ("i1 the CPU needs one point three seconds", round(n["njit_ms"] / 1000, 1) == 1.3),
         ("r01 twenty-four SMs", n["sm"] == 24),
-        ("r02 two hundred fifty-six threads", n["big_tpb"] == 256),
+        ("r02 two hundred fifty-six threads", n["small_tpb"] == 256),
         ("r02 on one small blob, the CPU still wins", n["small_cpu_ms"] < n["small_gpu_ms"]),
         ("r03 one block is over twice the CPU", 2.0 < d["big_1block_x"] < 3.0),
         ("r03 one SM of twenty-four", n["sm"] == 24),

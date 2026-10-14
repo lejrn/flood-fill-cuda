@@ -54,20 +54,20 @@ def frame() -> Frame:
             score_c=np.array([0.0, top - 1.55, 0]), score_w=7.4,
             card_c=np.array([0.0, 2.05, 0]),
             gauge_c=np.array([0.0, -2.45, 0]),
-            inset_c=np.array([-3.1, 4.25, 0]),
+            inset_c=np.array([-2.95, 4.25, 0]),
             tag_c=np.array([3.2, 4.3, 0]),
             vertical=True,
         )
     top = h / 2
     return Frame(
-        floor_c=np.array([-3.5, -0.05, 0]), floor_wh=(6.6, 5.1),
+        floor_c=np.array([-3.25, -0.2, 0]), floor_wh=(6.3, 4.9),
         machine_c=np.array([3.6, -0.35, 0]), machine_wh=(6.4, 4.6),
         caption_c=np.array([0.0, -h / 2 + 0.6, 0]),
         goal_c=np.array([3.55, top - 0.55, 0]), goal_w=6.6,
         score_c=np.array([-3.5, top - 0.68, 0]), score_w=6.6,
         card_c=np.array([0.0, 0.2, 0]),
         gauge_c=np.array([3.6, 2.15, 0]),
-        inset_c=np.array([-6.2, 1.9, 0]),
+        inset_c=np.array([-6.05, 2.25, 0]),
         tag_c=np.array([-0.9, 2.3, 0]),
         vertical=False,
     )

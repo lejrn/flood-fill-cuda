@@ -218,7 +218,7 @@ def boundary(k: int) -> Boundary:
         return b
     b = replace(b, machine=mc.Spec(rooms=("lit", "lit") + ("off",) * 22, teams=(1, 1) + (0,) * 22,
                                    queue=True, gate="rest"),
-                gauge=2, cap=("22 dark", "SMs busy: 2 of 24"))
+                gauge=2, cap=("22 dark", "22 of 24 SMs idle"))
     if k == 7:
         return b
     full = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, queue=True, gate="rest")

@@ -33,7 +33,7 @@ ROOM_OFF = "#262d36"
 ROOM_IDLE = "#424b57"
 ROOM_LIT = "#22405f"
 ROOM_WAIT = "#5a4519"
-FENCE_REST = "#4d3c17"
+FENCE_REST = "#3a4652"       # a fence at rest is neutral: amber means only "waiting"
 SLOT = "#2a313a"
 KERNEL = "#1d5f59"
 CPU_BOX = "#39414c"
@@ -243,7 +243,7 @@ def _labels(spec: Spec, pl: Placement) -> list[tuple[str, object, float]]:
     if spec.rack:
         txt = VGroup(label("tags", 24, INK_SOFT), label("64 max", 34, INK, mono=True))
         txt.arrange(direction=np.array([0, -1, 0]), buff=0.06)
-        out.append(("rack", on_plane(txt, pl, ((s0 + s1) / 2, -0.82), 0.1, width=1.0), 0.2))
+        out.append(("rack", on_plane(txt, pl, ((s0 + s1) / 2, -0.82), 0.1, width=1.25), 0.2))
     return out
 
 
