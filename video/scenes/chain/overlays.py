@@ -1,13 +1,12 @@
 """The flat overlays of the chain cut v2, drawn above the 2.5D stage.
 
-- goal meter: the frame budget (33 ms for the 81 Mpx frame at 30 fps) on
-  a log track, with a teal budget tick, a grey CPU tick and a needle for
+- goal meter: the frame budget (33 ms, the 81 Mpx frame at 30 fps) on a
+  log track, with a teal budget tick, a grey CPU tick and a needle for
   the real frame's current time;
 - scoreboard: "CPU vs GPU" in three rows (one small blob, one huge blob,
   many blobs). Collapsed it is a strip of three pills; a scene shows the
   expanded card for a few seconds when a row fills;
-- room gauge ("SMs busy: 1 / 24 = 4%"), the "you are here" inset and the
-  act tag (SIZE / COUNT).
+- the "you are here" inset (one line) and the act tag (SIZE / COUNT).
 
 Every builder is a pure function of its spec, so `state.chain_state(k)`
 and a scene's last frame draw the same pixels.
@@ -73,8 +72,7 @@ def goal_meter(G: Frame, spec: GoalSpec, nums: dict) -> VGroup:
     h = 1.05
     box = RoundedRectangle(corner_radius=0.12, width=w, height=h, stroke_color=GRID, stroke_width=2,
                            fill_color=PANEL, fill_opacity=1).move_to(G.goal_c)
-    left = VGroup(label("budget 33 ms", 26, INK, mono=True),
-                  label("81 Mpx frame, 30 fps", 16, INK_SOFT)).arrange(DOWN, buff=0.05, aligned_edge=LEFT)
+    left = label("budget 33 ms", 26, INK, mono=True)
     left.move_to(box.get_left() + RIGHT * (0.2 + left.width / 2))
     x0 = left.get_right()[0] + 0.35
     x1 = box.get_right()[0] - 0.3
@@ -86,7 +84,6 @@ def goal_meter(G: Frame, spec: GoalSpec, nums: dict) -> VGroup:
         g.add(Line([x, y - 0.05, 0], [x, y + 0.05, 0], stroke_color=GRID, stroke_width=2))
     xb = _track_x(G, 1000 / 30, x0, x1)
     g.add(Line([xb, y - 0.14, 0], [xb, y + 0.14, 0], stroke_color=TEAL, stroke_width=4))
-    g.add(label("33", 13, TEAL, mono=True).move_to([xb, y + 0.25, 0]))
     if spec.cpu_tick:
         xc = _track_x(G, nums["njit_ms"], x0, x1)
         g.add(Line([xc, y - 0.14, 0], [xc, y + 0.14, 0], stroke_color=GREY, stroke_width=4))
@@ -118,7 +115,7 @@ class Row:
     tag: str = ""              # "one session"
 
 
-ROW_NAMES = ("one small blob", "size: one huge blob", "count: many blobs")
+ROW_NAMES = ("small blob", "huge blob", "many blobs")
 
 
 def _pill(text_top: str, text_bottom: str, color: str, w: float, h: float = 0.62, dashed: bool = False) -> VGroup:
@@ -139,7 +136,6 @@ def score_strip(G: Frame, rows: tuple) -> VGroup:
     gap = 0.12
     w = (G.score_w - gap * (n - 1)) / n
     g = VGroup()
-    head = label("CPU vs GPU", 14, INK_SOFT)
     for i, r in enumerate(rows):
         x = G.score_c[0] - G.score_w / 2 + w / 2 + i * (w + gap)
         if r is None:
@@ -151,9 +147,6 @@ def score_strip(G: Frame, rows: tuple) -> VGroup:
             p = _pill(ROW_NAMES[i], f"{r.winner} {r.factor}", col, w)
         p.move_to([x, G.score_c[1], 0])
         g.add(p)
-    if len(g):
-        head.next_to(g, UP, buff=0.05).align_to(g, LEFT)
-        g.add(head)
     return _z(g, Z_OVER + 1)
 
 
@@ -204,17 +197,6 @@ def score_card(G: Frame, rows: tuple, highlight: int | None = None, footnote: st
 
 # ---- small overlays ------------------------------------------------------
 
-def room_gauge(G: Frame, busy: int, sm: int, note: str = "") -> VGroup:
-    pct = 100 * busy / sm
-    t = label(f"SMs busy: {busy} / {sm} = {pct:.0f}%", 18, INK if busy < sm else TEAL, mono=True)
-    g = VGroup(t)
-    if note:
-        g.add(label(note, 13, INK_SOFT))
-        g.arrange(DOWN, buff=0.05)
-    g.move_to(G.gauge_c)
-    return _z(g)
-
-
 def act_tag(G: Frame, act: str, won: bool = False) -> VGroup:
     color = TEAL if won else INK
     text = label(act + (" ✓" if won else ""), 18, color, mono=True)
@@ -228,7 +210,7 @@ DRONE_FRAME = 216
 DRONE_BOX = (64, 104, 77, 116)          # x0, y0, x1, y1 in the 576 x 1024 frame
 
 
-def inset(G: Frame, line1: str, line2: str = "") -> Group:
+def inset(G: Frame, line: str) -> Group:
     """A thumbnail of the camera frame with a box on the chosen drone."""
     from PIL import Image
 
@@ -248,10 +230,7 @@ def inset(G: Frame, line1: str, line2: str = "") -> Group:
                      stroke_color=RED_PX, stroke_width=2.5).move_to([cx, cy, 0])
     frame_box = Rectangle(width=img.width + 0.04, height=img.height + 0.04, stroke_color=GRID,
                           stroke_width=1.5).move_to(img)
-    txt = VGroup(label(line1, 14, INK_SOFT, mono=True))
-    if line2:
-        txt.add(label(line2, 12, INK_SOFT, mono=True))
-    txt.arrange(DOWN, buff=0.03).next_to(frame_box, DOWN, buff=0.06)
+    txt = label(line, 14, INK_SOFT, mono=True).next_to(frame_box, DOWN, buff=0.06)
     g = Group(img, frame_box, ring, txt)
     for m in g.get_family():
         m.set_z_index(Z_OVER - 5)

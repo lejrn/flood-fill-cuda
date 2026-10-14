@@ -41,10 +41,14 @@ from scenes.style import INK, INK_SOFT, OUT, BeatScene, beat_seconds, label, voi
 F = 1 / 15
 EPS = 1e-6
 
-# Silent seconds after a beat's narration, for pictures that need the time
+# Silent seconds after a beat's narration: every beat gets BREATH, so the
+# last caption can be read before the next beat; some pictures need more
 # (the zoom, the scoreboard card, the reveal's last look at the drones).
+BREATH = 0.6
 HOLD = {"r00_zoom": 1.5, "r02_one_block": 1.2, "r03_giant": 0.8, "r06_diagonals": 1.2,
         "r10_runs": 1.5, "r11_reveal": 2.5}
+# A caption stays at least this long before the next one replaces it.
+MIN_DWELL = 1.4
 
 
 def fr(n: int) -> float:
@@ -102,6 +106,7 @@ class ChainScene(BeatScene):
         self.machine = self.state.machine
         self.over = dict(self.state.over)
         self.cap: VGroup | None = self.state.cap
+        self._cap_t = -MIN_DWELL                 # when the caption on screen appeared
         self.extras: list = []
         self._hooks: list = []
         self._clock = None
@@ -120,7 +125,7 @@ class ChainScene(BeatScene):
         return self.floors[0] if self.floors else None
 
     def target_seconds(self) -> float:
-        return beat_seconds(self.beat, default=8.0) + HOLD.get(self.beat, 0.0)
+        return beat_seconds(self.beat, default=8.0) + max(BREATH, HOLD.get(self.beat, 0.0))
 
     # ---- words
     def cue(self, word: str, n: int = 1, end: bool = False, after: float = 0.0) -> float:
@@ -223,7 +228,9 @@ class ChainScene(BeatScene):
 
     # ---- machine
     def machine_anims(self, spec: mc.Spec | None, slide: float = 0.3) -> list:
-        """Animations from the current machine to `spec`, part by part."""
+        """Animations from the current machine to `spec`, part by part: a part
+        whose key is unchanged stays, a changed one cross-fades, a new one
+        slides in, a removed one fades out."""
         old = self.machine
         if spec is None:
             self.machine = None
@@ -234,7 +241,7 @@ class ChainScene(BeatScene):
         for name in names:
             o = old.parts.get(name) if old else None
             n = new.parts.get(name)
-            if o is not None and n is not None and _same(o, n):
+            if o is not None and n is not None and old.keys.get(name) == new.keys.get(name):
                 keep[name] = o
                 continue
             if o is not None:
@@ -243,7 +250,8 @@ class ChainScene(BeatScene):
                 shift = DOWN * slide if (o is None and slide) else ORIGIN
                 anims.append(FadeIn(n, shift=shift))
                 keep[name] = n
-        self.machine = mc.Machine(spec, {k: keep[k] for k in new.parts if k in keep})
+        self.machine = mc.Machine(spec, {k: keep[k] for k in new.parts if k in keep},
+                                  {k: new.keys[k] for k in new.parts if k in keep})
         return anims
 
     def machine_to(self, spec: mc.Spec | None, frames: int = 6, slide: float = 0.3, extra=()) -> None:
@@ -251,7 +259,7 @@ class ChainScene(BeatScene):
         if anims or extra:
             self.play(*anims, *extra, run_time=fr(frames))
 
-    # ---- overlays (goal meter, scoreboard strip, gauge, inset, act tag)
+    # ---- overlays (goal meter, scoreboard strip, inset, act tag)
     def over_anims(self, name: str, new) -> list:
         old = self.over.get(name)
         anims = []
@@ -275,18 +283,20 @@ class ChainScene(BeatScene):
     def strip(self, rows: tuple):
         return ov.score_strip(self.G, rows)
 
-    def gauge(self, busy: int, note: str = ""):
-        return ov.room_gauge(self.G, busy, int(self.num["sm"]), note)
-
     # ---- captions
     def say(self, text: str, sub: str | None = None, at: float | None = None, frames: int = 5, extra=()) -> None:
+        """Replace the caption (at scene time `at`, and never sooner than
+        MIN_DWELL after the last one appeared, so each can be read)."""
         if at is not None:
             self.until(at)
+        if self.cap is not None:
+            self.until(self._cap_t + MIN_DWELL)
         new = caption_group(self.G, text, sub)
         if self.cap is not None:        # out, then in: two captions never overlap
             self.play(FadeOut(self.cap), run_time=fr(2))
         self.play(FadeIn(new, scale=1.06), *extra, run_time=fr(frames))
         self.cap = new
+        self._cap_t = self.elapsed()
 
     def say_last(self, at: float | None = None, frames: int = 5) -> None:
         """The beat's last caption: the one `chain_state(k + 1)` carries over the cut."""
@@ -340,16 +350,3 @@ class ChainScene(BeatScene):
             self.finish(fade=0)
         else:
             self.finish(fade=0.5)
-
-
-def _same(a: VGroup, b: VGroup) -> bool:
-    """True when two parts draw the same thing (deterministic builds)."""
-    fa, fb = a.family_members_with_points(), b.family_members_with_points()
-    if len(fa) != len(fb):
-        return False
-    for x, y in zip(fa, fb):
-        if x.points.shape != y.points.shape or not np.allclose(x.points, y.points, atol=1e-6):
-            return False
-        if x.get_fill_color().to_hex() != y.get_fill_color().to_hex():
-            return False
-    return True

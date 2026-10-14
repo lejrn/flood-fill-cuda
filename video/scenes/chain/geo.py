@@ -2,11 +2,10 @@
 cut uses frame coordinates.
 
 9:16 (8 x 14.22), top to bottom: the goal meter, the scoreboard strip,
-the floor (inset top left, act tag top right), the caption, the room
-gauge, the machine.
+the floor (inset top left, act tag top right), the caption, the machine
+(the CPU and GPU boards).
 16:9 (14.22 x 8): the scoreboard top left, the goal meter top right,
-the floor left, the machine right (room gauge above it), the caption at
-the bottom centre.
+the floor left, the machine right, the caption at the bottom centre.
 """
 from __future__ import annotations
 
@@ -30,7 +29,6 @@ class Frame:
     score_c: np.ndarray        # centre of the collapsed scoreboard strip
     score_w: float
     card_c: np.ndarray         # centre of the expanded scoreboard card
-    gauge_c: np.ndarray        # centre of the room gauge
     inset_c: np.ndarray        # centre of the "you are here" inset
     tag_c: np.ndarray          # centre of the act tag
     vertical: bool
@@ -48,12 +46,11 @@ def frame() -> Frame:
         top = h / 2
         return Frame(
             floor_c=np.array([0.0, 2.05, 0]), floor_wh=(7.4, 5.0),
-            machine_c=np.array([0.0, -4.55, 0]), machine_wh=(7.4, 4.4),
+            machine_c=np.array([0.0, -4.42, 0]), machine_wh=(7.7, 5.1),
             caption_c=np.array([0.0, -1.15, 0]),
             goal_c=np.array([0.0, top - 0.62, 0]), goal_w=7.4,
             score_c=np.array([0.0, top - 1.55, 0]), score_w=7.4,
             card_c=np.array([0.0, 2.05, 0]),
-            gauge_c=np.array([0.0, -2.45, 0]),
             inset_c=np.array([-2.95, 4.25, 0]),
             tag_c=np.array([3.2, 4.3, 0]),
             vertical=True,
@@ -61,13 +58,12 @@ def frame() -> Frame:
     top = h / 2
     return Frame(
         floor_c=np.array([-3.25, -0.2, 0]), floor_wh=(6.3, 4.9),
-        machine_c=np.array([3.6, -0.35, 0]), machine_wh=(6.4, 4.6),
+        machine_c=np.array([3.6, -0.08, 0]), machine_wh=(6.8, 5.6),
         caption_c=np.array([0.0, -h / 2 + 0.6, 0]),
         goal_c=np.array([3.55, top - 0.55, 0]), goal_w=6.6,
         score_c=np.array([-3.5, top - 0.68, 0]), score_w=6.6,
         card_c=np.array([0.0, 0.2, 0]),
-        gauge_c=np.array([3.6, 2.15, 0]),
-        inset_c=np.array([-6.05, 2.25, 0]),
+        inset_c=np.array([-6.05, 1.95, 0]),
         tag_c=np.array([-0.9, 2.3, 0]),
         vertical=False,
     )

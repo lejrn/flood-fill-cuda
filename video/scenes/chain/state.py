@@ -176,18 +176,17 @@ class Boundary:
     machine: mc.Spec | None = None
     goal: ov.GoalSpec | None = None
     rows: tuple = (None, None, None)   # scoreboard: Row, "?" or None per row
-    gauge: int | None = None           # SMs busy
-    gauge_note: str = ""
-    inset: tuple | None = None         # (line1, line2)
+    inset: str | None = None           # the inset's one line
     tag: tuple | None = None           # (act, won)
-    cap: tuple | None = None           # (text, sub): the caption crossing the cut
+    cap: tuple | None = None           # (text, sub or None): the caption crossing the cut
 
 
 ALL_LIT = ("lit",) * 24
 
 
 def boundary(k: int) -> Boundary:
-    """The state when beat k starts (k >= FIRST)."""
+    """The state when beat k starts (k >= FIRST). Captions are a big word and
+    at most a short qualifier: the narration carries the rest."""
     n, d = nums(), nb.derived()
     small, huge, many = score_rows()
     goal = ov.GoalSpec(cpu_tick=True)
@@ -195,67 +194,62 @@ def boundary(k: int) -> Boundary:
     b = Boundary(goal=goal, rows=rows)
     if k <= 2:
         return b
-    b = replace(b, floors=("drone_red",), inset=("you are here", "one drone, one frame"),
-                cap=(f"{int(toys()['drone'].sum())} pixels", "one drone"))
+    b = replace(b, floors=("drone_red",), inset="one drone", cap=(f"{int(toys()['drone'].sum())} pixels", None))
     if k == 3:
         return b
-    b = replace(b, floors=("drone_cpu",), machine=mc.Spec(cpu=True),
+    b = replace(b, floors=("drone_cpu",), machine=mc.Spec(cpu="lit"),
                 cap=(f"{int(n['sm'])} SMs", "streaming multiprocessors"))
     if k == 4:
         return b
-    one = mc.Spec(cpu=True, rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23)
+    one = mc.Spec(cpu="lit", rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23)
     b = replace(b, floors=("drone_cpu", "drone_gpu"), machine=one, rows=(small, "?", "?"),
-                cap=("CPU wins", f"16 K px test blob: CPU {fmt_ms(n['small_cpu_ms'])}, "
-                                 f"best GPU {fmt_ms(n['small_gpu_ms'])}"))
+                cap=("CPU wins", "one small blob"))
     if k == 5:
         return b
     b = replace(b, floors=("square4",),
                 machine=mc.Spec(rooms=("lit",) + ("off",) * 23, teams=(1,) + (0,) * 23, shelf=True,
                                 room_fence="rest"),
-                gauge=1, inset=("not a drone:", "a stress test"), tag=("SIZE", False),
-                cap=("1 of 24", "one block, one SM"))
+                inset="stress test", tag=("SIZE", False), cap=(f"1 of {int(n['sm'])} SMs", None))
     if k == 6:
         return b
     b = replace(b, machine=mc.Spec(rooms=("lit", "lit") + ("off",) * 22, teams=(1, 1) + (0,) * 22,
                                    queue=True, gate="rest"),
-                gauge=2, cap=("22 dark", "22 of 24 SMs idle"))
+                cap=(f"{int(n['sm']) - 2} SMs idle", None))
     if k == 7:
         return b
     full = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, queue=True, gate="rest")
-    b = replace(b, floors=("snake",), machine=full, gauge=24, gauge_note="1/3 of each SM: registers",
-                cap=(f"{int(d['snake_stops']):,} stops", "~2 µs each, the 256 × 256 snake"))
+    b = replace(b, floors=("snake",), machine=full, cap=(f"{int(d['snake_stops']):,} stops", "~2 µs each"))
     if k == 8:
         return b
-    b = replace(b, floors=("square8",), machine=replace(full, stencil=8), rows=(small, huge, "?"),
-                tag=("SIZE", True), cap=(f"{d['big_8ways_x']:.1f}×", "the CPU, one 64 Mpx blob, kernel time"))
+    b = replace(b, floors=("square8",), machine=full, rows=(small, huge, "?"),
+                tag=("SIZE", True), cap=(f"{d['big_8ways_x']:.1f}×", "vs the CPU, kernel time"))
     if k == 9:
         return b
-    m9 = replace(full, stencil=8, launches=f"{int(n['est_ch03_calls']):,}")
+    m9 = replace(full, launches=f"{int(n['est_ch03_calls']):,}")
     b = replace(b, floors=("frame_filled",), machine=m9,
                 goal=ov.GoalSpec(needle_ms=n["est_ch03_ms"], needle_text="~" + fmt_ms(n["est_ch03_ms"])),
-                tag=("COUNT", False), inset=("a drone frame:", f"~{int(n['drone_blobs_median']):,} blobs"),
-                cap=("~" + fmt_ms(n["est_ch03_ms"]), "estimate: one launch per blob"))
+                tag=("COUNT", False), inset="drone frame", cap=("~" + fmt_ms(n["est_ch03_ms"]), "estimate"))
     if k == 10:
         return b
-    m10 = replace(m9, launches=f"{int(n['est_ch04_calls']):,}", printer=True, rack=True,
-                  tokens=(RED_PX,) * 6, tag_tokens=(BLUE, GREEN, BLUE, BLUE, GREEN, BLUE))
+    m10 = replace(m9, launches=f"{int(n['est_ch04_calls']):,}", tokens=(RED_PX,) * 6,
+                  tag_tokens=(BLUE, GREEN, BLUE, BLUE, GREEN, BLUE))
     b = replace(b, floors=("two",), machine=m10,
                 goal=ov.GoalSpec(needle_ms=n["est_ch04_ms"], needle_text="~" + fmt_ms(n["est_ch04_ms"])),
-                cap=("64 tags", "6 spare bits per queue entry"))
+                cap=("64 tags max", None))
     if k == 11:
         return b
-    m11 = replace(full, stencil=8, launches="3", min_unit=True, tokens=(RED_PX,) * mc.SLOTS)
+    m11 = replace(full, launches="3", tokens=(RED_PX,) * mc.SLOTS)
     b = replace(b, floors=("frame_labels",), machine=m11,
                 goal=ov.GoalSpec(needle_ms=n["ch05_ms"], needle_text=fmt_ms(n["ch05_ms"])),
                 cap=(fmt_ms(n["ch05_ms"]), "still over 33 ms"))
     if k == 12:
         return b
-    m12 = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, stencil=8, min_unit=True, kernels=True, seams=True)
+    m12 = mc.Spec(rooms=ALL_LIT, teams=(2,) * 24, kernels=True, seams=True)
     return replace(b, floors=("frame_teal",), machine=m12,
                    goal=ov.GoalSpec(needle_ms=n["ch06_rgb_ms"], needle_text=fmt_ms(n["ch06_rgb_ms"]),
                                     needle_color=TEAL, mask_mark=True),
                    rows=(small, huge, many), tag=("COUNT", True),
-                   cap=(fmt_ms(n["ch06_rgb_ms"]), f"from the RGB image; {fmt_ms(n['ch06_mask_ms'])} from a packed mask"))
+                   cap=(fmt_ms(n["ch06_rgb_ms"]), f"RGB in; {fmt_ms(n['ch06_mask_ms'])} from a packed mask"))
 
 
 # ---- floor rasters ----
@@ -289,7 +283,7 @@ def floor_raster(name: str, rpx: int) -> np.ndarray:
 class State:
     floors: list = field(default_factory=list)
     machine: mc.Machine | None = None
-    over: dict = field(default_factory=dict)       # goal, strip, gauge, inset, tag
+    over: dict = field(default_factory=dict)       # goal, strip, inset, tag
     cap: VGroup | None = None
 
     def mobs(self) -> list:
@@ -339,8 +333,7 @@ def overlays(b: Boundary, L: Layout) -> dict:
     G = L.G
     o = {"goal": ov.goal_meter(G, b.goal, n) if b.goal else None,
          "strip": ov.score_strip(G, b.rows) if any(r is not None for r in b.rows) else None,
-         "gauge": ov.room_gauge(G, b.gauge, int(n["sm"]), b.gauge_note) if b.gauge else None,
-         "inset": ov.inset(G, *b.inset) if b.inset else None,
+         "inset": ov.inset(G, b.inset) if b.inset else None,
          "tag": ov.act_tag(G, *b.tag) if b.tag else None}
     return o
 
