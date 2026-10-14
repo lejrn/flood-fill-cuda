@@ -63,7 +63,7 @@ class Cpu(ChainScene):
 
         self.until(t0)
         self.floor_play(key, render, t1 - t0)
-        # the sentence names three things 1.4 s apart, the captions' least dwell:
+        # the sentence names three things, each kept the captions' least dwell (MIN_DWELL):
         # the first lands in the pause before "One", so the next two keep up
         self.say("1 pixel per step", at=self.cue("One") - 0.5)
         self.say(f"1 core of {int(self.num['cpu_cores'])}", at=self.cue("core") - fr(2))

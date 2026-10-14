@@ -12,7 +12,7 @@ from manim import Dot, FadeIn, FadeOut, VMobject
 
 from scenes.chain import machine as mc
 from scenes.chain import toy
-from scenes.chain.base import ChainScene, fr
+from scenes.chain.base import ChainScene, MIN_DWELL, fr
 from scenes.chain.state import Z_MACHINE, boundary, filled_picture, label_colors, toys
 from scenes.style import INK
 
@@ -89,11 +89,11 @@ class Tags(ChainScene):
         t_two = self.cue("two")
         self.until(t_two)
         self.floor_play(lambda p: round(p * top), render, max(self.cue("speed", end=True) - t_two, 1.0))
-        self.say("max, not sum", at=max(self.cue("launch"), t_pill + 1.4 - fr(LAND)))
+        self.say("max, not sum", at=max(self.cue("launch"), t_pill + MIN_DWELL - fr(LAND)))
 
         # "about CPU speed": the needle settles by the CPU tick (its new label
         # never lands within MIN_DWELL of the caption)
-        self.until(max(self.cue("CPU"), self._cap_t + 1.4 - fr(11)))
+        self.until(max(self.cue("CPU"), self._cap_t + MIN_DWELL - fr(11)))
         needle_move(self, b1.goal)
         t_needle = self.elapsed()
 
@@ -114,7 +114,7 @@ class Tags(ChainScene):
                     m.set_fill(opacity=a)
 
         self.run(flash, max(self.cue("sixty-four", end=True) - t_run, 0.6))
-        self.say_last(at=max(self.cue("sixty-four"), t_needle + 1.4 - fr(LAND)))
+        self.say_last(at=max(self.cue("sixty-four"), t_needle + MIN_DWELL - fr(LAND)))
 
         # "every seed is handed in": P-core 0 lights (our host code runs) and
         # seeds run from it over the PCIe link to the GPU, one after another

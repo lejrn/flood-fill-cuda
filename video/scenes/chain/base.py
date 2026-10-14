@@ -44,11 +44,11 @@ EPS = 1e-6
 # Silent seconds after a beat's narration: every beat gets BREATH, so the
 # last caption can be read before the next beat; some pictures need more
 # (the zoom, the scoreboard card, the reveal's last look at the drones).
-BREATH = 0.6
+BREATH = 0.75
 HOLD = {"r00_zoom": 1.5, "r02_one_block": 1.2, "r03_giant": 0.8, "r06_diagonals": 1.2,
         "r10_runs": 1.5, "r11_reveal": 2.5}
 # A caption stays at least this long before the next one replaces it.
-MIN_DWELL = 1.4
+MIN_DWELL = 1.75
 
 
 def fr(n: int) -> float:

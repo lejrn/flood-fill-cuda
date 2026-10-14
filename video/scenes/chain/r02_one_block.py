@@ -4,7 +4,7 @@ step counter each; at "onto" a block (the blue cube) drops onto SM 0,
 which lights; at "SM" that SM grows out of the chip over the idle split
 floor, drawn large like NVIDIA's SM figure (`sm_closeup`: 4 x 32 lanes,
 shared memory), and flies back into SM 0 just before "paint". Text lands
-at least 1.4 s apart. The race in steps starts at "paint", on one clock:
+at least MIN_DWELL apart. The race in steps starts at "paint", on one clock:
 the CPU paints one pixel per step (left), the
 block one whole 4-way ring per step (right). The right side finishes at
 its ring count; the left side then speeds up and finishes too.
@@ -227,11 +227,11 @@ class OneBlock(ChainScene):
         self.play(*grow, run_time=fr(12))
 
         # ---- "the CPU still wins": the carried caption; the card folds into the strip's first pill
-        t_cap = max(self.cue("CPU"), t_card + 1.4)
+        t_cap = max(self.cue("CPU"), t_card + MIN_DWELL)
         self.say_last(at=t_cap)
         strip = self.strip(b5.rows)
         pill = strip[0].copy()
-        self.until(max(self.cue("wins") + 0.4, t_cap + 1.4))
+        self.until(max(self.cue("wins") + 0.4, t_cap + MIN_DWELL))
         self.play(FadeOut(card, target_position=pill.get_center(), scale=0.3), FadeIn(pill),
                   *[FadeOut(m) for m in notes], run_time=fr(8))
         # the other pills did not change: swap in the whole strip without a cross-fade

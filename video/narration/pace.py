@@ -5,8 +5,8 @@ Usage (from video/):
 
 Reads out/<src>/ (beat wavs, words.json, timing.json), and writes
 out/<out>/ in the same form with every pause after a sentence end (. ? !)
-stretched to --sentence seconds and after a colon or semicolon to
---clause seconds (pauses already that long are left alone; commas are
+stretched to --sentence seconds (1.125) and after a colon or semicolon to
+--clause seconds (0.56; pauses already that long are left alone; commas are
 never touched). Silence is inserted at the quietest point of the
 existing pause, and every later word time shifts by what was inserted,
 so the scenes' word cues stay on their words.
@@ -100,8 +100,8 @@ def main() -> None:
     ap.add_argument("--src", required=True, help="folder under out/ to read")
     ap.add_argument("--out", required=True, help="folder under out/ to write")
     ap.add_argument("--script", default=None, help="narration file under narration/ (default script.md)")
-    ap.add_argument("--sentence", type=float, default=0.9, help="pause after . ? ! (seconds)")
-    ap.add_argument("--clause", type=float, default=0.45, help="pause after : ; (seconds)")
+    ap.add_argument("--sentence", type=float, default=1.125, help="pause after . ? ! (seconds)")
+    ap.add_argument("--clause", type=float, default=0.56, help="pause after : ; (seconds)")
     args = ap.parse_args()
 
     src, out = HERE.parent / "out" / args.src, HERE.parent / "out" / args.out
