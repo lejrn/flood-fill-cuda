@@ -1,10 +1,11 @@
 """r10: stop moving pixels. One row of the many-blob toy: its red pixels
 come in spans (runs). Every row becomes runs, 25x fewer items on the real
-picture. Touching runs are linked (the smaller label wins), each run is
-painted in one stroke. The queue, the gate (the ring loop) and the launch
-counter come off; six plain kernels go on, with 5 seams where the gate
-was. About three milliseconds: the needle crosses the budget, and the
-scoreboard's count row fills.
+frame. Touching runs are linked (the smaller label wins), each run is
+painted in one stroke. The queue leaves VRAM, the gate (the ring loop) and
+the launch counter go; six plain kernels slide into the gap between the
+boards, with 5 seams where the gate was, and light one by one while the
+real frame turns teal. About three milliseconds: the needle crosses the
+budget, then the scoreboard card opens on the count row.
 
 Starts on chain_state(12), ends on chain_state(13).
 """
@@ -13,57 +14,19 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import DOWN, LEFT, FadeIn, FadeOut, RoundedRectangle, SurroundingRectangle, VectorizedPoint, VGroup, config
+from manim import DOWN, UP, FadeIn, FadeOut, SurroundingRectangle, config
 
 from scenes.chain import floor as fl
 from scenes.chain import overlays as ov
 from scenes.chain import toy
-from scenes.chain.base import ChainScene, fr
-from scenes.style import GREY, GRID, INK, INK_SOFT, label
-from scenes.chain.state import BLOB_HUES, TEAL, boundary, label_colors, mix, picture, score_rows, teal_picture, toys
+from scenes.chain.base import MIN_DWELL, ChainScene, fr
+from scenes.chain.state import (BLOB_HUES, TEAL, Z_OVER, boundary, carry_caption, label_colors, mix, picture,
+                                score_rows, teal_picture, toys)
+from scenes.style import GOLD, GREY
 
 ROW = 12        # a middle row of the toy with three runs (the U's two arms and a blob)
-
-
-def _score_card(G, rows: tuple, highlight: int | None = None, footnote: str | None = None) -> VGroup:
-    """ov.score_card as r11 draws it: the head's empty first cell is a point
-    (an empty Text has no points, so Manim cannot place it), a footnote line
-    names each row's sessions, and the highlighted row gets a frame (teal: a
-    GPU win, grey: a CPU win)."""
-    lines = VGroup()
-    lines.add(VGroup(VectorizedPoint(), label("CPU", 16, INK_SOFT), label("GPU", 16, INK_SOFT),
-                     label("winner", 16, INK_SOFT)))
-    for i, r in enumerate(rows):
-        col = TEAL if r.winner == "GPU" else GREY
-        name = VGroup(label(r.what, 20, INK if i == highlight else INK_SOFT),
-                      label(r.picture, 13, INK_SOFT)).arrange(DOWN, buff=0.03, aligned_edge=LEFT)
-        lines.add(VGroup(name, label(ov.fmt_ms(r.cpu_ms), 20, INK, mono=True),
-                         label(ov.fmt_ms(r.gpu_ms), 20, INK, mono=True),
-                         label(f"{r.winner} {r.factor}", 22, col, mono=True)))
-    cols = [max(row[j].width for row in lines) for j in range(4)]
-    xs = np.cumsum([0] + [c + 0.45 for c in cols[:-1]])
-    lines.arrange(DOWN, buff=0.22, aligned_edge=LEFT)
-    for row in lines:
-        for j, m in enumerate(row):
-            m.set_x(xs[j] + m.width / 2)
-    body = VGroup(label("CPU vs GPU", 22, INK), lines).arrange(DOWN, buff=0.25, aligned_edge=LEFT)
-    if footnote:
-        body.add(label(footnote, 12, INK_SOFT, mono=True))
-        body.arrange(DOWN, buff=0.22, aligned_edge=LEFT)
-    room = config.frame_width - 0.9
-    if body.width > room:
-        body.scale_to_fit_width(room)
-    box = RoundedRectangle(corner_radius=0.16, width=body.width + 0.6, height=body.height + 0.5,
-                           fill_color=ov.PANEL, fill_opacity=0.97, stroke_color=GRID, stroke_width=2)
-    box.move_to(G.card_c)
-    body.move_to(box)
-    g = VGroup(box, body)
-    if highlight is not None:
-        col = TEAL if rows[highlight].winner == "GPU" else GREY
-        g.add(SurroundingRectangle(lines[1 + highlight], color=col, buff=0.09, corner_radius=0.08, stroke_width=2.5))
-    for m in g.get_family():
-        m.set_z_index(ov.Z_OVER + 20)
-    return g
+# the linked groups' colours, less any that reads as amber (amber means waiting)
+HUES = tuple(h for h in BLOB_HUES if np.abs(fl.rgb(h).astype(int) - fl.rgb(GOLD).astype(int)).max() > 48)
 
 
 class Runs(ChainScene):
@@ -73,9 +36,66 @@ class Runs(ChainScene):
         """Put one raster on the floor now (on the shared clock)."""
         self.floor_play(lambda p: 0, lambda _k: raster, fr(1))
 
+    def say_last(self, at: float | None = None, frames: int = 5, extra=()) -> None:
+        """base.say_last, with `extra` played alongside the caption's fade-in
+        (the needle and the act tag land with the number they show)."""
+        self.say(*carry_caption(self.k + 1), at=at, frames=frames, extra=extra)
+
+    def relight(self, spec, frames: int = 2) -> None:
+        """machine_to for a part that changes in place (a kernel lights): the
+        new part fades in over the old one, then the old one goes, so the
+        unchanged kernels never thin out mid-fade."""
+        before = dict(self.machine.parts)
+        anims = [a for a in self.machine_anims(spec, slide=0) if not isinstance(a, FadeOut)]
+        self.play(*anims, run_time=fr(frames))
+        self.remove(*[o for name, o in before.items() if self.machine.parts.get(name) is not o])
+
+    def over_in(self, **news) -> tuple[list, list]:
+        """over_anims, the same way: FadeIns of the new overlays drawn over the
+        old ones, and the old ones to remove after the play, so the unchanged
+        parts (the meter's track, the strip's filled pills) never thin out."""
+        anims, old = [], []
+        for name, new in news.items():
+            if self.over.get(name) is not None:
+                old.append(self.over[name])
+            anims.append(FadeIn(new))
+            self.over[name] = new
+        return anims, old
+
+    def card(self, rows: tuple, h: int):
+        """The full scoreboard, its footnote naming each row's sessions, row h
+        framed (teal: a GPU win, grey: a CPU win)."""
+        foot = "; ".join(f"row {i + 1}: {r.tag}" for i, r in enumerate(rows))
+        c = ov.score_card(self.G, rows, highlight=h, footnote=foot)
+        line = c[1][1][1 + h]                      # box, body -> (title, lines, foot); lines[0] is the head
+        col = TEAL if rows[h].winner == "GPU" else GREY
+        frame = SurroundingRectangle(line, color=col, buff=0.09, corner_radius=0.08, stroke_width=2.5)
+        frame.set_z_index(Z_OVER + 21)
+        c.add(frame)
+        # where r11 opens its card, so it keeps its place across the cut: 9:16
+        # over the floor, 16:9 left of the boards (the six kernels stay in view)
+        G, w = self.G, config.frame_width
+        if G.vertical:
+            x0, x1 = -w / 2 + 0.15, w / 2 - 0.15
+        else:
+            x0, x1 = -w / 2 + 0.2, self.machine.part("boards").get_left()[0] - 0.15
+        c.scale(min(1.0, (x1 - x0) / c.width))
+        c.set_x(min(max(G.floor_c[0], x0 + c.width / 2), x1 - c.width / 2))
+        # and clear of what it would cut through: the inset and the act tag
+        # above it (9:16: the inset's line sits on the card's top band), the caption below
+        hi, lo = np.inf, self.cap.get_top()[1] + 0.15 if self.cap is not None else -np.inf
+        for name in ("inset", "tag"):
+            m = self.over.get(name)
+            if m is not None and m.get_right()[0] > c.get_left()[0] and m.get_left()[0] < c.get_right()[0]:
+                hi = min(hi, m.get_bottom()[1] - 0.12)
+        if c.height > hi - lo:
+            c.scale((hi - lo) / c.height)
+        c.shift(DOWN * max(0.0, c.get_top()[1] - hi) + UP * max(0.0, lo - c.get_bottom()[1]))
+        return c
+
     def beat_anim(self) -> None:
         t = toys()
-        n, d = self.num, self.der
+        d = self.der
         many = t["many"]
         rs = toy.runs(many)
         boxes_of = lambda runs: [(x.r, x.c0, x.c1) for x in runs]
@@ -102,7 +122,7 @@ class Runs(ChainScene):
         self.until(self.cue("spans"))
         self.show(self.toy(col, boxes=boxes_of(row_runs)))
 
-        # then every row, top to bottom
+        # then every row, top to bottom; the count is the real frame's
         allc = red.copy()
         for x in rs:
             allc[x.r, x.c0:x.c1 + 1] = teal
@@ -115,9 +135,7 @@ class Runs(ChainScene):
 
         self.until(self.cue("spans") + fr(5))
         self.floor_play(lambda p: round(p * (many.shape[0] - 1)), rows_done, fr(8))
-        self.say(f"{d['runs_x']:.0f}× fewer",
-                 f"{n['n_pixels'] / 1e6:.0f} Mpx frame: {int(n['red_px']):,} px -> {int(n['n_runs']):,} runs",
-                 at=self.cue("spans", end=True))
+        self.say(f"{d['runs_x']:.0f}× fewer", "on the real frame", at=self.cue("spans", end=True))
 
         # "link touching spans": rows top to bottom, each run takes its group's
         # colour; where two groups touch, the smaller label wins (the U's right arm)
@@ -141,7 +159,7 @@ class Runs(ChainScene):
             for i, x in enumerate(rs):
                 if x.r <= r:
                     root = find(i)
-                    hue_of.setdefault(root, fl.rgb(BLOB_HUES[len(hue_of) % len(BLOB_HUES)]))
+                    hue_of.setdefault(root, fl.rgb(HUES[len(hue_of) % len(HUES)]))
                     roots[i] = root
             steps.append(roots)
 
@@ -157,40 +175,58 @@ class Runs(ChainScene):
         self.until(t0)
         self.floor_play(lambda p: round(p * last), linked, max(self.cue("pixels", after=t0) - t0, 0.6))
         # "not pixels": each run painted in one stroke
+        painted = linked(last, paint=True)
         self.until(self.cue("pixels", after=t0, end=True) - fr(3))
-        self.show(linked(last, paint=True))
+        self.show(painted)
 
-        # "No queue, no ring loop": the parts come off, one per word
+        # "No queue, no ring loop": the queue leaves VRAM, then the gate and the
+        # launch counter go with the caption (one text change, not two 0.4 s
+        # apart); no caption of their own, the parts say it
         m = self.machine.spec
         no_queue = replace(m, queue=False, tokens=())
         no_loop = replace(no_queue, gate=None, launches=None)
-        self.say("no queue", at=self.cue("No"), extra=self.machine_anims(no_queue))
-        self.say("no ring loop", "no gate, no launch counter", at=self.cue("ring"),
-                 extra=self.machine_anims(no_loop))
+        self.until(self.cue("queue"))
+        self.machine_to(no_queue, frames=5)
+        self.until(self.cue("ring"))
+        self.unsay(frames=5, extra=self.machine_anims(no_loop))
 
-        # "six plain steps": the kernel strip slides on, its 5 seams where the gate was;
-        # each kernel lights once, in order
-        self.until(self.cue("six"))
+        # "six plain steps": the six kernels slide into the gap between the boards
+        # (5 seams where the gate was), the first one lit, while the floor goes
+        # back to the real frame's red pixels; each kernel then lights in turn
+        # and the frame turns teal, a sixth at a time
         kern = replace(no_loop, kernels=True, seams=True)
-        self.machine_to(replace(kern, kernel_lit=0), frames=5)
-        self.floor_blend(linked(last, paint=True), self.pic(teal_picture()), frames=10)
+        red_pic = self.pic(picture("red"))
+        teal_pic = self.pic(teal_picture())
+        tint = [red_pic if j == 0 else mix(red_pic, teal_pic, j / 5) for j in range(5)] + [teal_pic]
+        self.until(self.cue("six"))
+        self.floor_blend(painted, red_pic, frames=6)
+        self.machine_to(replace(kern, kernel_lit=0), frames=6)
+        t_about = self.cue("About")
+        t1 = self.elapsed()
+        step = min(max((t_about - fr(3) - t1) / 5, fr(3)), 0.4)
         for j in range(1, 6):
-            self.machine_to(replace(kern, kernel_lit=j), frames=2, slide=0)
-        self.machine_to(kern, frames=2, slide=0)
+            self.until(t1 + (j - 1) * step)
+            self.floor_blend(tint[j - 1], tint[j], frames=2)
+            self.relight(replace(kern, kernel_lit=j), frames=2)
+        self.until(t1 + 5 * step)
+        self.relight(kern, frames=2)
 
-        # "About three milliseconds": the needle crosses 33 ms and turns teal;
-        # the count row fills on the expanded scoreboard, then it folds into the strip
-        small, huge, many_row = score_rows()
-        rows = (small, huge, many_row)
-        foot = "; ".join(f"row {i + 1}: {r.tag}" for i, r in enumerate(rows))
-        card = _score_card(self.G, rows, highlight=2, footnote=foot)
-        self.extras = [card]
-        self.until(self.cue("About"))
-        self.over_to(goal=self.goal(end.goal), tag=ov.act_tag(self.G, *end.tag), frames=6,
-                     extra=[FadeIn(card, scale=0.96)])
-        self.bring_to_front(self.over["strip"])     # the strip's header sits on the meter's edge
-        self.say_last(at=self.cue("milliseconds"))
-        self.until(self.speech_end() + 0.9)
-        self.over_to(strip=self.strip(end.rows), frames=5, extra=[FadeOut(card)])
-        self.extras = []
+        # "About three milliseconds": the needle swings past the budget and turns
+        # teal, COUNT is won, the number lands as the last caption
+        anims, old = self.over_in(goal=self.goal(end.goal), tag=ov.act_tag(self.G, *end.tag))
+        self.say_last(at=t_about, frames=6, extra=anims)
+        self.remove(*old)
+
+        # then the scoreboard card opens on the count row (its footnote names the
+        # sessions) and the strip's last pill fills; the card stays to the end of
+        # the hold and closes here, not in base (whose fade's last step is never
+        # drawn: the frame before the snap would keep a trace of it)
+        rows = score_rows()
+        card = self.card(rows, 2)
+        anims, old = self.over_in(strip=self.strip(end.rows))
+        self.until(t_about + MIN_DWELL)
+        self.play(*anims, FadeIn(card, scale=0.96), run_time=fr(6))
+        self.remove(*old)
+        self.until(self.target_seconds() + 0.4 - fr(3) - fr(3))
+        self.play(FadeOut(card), run_time=fr(3))
         assert self.machine.spec == end.machine, (self.machine.spec, end.machine)

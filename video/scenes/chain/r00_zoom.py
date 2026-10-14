@@ -3,11 +3,14 @@
 The floor appears holding the camera frame (frame 216), a square crop
 with the chosen drone near its top left. At "Freeze" a two-frame white
 flash; the camera frame dissolves into the filter's mask and a thin red
-box marks the drone. A nearest-neighbour push-in shrinks the crop from
+box marks the drone; the "you are here" inset (one line) fades in while
+they hold. At "Zoom" a nearest-neighbour push-in shrinks the crop from
 the frame's full width to the toy's 18 px window, drifting so the drone
 ends centred, and the last crop blends into the toy floor ('drone_red'):
-white pixels become red cells, grid lines fade in. The "you are here"
-inset appears at the end.
+white pixels become red cells, grid lines fade in. The caption (the
+pixel count, no sub) comes at "pixels", at least MIN_DWELL after the
+inset; nothing with text changes after it, so the next beat's boards
+come in on a quiet screen.
 
 The camera frame and the mask are light-on-dark, so `fl.picture_raster`
 (made for red on white) is not used: `crop_raster` here samples a box
@@ -23,7 +26,7 @@ from PIL import Image
 from scenes.chain import floor as fl
 from scenes.chain import overlays as ov
 from scenes.chain import toy
-from scenes.chain.base import ChainScene, fr
+from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import DRONE_N, Z_FLOOR, boundary, floor_raster
 from scenes.style import ASSETS, RED_PX
 
@@ -108,7 +111,8 @@ class Zoom(ChainScene):
         # one clock for the whole floor: flash, dissolve, push-in, become the toy
         t_flash = max(self.cue("Freeze"), self.elapsed())
         t_dis = t_flash + 2 / 15
-        t_push = t_dis + 6 / 15
+        t_mask = t_dis + 6 / 15                         # the mask and the box, held ...
+        t_push = max(self.cue("Zoom"), t_mask)          # ... until "Zoom" starts the push-in
         t_toy = max(self.cue("show"), t_push + 1.4)    # the 18 px window by "show" ...
                                                         # ... and the red cells by its end
         t_end = t_toy + 7 / 15
@@ -135,7 +139,7 @@ class Zoom(ChainScene):
             if t < t_dis:
                 return (first.astype(np.float32) * 0.25 + white.astype(np.float32) * 0.75).astype(np.uint8)
             if t < t_push:
-                a = ease((t - t_dis) / (t_push - t_dis))
+                a = ease((t - t_dis) / (t_mask - t_dis))
                 r = (first.astype(np.float32) * (1 - a) + mask0.astype(np.float32) * a).astype(np.uint8)
                 return box_outline(r, ox0, oy0, side0, a)
             if t < t_toy:
@@ -148,7 +152,10 @@ class Zoom(ChainScene):
 
         t0 = self.elapsed()
         self.floor_play(key, render, t_end - t0)
-        self.say_last(at=self.cue("pixels"))
-        self.until(t_end)
+        # the inset while the mask and its box hold, before "Zoom": its line is
+        # text too, so it keeps MIN_DWELL clear of the caption, and the beat's
+        # last text change stays clear of r01's boards (they slide in at "CPU")
+        self.until(t_mask)
         b = boundary(self.k + 1)
-        self.over_to(inset=ov.inset(self.G, *b.inset), frames=6)
+        self.over_to(inset=ov.inset(self.G, b.inset), frames=6)
+        self.say_last(at=max(self.cue("pixels"), self.elapsed() + MIN_DWELL))

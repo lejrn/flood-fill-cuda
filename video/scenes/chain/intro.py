@@ -1,18 +1,23 @@
-"""The chain cut's intro clip: beats i0_problem and i1_compare in one clip.
+"""The chain cut's intro clip: beats i0_problem and i1_compare in one clip (v3).
 
-i0: the camera films a drone show, a filter turns each drone into a white
-blob, and every frame has a 33 ms budget (the four panels of
-`scenes/s_intro.py`: camera, filter, then two panels for i1).
+i0: four panels of the drone footage (`scenes/s_intro.py`'s grid): the
+camera, the filter, then at "Count them all, every frame" the GPU
+labelling every frame (a blob counter under it), and at "thirty-three"
+the chain's goal meter ("budget 33 ms"), which stays for the whole cut.
 i1: on a drone frame the compiled CPU code keeps up (a measured card:
-CPU vs GPU against the 33 ms line, the GPU labelling every frame beside
-it). Then "scale up": the card swaps to the 81 Mpx test picture, the drone
-panels freeze and dim, the chain's goal meter comes in, and a CPU
-stopwatch runs in real time past 33 ms to the @njit time, beside "GPU ?".
-"Two places: size and count" brings the scoreboard strip; the clip ends on
-exactly `chain_state(2)` (goal meter + strip), the first picture of
-r00_zoom. The assembly places the i1 wav at len(i0) + 0.4 s.
+CPU vs GPU against the 33 ms line). "Scale up" freezes and dims the
+drone panels; at "eighty-one" the card swaps to the 81 Mpx test frame;
+"same thirty-three" pulses the meter and the card's line together; a CPU
+stopwatch runs in real time past 33 ms to the @njit time beside "GPU ?",
+and its end flies onto the meter as the grey CPU tick. "Two places"
+clears the stage and brings the scoreboard strip's two open pills; the
+clip ends on exactly `chain_state(2)` (goal meter + strip), the first
+picture of r00_zoom, after a BREATH. The assembly places the i1 wav at
+len(i0) + 0.4 s.
 
-Every number comes from `scenes.chain.numbers` (or from the assets).
+Text (v3): no title and no sub-labels; one short label per panel; the
+drone card keeps its honesty note and the 81 Mpx card says it is a test
+frame. Every number comes from `scenes.chain.numbers` (or the assets).
 """
 from __future__ import annotations
 
@@ -21,38 +26,45 @@ import os
 from pathlib import Path
 
 import numpy as np
-from manim import (DOWN, LEFT, RIGHT, UP, DashedLine, FadeIn, FadeOut, GrowFromEdge, Indicate, Rectangle,
-                   RoundedRectangle, VGroup, config)
+from manim import (DOWN, DR, LEFT, RIGHT, UP, UR, DashedLine, FadeIn, FadeOut, GrowFromEdge, Indicate, Line,
+                   Rectangle, ReplacementTransform, RoundedRectangle, VGroup, config)
 
 from narration.common import read_words
 from scenes.chain import geo
 from scenes.chain import numbers as nb
 from scenes.chain import overlays as ov
+from scenes.chain.base import BREATH
 from scenes.chain.state import chain_state, nums
 from scenes.panes.geometry import Box
 from scenes.panes.middle_strip import load_image
-from scenes.s_intro import (CAP_FONT, FPS_CAMERA, LINE_FONT, PH, PW, TITLE, TITLE_FONT, BlobCounter)
+from scenes.s_intro import CAP_FONT, FPS_CAMERA, PH, PW, BlobCounter
 from scenes.s_intro import CENTRES as CENTRES_V
-from scenes.s_intro import Y_BUDGET as Y_BUDGET_V
-from scenes.s_intro import Y_TITLE as Y_TITLE_V
 from scenes.stage import EPS, Replay, fr
 from scenes.style import (ASSETS, BG, GREY, GRID, INK, INK_SOFT, OUT, RED_PX, TEAL, BeatScene, beat_seconds,
                           is_vertical, label, voice)
 
 GAP = 0.4               # silence between the two beats inside this clip (assembly)
 DIM_TO = 0.4            # the drone panels' brightness after "Scale up"
+CAMERA, FILTER, COUNT, CARD = 0, 1, 2, 3     # panel slots, in reading order
 
 if is_vertical():
     # s_intro's 2 x 2 grid fits under the goal meter as it is
-    CENTRES, Y_TITLE, Y_BUDGET = CENTRES_V, Y_TITLE_V, Y_BUDGET_V
+    CENTRES = CENTRES_V
 else:
     # s_intro's 1 x 4 row, lowered so its top clears the goal meter (top right)
-    CENTRES = tuple((x, 0.22) for x in (-5.1, -1.7, 1.7, 5.1))
-    Y_TITLE, Y_BUDGET = 3.6, -3.38
+    # with a visible gap
+    CENTRES = tuple((x, 0.0) for x in (-5.1, -1.7, 1.7, 5.1))
 
 
 def ms_text(ms: float) -> str:
     return ov.fmt_ms(ms)
+
+
+class Counter(BlobCounter):
+    """s_intro's blob counter with its line cut to the number."""
+
+    def fmt(self, i: int) -> str:
+        return f"{int(self.counts[i]):,} blobs"
 
 
 class Readout(VGroup):
@@ -105,7 +117,7 @@ class MsCard(VGroup):
         self.budget = VGroup(*[
             DashedLine([xb, y - 0.14, 0], [xb, y - 0.30, 0], dash_length=0.04, stroke_color=TEAL, stroke_width=2)
             for y in y_rows],
-            label(f"{budget_ms:.0f} ms budget", 12, TEAL, mono=True))
+            label(f"{budget_ms:.0f} ms", 12, TEAL, mono=True))
         lab = self.budget[-1]
         lab.move_to([xb, y_rows[-1] - 0.46, 0])
         # keep the label inside the card (the line may sit near an edge)
@@ -151,7 +163,8 @@ class Intro(BeatScene):
         self.G = geo.frame()
 
     def target_seconds(self) -> float:
-        return beat_seconds("i0_problem", 8.0) + GAP + beat_seconds("i1_compare", 12.5)
+        # v3: like every chain beat, the clip ends on a breath of silence
+        return beat_seconds("i0_problem", 8.0) + GAP + beat_seconds("i1_compare", 12.5) + BREATH
 
     # ---- time
     def cue(self, beat: str, word: str, n: int = 1, end: bool = False) -> float:
@@ -183,17 +196,19 @@ class Intro(BeatScene):
         return Rectangle(width=PW + 0.04, height=PH + 0.04, stroke_width=1.5, stroke_color=GRID,
                          fill_opacity=0).move_to(self.centre(col))
 
-    def caption(self, line1: str, line2: str, col: int, color=INK_SOFT) -> VGroup:
+    def caption(self, text: str, col: int, sub: str | None = None, color=INK_SOFT) -> VGroup:
+        """A panel's label under it, and a small honesty note under that."""
         x, y = CENTRES[col][0], CENTRES[col][1] - PH / 2 - 0.2
-        g = VGroup(label(line1, size=CAP_FONT, color=color).move_to([x, y, 0]),
-                   label(line2, size=CAP_FONT - 3, color=INK_SOFT).move_to([x, y - 0.24, 0]))
+        g = VGroup(label(text, size=CAP_FONT, color=color).move_to([x, y, 0]))
+        if sub:
+            g.add(label(sub, size=CAP_FONT - 3, color=INK_SOFT).move_to([x, y - 0.24, 0]))
         for m in g:
             if m.width > PW:
                 m.scale_to_fit_width(PW)
         return g
 
     def dimmer(self, col: int) -> Rectangle:
-        """A BG veil over a panel and its caption: what shows through is DIM_TO bright."""
+        """A BG veil over a panel and its label: what shows through is DIM_TO bright."""
         c = self.centre(col)
         r = Rectangle(width=PW + 0.2, height=PH + 0.75, stroke_width=0, fill_color=BG, fill_opacity=1 - DIM_TO)
         return r.move_to(c + np.array([0, -0.3, 0]))
@@ -217,59 +232,57 @@ class Intro(BeatScene):
         budget = d["budget_ms"]
         cue = self.cue
 
-        if is_vertical():
-            title = VGroup(*[label(t, size=TITLE_FONT, color=INK) for t in TITLE]).arrange(DOWN, buff=0.1)
-        else:
-            title = label(" ".join(TITLE), size=TITLE_FONT, color=INK)
-        title.move_to([0, Y_TITLE, 0])
-
-        # ================= i0: camera, filter, budget =================
-        sky = self.panel("drones_sky", 0)
-        box0 = self.frame_box(0)
-        cap0 = self.caption("camera", f"a drone show, {FPS_CAMERA} fps", 0)
-        self.play(FadeIn(title), FadeIn(box0), FadeIn(sky), FadeIn(cap0), run_time=fr(9))
+        # ================= i0: camera, filter =================
+        sky = self.panel("drones_sky", CAMERA)
+        box0 = self.frame_box(CAMERA)
+        cap0 = self.caption(f"camera, {FPS_CAMERA} fps", CAMERA)
+        self.play(FadeIn(box0), FadeIn(sky), FadeIn(cap0), run_time=fr(9))
         sky.start(FPS_CAMERA)
 
         self.until(cue("i0_problem", "filter"))
-        mask = self.panel("drones_mask", 1)
+        mask = self.panel("drones_mask", FILTER)
         mask.sync_to(sky)
-        box1 = self.frame_box(1)
-        cap1 = self.caption("filter", "the sky stripped away, blobs left", 1)
+        box1 = self.frame_box(FILTER)
+        cap1 = self.caption("filter", FILTER)
         self.play(FadeIn(box1), FadeIn(mask), FadeIn(cap1), run_time=fr(9))
+        mask.t = sky.t          # a play suspends the panel's clock: back in step with the camera
 
+        # ================= "Count them all, every frame": the GPU labels them =================
+        self.until(cue("i0_problem", "Count"))
+        gpu = self.panel("drones_labels", COUNT)
+        gpu.sync_to(sky)
+        box2 = self.frame_box(COUNT)
+        cap2 = self.caption("count", COUNT, color=TEAL)
+        meta = json.loads((ASSETS / "drones_labels" / "meta.json").read_text(encoding="utf-8"))
+        counter = Counter(gpu, meta["blobs_per_frame"],
+                          self.centre(COUNT) + np.array([0, -PH / 2 + 0.62, 0]), PW - 0.16)
+        # hold the counter still while it fades in (s_intro: FadeIn pairs glyphs
+        # once); it comes with its panel, one text change
+        counter.suspend_updating()
+        self.play(FadeIn(box2), FadeIn(gpu), FadeIn(cap2), FadeIn(counter), run_time=fr(9))
+        gpu.t = sky.t
+        counter.resume_updating()
+
+        # ================= "thirty-three milliseconds": the goal meter =================
+        # the chain's meter from here on; its CPU tick comes from the stopwatch
         self.until(cue("i0_problem", "thirty-three"))
-        budget_line = label(f"{FPS_CAMERA} frames per second -> one frame every {budget:.0f} ms",
-                            size=LINE_FONT, color=INK, mono=True).move_to([0, Y_BUDGET, 0])
-        if budget_line.width > config.frame_width - 0.4:
-            budget_line.scale_to_fit_width(config.frame_width - 0.4)
-        self.play(FadeIn(budget_line, shift=UP * 0.15), run_time=fr(6))
+        meter = ov.goal_meter(self.G, ov.GoalSpec(cpu_tick=False), n)
+        full = ov.goal_meter(self.G, ov.GoalSpec(cpu_tick=True), n)
+        tick = VGroup(*full.submobjects[len(meter.submobjects):])      # the grey line, "CPU"
+        self.play(FadeIn(meter, shift=DOWN * 0.15), run_time=fr(7))
 
-        # ================= i1: the drone frame card, the GPU panel =================
+        # ================= i1: the drone frame card =================
         self.until(cue("i1_compare", "On"))
         drone_img = load_image(ASSETS / "drones_mask" / "frame_000.png")
-        drone_img.scale(min(PW / drone_img.width, PH / drone_img.height)).move_to(self.centre(2))
-        box2 = self.frame_box(2)
-        cap2 = self.caption("one drone frame", f"median of {int(n['drone_frames'])} frames, one session", 2)
-        dcard = MsCard(self.card_centre(2, 2), PW - 0.12, budget * 1.2,
-                       [("CPU (compiled)", n["drone_cpu_ms"]), ("GPU", n["drone_gpu_ms"])], budget)
+        drone_img.scale(min(PW / drone_img.width, PH / drone_img.height)).move_to(self.centre(CARD))
+        box3 = self.frame_box(CARD)
+        fh, fw = gpu.frame(0).shape[:2]
+        cap3 = self.caption(f"{fh * fw / 1e6:.2f} Mpx", CARD, sub=f"{int(n['drone_frames'])} frames, one session")
+        dcard = MsCard(self.card_centre(CARD, 2), PW - 0.12, budget * 1.2,
+                       [("CPU", n["drone_cpu_ms"]), ("GPU", n["drone_gpu_ms"])], budget)
         dbars = dcard.bars
         dcard.remove(*dbars, *dcard.values)        # bars and values arrive at "CPU"
-
-        gpu = self.panel("drones_labels", 3)
-        gpu.sync_to(sky)
-        box3 = self.frame_box(3)
-        with_px = gpu.frame(0).shape
-        mpx = with_px[0] * with_px[1] / 1e6
-        cap3 = self.caption("GPU, every frame", f"drone frames, {mpx:.2f} Mpx", 3, color=TEAL)
-        self.play(FadeIn(box2), FadeIn(drone_img), FadeIn(cap2), FadeIn(dcard),
-                  FadeIn(box3), FadeIn(gpu), FadeIn(cap3), run_time=fr(9))
-        meta = json.loads((ASSETS / "drones_labels" / "meta.json").read_text(encoding="utf-8"))
-        counter = BlobCounter(gpu, meta["blobs_per_frame"],
-                              self.centre(3) + np.array([0, -PH / 2 + 0.62, 0]), PW - 0.16)
-        # hold the counter still while it fades in (s_intro: FadeIn pairs glyphs once)
-        counter.suspend_updating()
-        self.play(FadeIn(counter), run_time=fr(5))
-        counter.resume_updating()
+        self.play(FadeIn(box3), FadeIn(drone_img), FadeIn(cap3), FadeIn(dcard), run_time=fr(9))
 
         self.until(cue("i1_compare", "CPU"))
         dbars[0].set_fill(GREY, 1)
@@ -278,36 +291,34 @@ class Intro(BeatScene):
         self.play(GrowFromEdge(dbars[0], LEFT), GrowFromEdge(dbars[1], LEFT),
                   FadeIn(dcard.values[0]), FadeIn(dcard.values[1]), run_time=fr(8))
 
-        # ================= "Scale up": the 81 Mpx card =================
+        # ================= "Scale up": the drone panels freeze and dim =================
         self.until(cue("i1_compare", "Scale"))
         for r in (sky, mask, gpu):
             r.stop()
         counter.clear_updaters()
-        dims = [self.dimmer(c) for c in (0, 1, 3)]
-        self.play(FadeOut(drone_img), FadeOut(cap2), FadeOut(dcard), *[FadeIn(m) for m in dims],
-                  run_time=fr(5))
+        dims = [self.dimmer(c) for c in (CAMERA, FILTER, COUNT)]
+        self.play(FadeOut(drone_img), FadeOut(cap3), FadeOut(dcard), *[FadeIn(m) for m in dims],
+                  run_time=fr(6))
+
+        # ================= "eighty-one megapixels": the test frame card =================
+        self.until(cue("i1_compare", "eighty-one"))
         red = load_image(ASSETS / "ch05_input_blobs" / "frame_000.png")
         red.scale_to_fit_width(PW)
-        red.move_to(self.centre(2) + np.array([0, PH / 2 - PW / 2, 0]))
-        cap2b = self.caption(f"{n['n_pixels'] / 1e6:.0f} Mpx test frame, {int(n['n_blobs']):,} blobs",
-                             "not a drone frame", 2)
+        red.move_to(self.centre(CARD) + np.array([0, PH / 2 - PW / 2, 0]))
+        cap3b = self.caption(f"{n['n_pixels'] / 1e6:.0f} Mpx", CARD, sub=f"test frame, {int(n['n_blobs']):,} blobs")
         njit = n["njit_ms"]
-        bcard = MsCard(self.card_centre(2, 2), PW - 0.12, njit * 1.1,
-                       [("CPU (compiled)", 0.0), ("GPU", None)], budget)
+        bcard = MsCard(self.card_centre(CARD, 2), PW - 0.12, njit * 1.1,
+                       [("CPU", 0.0), ("GPU", None)], budget)
         # the CPU value stays hidden until its stopwatch starts (a static
         # "0.00 ms" would read like a measured result)
         cpu_val = bcard.values[0]
         bcard.remove(cpu_val)
-        self.play(FadeIn(red), FadeIn(cap2b), FadeIn(bcard), run_time=fr(7))
+        self.play(FadeIn(red), FadeIn(cap3b), FadeIn(bcard), run_time=fr(7))
 
-        # ================= "same thirty-three": the goal meter =================
-        self.until(cue("i1_compare", "same"))
-        self.play(FadeOut(title), FadeOut(budget_line), run_time=fr(4))
-        full = ov.goal_meter(self.G, ov.GoalSpec(cpu_tick=True), n)
-        base = ov.goal_meter(self.G, ov.GoalSpec(cpu_tick=False), n)
-        tick = VGroup(*full.submobjects[len(base.submobjects):])
+        # ================= "same thirty-three": one budget, on the meter and the card =================
         self.until(cue("i1_compare", "thirty-three"))
-        self.play(FadeIn(base, shift=DOWN * 0.15), run_time=fr(7))
+        self.play(Indicate(meter[1], color=TEAL, scale_factor=1.12),
+                  Indicate(bcard.budget[-1], color=TEAL, scale_factor=1.3), run_time=fr(9))
 
         # ================= the CPU stopwatch, real time, to the @njit time =================
         t_stop = cue("i1_compare", "seconds")
@@ -330,8 +341,13 @@ class Intro(BeatScene):
         self.until(t_stop + 0.15)
         cpu_val.clear_updaters()
         watch(None, 0)
-        # the stopwatch's result lands on the meter as the grey CPU tick
-        self.play(FadeIn(tick), run_time=fr(6))
+        # the bar's end flies up onto the meter and becomes the grey CPU tick
+        bar = bcard.bars[0]
+        mark = Line(bar.get_corner(UR) + UP * 0.05, bar.get_corner(DR) + DOWN * 0.05,
+                    stroke_color=RED_PX, stroke_width=7)
+        mark.set_z_index(ov.Z_OVER)
+        self.play(ReplacementTransform(mark, tick[0]), run_time=fr(10))
+        self.play(FadeIn(tick[1]), run_time=fr(4))
 
         # ================= "Where does the GPU win?" =================
         self.until(cue("i1_compare", "GPU"))
@@ -339,19 +355,19 @@ class Intro(BeatScene):
         self.play(Indicate(bcard.names[1], color=TEAL, scale_factor=1.15),
                   Indicate(bcard.values[1], color=TEAL, scale_factor=1.3), run_time=fr(9))
 
-        # ================= "Two places": clear the stage, then SIZE and COUNT =================
+        # ================= "Two places": clear the stage, then the two open pills =================
         self.until(cue("i1_compare", "Two"))
-        keep = {id(base), id(tick)}
+        keep = {id(meter), id(tick[0]), id(tick[1])}
         gone = [m for m in self.mobjects if id(m) not in keep]
-        self.play(*[FadeOut(m) for m in gone], run_time=0.5)
+        self.play(*[FadeOut(m) for m in gone], run_time=fr(6))
         for m in gone:
             self.remove(m)
-        strip = ov.score_strip(self.G, (None, "?", "?"))
-        pill_size, pill_count, head = strip.submobjects
-        self.until(cue("i1_compare", "size"))
-        self.play(FadeIn(head), FadeIn(pill_size, shift=DOWN * 0.1), run_time=fr(6))
-        self.until(cue("i1_compare", "count"))
-        self.play(FadeIn(pill_count, shift=DOWN * 0.1), run_time=fr(6))
+        # both pills come in together (one text change); each pulses on its word
+        pills = ov.score_strip(self.G, (None, "?", "?")).submobjects
+        self.play(*[FadeIn(p, shift=DOWN * 0.1) for p in pills], run_time=fr(6))
+        for p, word in zip(pills, ("size", "count")):
+            self.until(cue("i1_compare", word))
+            self.play(Indicate(p[1], color=INK, scale_factor=1.15), run_time=fr(8))
 
         # ================= the seam: exactly chain_state(2) =================
         self.wait(1 / config.frame_rate + EPS, frozen_frame=True)
