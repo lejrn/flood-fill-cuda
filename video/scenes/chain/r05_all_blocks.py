@@ -1,139 +1,117 @@
-"""r05: all blocks. Every SM gets two blocks (48 x 256 threads) and the
-64 Mpx square goes 18x the CPU. But on a thin snake 48 blocks lose to one:
-every ring is one pixel, and after every ring the whole chip stops twice
-at the gate (grid.sync), about two microseconds each.
+"""r05: all blocks (v4). Every SM gets two blocks (48 x 256 threads) and
+the 64 Mpx square goes 18x the CPU. Each colour is one block: the blocks
+take turns down one queue, so their pixels mix, and small rings keep only
+a few of them busy. Then the launch-shape sweep, and the default we kept.
 
-At "every SM" the 22 dark SMs light in a ripple out from SM 0 and 1; at
-"forty-eight" two cubes land on every SM while the square refills in one
-quick pass. At "But" the snake comes in with its three times (48 / 2 / 1
-blocks, one small panel by the floor). From "Why" the snake fills one
-ring at a time and the whole machine goes amber twice per ring (the gate
-rises); a "grid.sync" tag sits by the GPU board from "gate"; then the
-rings race to the end with the gate up.
+At "So" the carried caption leaves and the square goes back to red (a
+fresh run). At "every SM" the 22 dark SMs light in a ripple out from SMs
+0 and 2. At "forty-eight" the 48 cubes land in the measured order (D5),
+each in its block's hue: one on each even SM, then on each odd SM, then
+the second cubes. At "Eighteen" the square refills in one quick pass with
+the 48-block owner mosaic (D4), "18x" / kernel time.
 
-Starts on chain_state(8) (two SMs lit, the square painted), ends on
-chain_state(9) (all SMs lit, two blocks each, the snake painted, the gate
-at rest).
+At "Each colour" the pass replays from the seed out: the mosaic dims to
+a ghost, the rings light again under a white outline, and a cube is
+bright only while its block has work in the ring (D6: the grid-stride
+rule on the real level sizes; dim, not amber, until r05b names the gate).
+Slowly over the small rings (rings 0-64 are block 0's alone) until
+"busy" ("few busy" / on small rings), then fast through the widest band
+(all 48 busy on 1,983 rings) and on, blocks dropping out from the top as
+the rings shrink into the corners; the queue drains as the replay ends.
+At "they share one queue" the blocks with work load from the one queue in
+VRAM (red packets up to their SMs) and store down to its rear (a packet
+in each block's hue), as r04's two did. At "pixels" a lens grows out of a
+cell on the widest ring with a 64 x 64 crop of the real owner map (a
+pixel a square; the cell is painted while it shows) and folds back into
+it with the second caption.
+
+At "threads" the sweep card grows out of the die (blocks x threads per
+block, a grey ramp, the default 48 x 256 outlined) and every cube lights
+again; "+15% at best" / 16 Mpx square at "fifteen"; at "kept" the default
+cell pulses; the card folds back into the die as the words end.
+
+Starts on chain_state(8) (SMs 0 and 2, the 2-block mosaic) and ends on
+chain_state(9) (every SM, two cubes each in block hues, the 48-block
+mosaic). The snake is r05b's.
 """
 from __future__ import annotations
 
 from dataclasses import replace
 
 import numpy as np
-from manim import (DOWN, LEFT, RIGHT, FadeIn, FadeOut, Group, ImageMobject, LaggedStart, Rectangle,
-                   RoundedRectangle, VGroup, VMobject)
+from manim import DOWN, AnimationGroup, FadeIn, FadeOut, Group, LaggedStart, there_and_back
 
+from scenes.chain import floor as fl
 from scenes.chain import machine as mc
+from scenes.chain import numbers as nb
 from scenes.chain import overlays as ov
-from scenes.chain.base import MIN_DWELL, ChainScene, fr
-from scenes.chain.state import ALL_LIT, boundary, level_colors, toys
-from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT, label
+from scenes.chain.base import ChainScene, fr
+from scenes.chain.iso import FACES, _shade
+from scenes.chain.state import boundary, floor_raster, level_colors, owner_colors, owner_crop, owner_fine, toys
+from scenes.style import RED_PX
 
-SLOW_RING = 0.95        # at least this many seconds per slow ring: 2 stops per ring stay under 3 flashes/s
-STOP_RAMP = 0.05        # seconds for one slow stop to ease in (and out)
-RAMP = 0.15             # seconds for the gate to come up as the fast rings start, and to go down at the end
-
-
-def sm_order(first=(0, 1)) -> list[int]:
-    """The SMs by distance from the first ones (on the die): a ripple out from them."""
-    c = [np.array([mc.sm_rect(i).x + mc.sm_rect(i).w / 2, mc.sm_rect(i).y + mc.sm_rect(i).d / 2]) for i in range(24)]
-    o = np.mean([c[i] for i in first], axis=0)
-    return sorted(range(24), key=lambda i: (np.linalg.norm(c[i] - o), i))
-
-
-def set_alpha(g: Group, a: float) -> None:
-    """Opacity of a machine part (box faces and images); a Group has no set_opacity."""
-    for m in g.get_family():
-        if isinstance(m, ImageMobject):
-            m.set_opacity(a)
-        elif isinstance(m, VMobject):
-            m.set_fill(opacity=a, family=False)
+RIPPLE = 14             # frames of the light ripple over the 22 dark SMs
+LAND = 0.4              # seconds of one cube's drop (the drops overlap, in block order)
+DROP = 0.22             # how far above its SM a cube starts (frame units)
+QUICK = 1.4             # seconds of the quick refill pass at "Eighteen"
+SLOW_BUSY = 12          # the slow replay runs until this many blocks have work (a quarter: still few)
+SLOW_TAIL = 0.35        # ... and holds the small rings this long past "busy", under the caption
+GHOST = 0.6             # a cell the replay has not reached: its paint this far towards the empty floor
+INTRO = 5               # frames for the floor and the cubes to go over to the replay
+LENS = {True: ((2.62, 3.15), 0.8), False: ((-1.0, 0.9), 0.72)}   # (centre, radius): 9:16, 16:9;
+# beside the floor's back-right edge, clear of the seed, the act tag and the machine
+PACKET_B = 128          # a packet: one warp's 32 queue entries of 4 B, a dense read or write (as r04)
+FRONT, REAR = (1, 2), (4, 5)   # r04's queue slots: the front (read) in VRAM chip 0, the rear (written) in chip 1
+LAG = 0.08              # the last busy block's packets trail block 0's by this much of the cycle
 
 
-def amber_overlay(spec: mc.Spec, pl) -> Group:
-    """The SMs, blocks and gate of `spec` waiting (amber, the gate up), invisible.
-    Built at the machine's own z and added later, so it draws over the parts."""
-    w = mc.build(replace(mc.with_rooms(spec, "wait"), team_state="wait", gate="wait"), pl, z0=100.0)
-    g = Group(*[v for k, v in w.parts.items() if (k.startswith("room") and k[4:].isdigit())
-                or k in ("teams", "gate")])
-    set_alpha(g, 0.0)
-    return g
+def ripple_order(rooms, first=(0, 2)) -> list[int]:
+    """The SMs by distance (on the die) from the first ones: a ripple out from them."""
+    def c(i: int) -> np.ndarray:
+        r = mc.sm_rect(i)
+        return np.array([r.x + r.w / 2, r.y + r.d / 2])
+    o = np.mean([c(i) for i in first], axis=0)
+    return sorted(rooms, key=lambda i: (float(np.linalg.norm(c(i) - o)), i))
 
 
-def small(text: str, size: int, color, mono: bool = False):
-    """A small label built at 4x and scaled down: Pango spaces small text badly
-    (at size 15 "kernel time" reads "kerneltime" and letters touch)."""
-    return label(text, size * 4, color, mono=mono).scale(0.25)
+def cube_blocks(sm_ids) -> list[int]:
+    """The block each cube is, in draw order (SM by SM, the lower block on the left)."""
+    return [b for i in range(24) for b in sorted(b for b, s in enumerate(sm_ids) if s == i)]
 
 
-def cubes_by_sm(teams: Group, pl) -> list[Group]:
-    """The faces of a teams part, grouped by the SM they stand on (nearest SM centre)."""
-    pts = np.array([mc.sm_point(pl, i)[:2] for i in range(24)])
-    out = [Group() for _ in range(24)]
-    for face in teams.submobjects:
-        d = np.linalg.norm(pts - face.get_center()[:2], axis=1)
-        out[int(np.argmin(d))].add(face)
-    return out
+def cube_faces(teams: Group, n: int) -> list[Group]:
+    """A teams part's faces, one Group per cube, in draw order (every box
+    has the same visible faces, so a cube is a run of them)."""
+    faces = teams.submobjects
+    k = len(faces) // n
+    return [Group(*faces[c * k:(c + 1) * k]) for c in range(n)]
 
 
-def times_panel(G, rows: list) -> VGroup:
-    """The snake's three kernel times, one compact table: a count, a bar as long
-    as its time, the time. The winner (1 block) is the bright row."""
-    longest = max(ms for _, ms in rows)
-    bar_w = 0.6
-    lines = VGroup()
-    for n, ms in rows:
-        win = ms == min(m for _, m in rows)
-        col = INK if win else INK_SOFT
-        bar = Rectangle(width=bar_w * ms / longest, height=0.11, stroke_width=0,
-                        fill_color=BLUE if win else GREY, fill_opacity=0.95 if win else 0.7)
-        lines.add(VGroup(small(str(n), 20, col, mono=True), bar, small(f"{ms:.0f} ms", 20, col, mono=True)))
-    lines.arrange(DOWN, buff=0.07)
-    # three columns: counts right-aligned, bars from one x, times right-aligned
-    xc = max(l[0].width for l in lines)
-    xt = max(l[2].width for l in lines)
-    for l in lines:
-        y = l[0].get_y()
-        l[0].move_to([xc - l[0].width / 2, y, 0])
-        l[1].move_to([xc + 0.14 + l[1].width / 2, y, 0])
-        l[2].move_to([xc + 0.14 + bar_w + 0.16 + xt - l[2].width / 2, y, 0])
-    head = VGroup(small("blocks", 15, INK_SOFT), small("kernel time", 15, INK_SOFT))
-    head[0].next_to(lines, np.array([0, 1, 0]), buff=0.07).align_to(lines, LEFT)
-    head[1].move_to(head[0]).align_to(lines, RIGHT)
-    body = VGroup(head, lines)
-    box = RoundedRectangle(corner_radius=0.1, width=body.width + 0.22, height=body.height + 0.14,
-                           fill_color=ov.PANEL, fill_opacity=0.95, stroke_color=GRID, stroke_width=2)
-    box.move_to(body)
-    g = VGroup(box, body)
-    # 9:16: in the corner right of the floor's front tip, above the caption;
-    # 16:9: in the corner left of it, below the floor's left edge
-    if G.vertical:
-        (x0, y0), (x1, y1) = (1.72, -0.62), (3.8, 0.46)
-    else:
-        (x0, y0), (x1, y1) = (-6.9, -3.85), (-4.55, -2.2)
-    g.scale(min(1.0, (x1 - x0) / g.width, (y1 - y0) / g.height))
-    if G.vertical:
-        g.move_to([x1 - g.width / 2, y0 + g.height / 2, 0])
-    else:
-        g.move_to([x0 + g.width / 2, (y0 + y1) / 2, 0])
-    for m in g.get_family():
-        m.set_z_index(ov.Z_OVER + 4)
-    return g
+def crop_cell(key: str = "c4", crop: str = "ring") -> tuple[int, int]:
+    """The toy floor cell an owner-map crop sits in (state.owner_fine's dot rule)."""
+    own = nb.owner_map()
+    g = own["grid"]
+    k, o, stride = int(g["dots_per_cell"]), int(g["toy_offset"]), float(g["stride_px"])
+    x, y = own[key]["crops"][crop]["center_xy"]          # the repo's [x, y] is the toy's [row, col]
+    return o + int(x // stride) // k, o + int(y // stride) // k
 
 
-def sync_tag(G, pl) -> VGroup:
-    """A small "grid.sync" tag above the GPU board's back-right corner (clear of
-    the raised gate), its right edge on the goal meter's: the gate's name."""
-    t = small("grid.sync", 18, INK_SOFT, mono=True)
-    box = RoundedRectangle(corner_radius=0.08, width=t.width + 0.26, height=t.height + 0.18, fill_color=ov.PANEL,
-                           fill_opacity=0.95, stroke_color=GRID, stroke_width=1.5)
-    g = VGroup(box, t)
-    t.move_to(box)
-    c = mc.gpu_corner(pl, "back-right")
-    g.move_to([G.goal_c[0] + G.goal_w / 2 - g.width / 2, c[1] + (0.12 if G.vertical else 0.42), 0])
-    for m in g.get_family():
-        m.set_z_index(ov.Z_OVER + 4)
-    return g
+class CubePaint:
+    """Recolours the cubes in place, every frame if need be (the replay's
+    busy states): each face gets its cube's colour, shaded as box_faces
+    shades it; only cubes whose colour changed are touched."""
+
+    def __init__(self, cubes: list[Group], pl) -> None:
+        self.cubes = cubes
+        self.shades = [k for n, _, k in FACES.values() if float(np.dot(n, pl.P.view)) > 1e-6]
+        self.now: list = [None] * len(cubes)
+
+    def set(self, colors: list[str]) -> None:
+        for c, col in enumerate(colors):
+            if col != self.now[c]:
+                for face, k in zip(self.cubes[c].submobjects, self.shades):
+                    face.set_fill(_shade(col, k), family=False)
+                self.now[c] = col
 
 
 class AllBlocks(ChainScene):
@@ -141,122 +119,208 @@ class AllBlocks(ChainScene):
 
     def beat_anim(self) -> None:
         t = toys()
-        sq, l4 = t["square"], t["square4"].level
-        sn, lv = t["snake"], t["snake4"].level
-        n4 = int(l4.max()) + 1
+        sq, lv = t["square"], t["square4"].level
         top = int(lv.max())
-        full = boundary(self.k + 1).machine
+        f = self.floor
         pl = self.Lay.machine_pl
         n = self.num
-        b = int(n["big_blocks"])
-        order = sm_order()
+        b8, b9 = boundary(self.k), boundary(self.k + 1)
+        ids = [int(i) for i in n["big_sm_ids"]]
+        blocks, tpb = int(n["big_blocks"]), int(n["big_tpb"])
+        levels = n["big_level_sizes"]
+        last = len(levels) - 1
+        ring_l = last / top                                   # real levels per toy ring (400)
+        busy = [nb.busy_blocks(s, blocks, tpb) for s in levels]
+        l_slow = next(L for L, b in enumerate(busy) if b > SLOW_BUSY) - 1
 
-        # every SM: the 22 dark SMs light, a ripple out from SM 0 and 1; the
-        # "22 SMs idle" caption leaves with the old picture, the square goes red
+        # the floors: red, the 48-block mosaic (painted up to a ring), its ghost
+        own = owner_fine("c4")
+        kf = own.shape[0] // sq.shape[0]
+        red = self.toy(level_colors(sq, np.full(sq.shape, -1)))
+        final = floor_raster("square_own48", f.rpx)
+        full = owner_colors(sq, lv, own, top=top)
+        ghost = (full.astype(np.float32) * (1 - GHOST) + fl.rgb(fl.EMPTY).astype(np.float32) * GHOST).astype(np.uint8)
+
+        def mosaic(upto: int) -> np.ndarray:
+            return fl.toy_raster(level_colors(sq, lv, upto=upto, top=top), f.rpx,
+                                 fine=owner_colors(sq, lv, own, upto=upto, top=top))
+
+        cell = crop_cell("c4", "ring")                        # the lens's cell, on the widest ring
+        assert int(lv[cell]) == round(nb.owner_map()["c4"]["crops"]["ring"]["level"] / ring_l), cell
+
+        def replay(r: int, lit: bool = False) -> np.ndarray:
+            """Rings up to r painted, ring r outlined, the rest a ghost of its
+            paint; with `lit`, the lens's cell painted too (the lens shows it)."""
+            far = np.repeat(np.repeat(lv > r, kf, 0), kf, 1)
+            if lit:
+                far[cell[0] * kf:(cell[0] + 1) * kf, cell[1] * kf:(cell[1] + 1) * kf] = False
+            return fl.toy_raster(level_colors(sq, lv), f.rpx, ring=(lv == r),
+                                 fine=np.where(far[..., None], ghost, full))
+
+        # ---- "So": a fresh run; the carried caption leaves, the square goes back to red
+        self.until(self.cue("So"))
+        self.floor_blend(floor_raster("square_own2", f.rpx), red, frames=5)
+        self.unsay(frames=4)
+
+        # ---- "every SM": the 22 dark SMs light, in a ripple out from SMs 0 and 2
         self.until(self.cue("every"))
-        sq_red = self.toy(level_colors(sq, np.full(sq.shape, -1)))
-        self.floor_blend(self.toy(level_colors(sq, l4)), sq_red, frames=4)
-        lit = {id(a.mobject): a for a in self.machine_anims(replace(self.machine.spec, rooms=ALL_LIT), slide=0)}
-        ripple = [lit[k] for k in (id(self.machine.parts[f"room{i}"]) for i in order) if k in lit]
-        self.unsay(frames=9, extra=[LaggedStart(*ripple, lag_ratio=0.12)])
+        anims = self.machine_anims(mc.with_rooms(b8.machine, "lit"), slide=0)
+        name = {id(p): k for k, p in self.machine.parts.items()}
+        by_sm = {int(name[id(a.mobject)][4:]): a for a in anims if name.get(id(a.mobject), "")[4:].isdigit()}
+        rest = [a for a in anims if a not in by_sm.values()]
+        self.play(LaggedStart(*[by_sm[i] for i in ripple_order(by_sm)], lag_ratio=0.12), *rest,
+                  run_time=fr(RIPPLE))
 
-        # forty-eight blocks: two cubes land on every SM (the old single cubes on
-        # SM 0 and 1 make way), and the square fills in one quick pass
-        self.until(self.cue("forty-eight"))
-        old = self.machine.parts["teams"]
-        self.machine_anims(full)                 # only the teams change; they land below
-        new = self.machine.parts["teams"]
-        per_sm = cubes_by_sm(new, pl)
-        r0, r1 = self.elapsed(), self.cue("eighteen")
-        self.floor_play(lambda p: round(p * n4) - 1,
-                        lambda i: self.toy(level_colors(sq, l4, upto=i, top=n4 - 1), ring=(l4 == i + 1)),
-                        max(r1 - r0, 0.8))
-        land = [FadeIn(per_sm[i], shift=DOWN * 0.22) for i in order if len(per_sm[i])]
-        self.play(FadeOut(old), LaggedStart(*land, lag_ratio=0.1), run_time=fr(9))
-        self.remove(*per_sm)
-        self.add(new)
-        self.say(f"{int(self.der['big_48_x'])}×", "kernel time", at=r1)
-
-        # the thin snake, with its three times: 48 blocks lose to one (the panel
-        # comes with the snake, the caption on "one", never within MIN_DWELL of it)
-        t_snake = self.cue("But")
-        self.until(t_snake)
-        sq_done = self.toy(level_colors(sq, l4))
-        sn_red = self.toy(level_colors(sn, np.full(sn.shape, -1)))
-        self.floor_blend(sq_done, sn_red, frames=6)
-        panel = times_panel(self.G, [(b, n["snake_48blocks_ms"]), (2, n["snake_2blocks_ms"]),
-                                     (1, n["snake_1block_ms"])])
-        self.unsay(frames=5, extra=[FadeIn(panel, shift=DOWN * 0.1)])
-        self.extras.append(panel)
-        self.say(f"{b} lose to 1", at=max(self.cue("one", after=self.cue("lose")), t_snake + MIN_DWELL))
-
-        # why: one pixel per ring, and two stops at the gate per ring. The slow
-        # rings run from "Why" to "gate" (2 stops per ring at under 3 flashes per
-        # second, a photosensitivity limit; each stop eases in and out, capped
-        # at 0.85), then the rest race past with the gate up
-        amber = amber_overlay(full, pl)
-        self.add(amber)
-        t0, ts, t1 = self.cue("Why"), self.cue("gate", end=True), self.cue("each", end=True) - 0.2
-        slow = max(1, int((ts - t0) / SLOW_RING))
-        period = (ts - t0) / slow
-        slow_t = slow * period
-        fast_t = max(t1 - t0 - slow_t, 0.5)
-        # a ring: work, then wait / gap / wait / gap (fractions of the ring); the
-        # gap between the two waits is long enough to read as two stops
-        cuts = (0.0, 0.22, 0.42, 0.6, 0.8, 1.0)
-        names = ("work", "wait", "gap", "wait", "gap")
-
-        def phase(p: float):
-            """(ring, state): state is work | wait | gap in the slow rings, None when fast."""
-            tau = p * (slow_t + fast_t)
-            if tau < slow_t:
-                x = tau / period + 1e-6
-                i, f = int(x), x - int(x)
-                j = max(k for k in range(5) if f >= cuts[k])
-                return i, names[j]
-            q = min((tau - slow_t) / fast_t, 1.0)
-            return min(top, slow + int(q * (top + 1 - slow))), None
-
-        def glow(p: float) -> float:
-            """Amber opacity: a trapezoid on each wait in the slow rings; up (0.7)
-            while the rest race past, eased in and out over RAMP."""
-            tau = p * (slow_t + fast_t)
-            if tau >= slow_t:
-                return 0.7 * max(0.0, min(1.0, (tau - slow_t) / RAMP, (slow_t + fast_t - tau) / RAMP))
-            f = (tau / period) % 1.0
-            ramp = STOP_RAMP / period           # inside each wait, so the gap stays dark
-            o = 0.0
-            for a, z in ((cuts[1], cuts[2]), (cuts[3], cuts[4])):
-                o = max(o, min(1.0, (f - a) / ramp, (z - f) / ramp))
-            return 0.85 * o
-
-        def render(key):
-            i, st = key
-            if i >= top:
-                return self.toy(level_colors(sn, lv))
-            if st == "work":
-                dots = (lv == i).astype(int)
-                return self.toy(level_colors(sn, lv, upto=i - 1, top=top), dots=dots)
-            dots = (lv == i).astype(int) * (2 if st == "wait" else 1)
-            return self.toy(level_colors(sn, lv, upto=i, top=top), dots=dots)
-
-        def flash(p: float) -> None:
-            set_alpha(amber, 0.0 if p >= 1 else glow(p))
-
+        # ---- "forty-eight blocks, two on each": the cubes land in the measured order
+        # (block b on SM big_sm_ids[b]), each in its hue. Blocks 0 and 1 are already
+        # there: their wide cubes narrow to make room for the second cubes
+        t0, t1 = self.cue("forty-eight"), self.cue("each", end=True)
         self.until(t0)
-        self.floor_play(phase, render, slow_t + fast_t)
-        self.run(flash, slow_t + fast_t)
+        old = self.machine.parts["teams"]
+        land = replace(b9.machine, tokens=b8.machine.tokens)     # the queue stays until the replay ends
+        self.machine_anims(land)                                  # only the teams change; they land below
+        teams = self.machine.parts["teams"]
+        cubes = cube_faces(teams, blocks)
+        order = cube_blocks(ids)
+        of = {b: cubes[c] for c, b in enumerate(order)}
+        drops = [FadeIn(of[b], shift=DOWN * DROP) for b in range(2, blocks)]
+        span = max(t1 - t0, 1.0)
+        self.play(LaggedStart(AnimationGroup(FadeOut(old), FadeIn(of[0]), FadeIn(of[1])), *drops,
+                              lag_ratio=(span / LAND - 1) / len(drops)), run_time=span)
+        self.remove(*cubes)
+        self.add(teams)             # after the floor: redrawn every frame, so the replay can recolour it
 
-        # at "gate": the panel goes, the gate's name comes in by the GPU board;
-        # the tag leaves with the old caption, so the last caption is one text
-        # change (not a second one when the extras fade before the snap)
-        tg = self.cue("gate")
-        self.until(tg)
-        tag = sync_tag(self.G, pl)
-        self.extras.remove(panel)
-        self.play(FadeOut(panel), FadeIn(tag), run_time=fr(5))
-        self.until(max(self.cue("each"), tg + MIN_DWELL))
-        self.unsay(frames=2, extra=[FadeOut(tag)])
-        self.say_last()
-        self.settle()
-        self.remove(amber)
+        # ---- "Eighteen": the square refills in one quick pass, block by block mixed
+        tq = self.cue("Eighteen")
+        self.until(tq)
+        self.floor_play(lambda p: min(top, int(p * (top + 1))), mosaic, QUICK)
+        self.say(f"{int(self.der['big_48_x'])}×", "kernel time")
+
+        # ---- "Each colour is one block": the pass replays from the seed out. A cube is
+        # bright while its block has work in the ring, dim while it has none (D6). Slow
+        # over the small rings until "busy", fast through the widest band and on
+        paint = CubePaint(cubes, pl)
+        hues = mc.block_hues(blocks)
+
+        def colours(nbusy: int) -> list[str]:
+            s = mc.place_blocks(b9.machine, ids, hues=hues, busy=mc.block_states(nbusy, blocks))
+            return [mc.cube_color(s, i, j) for i in range(24) for j in range(s.teams[i])]
+
+        work = colours(blocks)
+        cache: dict[int, list[str]] = {}
+
+        def cols(nbusy: int) -> list[str]:
+            if nbusy not in cache:
+                cache[nbusy] = colours(nbusy)
+            return cache[nbusy]
+
+        t_in = self.cue("Each", after=tq)                     # not the "each" of "two on each"
+        t_s, t_f, t_e = t_in + fr(INTRO), self.cue("busy") + SLOW_TAIL, self.cue("threads") - 0.15
+        total = t_e - t_in
+
+        def level_at(p: float):
+            """("in", a) while going over to the replay, else the real level shown."""
+            tau = p * total
+            if tau < t_s - t_in:
+                return ("in", tau / (t_s - t_in))
+            if tau < t_f - t_in:
+                return l_slow * (tau - (t_s - t_in)) / (t_f - t_s)
+            return min(last, l_slow + (last - l_slow) * (tau - (t_f - t_in)) / (t_e - t_f))
+
+        # the lens's cell is painted from "pixels" until the lens has folded back into
+        # it (the second caption's fade: from "busy" - 2 frames, 2 out and 5 in)
+        t_lit = (self.cue("pixels"), self.cue("busy") + fr(5))
+
+        def fkey(p: float):
+            L = level_at(p)
+            if p >= 1:
+                return "done"
+            if isinstance(L, tuple):
+                return ("in", round(L[1] * INTRO))
+            return ("ring", min(top, int(L // ring_l)), t_lit[0] <= t_in + p * total < t_lit[1])
+
+        start = replay(0)
+
+        def frender(key):
+            if key == "done":
+                return final
+            if key[0] == "in":
+                a = key[1] / INTRO
+                return (final.astype(np.float32) * (1 - a) + start.astype(np.float32) * a).astype(np.uint8)
+            return replay(key[1], lit=key[2])
+
+        def cubes_at(p: float) -> None:
+            L = level_at(p)
+            if isinstance(L, tuple):
+                paint.set([mc.mix_hex(a, b, L[1]) for a, b in zip(work, cols(busy[0]))])
+            else:
+                paint.set(cols(busy[int(L)]))
+
+        # ---- "they share one queue": the blocks with work in the ring load from the one
+        # queue in VRAM (red packets up to their SMs) and store new entries down to its
+        # rear (a packet in each block's hue), block 0 first, as r04's two did
+        t_q0, t_q1 = self.cue("they", after=t_in), self.cue("pixels") - 0.05
+        L_q = level_at((t_q0 - t_in) / total)
+        nq = busy[0] if isinstance(L_q, tuple) else busy[int(L_q)]
+        legs, bars = [], []
+        for b in range(nq):
+            o = LAG * b / max(nq - 1, 1)
+            legs += [(mc.vram_path(pl, ids[b], FRONT[b % 2])[::-1], o, 0.42 + o),
+                     (mc.vram_path(pl, ids[b], REAR[b % 2]), 0.5 + o, 0.92 + o)]
+            bars += [mc.packet(PACKET_B, RED_PX), mc.packet(PACKET_B, hues[b])]
+        for bar in bars:
+            bar.set_fill(opacity=0).set_stroke(opacity=0)
+        self.add(*bars)                 # after the floor: redrawn every frame
+
+        def traffic(p: float) -> None:
+            for bar, (path, a, z) in zip(bars, legs):
+                s = (p - a) / (z - a)
+                on = p < 1 and 0.0 <= s < 1.0
+                if on:
+                    bar.move_to(mc.point_along(path, s))
+                op = min(1.0, 6 * s, 6 * (1 - s)) if on else 0.0
+                bar.set_fill(opacity=op).set_stroke(opacity=0.6 * op)
+
+        self.until(t_in)
+        self.floor_play(fkey, frender, total)
+        self.run(cubes_at, total)
+        self.run(traffic, t_q1 - t_q0, start=t_q0)
+
+        # ---- "their pixels mix": a lens grows out of a cell on the widest ring, the
+        # real owner map at full resolution; it folds back with the next caption
+        tgt = f.cell_centre(*cell)
+        (lc, lr) = LENS[self.G.vertical]
+        lens = ov.owner_lens(owner_crop("c4", "ring"), lc, lr, target=tgt)
+        self.until(self.cue("pixels"))
+        self.play(FadeIn(lens, scale=0.15, target_position=tgt), run_time=fr(8))
+        self.remove(*bars)
+
+        # ---- "busy": few blocks busy on the small rings (the replay still shows them)
+        self.say("few busy", "on small rings", at=self.cue("busy") - fr(2),
+                 extra=[FadeOut(lens, scale=0.15, target_position=tgt)])
+
+        # ---- the queue drains as the replay reaches the corners
+        self.until(t_e - fr(5))
+        self.machine_to(b9.machine, frames=5)
+
+        # ---- "We also tried other threads per block and block counts": the sweep card
+        # grows out of the die (the launch's blocks); every cube lights again
+        die = np.mean([mc.sm_point(pl, i) for i in range(24)], axis=0)
+        card = ov.sweep_card(self.G, n["sweep_grid_ms"], nb.SWEEP_ROWS, nb.SWEEP_TPB, (blocks, tpb),
+                             n["sweep_best_ms"], nb.sweep_bin)
+        outline = card[1][0][-1]                  # the default cell's outline (sweep_card adds it last)
+        for m in card.get_family():               # under the caption, which it crosses as it grows
+            m.set_z_index(ov.Z_OVER + 1)
+        self.until(self.cue("threads"))
+        low = cols(busy[last])
+        self.run(lambda p: paint.set([mc.mix_hex(a, b, p) for a, b in zip(low, work)]), fr(9))
+        self.play(FadeIn(card, scale=0.12, target_position=die), run_time=fr(9))
+
+        # ---- "fifteen": the carried caption; "We kept": the default cell pulses
+        self.say_last(at=self.cue("fifteen") - fr(2))
+        self.until(self.cue("kept"))
+        self.play(outline.animate(rate_func=there_and_back).scale(1.3).set_stroke(width=6), run_time=fr(12))
+
+        # ---- the card folds back into the die as the words end
+        self.until(self.cue("fifty-six", end=True) - 0.2)
+        self.play(FadeOut(card, scale=0.12, target_position=die), run_time=fr(8))

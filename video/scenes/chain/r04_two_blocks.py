@@ -1,15 +1,31 @@
-"""r04: a second block on a second SM. At "So" the carried caption leaves
-and the square goes back to red: a fresh run. At "second" block 1 (a
-green cube, its own colour while it works) drops onto SM 1, and SM 1
-lights at "second SM". At "SM" SM 0's shared-memory queue and its fence
-go: two blocks share one queue, in VRAM, and the chip-wide gate
-(grid.sync) appears as a low rail at rest (it pays off in r05). Then the
-square refills at twice r03's pace, each ring split between the two
-blocks: block 0 (left half, blue dots) and block 1 (right half, green
-dots); when it is done, block 1's cube turns blue like block 0's. "2×
-again" (kernel time) at "twice". At "twenty-two" the 22 dark SMs ripple
-idle, the carried "22 SMs idle" lands on "SMs", and at "dark" they go
-dark again.
+"""r04: a second block, then the whole queue in global memory.
+
+At "So" the carried caption leaves and the square goes back to red: a
+fresh run. At "second block" block 1 (its green cube) drops onto SM 0,
+squeezed in beside block 0; at "second SM" SM 2 lights, outlined: where
+it will go (D5, measured: SM 2, not SM 1). "Squeezed onto one SM": SM 0
+is outlined; at "slower" both cubes dim (ch02's pinned pair, 1.7x
+slower, spoken only). As the clause ends block 1 hops to SM 2 and both
+cubes light again.
+
+"private": the two shelf cards (D1) grow out of SM 0 (its queue region
+full of red tokens) and SM 2 (empty, as its tile's shelf now shows).
+"the whole queue moves": SM 0's tokens drain down its leader, into SM 0,
+through the memory controller into VRAM, beside the spill; the cards
+fold back, the shelves and the fence go, the queue's slots and its label
+come up under the VRAM chips and the gate rail appears at rest.
+
+"address": the refill, on r04's own plan (r03's sweep_plan, from
+"address" to "fast"). The floor is the 2-block owner mosaic (D4): each
+painted cell shows its real pixels' owners, blue and green mixed, never
+two halves. Every ring loads from the VRAM queue up to SM 0 and SM 2
+(red packets) and stores new entries down to its rear (a blue packet
+from SM 0, a green one from SM 2). The first step stops at the last real
+ring with one block's work (real rings 0-64): only block 0's seed dots
+are painted, and block 1's cube stays dim until its block has work (D6).
+"no slower" / "16 Mpx square" at the second "slower"; "2x again" /
+"kernel time" at "twice". At "twenty-two" the 22 dark SMs ripple idle,
+the carried "22 SMs idle" lands on "SMs", and at "dark" they go dark.
 
 Starts on chain_state(7) and ends on chain_state(8).
 """
@@ -18,50 +34,102 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import DOWN, FadeIn, FadeOut, Group, ImageMobject, ManimColor
+from manim import DOWN, FadeIn, FadeOut, Group, ImageMobject, Polygon, ReplacementTransform, smooth
 
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
-from scenes.chain.base import ChainScene, fr
-from scenes.chain.r03_giant import F15, plan_index, r03_plan
-from scenes.chain.state import boundary, floor_raster, level_colors, toys
-from scenes.style import BLUE, GREEN
+from scenes.chain import numbers as nb
+from scenes.chain.base import ChainScene, _norm, fr
+from scenes.chain.iso import plane_corners
+from scenes.chain.r03_giant import F15, plan_index, sweep_plan
+from scenes.chain.state import (OWNER_FLOORS, boundary, floor_raster, level_colors, owner_colors, owner_fine,
+                                toys)
+from scenes.style import INK, RED_PX
 
-DOT1 = GREEN            # block 1's colour: its dots on the floor, its cube on SM 1 while it works
-DROP = 0.7              # how far above SM 1 block 1's cube starts its drop (frame units)
-LIFT = 40.0             # block 1's cube drawn above the machine's top layer (SM 0's fence) as it drops past it
+DROP = 0.7              # how far above SM 0 block 1's cube starts its drop (frame units)
+LIFT = 40.0             # a moving cube drawn above the machine's top layer (SM 0's fence) as it passes it
+HOP_ARC = -2.0          # block 1's hop from SM 0 to SM 2: a clockwise arc (up and over)
+PULSE = 1.0             # seconds of an SM's white outline pulse
+DRAIN = 1.4             # seconds of SM 0's tokens draining into VRAM
+DRAIN_TRIP = 0.55       # each token's share of that (the rest is the lag across them)
+CYCLE = 0.5             # seconds of a load-then-store cycle once the rings run fast
 GLOW = 0.6              # seconds of the idle ripple over the 22 dark SMs
 GLOW_W = 0.4            # each SM's share of that ripple (the rest is the lag across them)
+PACKET_B = 128          # a packet: one warp's 32 queue entries of 4 B, a dense read or write
+# Each packet's window in a load-then-store cycle (fractions): block 0 first,
+# block 1 a little behind it (their paths share the memory controller).
+WINDOWS = {"load0": (0.0, 0.42), "load1": (0.08, 0.5), "store0": (0.5, 0.92), "store1": (0.58, 1.0)}
+# Queue slots the packets use: the front (being read) in VRAM chip 0, the
+# rear (being written) in chip 1.
+FRONT, REAR = (1, 2), (4, 5)
+DRAIN_SLOTS = (3, 4, 5)  # where SM 0's drained tokens land: chip 1, beside the spill in chip 0
 
 
-def block_dots(n: int, ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """The ring's cells split between two blocks: left half, right half."""
-    left = np.zeros((n, n), bool)
-    left[:, : n // 2] = True
-    return ring & left, ring & ~left
+def r04_window(words: list) -> tuple[float, float]:
+    """r04's refill: from "address" to just after "fast" starts. Words are
+    matched like ChainScene.cue; a voice without them gets a 3 s refill."""
+    def at(w: str) -> float | None:
+        hits = [x for x in words if _norm(x[0]) == _norm(w)]
+        return float(hits[0][1]) if hits else None
+    t0, t1 = at("address"), at("fast")
+    if t0 is None or t1 is None or t1 + 0.1 <= t0:
+        t0 = t0 if t0 is not None else 0.0
+        return t0, t0 + 3.0
+    return t0, t1 + 0.1
 
 
-def paint_dots(raster: np.ndarray, cells: np.ndarray, hex_: str) -> np.ndarray:
-    """Draw dots of colour hex_ on the given cells (as toy_raster draws its dots)."""
-    rpx, n = raster.shape[0], cells.shape[0]
-    idx, off, _ = fl._index_maps(rpx, n)
-    d = cells[idx][:, idx]
-    inside = off[:, None] ** 2 + off[None, :] ** 2 < 0.27 ** 2
-    raster[d & inside, :3] = fl.rgb(hex_)
-    return raster
+def r04_plan(words: list, rings: int) -> list[int]:
+    """The ring shown on each 15 fps frame of the refill: r03's sweep_plan
+    (a slow opening, then one ring per step), stretched to fill the window.
+    Two blocks sync at the gate after every ring, but here it stays at
+    rest (r05b names it), so the plan's wait frames are each ring's tail."""
+    t0, t1 = r04_window(words)
+    frames = max(int((t1 - t0) * F15), rings)
+    base = [i for i, _ in sweep_plan(rings, frames)]
+    return [base[f * len(base) // frames] for f in range(frames)]
 
 
-def tinted(part: Group, src: str, dst: str, dz: float = 0.5) -> Group:
-    """A copy of a machine part's box faces, each face's shade of src turned
-    into the same shade of dst, drawn dz above the original."""
-    s, d = ManimColor(src).to_rgb(), ManimColor(dst).to_rgb()
-    j = int(np.argmax(s))
-    g = part.copy()
-    for face in g.submobjects:
-        k = float(face.get_fill_color().to_rgb()[j]) / float(s[j])
-        face.set_fill(ManimColor.from_rgb(tuple(float(v) * k for v in d)))
-        face.set_z_index(face.z_index + dz)
+def cube_faces(m: mc.Machine) -> list[Group]:
+    """A copy of each cube's faces in m's teams part, in build order (by SM,
+    the left cube first). Every box of a build shows the same faces."""
+    part, n = m.part("teams"), len(m.keys.get("teams", ()))
+    k = len(part.submobjects) // max(n, 1)
+    return [Group(*[f.copy() for f in part.submobjects[j * k:(j + 1) * k]]) for j in range(n)]
+
+
+def lifted(g: Group, dz: float = LIFT) -> Group:
+    for f in g.submobjects:
+        f.set_z_index(f.z_index + dz)
     return g
+
+
+def show_fill(g, a: float) -> None:
+    """Fade a group of box faces (no stroke) or packets: a Group's set_opacity
+    only sets an attribute, so each member's fill is set."""
+    for m in g.family_members_with_points():
+        m.set_fill(opacity=a)
+        if m.get_stroke_width() > 0:
+            m.set_stroke(opacity=0.6 * a)
+
+
+def sm_outline(pl, i: int) -> Polygon:
+    """A white outline round SM i on the die's top face (the new-part convention)."""
+    r = mc.sm_rect(i)
+    ul, ur, dl, dr = plane_corners(pl, r.x - 0.03, r.y - 0.03, r.x1 + 0.03, r.y1 + 0.03, mc.DIE_Z)
+    p = Polygon(ul, ur, dr, dl, stroke_color=INK, stroke_width=3, fill_opacity=0)
+    p.set_z_index(mc.Z_PACKET - 1)
+    return p
+
+
+def depth_fine(key: str) -> np.ndarray:
+    """owner_fine's twin for the real depth (ring) of each sampled pixel, -1 off the square."""
+    own = nb.owner_map()
+    g = own["grid"]
+    k, o, side = int(g["dots_per_cell"]), int(g["toy_offset"]), int(g["toy_side"])
+    n = toys()["square"].shape[0]
+    out = np.full((n * k, n * k), -1, np.int32)
+    out[o * k:(o + side) * k, o * k:(o + side) * k] = own[key]["depth_samples"]
+    return out
 
 
 def images(part: Group) -> list:
@@ -71,61 +139,138 @@ def images(part: Group) -> list:
 class TwoBlocks(ChainScene):
     k = 7
 
-    def adopt(self, spec: mc.Spec, name: str):
-        """Part `name` of spec's build becomes the machine's own, added
-        behind everything: the old part, still on top, can then fade out
-        over it (or be removed where the two are the same pixels)."""
-        m = mc.build(spec, self.Lay.machine_pl, z0=100.0)
-        old, new = self.machine.parts.get(name), m.part(name)
-        self.bring_to_back(new)
-        self.machine.parts[name] = new
-        self.machine.keys[name] = m.keys[name]
-        return old
+    def cubes_to(self, spec: mc.Spec, moves, frames: int, extra=()) -> None:
+        """machine_to(spec) with the cubes drawn by moves(old, new) -> anims,
+        on copies of each cube; the new build's part replaces them after."""
+        old_part = self.machine.part("teams")
+        old = cube_faces(self.machine)
+        anims = self.machine_anims(spec, slide=0)
+        new_part = self.machine.part("teams")
+        new = cube_faces(self.machine)
+        anims = [a for a in anims if a.mobject is not old_part and a.mobject is not new_part]
+        self.remove(old_part)
+        self.add(*old)
+        self.play(*anims, *moves(old, new), *extra, run_time=fr(frames))
+        self.remove(*old, *new)
+        self.add(new_part)
+
+    def pulse(self, mob, seconds: float = PULSE) -> None:
+        """mob's stroke up and back down over `seconds`, from now."""
+        mob.set_stroke(opacity=0)
+        self.add(mob)
+        self.run(lambda p: mob.set_stroke(opacity=min(1.0, 2.5 * float(np.sin(np.pi * p)))), seconds)
 
     def beat_anim(self) -> None:
         t = toys()
-        sq, lv = t["square"], t["square4"].level
-        n = sq.shape[0]
+        sq, lv = t["square"], t[OWNER_FLOORS["square_own2"][1]].level
         top = int(lv.max())
         f = self.floor
-        b6, b7 = boundary(self.k), boundary(self.k + 1)
+        b7, b8 = boundary(self.k), boundary(self.k + 1)
         pl = self.Lay.machine_pl
+        n = self.num
+        ids = tuple(int(i) for i in n["two_sm_ids"])             # (0, 2): where the blocks ran (D5)
+        hues = mc.block_hues(len(ids))
         painted = floor_raster("square4", f.rpx)
         red = self.toy(level_colors(sq, np.full(sq.shape, -1)))
 
-        # one block's machine (shelf, fence) with SM 1 lit and both cubes: between b6 and b7
-        both = replace(b6.machine, rooms=b7.machine.rooms, teams=b7.machine.teams)
-        # block 1's cube in its own colour, over the machine's blue one (and over SM 0's fence, which
-        # it passes in front of on its way down)
-        green = tinted(mc.build(replace(b7.machine, teams=(0, 1) + (0,) * 22), pl).part("teams"), BLUE, DOT1,
-                       dz=LIFT)
-        # the 22 SMs that stay dark, lit idle for a moment (nearest SM 1 first)
-        idle_m = mc.build(mc.with_rooms(b7.machine, "idle", range(2, 24)), pl)
-        c1 = mc.sm_point(pl, 1)
-        order = sorted(range(2, 24), key=lambda r: float(np.linalg.norm(mc.sm_point(pl, r) - c1)))
-        idle = [idle_m.part(f"room{r}") for r in order]
+        def blocks(spec, sms, busy=None):
+            return mc.place_blocks(spec, sms, hues=hues[:len(sms)], busy=busy)
 
         # ---- "So": a fresh run; the carried caption leaves, the square goes back to red
         self.until(self.cue("So"))
         self.floor_blend(painted, red, frames=5)
         self.unsay(frames=4)
 
-        # ---- "second block": block 1 drops onto SM 1; SM 1 lights at "second SM"
-        self.until(self.cue("second"))
-        self.play(FadeIn(green, shift=DOWN * DROP), run_time=fr(8))
-        self.remove(self.adopt(both, "teams"))          # cube 1, blue, under the green one
-        self.extras = [green]
-        self.until(self.cue("second", n=2))
-        self.machine_to(both, frames=4, slide=0)
+        # ---- "second block": block 1 drops onto SM 0, squeezed in beside block 0
+        squeezed = blocks(b7.machine, (ids[0], ids[0]))
+        self.until(max(self.cue("second"), self.elapsed()))
+        self.cubes_to(squeezed, lambda o, w: [ReplacementTransform(o[0], w[0]),
+                                              FadeIn(lifted(w[1]), shift=DOWN * DROP)], frames=8)
 
-        # ---- "SM": the shelf and the fence go; the shared queue in VRAM, the gate at rest
-        self.until(self.cue("SM"))
-        self.machine_to(b7.machine, frames=7, extra=[FadeOut(self.adopt(b7.machine, "room0"))])
+        # ---- "second SM": SM 2 lights, outlined: where block 1 will go
+        squeezed = mc.with_rooms(squeezed, "lit", ids[1:])
+        out2, out0 = sm_outline(pl, ids[1]), sm_outline(pl, ids[0])
+        self.until(max(self.cue("second", n=2), self.elapsed()))
+        self.pulse(out2)
+        self.machine_to(squeezed, frames=5, slide=0)
 
-        # ---- the refill: r03's plan at twice the pace (every second frame of
-        # it, without the fence waits: the fence is gone)
-        plan = [i for i, _ in r03_plan()[::2]]
+        # ---- "Squeezed onto one SM, two blocks ran one point seven times slower"
+        # (ch02's pinned pair, spoken only): SM 0 outlined, then both cubes dim
+        self.until(max(self.cue("one"), self.elapsed()))
+        self.pulse(out0)
+        dimmed = blocks(squeezed, (ids[0], ids[0]), busy=("dim", "dim"))
+        self.until(max(self.cue("slower"), self.elapsed()))
+        self.cubes_to(dimmed, lambda o, w: [ReplacementTransform(o[j], w[j]) for j in range(2)], frames=4)
+
+        # ... and as the clause ends block 1 hops to SM 2; both light again
+        spread = blocks(squeezed, ids)
+        self.until(max(self.cue("slower", end=True), self.elapsed()))
+        self.cubes_to(spread, lambda o, w: [ReplacementTransform(o[0], w[0]),
+                                            ReplacementTransform(lifted(o[1]), lifted(w[1]), path_arc=HOP_ARC)],
+                      frames=8)
+        self.remove(out0, out2)
+
+        # ---- "private": each block's shared memory, a card grown out of its SM:
+        # SM 0's region full of its queue, SM 2's empty (its tile's shelf too)
+        (c0, c2), size = self.G.cards
+        kw = dict(slots=int(n["ring_slots"]), shared_bytes=int(n["shared_kb"] * 1024))
+        card0 = mc.shelf_card(pl, c0, size, ids[0], True, **kw)
+        card2 = mc.shelf_card(pl, c2, size, ids[1], False, **kw)
+        home0, home2 = mc.sm_point(pl, ids[0]), mc.sm_point(pl, ids[1])
+        private = replace(spread, shelves=tuple("full" if i == ids[0] else "empty" if i == ids[1] else "off"
+                                                for i in range(max(ids) + 1)))
+        self.until(max(self.cue("private"), self.elapsed()))
+        self.machine_to(private, frames=8, slide=0,
+                        extra=[FadeIn(card0, target_position=home0, scale=0.08),
+                               FadeIn(card2, target_position=home2, scale=0.08)])
+
+        # ---- "the whole queue moves": SM 0's tokens drain down its leader, into
+        # SM 0, then through the memory controller into VRAM, beside the spill
+        # the tokens nearest the leader leave first, so none crosses another on its way out
+        lead = card0.card[2].get_start()
+        toks = sorted(card0.tokens, key=lambda tk: float(np.linalg.norm(tk.get_center() - lead)))
+        paths = [[tk.get_center(), lead, *mc.vram_path(pl, ids[0], DRAIN_SLOTS[j % len(DRAIN_SLOTS)])]
+                 for j, tk in enumerate(toks)]
+
+        def drain(p: float) -> None:
+            for j, (tk, path) in enumerate(zip(toks, paths)):
+                s = (p - (1 - DRAIN_TRIP) * j / max(len(toks) - 1, 1)) / DRAIN_TRIP
+                tk.move_to(mc.point_along(path, smooth(min(max(s, 0.0), 1.0))))
+
+        self.until(max(self.cue("whole"), self.elapsed()))
+        self.run(drain, DRAIN)
+        self.until(self.elapsed() + DRAIN)
+        # drained: the tokens stay on their slots in VRAM chip 1, the cards fold back without them
+        drained = card0.tokens
+        card0.body.remove(drained)
+        self.add(drained)
+
+        # ... the cards fold back into their SMs; the shelves and the fence go; the
+        # queue's slots and label come up in VRAM and the gate rail appears at rest.
+        # The queue's tokens are the same entries: the spill stays under them (it then
+        # goes, no cross-fade) and the drained tokens hand over to them in chip 1
+        spill = self.machine.part("spill")
+        anims = [a for a in self.machine_anims(b8.machine, slide=0) if a.mobject is not spill]
+        self.play(*anims, FadeOut(card0, target_position=home0, scale=0.08),
+                  FadeOut(card2, target_position=home2, scale=0.08), FadeOut(drained), run_time=fr(8))
+        self.remove(spill)
+
+        # ---- "every new pixel's address": the refill on r04's own plan. The floor is the
+        # owner map: each dot one real pixel, the block that painted it
+        own = owner_fine(OWNER_FLOORS["square_own2"][0])
+        k = own.shape[0] // sq.shape[0]
+        lvf = np.repeat(np.repeat(lv, k, 0), k, 1)
+        depth = depth_fine(OWNER_FLOORS["square_own2"][0])
+        alone = int(self.der["block0_only_rings"]) - 1     # 64: the last real ring with one block's work
+        first = (lvf == 0) & (depth > alone)                 # the seed cell's dots the first step leaves red
+        # block 1 works in a step if the step paints any of its dots (none in the first: D6)
+        works = []
+        for i in range(top + 1):
+            dots = (lvf == i) & (own == 1)
+            works.append(bool((dots & ~first).any() if i == 0 else dots.any()))
+        plan = r04_plan(self.words, top + 1)
         total = len(plan) / F15
+        t0 = self.elapsed() if not self.words else max(r04_window(self.words)[0], self.elapsed())
 
         def key(p: float):
             j = plan_index(p, total)
@@ -133,19 +278,71 @@ class TwoBlocks(ChainScene):
 
         def render(i):
             if i == "done":
-                return painted
-            b0, b1 = block_dots(n, lv == i)
-            out = self.toy(level_colors(sq, lv, upto=i, top=top), dots=b0.astype(int))
-            return paint_dots(out, b1, DOT1)
+                return floor_raster("square_own2", f.rpx)
+            fine = owner_colors(sq, lv, own, upto=i, top=top)
+            if i == 0:
+                fine[first] = fl.rgb(RED_PX)
+            return fl.toy_raster(level_colors(sq, lv, upto=i, top=top), f.rpx, ring=lv == i, fine=fine)
 
-        self.until(max(self.cue("SM", end=True), self.elapsed()))
-        t_done = self.elapsed() + total
+        # each step's span in seconds; the slow opening's rings get a load-then-store
+        # cycle each, the fast rings a steady stream of cycles to the end
+        start = {}
+        for j, i in enumerate(plan):
+            start.setdefault(i, j / F15)
+        counts = [plan.count(i) for i in range(top + 1)]
+        slow = next((i for i, c in enumerate(counts) if c <= 1.5 * min(counts)), top + 1)   # the slow opening's rings
+        t_fast = start.get(slow, total)
+        n_cyc = max(1, round((total - t_fast) / CYCLE))
+        cyc = (total - t_fast) / n_cyc
+
+        def phase(tt: float, ring: int) -> float:
+            if ring < slow:
+                end = start.get(ring + 1, total)
+                return (tt - start[ring]) / max(end - start[ring], 1e-6)
+            return ((tt - t_fast) / cyc) % 1.0 if tt < total else 1.0
+
+        legs = {"load0": mc.vram_path(pl, ids[0], FRONT[0])[::-1], "load1": mc.vram_path(pl, ids[1], FRONT[1])[::-1],
+                "store0": mc.vram_path(pl, ids[0], REAR[0]), "store1": mc.vram_path(pl, ids[1], REAR[1])}
+        colors = {"load0": RED_PX, "load1": RED_PX, "store0": hues[0], "store1": hues[1]}
+        packets = {name: mc.packet(PACKET_B, colors[name]) for name in legs}
+        dim1 = lifted(cube_faces(mc.build(blocks(b8.machine, ids, busy=("work", "dim")), pl))[1], 0.05)
+        for g in (*packets.values(), dim1):
+            show_fill(g, 0.0)
+        self.add(*packets.values(), dim1)
+
+        def traffic(p: float) -> None:
+            tt = p * total
+            j = min(int(tt * F15), len(plan) - 1)
+            ring = plan[j]
+            u = phase(tt, ring) if p < 1 else 1.0
+            show_fill(dim1, 1.0 if (p < 1 and not works[ring]) else 0.0)
+            for name, bar in packets.items():
+                a, b = WINDOWS[name]
+                s = (u - a) / (b - a)
+                on = p < 1 and 0.0 <= s < 1.0 and (name.endswith("0") or works[ring])
+                if on:
+                    bar.move_to(mc.point_along(legs[name], s))
+                show_fill(bar, min(1.0, 6 * s, 6 * (1 - s)) if on else 0.0)
+
+        self.until(t0)
         self.floor_play(key, render, total)
+        self.run(traffic, total)
 
-        # one block's kernel time over two blocks': "kernel time", as r03's and r05's ratios say
+        # ---- "On big blobs, measured, that's no slower": one block, same session, the
+        # 16 Mpx square, where the shared ring never spilled
+        self.say("no slower", f"{round(n['q1_px'] / 1e6)} Mpx square", at=self.cue("slower", n=2))
+        # one block's kernel time over two blocks': "kernel time", as r03b's and r05's ratios say
         self.say(f"{round(self.der['big_2v1_x'])}× again", "kernel time", at=self.cue("twice"))
+        self.until(max(t0 + total, self.elapsed()))
+        self.remove(*packets.values(), dim1)
 
-        # ---- "twenty-two SMs stay dark": they ripple idle, then go dark again
+        # ---- "twenty-two SMs stay dark": they ripple idle (nearest SM 2 first), then go dark again
+        rest = [i for i in range(int(n["sm"])) if i not in ids]
+        idle_m = mc.build(mc.with_rooms(b8.machine, "idle", rest), pl)
+        c2p = mc.sm_point(pl, ids[1])
+        order = sorted(rest, key=lambda r: float(np.linalg.norm(mc.sm_point(pl, r) - c2p)))
+        idle = [idle_m.part(f"room{r}") for r in order]
+
         def glow(p: float) -> None:
             for j, tile in enumerate(idle):
                 a = (p - (1 - GLOW_W) * j / (len(idle) - 1)) / GLOW_W
@@ -155,14 +352,9 @@ class TwoBlocks(ChainScene):
         glow(0.0)
         self.add(*idle)
         self.run(glow, GLOW, start=self.cue("twenty-two"))
-        self.extras = [green, *idle]
-
-        # block 1's work is done: its cube turns blue like block 0's
-        self.until(t_done)
-        self.play(FadeOut(green), run_time=fr(4))
         self.extras = list(idle)
 
         self.say_last(at=self.cue("SMs"))
-        self.until(self.cue("dark"))
+        self.until(max(self.cue("dark"), self.elapsed()))
         self.play(FadeOut(Group(*idle)), run_time=fr(7))
         self.extras = []

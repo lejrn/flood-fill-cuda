@@ -1,13 +1,15 @@
-"""r09: the GPU finds its own seeds. The tags leave the queue and P-core 0
-sends three launches over the link (the fill, then its two cleanups);
-once the fill lands, the SMs spark: on the many-blob toy every red pixel
-with no red neighbour before it in scan order sparks a seed, then a
-stride-4 lattice adds more (ch05 runs a stride-8 lattice on the real
-picture). The seeds are found on the GPU, inside the fill launch, not
-handed over the link. Waves start from every seed at once; where two
-meet, both keep the smaller label (the colours merge). The counter shows
-3 launches, the needle stops at 51 ms. But the queue in VRAM still
-carries every red pixel.
+"""r09: the GPU finds its own seeds. It answers r08's carried caption
+("2 seeds / per launch"). P-core 0 sends three launches over the link
+(the fill, then its two cleanups); once the fill lands, the SMs spark: on
+the many-blob toy every red pixel with no red neighbour before it in scan
+order sparks a seed, then a stride-4 lattice adds more (ch05 runs a
+stride-8 lattice on the real picture). The seeds are found on the GPU,
+inside the fill launch, not handed over the link. As they spark, the
+caption goes and the thin tag stripes lift off the queue: ch05 keeps
+labels in a per-pixel label map, not in a bit of the entry. Waves start
+from every seed at once; where two meet, both keep the smaller label (the
+colours merge). The counter shows 3 launches, the needle stops at 51 ms.
+But the queue in VRAM still carries every red pixel.
 
 Starts on chain_state(13), ends on chain_state(14).
 """
@@ -177,24 +179,24 @@ class Seeds(ChainScene):
         end = boundary(self.k + 1)
         pl = self.Lay.machine_pl
 
-        # "finds": the tags lift off the queue and go, the caption with them;
-        # the floor becomes many blobs, all red. P-core 0 lights and sends the
-        # three launches (ch05's split build: init, scan and fill in one
-        # launch, then compress and finish), so the seeds are found inside
-        # the fill launch, after it lands
+        # "finds": the floor becomes many blobs, all red, under the carried
+        # "2 seeds / per launch". P-core 0 lights and sends the three
+        # launches (ch05's split build: init, scan and fill in one launch,
+        # then compress and finish), so the seeds are found inside the fill
+        # launch, after it lands
         plain = replace(self.machine.spec, tag_tokens=())
         core = mc.build(replace(plain, cpu="lit"), pl, z0=Z_MACHINE).parts["pcore"]
         t_finds = self.cue("finds")
         self.until(t_finds)
-        tags = self.machine.parts.get("tags")
-        self.machine_anims(plain)                    # the bookkeeping; the tags leave upward instead
         pulses, lands = self.launch_stream(t_finds + fr(4), travel=fr(5), gap=fr(3), burst=fr(3))
         self.floor_blend(self.toy(label_colors(t["two"], t["two_lab"])), self.toy(red), frames=6)
-        self.unsay(frames=6, extra=[FadeIn(core)] + ([FadeOut(tags, shift=UP * 0.3)] if tags is not None else []))
+        self.play(FadeIn(core), run_time=fr(6))
 
         # "seeds": sparks at every top-left corner (scan order), then the
         # lattice; a spark is a white ring for a moment, then a seed dot.
-        # The SMs spark with them.
+        # The SMs spark with them. The caption's two handed-in seeds go, and
+        # the tag stripes lift off the queue: the labels move to a per-pixel
+        # map (ch05), the entries are plain addresses again
         cand_order = sorted(zip(*np.nonzero(cand)))
         lat_order = sorted(zip(*np.nonzero(lat)))
         both = cand_order + lat_order
@@ -213,6 +215,9 @@ class Seeds(ChainScene):
         span = max(t_every - t_seeds - fr(2), fr(8))
         self.floor_play(lambda p: max(1, min(nc + nl + 3, round(p * (nc + nl + 3)))), sparks, span)
         sm_dots = self.sm_sparks(span)
+        tags = self.machine.parts.get("tags")
+        self.machine_anims(plain)                    # the bookkeeping; the stripes leave upward instead
+        self.unsay(frames=8, extra=[FadeOut(tags, shift=UP * 0.3)] if tags is not None else [])
         # the last launch has landed: the counter shows 3, the CPU's part is done
         self.until(lands[-1])
         self.machine_to(replace(plain, launches="3"), frames=3, slide=0, extra=[FadeOut(core)])
@@ -236,14 +241,14 @@ class Seeds(ChainScene):
         self.floor_play(lambda p: min(nf - 1, int(p * nf)), waves, max(t_fifty - self.elapsed() - fr(2), fr(10)))
 
         # "fifty-one milliseconds": the real picture, every blob labelled; the
-        # needle slides to 51 ms, its value comes in, then the caption
+        # needle slides to 51 ms, then its value comes in on the same frames
+        # as the caption (one text change, as r07 and r10 do)
         self.until(t_fifty)
         self.floor_blend(waves(nf - 1), self.pic(picture("labels")), frames=8)
         meter, val = self.needle_slide(end.goal)
-        self.play(FadeIn(val), run_time=fr(3))
+        self.say_last(at=self.cue("milliseconds"), extra=[FadeIn(val)])
         self.remove(val)
         meter.add(val)
-        self.say_last(at=self.cue("milliseconds"))
 
         # "every red pixel still rides the queue": a counter in front of the
         # queue's VRAM climbs to every red pixel of the real picture, and at

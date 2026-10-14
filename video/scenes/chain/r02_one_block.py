@@ -1,11 +1,17 @@
-"""r02: one block on one SM. At "So" the floor splits into two half
-floors, the same red drone on each, "CPU" and "GPU" under them with a
-step counter each; at "onto" a block (the blue cube) drops onto SM 0,
-which lights; at "SM" that SM grows out of the chip over the idle split
-floor, drawn large like NVIDIA's SM figure (`sm_closeup`: 4 x 32 lanes,
-shared memory), and flies back into SM 0 just before "paint". Text lands
-at least MIN_DWELL apart. The race in steps starts at "paint", on one clock:
-the CPU paints one pixel per step (left), the
+"""r02: one block on one SM, its queue in the SM's shared memory. At "So"
+the floor splits into two half floors, the same red drone on each; at
+"onto" a block (the blue cube) drops onto SM 0, which lights; at "SM"
+that SM grows out of the chip over the idle split floor, drawn large
+like NVIDIA's SM figure (`sm_closeup`: 4 x 32 lanes, the shared-memory
+strip "full", the queue's red). At "queue" a few red entries drop from
+the lanes into the strip; at "shared memory" the strip gets the white
+outline pulse (a new part). Just before "paint" it flies back into SM 0,
+whose shelf is "full" from then on (the queue lives there). The caption
+"256 threads" and the race's floor labels ("CPU", "GPU", a step counter
+each) land together during that flight, one text change: the floor
+labels at "So" would sit under a second of the close-up's text. Text
+lands at least MIN_DWELL apart. The race in steps starts at "paint", on
+one clock: the CPU paints one pixel per step (left), the
 block one whole 4-way ring per step (right). The right side finishes at
 its ring count; the left side then speeds up and finishes too.
 
@@ -20,21 +26,24 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import (DOWN, LEFT, FadeIn, FadeOut, GrowFromEdge, Group, Rectangle, RoundedRectangle,
-                   SurroundingRectangle, VGroup)
+from manim import (DL, DOWN, LEFT, UP, FadeIn, FadeOut, GrowFromEdge, Group, LaggedStart, Rectangle, RoundedRectangle,
+                   SurroundingRectangle, UpdateFromAlphaFunc, VGroup, linear, rush_into, smooth, there_and_back)
 
+from scenes.chain import die as dz
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
-from scenes.chain.base import MIN_DWELL, ChainScene, fr
+from scenes.chain.base import MIN_DWELL, ChainScene, caption_group, fr
 from scenes.chain.state import Z_FLOOR, Z_OVER, boundary, floor_raster, fmt_ms, level_colors, toys
-from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT, label
+from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT, RED_PX, label
 
 # The SM close-up: (centre of the SM picture, its height), the title and
 # sub to its left. In 9:16 it sits in the band between the caption and
 # the GPU board's back edge, left of SM 0; in 16:9, in the empty band
 # above the CPU board. Both keep the CPU board (it races too) in view.
 CLOSEUP = {True: 3.7, False: 3.5}          # the close-up's height, 9:16 and 16:9
+ENTRIES = 4                                # queue entries that drop into the strip (schematic, no number)
+CARD = "#0f141a"                           # the close-up's card: the gaps between entries
 
 
 class Counter(VGroup):
@@ -72,11 +81,70 @@ def _z(mob, z: float):
     return mob
 
 
+def span(a: float, b: float):
+    """A rate function that runs `smooth` over the fraction [a, b] of a play
+    only: several changes in one play, each on its own word."""
+    return lambda t: smooth(min(1.0, max(0.0, (t - a) / max(b - a, 1e-6))))
+
+
 def sm_callout(L) -> Group:
     """mc.sm_closeup over the floor area (the split floors are still at step
-    0): SM 0 drawn large, with its 4 x 32 lanes and shared memory labelled."""
+    0): SM 0 drawn large, with its 4 x 32 lanes and shared memory labelled,
+    the strip "full" (the queue's red: the queue lives there)."""
     h = CLOSEUP[L.G.vertical]
-    return mc.sm_closeup(L.machine_pl, L.G.floor_c, h, i=0, shelf=False)
+    return mc.sm_closeup(L.machine_pl, L.G.floor_c, h, i=0, shelf="full")
+
+
+def strip_rect(sm: Group) -> tuple[np.ndarray, float, float, float]:
+    """The close-up's shared-memory strip in frame units: (centre, width,
+    height, the free width left of its label). The same arithmetic as
+    die._sm and die.sm_detail: inset 0.018; RT core 17%, texture 5%, the
+    strip 7% of the inner depth, 0.008 between rows; the label 0.022 high."""
+    from PIL import ImageFont
+
+    img = sm[1]
+    sx, sy = img.width / dz.SM_W, img.height / dz.SM_D
+    w, d = dz.SM_W - 0.036, dz.SM_D - 0.036
+    y0 = 0.018 + d * (0.17 + 0.05) + 2 * 0.008
+    h = d * 0.07
+    font = ImageFont.truetype(dz.FONT_DIR + "DejaVuSans.ttf", 1000)
+    text_w = 0.022 * font.getlength("shared memory") / 1000
+    c = img.get_corner(DL) + np.array([(0.018 + w / 2) * sx, (y0 + h / 2) * sy, 0.0])
+    return c, w * sx, h * sy, (w - text_w) / 2 * sx
+
+
+def strip_entries(sm: Group, z: float) -> VGroup:
+    """ENTRIES queue entries in the strip, from its left end up to its label:
+    red cells parted by the card's dark, so each reads as one entry on the
+    red strip."""
+    c, w, h, free = strip_rect(sm)
+    pitch = (free - 0.22) / ENTRIES                 # a clear gap before the label
+    x0 = c[0] - w / 2 + 0.04
+    g = VGroup(*[Rectangle(width=pitch * 0.78, height=h * 0.78, fill_color=RED_PX, fill_opacity=1,
+                           stroke_color=CARD, stroke_width=1.6).move_to([x0 + (k + 0.5) * pitch, c[1], 0])
+                 for k in range(ENTRIES)])
+    return _z(g, z)
+
+
+def fall(entry, rise: float) -> UpdateFromAlphaFunc:
+    """An entry appears `rise` above its place, over the lanes (a thread
+    writes it), and falls into the strip, speeding up."""
+    end = entry.get_center().copy()
+
+    def step(m, a: float) -> None:
+        m.move_to(end + UP * rise * (1 - rush_into(a)))
+        m.set_fill(opacity=min(1.0, 4 * a))
+        m.set_stroke(opacity=min(1.0, 4 * a))
+
+    return UpdateFromAlphaFunc(entry, step, rate_func=linear)
+
+
+def strip_outline(sm: Group, z: float) -> Rectangle:
+    """The white outline round the strip (the new-part pulse), hidden."""
+    c, w, h, _ = strip_rect(sm)
+    o = Rectangle(width=w + 0.08, height=h + 0.08, stroke_color=INK, stroke_width=3.5).move_to(c)
+    o.set_stroke(opacity=0)
+    return _z(o, z)
 
 
 def time_card(n: dict, halves: list, ins, strip):
@@ -142,31 +210,67 @@ class OneBlock(ChainScene):
         cr = Counter("step 0", 16, INK_SOFT, under(right, 0.5), zt)
         notes = [names, cl, cr]
 
+        # (the floor labels wait for the race: here they would sit under a
+        # second of the close-up's text)
         self.until(self.cue("So"))
-        anims = [FadeOut(old), FadeIn(left), FadeIn(right), *[FadeIn(m) for m in notes]]
+        anims = [FadeOut(old), FadeIn(left), FadeIn(right)]
         if self.cap is not None:
             anims.append(FadeOut(self.cap))
             self.cap = None
         self.set_floors(halves)
-        t_lab = self.elapsed()                          # text lands at least MIN_DWELL apart from here on
         self.play(*anims, run_time=fr(6))
 
-        # ---- "onto": a block drops onto SM 0, which lights under it
+        # ---- "onto": a block drops onto SM 0, which lights under it (no queue on its shelf yet)
         self.until(self.cue("onto"))
-        drop = self.machine_anims(replace(b5.machine, rooms=b4.machine.rooms), slide=0.3)
-        light = self.machine_anims(b5.machine, slide=0)
+        lit = replace(b5.machine, shelves=())
+        drop = self.machine_anims(replace(lit, rooms=b4.machine.rooms), slide=0.3)
+        light = self.machine_anims(lit, slide=0)
         self.play(*drop, *light, run_time=fr(6))
 
-        # ---- "SM": that SM, drawn large, for about 2.5 s (its title waits out the floor labels)
+        # ---- "SM": that SM grows out of the chip, drawn large, its shared-memory strip the queue's red
         sm = sm_callout(self.Lay)
         home = mc.sm_point(self.Lay.machine_pl, 0)
-        t_sm = max(self.cue("SM"), t_lab + MIN_DWELL, self.elapsed())
+        t_sm = max(self.cue("SM"), self.elapsed())
         self.until(t_sm)
         self.play(FadeIn(sm, target_position=home, scale=0.08), run_time=fr(8))
-        self.say(f"{int(n['small_tpb'])} threads", at=max(self.cue("threads"), t_sm + MIN_DWELL))
-        # back into SM 0 just before "paint", where the race starts
-        self.until(max(self.cue("paint") - fr(8), t_sm + fr(8) + MIN_DWELL, self.elapsed()))
-        self.play(FadeOut(sm, target_position=home, scale=0.08), run_time=fr(8))
+
+        # ---- "queue": a few entries drop from the lanes into the strip
+        z_sm = sm[1].z_index
+        entries = strip_entries(sm, z_sm + 1)
+        self.until(max(self.cue("queue"), self.elapsed()))
+        self.play(LaggedStart(*[fall(e, 0.38) for e in entries], lag_ratio=0.3), run_time=fr(12))
+
+        # ---- "shared memory": the strip's white outline pulse (a new part)
+        ring = strip_outline(sm, z_sm + 2)
+        self.add(ring)
+        t_pulse = max(self.cue("shared"), self.elapsed())
+        self.until(t_pulse)
+        pulse = min(max(self.cue("memory", end=True) - t_pulse, fr(10)), fr(14))
+        self.play(UpdateFromAlphaFunc(ring, lambda m, a: m.set_stroke(opacity=there_and_back(a))),
+                  run_time=pulse)
+        self.remove(ring)
+
+        # ---- back into SM 0 just before "paint", where the race starts: SM 0's
+        # shelf turns "full" as it lands. "256 threads" and the race's floor
+        # labels land at "threads", in the same play: one text change. The
+        # flight starts 6 frames before them, so in 9:16 the card has crossed
+        # the caption band when the caption comes in.
+        t_cap = max(self.cue("threads"), t_sm + MIN_DWELL)
+        t0 = max(t_cap - fr(6), self.elapsed())
+        self.until(t0)
+        t0 = self.elapsed()
+        frames = max(8, round((max(t_cap, t0) - t0) * 15) + 5)
+        a_back = 8 / frames                             # the flight: the play's first 8 frames
+        a_cap = 1 - 5 / frames                          # the text: its last 5
+        cap = caption_group(self.G, f"{int(n['small_tpb'])} threads")
+        shelf = self.machine_anims(b5.machine, slide=0)
+        for anim in shelf:
+            anim.set_rate_func(span(0.6 * a_back, a_back))
+        self.play(FadeOut(Group(sm, entries), target_position=home, scale=0.08, rate_func=span(0.0, a_back)),
+                  *shelf, FadeIn(cap, scale=1.06, rate_func=span(a_cap, 1.0)),
+                  *[FadeIn(m, rate_func=span(a_cap, 1.0)) for m in notes],
+                  run_time=fr(frames))
+        self.cap, self._cap_t = cap, self.elapsed()
 
         # ---- the race in steps, on one clock
         t_r0 = max(self.cue("paint"), self.elapsed())

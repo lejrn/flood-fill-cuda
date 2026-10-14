@@ -1,48 +1,76 @@
-"""r03: one giant blob. The drone swells into the 64 Mpx test square and
-the CPU core goes dark. One block (the cube on SM 0) sweeps it ring by
-ring and waits at SM 0's fence (__syncthreads) after every ring: the
-fence flashes amber, the ring's workers wait amber on the floor. Over
-twice the CPU, but one SM of twenty-four: the other 23 come up idle in a
-wave, then go dark again.
+"""r03_giant: one giant blob, and its queue overflows shared memory (v4,
+points 1 and 2). The drone swells into the 64 Mpx test square and the
+CPU core goes dark. At "overflows" the shelf gauge (D1) grows out of SM 0:
+its box is a block's default shared memory, the queue region two thirds
+of it, the bar under it the queue's real load (two adjacent rings of the
+64 Mpx square; toy ring i is real ring 400 i, and the bar moves through
+the real rings in between, so it never jumps). The block sweeps the
+square ring by ring and waits at SM 0's fence (__syncthreads) after each
+ring: the fence flashes amber, the ring's workers wait amber on the floor.
 
-Starts on chain_state(5) (the split drones, P-core 0 and SM 0 lit) and
-ends on chain_state(6) (the square painted, SM 0 with its shelf and its
-fence at rest).
+While the bar is past the region (real rings 1,024 to 6,975, toy rings 3
+to 17) red tokens pour out of the region's end, down the leader into
+SM 0 and through the memory controller into VRAM chip 0's slots; on the
+rings after, some come back up to SM 0 (the spill slice is read after the
+ring's shared slots). Text: "48 KB" at "forty-eight" (the box pulses),
+"125 KB" at "hundred", the carried "spill" at "spills". At "eight
+gigabytes" the four VRAM chips pulse. The sweep ends with "gigabytes",
+and the gauge folds back into SM 0.
+
+Starts on chain_state(5) (the split drones, P-core 0 and SM 0 lit, its
+shelf full) and ends on chain_state(6) (the square painted, SM 0 with its
+shelf and its fence at rest, the spill in VRAM chip 0).
 """
 from __future__ import annotations
 
 from dataclasses import replace
 
 import numpy as np
-from manim import LEFT, AnimationGroup, FadeIn, FadeOut, config, smooth
+from manim import LEFT, FadeIn, FadeOut, Polygon, Rectangle, config, smooth
 
 from narration.common import read_words
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
 from scenes.chain.base import MIN_DWELL, ChainScene, _norm, fr
+from scenes.chain.iso import plane_corners
 from scenes.chain.state import boundary, floor_raster, level_colors, make_floors, toys
-from scenes.style import OUT, voice
+from scenes.style import INK, OUT, RED_PX, voice
 
 # The sweep runs on whole frames (at 15 fps; every step lasts twice as many
 # frames at 30 fps), so every fence flash is drawn and preview = final.
-SLOW = 3                # the first rings run slowly, so the fence flash can be read
+SLOW = 3                # sweep_plan: the first rings run slowly, so the fence flash can be read
 SLOW_STEP = (4, 2)      # ... paint frames, then wait frames at the fence
 FALLBACK_STEP = (3, 1)  # when even the slow rings do not fit
 F15 = 15                # the plan's frame rate
+WAIT = 2                # paced_plan: wait frames at the fence after each ring
+
+GROW = 6                # frames: the gauge grows out of SM 0 (and folds back into it)
+TOKEN = (0.11, 0.08)    # a travelling queue entry (frame units)
+TOKEN_SPEED = 6.0       # frame units per second along its way
+STORES_MAX = 4          # tokens poured on the ring with the largest overflow (at least one per ring)
+PULSE = 0.9             # seconds of a white outline pulse (the new-part convention)
 
 
-def sweep_window(words: list) -> tuple[float, float]:
-    """r03's sweep: from "block" to just after "twenty-four" starts.
-    Words are matched like ChainScene.cue (punctuation ignored); a voice
-    without them gets a 3 s sweep."""
-    def at(w: str, n: int = 1) -> float | None:
+def sweep_window(words: list, first: str = "overflows", last: str = "gigabytes",
+                 lead: float = 0.0) -> tuple[float, float]:
+    """A sweep's window: from `lead` s after `first` starts to the end of
+    `last`. Words are matched like ChainScene.cue (punctuation ignored); a
+    voice without them gets a 3 s sweep."""
+    def at(w: str, i: int) -> float | None:
         hits = [x for x in words if _norm(x[0]) == _norm(w)]
-        return float(hits[n - 1][1]) if len(hits) >= n else None
-    t0, t4 = at("block"), at("twenty-four")
-    if t0 is None or t4 is None or t4 + 0.1 <= t0:
+        return float(hits[0][i]) if hits else None
+    t0, t1 = at(first, 1), at(last, 2)
+    t0 = None if t0 is None else t0 + lead
+    if t0 is None or t1 is None or t1 <= t0 + 0.1:
         t0 = t0 if t0 is not None else 0.0
         return t0, t0 + 3.0
-    return t0, t4 + 0.1
+    return t0, t1
+
+
+def r03_window(words: list) -> tuple[float, float]:
+    """r03's sweep: from the gauge being in (GROW frames after "overflows")
+    to the end of "gigabytes"."""
+    return sweep_window(words, "overflows", "gigabytes", lead=GROW / F15)
 
 
 def _plan(n: int, slow: int, step: tuple[int, int], g: int) -> list[tuple[int, bool]]:
@@ -58,7 +86,8 @@ def _plan(n: int, slow: int, step: tuple[int, int], g: int) -> list[tuple[int, b
 
 
 def sweep_plan(n: int, frames: int) -> list[tuple[int, bool]]:
-    """(ring, waiting at the fence) for each 15 fps frame of the sweep.
+    """(ring, waiting at the fence) for each 15 fps frame of a sweep that
+    must fit in `frames` (it may end sooner).
 
     The block syncs after every ring, so a wait after every ring comes
     first: the slow opening shrinks (SLOW rings, then fewer, then one ring
@@ -79,6 +108,21 @@ def sweep_plan(n: int, frames: int) -> list[tuple[int, bool]]:
     return [(i, False) for i in range(n)]
 
 
+def paced_plan(n: int, frames: int, wait: int = WAIT) -> list[tuple[int, bool]]:
+    """(ring, waiting at the fence) for each 15 fps frame of a sweep that
+    fills `frames`: every ring gets an even share (within one frame), its
+    last `wait` frames at the fence, so the rings keep one pace and a ring
+    lands where the words put it. When a ring would get under wait + 2
+    frames, sweep_plan's shorter sweep instead."""
+    if frames < n * (wait + 2):
+        return sweep_plan(n, frames)
+    plan: list[tuple[int, bool]] = []
+    for i in range(n):
+        m = (i + 1) * frames // n - i * frames // n
+        plan += [(i, False)] * (m - wait) + [(i, True)] * wait
+    return plan
+
+
 def plan_index(p: float, seconds: float) -> int:
     """The 15 fps plan index shown at progress p of a run of `seconds`."""
     fps = config.frame_rate
@@ -87,11 +131,18 @@ def plan_index(p: float, seconds: float) -> int:
 
 
 def r03_plan() -> list[tuple[int, bool]]:
-    """r03's sweep plan (for r04, which runs it at twice the pace)."""
+    """r03's sweep plan, timed from its words "overflows" to "gigabytes"."""
     words = read_words(OUT / voice()).get("r03_giant", [])
-    t0, t1 = sweep_window(words) if words else (0.0, 3.0)
+    t0, t1 = r03_window(words) if words else (0.0, 3.0)
     lv = toys()["square4"].level
-    return sweep_plan(int(lv.max()) + 1, int((t1 - t0) * F15))
+    return paced_plan(int(lv.max()) + 1, int((t1 - t0) * F15))
+
+
+def queue_load(levels) -> np.ndarray:
+    """The queue's load on each real ring: the ring being read plus the ring
+    being written (the last ring alone), in 4-byte slots."""
+    s = np.asarray(levels, float)
+    return s + np.append(s[1:], 0.0)
 
 
 def amber_fence(spec: mc.Spec, pl):
@@ -109,22 +160,30 @@ def show_amber(g, on: bool) -> None:
         m.set_fill(opacity=1.0 if on else 0.0)
 
 
+def chip_outlines(pl, z: float = 300.0) -> list:
+    """The four VRAM chips' top faces, outlined in white (hidden until pulsed)."""
+    out = []
+    for r in mc.vram_rects():
+        ul, ur, dl, dr = plane_corners(pl, r.x, r.y, r.x1, r.y1, 0.08)
+        p = Polygon(ul, ur, dr, dl, stroke_color=INK, stroke_width=3.5, stroke_opacity=0, fill_opacity=0)
+        p.set_z_index(z)
+        out.append(p)
+    return out
+
+
 class Giant(ChainScene):
     k = 5
 
-    def ripple(self, spec: mc.Spec, frames: int) -> None:
-        """machine_to(spec), the SMs' changes swept across the die column by
-        column, left to right (GPC 0 first), as r01 does."""
-        old = self.machine
-        anims = self.machine_anims(spec, slide=0)
-        name = {id(p): n for m in (old, self.machine) for n, p in m.parts.items()}
-        cols: dict = {}
-        for a in anims:
-            n = name.get(id(a.mobject), "")
-            x = round(mc.sm_rect(int(n[4:])).x, 2) if n[4:].isdigit() else -1.0
-            cols.setdefault(x, []).append(a)
-        sweep = [AnimationGroup(*cols[x]) for x in sorted(cols)]
-        self.play(AnimationGroup(*sweep, lag_ratio=0.35), run_time=fr(frames))
+    def pulse(self, mobs: list, seconds: float = PULSE) -> None:
+        """A white outline pulse, from now: the outlines' strokes rise and
+        fall once (on the floor's clock, so it runs through any play)."""
+        self.add(*mobs)
+
+        def fn(p: float) -> None:
+            for m in mobs:
+                m.set_stroke(opacity=float(np.sin(np.pi * p)))
+
+        self.run(fn, seconds)
 
     def beat_anim(self) -> None:
         t = toys()
@@ -133,6 +192,7 @@ class Giant(ChainScene):
         nrings = top + 1
         b6 = boundary(6)
         pl = self.Lay.machine_pl
+        n, d = self.num, self.der
         # the swell's machine: P-core 0 dark, SM 0 as it was
         dark = replace(self.machine.spec, cpu="off")
 
@@ -163,14 +223,30 @@ class Giant(ChainScene):
         self.over["inset"] = new_inset
         self.set_floors([new])
 
-        # ---- "block": SM 0 gets its shelf and its fence; the block sweeps the square
-        # ring by ring and waits at the fence after each one (amber: the fence, and the
-        # ring's workers on the floor). The plan is in whole frames, so every wait is
+        # ---- "overflows": the shelf gauge grows out of SM 0 to its place, on its leader.
+        # Box: a block's shared memory (48 KB); region: the queue's 8,192 slots; bar: the
+        # queue's real load, on the same byte scale up to the two-ring peak
+        home = mc.sm_point(pl, 0)
+        (gc, gs) = self.G.gauge
+        gauge = mc.shelf_gauge(pl, gc, gs, slots=int(n["ring_slots"]), shared_bytes=round(n["shared_kb"] * 1024),
+                               peak_slots=int(d["two_ring_peak"]))
+        self.until(self.cue("overflows"))
+        self.play(FadeIn(gauge, target_position=home, scale=0.08), run_time=fr(GROW))
+
+        # ---- the sweep, from the gauge being in to the end of "gigabytes": one block paints
+        # the square ring by ring and waits at SM 0's fence after each one (amber: the fence,
+        # and the ring's workers on the floor). The plan is in whole frames, so every wait is
         # drawn (and preview = final).
-        t0, t1 = sweep_window(self.words)
+        t0, t1 = r03_window(self.words)
+        self.until(t0)
+        t0 = self.elapsed()
         sweep = t1 - t0
-        plan = sweep_plan(nrings, int(sweep * F15))
+        plan = paced_plan(nrings, int(sweep * F15))
         amber = amber_fence(b6.machine, pl)
+        first = {}                                    # ring -> (its first plan frame, its frames, paint frames)
+        for j, (i, waiting) in enumerate(plan):
+            a, m, paint = first.get(i, (j, 0, 0))
+            first[i] = (a, m + 1, paint + (0 if waiting else 1))
 
         def key(p: float):
             j = plan_index(p, sweep)
@@ -186,22 +262,127 @@ class Giant(ChainScene):
         def flash(p: float) -> None:
             show_amber(amber, key(p)[1])
 
-        self.until(t0)
-        self.add(amber)                       # after the floor: redrawn every frame of a play
-        self.extras = [amber]
+        # the bar: toy ring i is real ring 400 i at the middle of its frames, so the real
+        # ring moves on every frame (and the ring the bar crosses the region on is toy ring 3)
+        load = queue_load(n["big_level_sizes"])
+        scale = (len(load) - 1) / top
+        ring_slots = int(n["ring_slots"])
+
+        def real_ring(p: float) -> float:
+            q = p * sweep * F15
+            j = min(int(q), len(plan) - 1)
+            i = plan[j][0]
+            a, m, _ = first[i]
+            pos = min(i + (q - a) / m, nrings)
+            return float(np.clip(scale * (pos - 0.5), 0, len(load) - 1))
+
+        def bar(p: float) -> None:
+            gauge.set_load(float(np.interp(real_ring(p), np.arange(len(load)), load)))
+
+        # the overflow, per toy ring whose real ring overflows the region: stores pour out
+        # of the region's end over the ring's paint frames, more as the overflow grows; on
+        # the rings after, some come back up to SM 0 (after the ring's shared slots)
+        over = {i: load[round(scale * i)] - ring_slots for i in range(nrings)}
+        band = [i for i in range(nrings) if over[i] > 0]
+        peak = max(over[i] for i in band)
+        stores = {i: max(1, round(STORES_MAX * over[i] / peak)) for i in band}
+        events = []                                   # (start s, path, seconds, slot, store?)
+
+        def at_frame(f: float) -> float:
+            return t0 + f / F15
+
+        def way(pts) -> tuple:
+            length = sum(float(np.linalg.norm(b - a)) for a, b in zip(pts, pts[1:]))
+            return pts, min(max(length / TOKEN_SPEED, 0.4), 1.0)
+
+        k = 0
+        for i in band:
+            a, _, paint = first[i]
+            for s in range(stores[i]):
+                pts, sec = way(gauge.to_vram(pl, k % mc.SPILL_SLOTS))
+                events.append((at_frame(a + paint * (s + 0.5) / stores[i]), pts, sec, k % mc.SPILL_SLOTS, True))
+                k += 1
+        landed = min(e[0] + e[2] for e in events)
+        k = 0
+        # each ring reads the ring before's spill slice, so the loads run one ring past the band
+        for i in range(band[0] + 1, min(band[-1] + 2, nrings)):
+            a, _, paint = first[i]
+            for s in range(max(1, stores[i - 1] // 2)):
+                ts = at_frame(a + paint / 2 + 1.5 * s)
+                if ts < landed + fr(2):               # nothing to load before the first entry lands
+                    continue
+                pts, sec = way(list(reversed(mc.vram_path(pl, 0, k % mc.SPILL_SLOTS))))
+                events.append((ts, pts, sec, k % mc.SPILL_SLOTS, False))
+                k += 1
+        tokens = []
+        for _ in events:
+            tok = Rectangle(width=TOKEN[0], height=TOKEN[1], fill_color=RED_PX, fill_opacity=0, stroke_width=0)
+            tok.set_z_index(mc.Z_PACKET)
+            tokens.append(tok)
+
+        # VRAM chip 0's three spill slots, each shown as its first token lands: the end
+        # state's own part (the same faces), so the cut is seamless
+        spill = mc.build(b6.machine, pl, z0=100.0, only={"spill"})
+        faces = spill.part("spill").submobjects
+        per = len(faces) // mc.SPILL_SLOTS             # a slot and its token
+        slot_faces = [faces[j * per:(j + 1) * per] for j in range(mc.SPILL_SLOTS)]
+        lands = {}
+        for ts, _, sec, slot, store in events:
+            if store:
+                lands[slot] = min(lands.get(slot, np.inf), ts + sec)
+        for f in faces:
+            f.set_fill(opacity=0)
+        t_end = max(e[0] + e[2] for e in events)
+
+        def pour(p: float) -> None:
+            now = t0 + p * (t_end - t0)
+            for tok, (ts, pts, sec, _, _) in zip(tokens, events):
+                s = (now - ts) / sec
+                if 0 <= s < 1:                        # gone on arrival (none left on SM 0 at the end)
+                    tok.move_to(mc.point_along(pts, s))
+                    tok.set_fill(opacity=1)
+                else:
+                    tok.set_fill(opacity=0)
+            for j, fs in enumerate(slot_faces):
+                a = min(max((now - lands[j] + fr(2)) / fr(3), 0.0), 1.0)
+                for f in fs:
+                    f.set_fill(opacity=a)
+
+        # added after the floor: redrawn every frame of a play
+        self.add(amber, spill.part("spill"), *tokens)
+        self.extras = [amber, *tokens]
         self.floor_play(key, render, sweep)
         self.run(flash, sweep)
+        self.run(bar, sweep)
+        self.run(pour, t_end - t0)
         # the fence fades in (no slide, so the amber copy fits it) by the first wait frame
-        self.machine_to(b6.machine, frames=SLOW_STEP[0], slide=0)
+        self.machine_to(replace(b6.machine, spill=False), frames=SLOW_STEP[0], slide=0)
+        self.machine.parts["spill"] = spill.part("spill")
+        self.machine.keys["spill"] = spill.keys["spill"]
+        self.machine.spec = b6.machine
 
-        # ---- "twice": the speed-up, never within MIN_DWELL of the inset's new line being in
-        self.say(f"{self.der['big_1block_x']:.2f}×", "vs the CPU, kernel time",
-                 at=max(self.cue("twice"), t_text + MIN_DWELL))
+        # ---- "forty-eight kilobytes": the box (a block's shared memory) pulses, caption 1
+        box = gauge.box
+        ring = Rectangle(width=box.width + 0.08, height=box.height + 0.08, stroke_color=INK, stroke_width=4,
+                         stroke_opacity=0).move_to(box)
+        ring.set_z_index(mc.Z_CALLOUT + 2)
+        t48 = max(self.cue("forty-eight"), t_text + MIN_DWELL)
+        self.until(t48)
+        self.pulse([ring])
+        self.say(f"{round(n['shared_kb'])} KB", "per block, by default", at=t48)
 
-        # ---- "one SM of twenty-four": the caption on "SM"; on "twenty-four" the other
-        # 23 SMs come up idle in a wave, and go dark again as the word ends
-        self.say_last(at=self.cue("SM"))
-        self.until(self.cue("twenty-four"))
-        self.ripple(mc.with_rooms(b6.machine, "idle", rooms=range(1, 24)), frames=10)
-        self.until(self.cue("twenty-four", end=True))
-        self.ripple(b6.machine, frames=8)
+        # ---- "over a hundred": caption 2, the bar near its peak, far past the box
+        self.say(f"{round(d['two_ring_kb'])} KB", "two rings at peak", at=self.cue("hundred"))
+
+        # ---- "spills": the tokens are landing in VRAM chip 0's slots; the carried caption
+        self.say_last(at=self.cue("spills"))
+
+        # ---- "eight gigabytes": the four VRAM chips pulse
+        self.until(self.cue("eight"))
+        chips = chip_outlines(pl)
+        self.pulse(chips)
+        self.extras += [ring, *chips]
+
+        # ---- the sweep ends with "gigabytes": the gauge folds back into SM 0
+        self.until(t1)
+        self.play(FadeOut(gauge, target_position=home, scale=0.08), run_time=fr(GROW))

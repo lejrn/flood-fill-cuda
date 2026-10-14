@@ -3,6 +3,14 @@
 kernel per blob: each launch crosses the PCIe link to the GPU, its blob
 fills, and the SMs wait amber for the next one. The launch counter climbs
 to 2,522 and the needle swings past the CPU tick: we built for size.
+
+The act changes here (D4): in act 1 a hue was a block, in act 2 a hue is
+a blob. So on "count", while the floor pulls back, the 48 cubes drop
+their block hues and turn plain blue.
+
+Starts on chain_state(11) (the 8-way owner mosaic, cubes in block hues,
+"25.8×"), ends on chain_state(12) (the filled frame, plain blue cubes,
+2,522 launches, "~2,181 ms").
 """
 from __future__ import annotations
 
@@ -16,7 +24,7 @@ from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
-from scenes.chain.state import LEVEL_HI, Z_OVER, boundary, filled_picture, level_colors, picture, picture_blobs, toys
+from scenes.chain.state import LEVEL_HI, Z_OVER, boundary, filled_picture, floor_raster, picture, picture_blobs
 from scenes.style import INK, INK_SOFT, label
 
 Z_LABEL = 195.0         # the machine's silkscreen and launch pill (z0 + 95)
@@ -114,7 +122,8 @@ class LaunchPill:
             self.num, self.text = self._swap(self.num, new), text
         word = "launch" if text == "1" else "launches"
         if word != self.word_text:
-            new = label(word, 15, INK_SOFT).move_to(self.word_at, aligned_edge=DL)
+            # built as launch_chip builds it, so "launches" ends as the machine's own glyphs
+            new = label(word, 60, INK_SOFT).scale(0.25).move_to(self.word_at, aligned_edge=DL)
             self.word, self.word_text = self._swap(self.word, new), word
 
 
@@ -122,14 +131,13 @@ class RealFrame(ChainScene):
     k = 11
 
     def beat_anim(self) -> None:
-        t = toys()
         n = self.num
         start, end = boundary(self.k), boundary(self.k + 1)
         pl = self.Lay.machine_pl
         red = picture("red")
         r, c, side = zoom_target()
         H = red.shape[0]
-        square = self.toy(level_colors(t["square"], t["square8"].level))
+        square = floor_raster(start.floors[0], self.floor.rpx)     # the 8-way owner mosaic on screen
         crop = self.pic(zoom_crop(red, r, c, side), nearest=True)
         steps = 24
 
@@ -152,13 +160,34 @@ class RealFrame(ChainScene):
         self.until(t_now)
         t_frame = min(self.cue("frame", end=True), t_l - fr(2))
         self.floor_play(lambda p: round(p * steps), zoom, t_frame - t_now)
+
+        # "count": act 2 is one hue per blob, so the cubes drop their block
+        # hues. Plain blue cubes (the end state's) fade in over the hued ones
+        # as the word is said: a hook, so the pull back and the tag go on
+        plain = replace(start.machine, team_hues=(), team_busy=())
+        blue = mc.build(plain, pl, z0=100.0, only=("teams",))
+        cubes = blue.parts["teams"]
+        set_alpha(cubes, 0.0)
+        self.add(cubes)
+        t_count = self.cue("count")
+        self.run(lambda p: set_alpha(cubes, p), fr(9), start=t_count)
         new_tag, new_inset = ov.act_tag(self.G, *end.tag), ov.inset(self.G, end.inset)
         self.unsay(frames=3, extra=[FadeOut(self.over["tag"]), FadeOut(self.over["inset"])])
         self.play(FadeIn(new_tag), FadeIn(new_inset), run_time=fr(3))
         self.over["tag"], self.over["inset"] = new_tag, new_inset
+        t_text = self.elapsed()
+
+        # the blue cubes are fully in: they become the machine's cubes and the
+        # hued ones go at once (left under them, their soft edges tint the
+        # blue ones). A frame after the fade's last step: the renderer drops
+        # a removed part only when the next wait starts
+        self.until(t_count + fr(9) + fr(1))
+        self.remove(self.machine.parts["teams"])
+        self.machine = mc.Machine(plain, {**self.machine.parts, "teams": cubes},
+                                  {**self.machine.keys, "teams": blue.keys["teams"]})
         N = int(n["est_ch03_calls"])
         # every text change waits MIN_DWELL after the last one is fully in, as say() does
-        self.say(f"{int(n['n_blobs']):,} blobs", at=max(self.cue("blobs"), self.elapsed() + MIN_DWELL))
+        self.say(f"{int(n['n_blobs']):,} blobs", at=max(self.cue("blobs"), t_text + MIN_DWELL))
         t_cap = self.elapsed()
 
         # "one launch each": P-core 0 lights (it runs the launch loop), and the
@@ -307,7 +336,7 @@ class RealFrame(ChainScene):
         self.over["goal"] = goal
         self.floor_play(lambda p: blobs_done(count(t_l + p * (t_b1 - t_l))), render, t_b1 - t_l)
         self.run(tick, span)
-        self.play(*self.machine_anims(replace(start.machine, cpu="lit"), slide=0), run_time=fr(3))
+        self.play(*self.machine_anims(replace(plain, cpu="lit"), slide=0), run_time=fr(3))
         self.until(t_go + T)
         self.play(FadeIn(pill.g), run_time=fr(3))
 

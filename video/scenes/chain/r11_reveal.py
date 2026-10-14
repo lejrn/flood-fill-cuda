@@ -231,11 +231,12 @@ class Reveal(ChainScene):
         # CPU's caption leaves (after its MIN_DWELL), the P-core rests and the
         # blocks land as the SMs light up, column by column
         self.until(max(self.cue("huge"), self._cap_t + MIN_DWELL))
+        t_swap = self.elapsed()               # the swap is a text change: the GPU caption waits its dwell
         cap, self.cap = self.cap, None
         sweep, stand = self.ripple(m13)
         self.swap_card(self.card((1, 2)), frames=8, extra=[FadeOut(cap), sweep])
         self.land(stand)
-        self.say("the GPU", "huge or many blobs", at=self.cue("GPU"))
+        self.say("the GPU", "huge or many blobs", at=max(self.cue("GPU"), t_swap + MIN_DWELL))
 
         # "Every drone, every frame." - one change: the card closes onto the
         # live drones as the caption turns (when "the GPU" has had its dwell)
