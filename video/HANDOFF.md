@@ -356,19 +356,72 @@ the outro fade. Rules that keep this true:
 - Add the ch06 column to the README grand table (`overview/build.py`).
 - Background music (`--music`) and captions.
 
-## 11. The chain cut (v3 and v2 on 2026-10-14; v1 on 2026-10-13)
+## 11. The chain cut (v4, v3 and v2 on 2026-10-14; v1 on 2026-10-13)
 
 A second cut beside the three-pane one, told as a chain of "But... So"
 rungs in the style of the Infinite Desk Shorts (`reference/infinite-desk/`,
-whose README distils 21 of them). v3 is the current version; v2 and v1
-are in git history (v1's four renders are kept in `out/chain_v1/`).
+whose README distils 21 of them). v4 is the current version; v3, v2 and
+v1 are in git history (v1's four renders are kept in `out/chain_v1/`).
 
 | file | frame | look | voice | length |
 |---|---|---|---|---|
-| `final_chain_iso_vertical_kokoro_paced.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam`, paced | 138.7 s |
-| `final_chain_iso_landscape_kokoro_paced.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam`, paced | 138.7 s |
+| `final_chain_iso_vertical_kokoro_paced.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam`, paced | 217.6 s |
+| `final_chain_iso_landscape_kokoro_paced.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam`, paced | 217.6 s |
 
-### v3: real hardware, less text, more air
+### v4: the memory story
+
+The user liked v3 ("WAY better") and asked for 25% more time between
+sentences and seven additions: the one-block start with its queue in
+shared memory (and its 48 KB limit), the queue moving to global memory,
+neighbours written there, the threads-per-block search, a colour per
+block on the huge blob, the global-memory layer (the queue and its tags,
+visited), and data moving between VRAM and the SMs (coalescing). The
+user allowed up to 5 minutes. Six readers and seven adversarial checkers
+held each point against the repo first (`narration/chain_v4_proposal.md`,
+"Where v4 departs from the user's wording"): there was never a
+blob-per-SM plan; 48 KB is the default per-block limit (the ring used
+32 KB, the giant square needs about 125 KB); the queue went global in
+two steps (ch01 v2's spill, then ch02); only ch03 swept to a plateau
+(+15%, never adopted); blocks share one queue, so their pixels mix; a
+tag is one spare bit of a queue word and ch04 takes two seeds;
+coalescing was never profiled and ch06's measured win is 25x fewer items.
+
+- 16 beats: two split off (`r03b_one_sm`, `r05b_snake`); r02, r03, r04,
+  r05, r08 and r10 say more (`script_chain.md`). Every new number is
+  pinned in `numbers.py` with claim checks (59).
+- New data: `chapters/ch03_gpu_1blob_nblock/benchmarks/owner_map.py`
+  (results `results/ch03_gpu_1blob_nblock/owner_map/`): which block
+  painted each pixel of the 64 Mpx square for 2 x 256, 48 x 256 4-way and
+  48 x 256 8-way. Its per-block counts equal the pinned session's.
+- New visuals (`machine.py`, `die.py`, `overlays.py`): the SM close-up
+  with its queue in shared memory; the shared-memory gauge that
+  overflows into VRAM; per-SM shelf cards; a global-memory close-up
+  (image, visited and queue lanes, a 32-bit entry with its tag bit, one
+  dense warp load, a row read as one 96 B packet "coalesced, by design,
+  not profiled"); load and store packets between VRAM and the SMs; block
+  hues, real owner mosaics and an owner lens; busy and idle cubes per
+  ring; the launch-shape sweep card. Explaining panels open large over
+  the floor area and fold back into their hardware.
+- Pacing: sentence pauses 1.125 s, colon pauses 0.56 s, BREATH 0.75 s,
+  MIN_DWELL 1.75 s.
+- How v4 was made: a research workflow (6 readers, 7 verifiers, a
+  designer, a critic), the user's answers, a data and foundation workflow
+  (owner map, script and numbers, shared modules, a reviewer), then a
+  scene workflow (a builder and a reviewer per scene, 24 agents).
+- Checks at 1080p30 (v4, Kokoro paced, 217.5 s): all 13 snaps pass in
+  both layouts (largest 1.03 in 9:16, 0.83 in 16:9) and 11 of 14 seams.
+  The three flagged seams sit on high-detail pictures: r05 -> r05b (the
+  48-block owner mosaic, 0.174% / 0.133%), r09 -> r10 (the speckled label
+  frame, 0.221% / 0.163%) and r10 -> r11 (0.113% / 0.103%). Their
+  difference maps are only element outlines (a clip's last P-frame
+  against the next clip's keyframe), nothing moved or missing. Phone
+  copies: `out/share/chain_v4_iso_{vertical,landscape}_kokoro_small.mp4`
+  (17.5 / 15.6 MB).
+- Parallel renders that share one `media_dir` can race on Manim's text
+  cache (a missing `texts/*.svg`): render the same layout one at a time,
+  or give each job its own media folder.
+
+### v3: real hardware, less text, more air (138.6 s)
 
 The user's notes on v2: the CPU sat at the head of the GPU's queue
 conveyor, which read as "the CPU is on the memory queue"; the GPU should
