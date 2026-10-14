@@ -356,25 +356,76 @@ the outro fade. Rules that keep this true:
 - Add the ch06 column to the README grand table (`overview/build.py`).
 - Background music (`--music`) and captions.
 
-## 11. The chain cut (v2 on 2026-10-14; v1 on 2026-10-13)
+## 11. The chain cut (v3 and v2 on 2026-10-14; v1 on 2026-10-13)
 
 A second cut beside the three-pane one, told as a chain of "But... So"
 rungs in the style of the Infinite Desk Shorts (`reference/infinite-desk/`,
-whose README distils 21 of them). v2 is the current version; v1 ("you
-build a machine", 11 beats, flat and 2.5D) is in git history and its four
-renders are kept in `out/chain_v1/`.
+whose README distils 21 of them). v3 is the current version; v2 and v1
+are in git history (v1's four renders are kept in `out/chain_v1/`).
 
 | file | frame | look | voice | length |
 |---|---|---|---|---|
-| `final_chain_iso_vertical_kokoro.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam` | 115.9 s |
-| `final_chain_iso_landscape_kokoro.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam` | 115.9 s |
+| `final_chain_iso_vertical_kokoro_paced.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam`, paced | 138.7 s |
+| `final_chain_iso_landscape_kokoro_paced.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam`, paced | 138.7 s |
 
-At 1080p30 both cuts pass all 11 snaps (largest 0.97) and 11 of 12 seams.
-The flagged seam, r10 -> r11 (0.09% / 0.08% of pixels against 0.05%), is
+### v3: real hardware, less text, more air
+
+The user's notes on v2: the CPU sat at the head of the GPU's queue
+conveyor, which read as "the CPU is on the memory queue"; the GPU should
+look like NVIDIA's Ada diagrams, with the CPU in a parallel diagram of
+its own; more time between changes; less text; ElevenLabs "Adam". The
+script did not change. The plan with every rule is
+`narration/chain_v3_plan.md`.
+
+- The machine is two boards (`scenes/chain/die.py`, `machine.py`): the
+  i9-13900H (6 P-cores, 8 E-cores, L3 24 MB, Xe graphics) and the RTX
+  4060 Laptop GPU drawn as AD107 (3 GPCs x 4 TPCs x 2 SMs, each SM in
+  NVIDIA's layout, L2 32 MB as the device reports, GigaThread, PCIe,
+  memory controllers, four VRAM chips), joined by a PCIe link. The
+  P-core lights while the CPU code runs; blocks land on SMs as cubes; an
+  SM close-up appears when the story first moves onto one SM; the queue
+  lives in VRAM; launches and seeds travel over the link; ch06's six
+  kernels queue in the launch lane. The algorithm gadgets of v2 (stencil
+  badge, tag printer, "64 max" rack, min unit) are gone from the boards.
+  AD107's floorplan is not public: the GPC count comes from 3DNews and
+  Wccftech's configuration tables, the plan follows NVIDIA's Ada figures.
+- Less text: no "SMs busy" gauge, a one-line meter and inset, no strip
+  header, at most three captions per beat (a big word and at most a short
+  qualifier), small text set at 4x so Pango keeps its spaces.
+- More air: `narration/pace.py` stretches the pause after each sentence
+  to 0.9 s and after a colon to 0.45 s, shifting the word times with it;
+  every beat ends with at least 0.6 s of silence (`BREATH`); a caption
+  stays at least 1.4 s (`MIN_DWELL`) before the next replaces it.
+- Voices: `kokoro_paced` (`out/kokoro_paced_chain`, from `kokoro_chain`).
+  ElevenLabs Adam is premade `pNInz6obpgDQGcFmaJgB` ("Adam - Dominant,
+  Firm"), `eleven_v4`, made with the claude.ai connector (flow
+  `pEZs8Czt8aDISzS8Ye62`): 11 of 14 takes are in `out/adam_chain_raw/`.
+  r01_cpu, r07_real_frame and r10_runs failed on 2026-10-14 because
+  ElevenLabs disabled the account's free tier ("unusual activity").
+  When the three takes exist: `import_audio.py --src out/adam_chain_raw
+  --out adam_unpaced_chain --script script_chain.md --voice "elevenlabs:Adam
+  (pNInz6obpgDQGcFmaJgB) eleven_v4"`, then `pace.py --src
+  adam_unpaced_chain --out adam_chain --script script_chain.md`, then
+  render with `--voice adam`. `import_audio.py` now pins word times on
+  the take's own pauses (`narration/align.py`).
+- How v3 was made: the shared modules first (two commits), then a
+  workflow with one agent per scene and an independent reviewer per
+  scene (26 agents), then the reviewers' shared findings fixed by hand.
+
+Checks at 1080p30 (v3, Kokoro paced): all 11 snaps pass in both layouts
+(largest 1.00 in 9:16, 0.82 in 16:9) and 11 of 12 seams. The flagged
+seam is r10 -> r11 again (0.113% / 0.103% of pixels against 0.05%): its
+difference map is only the outlines of every element (the last frame of
+one clip against the keyframe that opens the next, on the speckled teal
+picture), nothing moved or missing. Compressed copies for phones:
+`out/share/chain_v3_iso_{vertical,landscape}_kokoro_small.mp4` (12.6 /
+11.4 MB). v2's cuts (Kokoro unpaced, 115.9 s) passed all 11 snaps.
+v2 at 1080p30: all 11 snaps (largest 0.97) and 11 of 12 seams. The
+flagged seam, r10 -> r11 (0.09% / 0.08% of pixels against 0.05%), is
 the speckled teal picture: at most 79 levels, spread over the whole frame,
 i.e. keyframe noise, not content (v1's only flag was the same picture).
 
-The story (v2, "size, then count"): a drone show opens it. On frames that
+The story (v2 and v3, "size, then count"): a drone show opens it. On frames that
 small the compiled CPU keeps up (measured: 3.1 ms vs the GPU's 0.93 ms per
 drone frame), but at 81 Mpx it needs 1.3 s against a 33 ms budget. "Where
 does the GPU win? Two places: size and count." The video zooms into one
@@ -406,7 +457,7 @@ Files: narration `narration/script_chain.md`; the approved design with
 every source `narration/chain_v2_proposal.md`; scenes `scenes/chain/`
 (`intro.py`, `r00_zoom.py` ... `r11_reveal.py` on `base.ChainScene`;
 `state.py` is the boundary table, `overlays.py` the meter, scoreboard,
-gauge, inset and act tag); numbers and claim checks
+inset and act tag; `machine.py` and `die.py` the two boards); numbers and claim checks
 `scenes/chain/numbers.py` (28 checks). The drone-frame benchmark is
 `src/flood_fill_cuda/overview/bench_drones.py`, results
 `results/overview/benchmark_results/drones_20261014T023648Z.json`.
@@ -434,8 +485,9 @@ Commands (from `video/`):
 uv run narration/tts_kokoro.py --script script_chain.md --out kokoro_chain
 uv run narration/tts_elevenlabs.py --script script_chain.md --out elevenlabs_chain   # needs ELEVENLABS_API_KEY in .env
 uv run python -m scenes.chain.toy && uv run python -m scenes.chain.numbers
-uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro --render --preview   # 480 px, 15 fps
-uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro --render             # 1080p30
+uv run narration/pace.py --src kokoro_chain --out kokoro_paced_chain --script script_chain.md
+uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro_paced --render --preview   # 480 px, 15 fps
+uv run build/assemble.py --cut chain --look iso --layout vertical --voice kokoro_paced --render --check     # 1080p30
 uv run build/seam_check.py --cut chain --look iso --layout vertical --intra
 uv run build/chain_snapcheck.py r05_all_blocks AllBlocks --layout vertical                            # one clip
 STATE=7 LOOK=iso VIDEO_LAYOUT=vertical .venv/bin/python -m manim render -s -qh --disable_caching \
