@@ -8,9 +8,9 @@ For narration made outside this repo, e.g. with the ElevenLabs connector:
 one file per beat, named `<beat>.mp3` or `<beat>.wav` after the `## beat`
 headings of script.md (or `--script`). Writes out/<out>/<beat>.wav (edges
 trimmed like the Kokoro script), narration.wav, timing.json, and
-words.json with word times estimated from character counts (these voices
-come without timestamps), so `VOICE=<out>` and `assemble.py --voice <out>`
-work exactly as they do for Kokoro.
+words.json with word times pinned on the take's pauses (`align.py`:
+these voices come without timestamps), so `VOICE=<out>` and
+`assemble.py --voice <out>` work exactly as they do for Kokoro.
 """
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from common import HERE, estimate_words, load_beats, script_path, trim_edges, write_timing, write_words
+from align import align_words
+from common import HERE, load_beats, script_path, trim_edges, write_timing, write_words
 
 
 def main() -> None:
@@ -53,14 +54,14 @@ def main() -> None:
         audio = trim_edges(audio, sr)
         sf.write(out / f"{beat.name}.wav", audio, sr)
         durations[beat.name] = len(audio) / sr
-        words[beat.name] = estimate_words(beat.text, durations[beat.name])
+        words[beat.name] = align_words(beat.text, audio, sr)
         joined += [audio, np.zeros(int(sr * args.gap), dtype=np.float32)]
         print(f"{beat.name:20s} {durations[beat.name]:5.2f} s")
 
     track = np.concatenate(joined[:-1])
     sf.write(out / "narration.wav", track, sr)
     timing = write_timing(out, args.voice, durations, args.gap)
-    write_words(out, words, "estimated from character counts")
+    write_words(out, words, "pinned on the take's pauses (align.py)")
     print(f"total {len(track) / sr:.2f} s  ->  {out / 'narration.wav'}\n{timing}")
 
 
