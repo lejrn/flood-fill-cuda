@@ -374,29 +374,29 @@ def sm_point(pl: Placement, i: int = 0) -> np.ndarray:
     return pl.to_frame([[r.x + r.w / 2, r.y + r.d / 2, DIE_Z]])[0]
 
 
-def sm_closeup(pl: Placement, centre, height: float, i: int = 0, shelf: bool = True, z: float = 480.0) -> Group:
-    """One SM drawn large, flat, like NVIDIA's SM diagram, with a leader line
-    to SM i on the chip: four partitions (one warp scheduler and 32 lanes
-    each), the L1 / shared memory, texture units and the RT core."""
-    from manim import Line, Rectangle
+def sm_closeup(pl: Placement, centre, height: float, i: int = 0, shelf: bool = False, z: float = 480.0) -> Group:
+    """One SM drawn large, flat, like NVIDIA's SM figure (four partitions of
+    32 lanes, the shared memory, texture units, the RT core), on a dark
+    panel, titled "1 SM". Grow it out of `sm_point(pl, i)` and back into it
+    (FadeIn / FadeOut with target_position) so it reads as that SM."""
+    from manim import Rectangle
 
     k = _ppu()
     ppw = round(height * k / dz.SM_D * 1.3, 1)
-    img = ImageMobject(dz.sm_tile("lit", ppw, shelf))
+    img = ImageMobject(dz.sm_detail(ppw, shelf))
     img.set_resampling_algorithm(RESAMPLING_ALGORITHMS["bilinear"])
     img.set_height(height)
     img.move_to(np.asarray(centre, float))
     frame = Rectangle(width=img.width + 0.08, height=img.height + 0.08, stroke_color="#7fb2ea",
-                      stroke_width=2).move_to(img)
-    title = label("1 SM", 22, INK).next_to(frame, np.array([0, 1, 0]), buff=0.1)
-    sub = label("4 × 32 lanes", 16, INK_SOFT).next_to(frame, DOWN, buff=0.1)
-    target = sm_point(pl, i)
-    corners = [frame.get_corner(np.array([a, b, 0])) for a in (-1, 1) for b in (-1, 1)]
-    start = min(corners, key=lambda c: np.linalg.norm(c - target))
-    lead = Line(start, target, stroke_color="#7fb2ea", stroke_width=2)
-    g = Group(lead, img, frame, title, sub)
-    for m in g.get_family():
-        m.set_z_index(z)
+                      stroke_width=2.5).move_to(img)
+    title = label("1 SM", 26, INK).next_to(frame, np.array([0, 1, 0]), buff=0.12)
+    body = Group(img, frame, title)
+    box = RoundedRectangle(corner_radius=0.14, width=body.width + 0.4, height=body.height + 0.36,
+                           fill_color="#0f141a", fill_opacity=0.97, stroke_color="#2d333b", stroke_width=1.5)
+    box.move_to(body)
+    g = Group(box, img, frame, title)
+    for j, m in enumerate(g.get_family()):
+        m.set_z_index(z + (0 if m is box else 1))
     return g
 
 

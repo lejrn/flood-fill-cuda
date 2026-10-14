@@ -1,10 +1,11 @@
 """r02: one block on one SM. At "So" the floor splits into two half
 floors, the same red drone on each, "CPU" and "GPU" under them with a
 step counter each; at "onto" a block (the blue cube) drops onto SM 0,
-which lights; at "SM" that SM is drawn large (`sm_closeup`, its title
-beside it) for about 2.5 s, next to SM 0 and clear of the split floor,
-the caption and both boards. Text lands at least 1.4 s apart. The race
-in steps, on one clock: the CPU paints one pixel per step (left), the
+which lights; at "SM" that SM grows out of the chip over the idle split
+floor, drawn large like NVIDIA's SM figure (`sm_closeup`: 4 x 32 lanes,
+shared memory), and flies back into SM 0 just before "paint". Text lands
+at least 1.4 s apart. The race in steps starts at "paint", on one clock:
+the CPU paints one pixel per step (left), the
 block one whole 4-way ring per step (right). The right side finishes at
 its ring count; the left side then speeds up and finishes too.
 
@@ -33,7 +34,7 @@ from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT, label
 # sub to its left. In 9:16 it sits in the band between the caption and
 # the GPU board's back edge, left of SM 0; in 16:9, in the empty band
 # above the CPU board. Both keep the CPU board (it races too) in view.
-CLOSEUP = {True: ((-1.58, -2.59), 1.2), False: ((1.57, 1.74), 1.5)}
+CLOSEUP = {True: 3.7, False: 3.5}          # the close-up's height, 9:16 and 16:9
 
 
 class Counter(VGroup):
@@ -72,20 +73,10 @@ def _z(mob, z: float):
 
 
 def sm_callout(L) -> Group:
-    """mc.sm_closeup (SM 0 as lit on the chip, no shelf yet) with its title
-    and sub moved beside the picture (a short panel fits the free bands next
-    to SM 0), the leader redrawn from the nearest corner, on a dark panel."""
-    (cx, cy), h = CLOSEUP[L.G.vertical]
-    lead, img, frame, title, sub = mc.sm_closeup(L.machine_pl, np.array([cx, cy, 0.0]), h, i=0, shelf=False)
-    VGroup(title, sub).arrange(DOWN, buff=0.12).next_to(frame, LEFT, buff=0.15)
-    target = mc.sm_point(L.machine_pl, 0)
-    corners = [frame.get_corner(np.array([a, b, 0])) for a in (-1, 1) for b in (-1, 1)]
-    lead.put_start_and_end_on(min(corners, key=lambda c: np.linalg.norm(c - target)), target)
-    body = Group(img, frame, title, sub)            # the leader line stays outside the panel
-    box = RoundedRectangle(corner_radius=0.12, width=body.width + 0.3, height=body.height + 0.3,
-                           fill_color=ov.PANEL, fill_opacity=0.97, stroke_color=GRID, stroke_width=1.5)
-    box.move_to(body).set_z_index(lead.z_index - 1)
-    return Group(box, lead, img, frame, title, sub)
+    """mc.sm_closeup over the floor area (the split floors are still at step
+    0): SM 0 drawn large, with its 4 x 32 lanes and shared memory labelled."""
+    h = CLOSEUP[L.G.vertical]
+    return mc.sm_closeup(L.machine_pl, L.G.floor_c, h, i=0, shelf=False)
 
 
 def time_card(n: dict, halves: list, ins, strip):
@@ -168,15 +159,21 @@ class OneBlock(ChainScene):
 
         # ---- "SM": that SM, drawn large, for about 2.5 s (its title waits out the floor labels)
         sm = sm_callout(self.Lay)
+        home = mc.sm_point(self.Lay.machine_pl, 0)
         t_sm = max(self.cue("SM"), t_lab + MIN_DWELL, self.elapsed())
         self.until(t_sm)
-        self.play(FadeIn(sm), run_time=fr(5))
+        self.play(FadeIn(sm, target_position=home, scale=0.08), run_time=fr(8))
+        self.say(f"{int(n['small_tpb'])} threads", at=max(self.cue("threads"), t_sm + MIN_DWELL))
+        # back into SM 0 just before "paint", where the race starts
+        self.until(max(self.cue("paint") - fr(8), t_sm + fr(8) + MIN_DWELL, self.elapsed()))
+        self.play(FadeOut(sm, target_position=home, scale=0.08), run_time=fr(8))
 
         # ---- the race in steps, on one clock
-        t_r0 = max(self.cue("two"), self.elapsed())
+        t_r0 = max(self.cue("paint"), self.elapsed())
         t_r1 = max(self.cue("once"), t_r0 + 1.2)        # the right side's last ring
         dt = (t_r1 - t_r0) / (rings - 1)
-        t_l1 = min(t_r1 + 0.9, self.cue("But") - fr(2))  # the left side, sped up, done before the card
+        # the left side, sped up, done before the card (and never in under 0.4 s)
+        t_l1 = max(t_r1 + 0.4, min(t_r1 + 0.9, self.cue("But") - fr(2)))
         gpu_done = floor_raster("drone_gpu", right.rpx)
         cpu_done = floor_raster("drone_cpu", left.rpx)
 
@@ -213,9 +210,6 @@ class OneBlock(ChainScene):
         self.until(t_r0)
         self.floor_play(ring_at, render_right, t_l1 - t_r0, floor=right)
         self.floor_play(pixels_at, render_left, t_l1 - t_r0, floor=left)
-        self.say(f"{int(n['small_tpb'])} threads", at=max(self.cue("threads"), t_sm + MIN_DWELL))
-        self.until(max(t_sm + 2.2, self.elapsed()))
-        self.play(FadeOut(sm), run_time=fr(4))
 
         # ---- "But": the race in time, on a 16 K px test blob: the CPU stops first
         card, bars = time_card(n, halves, self.over.get("inset"), self.over.get("strip"))
