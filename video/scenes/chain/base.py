@@ -298,12 +298,12 @@ class ChainScene(BeatScene):
         self.cap = new
         self._cap_t = self.elapsed()
 
-    def say_last(self, at: float | None = None, frames: int = 5) -> None:
+    def say_last(self, at: float | None = None, frames: int = 5, extra=()) -> None:
         """The beat's last caption: the one `chain_state(k + 1)` carries over the cut."""
         cc = carry_caption(self.k + 1)
         if cc is None:
             raise ValueError(f"{self.beat}: no carried caption for state {self.k + 1}")
-        self.say(*cc, at=at, frames=frames)
+        self.say(*cc, at=at, frames=frames, extra=extra)
 
     def unsay(self, frames: int = 4, extra=()) -> None:
         anims = list(extra)

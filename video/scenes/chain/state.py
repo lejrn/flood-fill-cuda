@@ -249,7 +249,7 @@ def boundary(k: int) -> Boundary:
                    goal=ov.GoalSpec(needle_ms=n["ch06_rgb_ms"], needle_text=fmt_ms(n["ch06_rgb_ms"]),
                                     needle_color=TEAL, mask_mark=True),
                    rows=(small, huge, many), tag=("COUNT", True),
-                   cap=(fmt_ms(n["ch06_rgb_ms"]), f"RGB in; {fmt_ms(n['ch06_mask_ms'])} from a packed mask"))
+                   cap=(fmt_ms(n["ch06_rgb_ms"]), "from the RGB image"))
 
 
 # ---- floor rasters ----

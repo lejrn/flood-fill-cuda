@@ -19,7 +19,6 @@ World layout (x right, y away from the viewer, z up):
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from functools import lru_cache
 
 import numpy as np
 from manim import DOWN, Group, ImageMobject, RoundedRectangle, VGroup, config
@@ -28,7 +27,7 @@ from PIL import Image
 
 from scenes.chain import die as dz
 from scenes.chain.iso import Box, Placement, box_faces, on_plane, plane_corners
-from scenes.style import BLUE, GOLD, GREY, INK, INK_SOFT, RED_PX, TEAL, label
+from scenes.style import BLUE, GOLD, GREY, INK, INK_SOFT, TEAL, label
 
 # ---- colours ----
 BOARD = "#10161c"
@@ -220,8 +219,10 @@ def _boxes(spec: Spec) -> list[tuple[str, Box]]:
             out.append(("teams", Box(x, r.y + 0.16, DIE_Z, bw, 0.24, 0.10, blue_or_gold, layer=4)))
     if spec.room_fence:
         r = sm_rect(0)
+        # like the gate: a low rail at rest (SM 0 stays visible), a wall when the threads wait
+        h = 0.18 if spec.room_fence == "wait" else 0.05
         out += [("room_fence", b) for b in _fence(r.x - 0.03, r.y - 0.03, r.x1 + 0.03, r.y1 + 0.03,
-                                                     DIE_Z, 0.18, spec.room_fence)]
+                                                     DIE_Z, h, spec.room_fence)]
     if spec.gate:
         gx, gy = GPU_DIE
         # at rest the gate is a low rail; when the blocks wait at it, it rises, amber
@@ -291,7 +292,7 @@ def _labels(spec: Spec, pl: Placement) -> list[tuple[str, object, tuple]]:
     for x0, name, model in ((CPU_X, "CPU", "i9-13900H"), (GPU_X, "GPU", "RTX 4060 Laptop")):
         t = VGroup(label(name, 40, INK), label(model, 26, INK_SOFT))
         t.arrange(direction=np.array([1, 0, 0]), buff=0.18, aligned_edge=DOWN)
-        t.scale(0.2 / t.height)                  # world units, left-aligned on the front strip
+        t.scale(0.27 / t.height)                 # world units, left-aligned on the front strip
         out.append(("labels", on_plane(t, pl, (x0 + BM + t.width / 2, FRONT / 2), 0.0), ()))
     if spec.queue:
         r = vram_rects()[-1]
@@ -305,14 +306,15 @@ def _labels(spec: Spec, pl: Placement) -> list[tuple[str, object, tuple]]:
 
 def launch_chip(text: str, pl: Placement) -> VGroup:
     """The launch counter: a small pill over the PCIe link (launches cross it)."""
-    t = VGroup(label(text, 20, INK, mono=True), label("launches", 15, INK_SOFT))
+    word = "launch" if text == "1" else "launches"
+    t = VGroup(label(text, 20, INK, mono=True), label(word, 60, INK_SOFT).scale(0.25))
     t.arrange(np.array([1, 0, 0]), buff=0.1, aligned_edge=DOWN)
     box = RoundedRectangle(corner_radius=0.1, width=t.width + 0.3, height=t.height + 0.2, fill_color="#0f141a",
                            fill_opacity=0.95, stroke_color="#2d333b", stroke_width=1.5)
     p = pl.to_frame([[CPU_BW + GAP / 2, (LINK_Y[0] + LINK_Y[1]) / 2, 0.0]])[0]
     g = VGroup(box, t)
     t.move_to(box)
-    g.move_to(p + np.array([0.0, 0.32, 0.0]))
+    g.move_to(p + np.array([0.0, 0.62, 0.0]))         # clear of the link: launches show crossing it
     return g
 
 

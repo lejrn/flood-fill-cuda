@@ -5,7 +5,7 @@ painted in one stroke. The queue leaves VRAM, the gate (the ring loop) and
 the launch counter go; six plain kernels slide into the gap between the
 boards, with 5 seams where the gate was, and light one by one while the
 real frame turns teal. About three milliseconds: the needle crosses the
-budget, then the scoreboard card opens on the count row.
+budget, then the strip's last pill fills (r11 opens the full card).
 
 Starts on chain_state(12), ends on chain_state(13).
 """
@@ -14,15 +14,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import DOWN, UP, FadeIn, FadeOut, SurroundingRectangle, config
+from manim import FadeIn, FadeOut
 
 from scenes.chain import floor as fl
 from scenes.chain import overlays as ov
 from scenes.chain import toy
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
-from scenes.chain.state import (BLOB_HUES, TEAL, Z_OVER, boundary, carry_caption, label_colors, mix, picture,
-                                score_rows, teal_picture, toys)
-from scenes.style import GOLD, GREY
+from scenes.chain.state import (BLOB_HUES, TEAL, boundary, carry_caption, label_colors, mix, picture,
+                                teal_picture, toys)
+from scenes.style import GOLD
 
 ROW = 12        # a middle row of the toy with three runs (the U's two arms and a blob)
 # the linked groups' colours, less any that reads as amber (amber means waiting)
@@ -61,37 +61,6 @@ class Runs(ChainScene):
             anims.append(FadeIn(new))
             self.over[name] = new
         return anims, old
-
-    def card(self, rows: tuple, h: int):
-        """The full scoreboard, its footnote naming each row's sessions, row h
-        framed (teal: a GPU win, grey: a CPU win)."""
-        foot = "; ".join(f"row {i + 1}: {r.tag}" for i, r in enumerate(rows))
-        c = ov.score_card(self.G, rows, highlight=h, footnote=foot)
-        line = c[1][1][1 + h]                      # box, body -> (title, lines, foot); lines[0] is the head
-        col = TEAL if rows[h].winner == "GPU" else GREY
-        frame = SurroundingRectangle(line, color=col, buff=0.09, corner_radius=0.08, stroke_width=2.5)
-        frame.set_z_index(Z_OVER + 21)
-        c.add(frame)
-        # where r11 opens its card, so it keeps its place across the cut: 9:16
-        # over the floor, 16:9 left of the boards (the six kernels stay in view)
-        G, w = self.G, config.frame_width
-        if G.vertical:
-            x0, x1 = -w / 2 + 0.15, w / 2 - 0.15
-        else:
-            x0, x1 = -w / 2 + 0.2, self.machine.part("boards").get_left()[0] - 0.15
-        c.scale(min(1.0, (x1 - x0) / c.width))
-        c.set_x(min(max(G.floor_c[0], x0 + c.width / 2), x1 - c.width / 2))
-        # and clear of what it would cut through: the inset and the act tag
-        # above it (9:16: the inset's line sits on the card's top band), the caption below
-        hi, lo = np.inf, self.cap.get_top()[1] + 0.15 if self.cap is not None else -np.inf
-        for name in ("inset", "tag"):
-            m = self.over.get(name)
-            if m is not None and m.get_right()[0] > c.get_left()[0] and m.get_left()[0] < c.get_right()[0]:
-                hi = min(hi, m.get_bottom()[1] - 0.12)
-        if c.height > hi - lo:
-            c.scale((hi - lo) / c.height)
-        c.shift(DOWN * max(0.0, c.get_top()[1] - hi) + UP * max(0.0, lo - c.get_bottom()[1]))
-        return c
 
     def beat_anim(self) -> None:
         t = toys()
@@ -217,16 +186,10 @@ class Runs(ChainScene):
         self.say_last(at=t_about, frames=6, extra=anims)
         self.remove(*old)
 
-        # then the scoreboard card opens on the count row (its footnote names the
-        # sessions) and the strip's last pill fills; the card stays to the end of
-        # the hold and closes here, not in base (whose fade's last step is never
-        # drawn: the frame before the snap would keep a trace of it)
-        rows = score_rows()
-        card = self.card(rows, 2)
+        # then the strip's last pill fills (GPU 35x): the full card, with the
+        # sessions behind each row, opens at the start of r11
         anims, old = self.over_in(strip=self.strip(end.rows))
         self.until(t_about + MIN_DWELL)
-        self.play(*anims, FadeIn(card, scale=0.96), run_time=fr(6))
+        self.play(*anims, run_time=fr(6))
         self.remove(*old)
-        self.until(self.target_seconds() + 0.4 - fr(3) - fr(3))
-        self.play(FadeOut(card), run_time=fr(3))
         assert self.machine.spec == end.machine, (self.machine.spec, end.machine)

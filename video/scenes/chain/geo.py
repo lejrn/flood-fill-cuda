@@ -51,7 +51,7 @@ def frame() -> Frame:
             goal_c=np.array([0.0, top - 0.62, 0]), goal_w=7.4,
             score_c=np.array([0.0, top - 1.55, 0]), score_w=7.4,
             card_c=np.array([0.0, 2.05, 0]),
-            inset_c=np.array([-2.95, 4.25, 0]),
+            inset_c=np.array([-2.95, 4.5, 0]),
             tag_c=np.array([3.2, 4.3, 0]),
             vertical=True,
         )
