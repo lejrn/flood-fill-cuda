@@ -13,3 +13,6 @@ __pycache__/
 *.wav
 *.mp3
 *.mp4
+
+# frames from third-party reference videos, local only
+reference/infinite-desk/frames/

@@ -24,5 +24,7 @@ scenes render it in both layouts, so a landscape re-render picks it up.
 
 - `scenes/BRIEF.md`: what is on screen and the rules.
 - `HANDOFF.md`: stack, pipeline, commands, gotchas, open items.
+- `reference/infinite-desk/`: how 21 Infinite Desk Shorts build an invention
+  as a problem-to-fix chain, and the method distilled from them (`README.md`).
 - Every number comes from a committed benchmark JSON via
   `scenes/panes/data.py`; `build/audit_numbers.py` checks them.
