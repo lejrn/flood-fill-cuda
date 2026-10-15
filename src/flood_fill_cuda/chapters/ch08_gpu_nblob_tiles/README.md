@@ -480,7 +480,8 @@ ch07's 157 tests and ch06's 109 also pass.
 ## Deviations from the design (and why)
 
 1. **The default lookup is a new hybrid** (E13), not the scan or the
-   index. The scan and index twins stay, and every scene times all three.
+   index. The scan and index twins stay. Every main and worst-case
+   scene times all three; the crops time only the hybrid.
 2. **The index covers only tiles with 2+ ring comps.** A single ring
    comp is ordinal 0. Indexing every touched tile cost +2-4%.
 3. **K2 is capped at 80 registers on a 1536-block grid** (E3), and the
