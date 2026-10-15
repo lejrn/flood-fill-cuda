@@ -760,7 +760,10 @@ def main():
                         "run_capacity": "max(8192, 1.05 * host runs)"},
         "ch05_config": {"label": CH05_LABEL, **CH05_CFG},
         "resources": resources,
-        "png_md5": md5, "png_paths": pngs,
+        # File names only: the md5 identifies the image, and a full path
+        # would record the local directory layout.
+        "png_md5": md5,
+        "png_paths": {n: os.path.basename(p) for n, p in pngs.items()},
         "policy": {"gpu_repeats": GPU_REPEATS,
                    "phase_repeats": PHASE_REPEATS,
                    "merge_sweep_repeats": SWEEP_REPEATS,
