@@ -558,7 +558,7 @@ ch07's 157 tests and ch06's 109 also pass.
    shapes (serpentine 0.421 vs 0.558 ms) but costs on `input_blobs`
    because K2 indexes every tile with 2+ ring comps.
 3. **Degenerate shapes.** A 1-px strip puts 32 px in a tile: 131,072
-   tiles and about 416 MB of buffers for 4 Mpx. A 1-D tiling, or
+   tiles and about 416 MiB of buffers for 4 Mpx. A 1-D tiling, or
    routing thin images to another method, would fix both.
 4. **Port `pack_tiles` to ch06.** It is worth 0.33 ms there (2.617 to
    2.291 ms on input_blobs).
