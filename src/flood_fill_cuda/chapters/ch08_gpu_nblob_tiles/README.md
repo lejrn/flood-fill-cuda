@@ -221,8 +221,8 @@ moves the method between two ends.
 
 **The valve is an escape hatch, not the method.** At L8 it fires only
 on chains that avoid the lattice for 16 rounds: the diagonal snake and
-the staircases below. There it stops the waves and lets the unions
-finish.
+the two staircases of E9 (the decoy one is in the worst cases below).
+There it stops the waves and lets the unions finish.
 
 So yes: on every main scene the labels travel as frontier waves over
 the comp graph, and union-find only joins waves of one blob that met.
