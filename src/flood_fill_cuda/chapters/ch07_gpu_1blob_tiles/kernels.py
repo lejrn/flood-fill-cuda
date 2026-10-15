@@ -427,20 +427,23 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None):
 
                 # ---- atomics: the owner's own word, then the exports.
                 # (f != f0 implies inb: out-of-image lanes hold m = 0.)
+                # All three exports are issued before any old value is
+                # used, so their round trips overlap instead of chaining
+                # (a skipped export keeps o = 0, and c & ~0 = c = 0).
                 if f != f0:
                     cuda.atomic.or_(reached, uint32(li), f)
-                add_up = False
-                add_dn = False
-                add_e = False
+                o_up = U0
+                o_dn = U0
+                o_e = U0
                 if c_up != U0:
-                    o = cuda.atomic.or_(reached, uint32(li - 1), c_up)
-                    add_up = uint32(c_up & ~o) != U0
+                    o_up = cuda.atomic.or_(reached, uint32(li - 1), c_up)
                 if c_dn != U0:
-                    o = cuda.atomic.or_(reached, uint32(li + 1), c_dn)
-                    add_dn = uint32(c_dn & ~o) != U0
+                    o_dn = cuda.atomic.or_(reached, uint32(li + 1), c_dn)
                 if c_e != U0:
-                    o = cuda.atomic.or_(reached, uint32(le), c_e)
-                    add_e = uint32(c_e & ~o) != U0
+                    o_e = cuda.atomic.or_(reached, uint32(le), c_e)
+                add_up = uint32(c_up & ~o_up) != U0
+                add_dn = uint32(c_dn & ~o_dn) != U0
+                add_e = uint32(c_e & ~o_e) != U0
                 if instrumented:
                     c_or = uint32(c_or + uint32(f != f0) + uint32(c_up != U0)
                                   + uint32(c_dn != U0) + uint32(c_e != U0))
