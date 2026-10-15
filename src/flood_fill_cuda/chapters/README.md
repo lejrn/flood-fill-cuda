@@ -8,18 +8,20 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs
-                                     │                                      │                            │                                    │                                   │                                    │
-                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:
-                                     ▼                            one BFS? where do they run?"    what stops it - and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,
-                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write
-                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs ──"one pixel per step?"──► 1 blob, tiles
+                                     │                                      │                            │                                    │                                   │                                    │                                     │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:        "one step closes a 32×32 tile:
+                                     ▼                            one BFS? where do they run?"    what stops it - and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,      BFS over tiles, ~31× fewer steps;
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write   but ch06's runs still beat its core
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)       (70.5 ms → 3.49 ms vs ch03, bare)
                                                                                                   plateau at 512 threads/SM      (1.6-1.8×)                        (755k blobs in 25 ms)
 ```
 
 Chapters 1-5 all ask *how should pixels move?* Chapter 6 asks whether
 they should be the unit at all, and the answer - runs, not pixels - is
-worth more than every scheduling result before it combined.
+worth more than every scheduling result before it combined. Chapter 7
+goes back to one blob and asks the BFS question again with a bigger
+step: a tile, not a pixel.
 
 ---
 
@@ -168,7 +170,8 @@ it down?" into a measured 0-3% (global/dirsplit) and 1.4-8.7% (split).
    Chapter 3.*
 2. **The serpentine remains unbeaten** by everything GPU: candidate
    answer is tile-based BFS (iterate inside a shared-memory tile between
-   global syncs) - trade barrier count for redundant tile work.
+   global syncs) - trade barrier count for redundant tile work. *→ became
+   Chapter 7, with the tile in registers instead of shared memory.*
 3. **Register dieting** for the dual kernels: fewer live window variables
    → higher tpb ceilings without spills.
 4. **Measured (not derived) hardware truth:** an `ncu` profiling pass -
@@ -272,7 +275,8 @@ structure, sharpening what `ncu` must arbitrate.
 2. **Register dieting** - the bare twin proves 768 threads/SM fit; a
    slimmer instrumented kernel tests whether residency moves the plateau.
 3. **Tile-based BFS** for the serpentine - N blocks made the worst case
-   worse; only fewer barriers can fix it.
+   worse; only fewer barriers can fix it. *→ became Chapter 7 (36× fewer
+   steps on the serpentine; one CPU core still wins it).*
 4. **Multi-blob** (connected-component labeling) - unchanged from
    Chapter 2's list. *→ became Chapter 4 (the labeling half; discovering
    the components is still open).*
@@ -536,11 +540,72 @@ judges both chapters, bit for bit.
 5. **Sub-millisecond end to end needs the OUTPUT to stop being RGB** -
    a paletted 1 B/px output puts the write at 13 MB instead of 40.
 
+*(Chapter 7 took up an older candidate instead: the tile-based BFS that
+Chapters 2 and 3 both named.)*
+
+---
+
+## Chapter 7 - one blob, a frontier of tiles (`ch07_gpu_1blob_tiles/`)
+
+### Inherited problems
+1. **The barrier ritual is ch03's bill.** Two `grid.sync` per BFS level:
+   4,001 levels on the 64 Mpx square, 32,641 on the serpentine.
+2. **Every pixel pays atomics**: 3.16 visited-CAS attempts per filled
+   pixel at 8-conn, claimed and enqueued one by one.
+3. **The candidate was named twice.** Chapters 2 and 3 both listed
+   tile-based BFS: iterate inside a tile between global syncs.
+4. **Chapter 6 needs no BFS at all.** Does a BFS with a bigger step
+   still have a place next to a run-based CCL?
+
+### Approaches - what each bets
+| approach | the bet |
+|---|---|
+| **32×32 tiles closed in registers** | Kogge-Stone fills along the 32-bit mask word and across the warp's 32 lanes close a tile with no memory traffic, so one BFS step moves the front a tile, not a pixel |
+| **filtered border exports** | plain loads keep the atomics to bits that are new and red in the neighbour tile |
+| **ch03's skeleton, for tiles** | the same global queue, warp-aggregated enqueue and two `grid.sync` per round; a per-tile stamp admits a tile to a round once |
+| **ch06's pack, a coalesced paint** | the 1-bit mask is the tiles' input; one pass paints the reached bits |
+
+### Results (RTX 4060 Laptop, session `tiles_20261015T114440Z`)
+| finding | number |
+|---|---|
+| headline (bare twins, each at its own grid) | `sq_8000`: **70.51 → 3.49 ms (20.2×)**; 20-24× on the 11-64 Mpx blobs, 12.7× at 1 Mpx. Instrumented pair 23.8×, best grid vs best grid 22.2× |
+| fewer steps | 27.8-36.1× fewer rounds than levels on ch03's six scenes (4,001 → 127 on `sq_8000`) |
+| fewer atomics | 210.9M CAS → 5.1M OR + stamp on `sq_8000` (41×) |
+| the serpentine | 34.4× ch03 (bare pair), but one CPU core is still 4.2× faster (0.94 vs 3.92 ms) |
+| **against ch06's run CCL** | ch06 wins `sq_8000` (2.38 vs 3.49 ms), `sq_4000` and the serpentine (29×). ch07 wins `sq_2000` (1.77×) and the disk (1.12×) only through ch06's paint launch. ch06's connectivity core is 2.6-9.5× cheaper on every blob |
+| where tiles degrade | zigzags on the tile borders make rounds equal levels: 0.96× and 0.88× ch03. A 1-px maze still wins 11.1× |
+| a launch shape | on a 524288×32 strip ch06's pack grid left 7 of 8 warps idle; sizing the block by the row's words took the same kernel from 3.16 to 0.41 ms |
+| the `syncwarp` lesson | one reconverging `cuda.syncwarp()` before the closure's shuffles: column fill 6,520 → 429 cycles (15.2×), rounds kernel 2.1-3.0× faster |
+| fairness | an audit moved the headline from 23.8× (ch03's instrumented pin) to 20.2× (its bare twin at its own grid), and caught a CPU pass relaxing the GPU clock between scenes |
+
+### New problems and lessons
+- **A frontier of tiles beats a frontier of pixels, not the absence of
+  a frontier.** ch06's runs do the connectivity part cheaper on every
+  blob, and 35× cheaper on the serpentine.
+- **Fewer steps is a property of the shape.** Paths that run along the
+  tile borders erase it; a tiling is a bet on the image.
+- **A step is now a latency chain.** Half a serpentine round is the
+  barrier pair, half is ~9-10 dependent memory trips. On big blobs the
+  RGB read and write are most of the pipeline.
+- **Warp intrinsics in loops need an explicit reconvergence.** The
+  compiler's fallback is a slow path that runs silently.
+- **Measure the baseline's best, not its default.**
+
+### Open problems → Chapter 8 candidates
+1. **Many blobs: labels on `input_blobs.png`.** Close tiles in registers
+   with local labels and join them across borders with ch06's
+   union-find: no rounds at all.
+2. **A narrow-front mode** without `grid.sync`, and a shifted tiling
+   against border-aligned paths.
+3. **ch06's launch shapes on thin images**, and `pack` folded into the
+   rounds.
+4. **`ncu`**, still owed (`ERR_NVGPUCTRPERM` on this machine).
+
 ---
 
 ## Epilogue - the same story, retold in Triton
 
-Every chapter above was rebuilt in Triton, kernel for kernel, with the
+Chapters 0-6 were rebuilt in Triton, kernel for kernel, with the
 same tests. Both backends were timed on the same cells: 1,214 rows,
 deterministic outputs identical on every run.
 
