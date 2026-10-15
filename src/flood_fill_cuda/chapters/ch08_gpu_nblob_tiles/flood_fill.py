@@ -49,9 +49,10 @@ from .kernels import (
     get_paint_kernel, gpu_sleep_kernel, fill_i32, pack_shape,
     MODE_RGB, MODE_LABEL, MODE_SEEDS, NUM_COUNTERS, COUNTER_NAMES,
     N_QSTATE, N_STAMPS, IDS_PER_TILE, REC, TILE, HDR_RING_MASK,
-    HDR_TOTAL_SHIFT, ST_UNION, ST_FLAT1, ST_FLAT2)
+    HDR_TOTAL_SHIFT, ST_UNION, ST_FLAT1, ST_FLAT2, INDEX_BYTES)
 
 CONTRACTS = ("rgb", "mask")
+LOOKUPS = ("scan", "index")
 PHASES = ("pack", "init", "label", "waves", "paint")
 MASK_PHASES = PHASES[1:]
 LABEL_ONLY_PHASES = ("init", "label", "waves")
@@ -108,7 +109,7 @@ class TileWaves:
                  debug=False, waves_tpb=WAVES_TPB, waves_blocks=None,
                  label_grid=LABEL_GRID, paint_grid=PAINT_GRID,
                  label_max_registers=None, paint_fast=True,
-                 pack_variant="direct", _skip_warmup=False):
+                 pack_variant="direct", label_exits=2, _skip_warmup=False):
         width, height = int(width), int(height)
         if width < 1 or height < 1:
             raise ValueError(f"bad shape {width}x{height}")
@@ -118,9 +119,9 @@ class TileWaves:
         if connectivity not in (4, 8):
             raise ValueError(
                 f"connectivity must be 4 or 8, got {connectivity!r}")
-        if lookup != "scan":
-            raise ValueError(f"lookup must be 'scan', got {lookup!r} (the "
-                             f"index twin was not built; see the README)")
+        if lookup not in LOOKUPS:
+            raise ValueError(f"lookup must be one of {LOOKUPS}, got "
+                             f"{lookup!r}")
         if lattice < 0 or valve_round < 0:
             raise ValueError("lattice and valve_round must be >= 0")
         if waves_tpb % 32 or not 32 <= waves_tpb <= 1024:
@@ -140,6 +141,8 @@ class TileWaves:
         self.lattice = int(lattice)
         self.valve_round = int(valve_round)
         self.lookup = lookup
+        self.index = lookup == "index"
+        self.label_exits = int(label_exits)
         self.instrumented = bool(instrumented)
         self.debug = bool(debug)
         self.paint_fast = bool(paint_fast)
@@ -155,9 +158,10 @@ class TileWaves:
 
         self.pack_k = get_pack_kernel(pack_variant)
         self.label_k = get_label_kernel(connectivity, self.instrumented,
-                                        self.debug, label_max_registers)
+                                        self.debug, label_max_registers,
+                                        self.index, self.label_exits)
         self.waves_k = get_waves_kernel(connectivity, self.instrumented,
-                                        self.debug)
+                                        self.debug, self.index)
         self.paint_k = get_paint_kernel(connectivity, MODE_RGB,
                                         self.paint_fast, self.instrumented,
                                         self.debug)
@@ -181,11 +185,19 @@ class TileWaves:
         self.cb = cuda.device_array(cc, np.int32)
         self.q_state = cuda.device_array(N_QSTATE, np.int32)
         self.counters = cuda.device_array(NUM_COUNTERS, np.int64)
-        nb = (self.valve_round + 4 if self.valve_round
-              else min(n_ids + 2, 1 << 16)) if self.instrumented else 1
+        # per-round rears (instrumented): rounds <= crossing comps + 1,
+        # and <= valve_round + 2 with the valve on; a run may switch the
+        # valve off, so size for that (rounds past the end are not kept)
+        nb = min(n_ids + 2, 1 << 16) if self.instrumented else 1
         self.bounds = cuda.device_array(nb, np.int32)
         self.stamps = cuda.device_array(N_STAMPS if self.instrumented else 1,
                                         np.int64)
+        if self.index:
+            self.idx = cuda.device_array(INDEX_BYTES * self.n_tiles, np.uint8)
+            self.frame = cuda.device_array(4 * self.n_tiles, np.uint32)
+        else:
+            self.idx = cuda.device_array(1, np.uint8)
+            self.frame = cuda.device_array(1, np.uint32)
         self._dummy_img = cuda.device_array((1, 1, 3), np.uint8)
         self._dummy_lmap = cuda.device_array((1, 1), np.int32)
         self._dummy_seeds = cuda.device_array(1, np.int32)
@@ -197,9 +209,10 @@ class TileWaves:
             self.coop_max_blocks = -1
             return
         _warmup(connectivity, self.instrumented, self.debug,
-                label_max_registers, self.paint_fast, pack_variant)
+                label_max_registers, self.paint_fast, pack_variant,
+                lookup, self.label_exits)
         cap = max_blocks(self.waves_tpb, connectivity, self.instrumented,
-                         self.debug)
+                         self.debug, lookup)
         if cap < 1:
             raise RuntimeError("this GPU cannot host one cooperative block "
                                f"of the waves kernel at {waves_tpb} threads")
@@ -225,19 +238,21 @@ class TileWaves:
         init_kernel[1, 64](self.q_state, self.counters)
         self.label_k[self.label_grid[0], self.label_grid[1]](
             self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-            self.ql, self.qd, self.q_state, self.counters,
-            np.int32(self.width), np.int32(self.height),
+            self.ql, self.qd, self.q_state, self.counters, self.idx,
+            self.frame, np.int32(self.width), np.int32(self.height),
             np.int32(self.words_per_row), np.int32(self.n_tiles),
             np.int32(lat))
 
-    def run(self, img_dev, contract="rgb", lattice=None):
+    def run(self, img_dev, contract="rgb", lattice=None, valve_round=None):
         """Enqueue the pipeline; returns (phase names, events). No sync.
 
-        lattice overrides the engine's lattice for this run only (it is a
-        runtime argument of K2, so one engine serves every seed rule)."""
+        lattice and valve_round override the engine's values for this run
+        only (both are runtime arguments, so one engine serves every seed
+        rule and valve setting; valve_round 0 is "off")."""
         if contract not in CONTRACTS:
             raise ValueError(f"contract must be one of {CONTRACTS}")
         lat = self.lattice if lattice is None else int(lattice)
+        valve = self.valve_round if valve_round is None else int(valve_round)
         names = PHASES if contract == "rgb" else MASK_PHASES
         events = [cuda.event(timing=True) for _ in range(len(names) + 1)]
         i = 0
@@ -251,8 +266,8 @@ class TileWaves:
         events[i].record()
         self.label_k[self.label_grid[0], self.label_grid[1]](
             self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-            self.ql, self.qd, self.q_state, self.counters,
-            np.int32(self.width), np.int32(self.height),
+            self.ql, self.qd, self.q_state, self.counters, self.idx,
+            self.frame, np.int32(self.width), np.int32(self.height),
             np.int32(self.words_per_row), np.int32(self.n_tiles),
             np.int32(lat))
         i += 1
@@ -260,8 +275,8 @@ class TileWaves:
         self.waves_k[self.waves_blocks, self.waves_tpb](
             self.hdr, self.rec, self.parent, self.qc, self.ql, self.qd,
             self.ca, self.cb, self.q_state, self.counters, self.bounds,
-            self.stamps, np.int32(self.words_per_row),
-            np.int32(self.n_tiles), np.int32(self.valve_round),
+            self.stamps, self.idx, self.frame, np.int32(self.words_per_row),
+            np.int32(self.n_tiles), np.int32(valve),
             np.int32(self.coll_capacity))
         i += 1
         events[i].record()
@@ -363,6 +378,9 @@ class TileWaves:
         for a in (self.hdr, self.rec, self.parent, self.qc, self.ql,
                   self.qd, self.ca, self.cb):
             fill_i32[256, 256](a, v)
+        if self.index:
+            fill_i32[256, 256](self.idx, np.int32(0x5A))
+            fill_i32[256, 256](self.frame, v)
 
 
 def phase_times(names, events):
@@ -373,28 +391,34 @@ def phase_times(names, events):
 
 
 def max_blocks(threads_per_block=WAVES_TPB, connectivity=8,
-               instrumented=False, debug=False):
+               instrumented=False, debug=False, lookup="scan"):
     """Cooperative capacity of the waves kernel twin, queried after its
     first compile (an uncompiled dispatcher has no overload)."""
-    key = (threads_per_block, connectivity, bool(instrumented), bool(debug))
+    key = (threads_per_block, connectivity, bool(instrumented), bool(debug),
+           lookup)
     if key not in _coop:
-        _warmup(connectivity, instrumented, debug)
-        kern = get_waves_kernel(connectivity, instrumented, debug)
+        _warmup(connectivity, instrumented, debug, lookup=lookup)
+        kern = get_waves_kernel(connectivity, instrumented, debug,
+                                lookup == "index")
         _coop[key] = _overload(kern).max_cooperative_grid_blocks(
             threads_per_block)
     return _coop[key]
 
 
 def kernel_resources(connectivity=8, instrumented=False, debug=False,
-                     label_max_registers=None, paint_fast=True):
+                     label_max_registers=None, paint_fast=True,
+                     lookup="scan", label_exits=2):
     """Registers and spill bytes per thread of each compiled kernel."""
     _warmup(connectivity, instrumented, debug, label_max_registers,
-            paint_fast)
+            paint_fast, lookup=lookup, label_exits=label_exits)
+    index = lookup == "index"
     out = {}
     for name, kern in (
             ("label", get_label_kernel(connectivity, instrumented, debug,
-                                       label_max_registers)),
-            ("waves", get_waves_kernel(connectivity, instrumented, debug)),
+                                       label_max_registers, index,
+                                       label_exits)),
+            ("waves", get_waves_kernel(connectivity, instrumented, debug,
+                                       index)),
             ("paint", get_paint_kernel(connectivity, MODE_RGB, paint_fast,
                                        instrumented, debug))):
         out[name] = {"regs": _one(kern.get_regs_per_thread()),
@@ -403,10 +427,12 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
 
 
 def _warmup(connectivity=8, instrumented=False, debug=False,
-            label_max_registers=None, paint_fast=True, pack_variant="direct"):
+            label_max_registers=None, paint_fast=True, pack_variant="direct",
+            lookup="scan", label_exits=2):
     """JIT-compile every kernel of a configuration once, on a tiny image."""
     key = (connectivity, bool(instrumented), bool(debug),
-           label_max_registers, bool(paint_fast), pack_variant)
+           label_max_registers, bool(paint_fast), pack_variant, lookup,
+           int(label_exits))
     if key in _warmed:
         return
     tiny = np.full((40, 40, 3), 255, dtype=np.uint8)
@@ -417,6 +443,7 @@ def _warmup(connectivity=8, instrumented=False, debug=False,
                     instrumented=instrumented, debug=debug,
                     label_max_registers=label_max_registers,
                     paint_fast=paint_fast, pack_variant=pack_variant,
+                    lookup=lookup, label_exits=label_exits,
                     waves_tpb=32, waves_blocks=1, label_grid=(1, 32),
                     paint_grid=(1, 32), _skip_warmup=True)
     dev = cuda.to_device(tiny)

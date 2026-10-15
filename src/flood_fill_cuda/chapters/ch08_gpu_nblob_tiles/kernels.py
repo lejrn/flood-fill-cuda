@@ -83,6 +83,8 @@ SUCC = 0xCA                # down, right, DL, DR
 EDGE = np.uint32(0x80000001)
 NEG1 = np.int32(-1)
 HDR_RING_MASK = 63
+INDEX_BYTES = 128          # index twin: a uint8 ordinal per frame pixel,
+                           # 32 per side (N, S, Wc, Ec) per tile
 HDR_TOTAL_SHIFT = 8
 
 # Direction tables packed into ints (no device arrays needed):
@@ -226,6 +228,38 @@ def _close(f, rem, lane, conn8):
         if not cuda.any_sync(FULL, uint32(g & rem & ~f) != U0):
             break
     return f, it, last
+
+
+@cuda.jit(device=True, inline=True)
+def _close_exits(f, rem, lane, conn8, exits):
+    """_close with a compile-time choice of exits, for experiment E2:
+    exits 2 = last comp + frontier (the default, == _close),
+    1 = frontier only, 0 = ch07's loop (stop when a trip changed
+    nothing). Returns (f, iterations, 1 if the last-comp exit fired)."""
+    if exits == 2:
+        return _close(f, rem, lane, conn8)
+    it = 0
+    while True:
+        old = f
+        f = _row_fill(f, rem)
+        if conn8:
+            f = _diag_step(f, rem, lane)
+        f = _col_fill(f, rem, lane)
+        it += 1
+        if exits == 1:
+            cuda.syncwarp()
+            if conn8:
+                d = _dilate(f)
+                g = uint32(d | _up(d, 1) | _down(d, 1))
+            else:
+                g = uint32(f | (f << S1) | (f >> S1) | _up(f, 1)
+                           | _down(f, 1))
+            if not cuda.any_sync(FULL, uint32(g & rem & ~f) != U0):
+                break
+        else:
+            if not cuda.any_sync(FULL, f != old):
+                break
+    return f, it, 0
 
 
 @cuda.jit(device=True, inline=True)
@@ -483,17 +517,21 @@ def init_kernel(q_state, counters):
 
 # ------------------------------------------------------------ K2 label
 
-def _make_label_kernel(conn8, instrumented, debug, max_registers=None):
+def _make_label_kernel(conn8, instrumented, debug, max_registers=None,
+                       index=False, exits=2):
     """K2: one warp per tile, grid-stride over every tile.
 
-    Compile-time flags (closure variables): conn8, instrumented, debug.
-    The bare twin keeps only the interior-comp count (n_blobs needs it).
+    Compile-time flags (closure variables): conn8, instrumented, debug,
+    index (also write the frame-pixel ordinals and the tile's frame words
+    for K3's index lookup), exits (E2: 2 both closure exits, 1 frontier
+    only, 0 ch07's loop). The bare twin keeps only the interior-comp
+    count (n_blobs needs it).
     """
     jit_kw = {} if max_registers is None else {"max_registers": max_registers}
 
     @cuda.jit(**jit_kw)
     def label_kernel(mask, hdr, rec, parent, qc, ql, qd, q_state, counters,
-                     width, height, wpr, n_tiles, lattice):
+                     idx, frame, width, height, wpr, n_tiles, lattice):
         lane = cuda.laneid
         warp = cuda.grid(1) >> 5
         n_warps = cuda.gridsize(1) >> 5
@@ -572,7 +610,7 @@ def _make_label_kernel(conn8, instrumented, debug, max_registers=None):
             while cuda.any_sync(FULL, rem != U0):
                 f, a, bit = _first_pixel(rem, lane)
                 anchor = int32((x0 + a) * height + ty * 32 + bit)
-                f, it, last = _close(f, rem, lane, conn8)
+                f, it, last = _close_exits(f, rem, lane, conn8, exits)
                 rem = uint32(rem & ~f)
                 n_total += 1
                 if instrumented:
@@ -585,6 +623,38 @@ def _make_label_kernel(conn8, instrumented, debug, max_registers=None):
                     sS = _bcast(f, 31)
                     sW = uint32(cuda.ballot_sync(FULL, (f & U1) != U0))
                     sE = uint32(cuda.ballot_sync(FULL, (f >> S31) != U0))
+                    if index and b >= 1:
+                        # lane j records the ordinal of every frame pixel
+                        # j this comp owns, per side (N, S, Wc, Ec). Only
+                        # tiles with 2+ ring comps get an index: K3 takes a
+                        # single ring comp directly. So comp 0's entries
+                        # are written when comp 1 appears (lane 0 still
+                        # holds comp 0's side words then).
+                        ib = uint32(INDEX_BYTES * tc + lane)
+                        if b == 1:
+                            cuda.syncwarp()
+                            zN = _bcast(rN, 0)
+                            zS = _bcast(rS, 0)
+                            zW = _bcast(rW, 0)
+                            zE = _bcast(rE, 0)
+                            b0 = np.uint8(0)
+                            if (zN >> uint32(lane)) & U1:
+                                idx[ib] = b0
+                            if (zS >> uint32(lane)) & U1:
+                                idx[ib + 32] = b0
+                            if (zW >> uint32(lane)) & U1:
+                                idx[ib + 64] = b0
+                            if (zE >> uint32(lane)) & U1:
+                                idx[ib + 96] = b0
+                        bv = np.uint8(b)
+                        if (sN >> uint32(lane)) & U1:
+                            idx[ib] = bv
+                        if (sS >> uint32(lane)) & U1:
+                            idx[ib + 32] = bv
+                        if (sW >> uint32(lane)) & U1:
+                            idx[ib + 64] = bv
+                        if (sE >> uint32(lane)) & U1:
+                            idx[ib + 96] = bv
                     if lane == (b & 31):
                         rN = sN
                         rS = sS
@@ -614,6 +684,18 @@ def _make_label_kernel(conn8, instrumented, debug, max_registers=None):
                     c_lat += sl
                     c_queued += q
                     c_app += ap
+            if index and b >= 2:
+                cuda.syncwarp()
+                fN = _bcast(m, 0)
+                fS = _bcast(m, 31)
+                fW = uint32(cuda.ballot_sync(FULL, (m & U1) != U0))
+                fE = uint32(cuda.ballot_sync(FULL, (m >> S31) != U0))
+                if lane == 0:
+                    fb = uint32(4 * tc)
+                    frame[fb] = fN
+                    frame[fb + 1] = fS
+                    frame[fb + 2] = fW
+                    frame[fb + 3] = fE
             if lane == 0:
                 hdr[uint32(tc)] = b | (n_total << HDR_TOTAL_SHIFT)
             if instrumented:
@@ -655,17 +737,26 @@ def _make_label_kernel(conn8, instrumented, debug, max_registers=None):
 
 # ------------------------------------------------------------ K3 waves
 
-def _make_waves_kernel(conn8, instrumented, debug):
+def _make_waves_kernel(conn8, instrumented, debug, index=False):
     """K3: cooperative. Rounds of claims over the comp graph, one
     grid.sync per round (three rotating append counters), the escalation
     valve, one union pass over the recorded collisions, two flatten
-    passes. Launched with the cooperative maximum of THIS twin."""
+    passes. Launched with the cooperative maximum of THIS twin.
+
+    Neighbour lookup (compile-time `index`):
+      scan   test every ring comp of the neighbour tile against the
+             wanted bits: n_ring(t2) k-steps per task
+      index  hit = wanted bits & the neighbour's frame word; per step,
+             the lowest hit bit's ordinal (K2's byte index) names the
+             comp, and all of that comp's bits leave `hit`: one step per
+             DISTINCT adjacent comp, at the price of a dependent chain
+             (frame word, ordinal, record)."""
     link = [SMID_CU] if instrumented else []
 
     @cuda.jit(link=link)
     def waves_kernel(hdr, rec, parent, qc, ql, qd, ca, cb, q_state,
-                     counters, bounds, stamps, wpr, n_tiles, valve_round,
-                     coll_cap):
+                     counters, bounds, stamps, idx, frame, wpr, n_tiles,
+                     valve_round, coll_cap):
         grid = cuda.cg.this_grid()
         tid = cuda.grid(1)
         stride = cuda.gridsize(1)
@@ -715,6 +806,7 @@ def _make_waves_kernel(conn8, instrumented, debug):
                 n2 = 0
                 t2 = 0
                 want = U0
+                hits = U0
                 fs = (FACING >> (2 * d)) & 3
                 succ = ((SUCC >> d) & 1) != 0
                 if valid:
@@ -730,19 +822,50 @@ def _make_waves_kernel(conn8, instrumented, debug):
                     else:
                         want = uint32(own >> S31)
                     n2 = hdr[uint32(t2)] & HDR_RING_MASK
+                    if index:
+                        # both loads independent; the frame word is only
+                        # written (and only used) for tiles with 2+ ring
+                        # comps, a single ring comp is ordinal 0
+                        fw = frame[uint32(4 * t2 + fs)]
+                        if n2 == 1:
+                            hits = U1
+                        else:
+                            hits = uint32(want & fw)
                     if instrumented:
                         c_tasks += 1
-                        c_tests += n2
+                        if not index:
+                            c_tests += n2
                 k = 0
-                while cuda.any_sync(FULL, k < n2):    # uniform k-steps
+                if index:
+                    active = hits != U0
+                else:
+                    active = k < n2
+                while cuda.any_sync(FULL, active):    # uniform k-steps
                     hit = False
                     c2 = IDS_PER_TILE * t2 + k
                     d2 = int32(0)
-                    if k < n2:
-                        s2 = uint32(rec[uint32(REC * c2 + fs)])
-                        hit = uint32(s2 & want) != U0
-                        if hit:
+                    if index:
+                        if hits != U0:
+                            if n2 == 1:
+                                c2 = IDS_PER_TILE * t2
+                                hits = U0
+                            else:
+                                j = cuda.ffs(hits) - 1
+                                b2 = int32(idx[uint32(INDEX_BYTES * t2
+                                                      + 32 * fs + j)])
+                                c2 = IDS_PER_TILE * t2 + b2
+                                s2 = uint32(rec[uint32(REC * c2 + fs)])
+                                hits = uint32(hits & ~s2)
+                            hit = True
                             d2 = rec[uint32(REC * c2 + R_DIRS)]
+                            if instrumented:
+                                c_tests += 1
+                    else:
+                        if k < n2:
+                            s2 = uint32(rec[uint32(REC * c2 + fs)])
+                            hit = uint32(s2 & want) != U0
+                            if hit:
+                                d2 = rec[uint32(REC * c2 + R_DIRS)]
                     old = int32(0)
                     if hit:
                         old = cuda.atomic.cas(rec, uint32(REC * c2 + R_LABEL),
@@ -779,6 +902,10 @@ def _make_waves_kernel(conn8, instrumented, debug):
                             c_app += na
                             c_capp += cna
                     k += 1
+                    if index:
+                        active = hits != U0
+                    else:
+                        active = k < n2
             grid.sync()
             n_new = q_state[Q_C0 + r % 3]
             if tid == 0:
@@ -1088,19 +1215,22 @@ _PAINT_CACHE = {}
 
 
 def get_label_kernel(connectivity=8, instrumented=False, debug=False,
-                     max_registers=None):
-    key = (connectivity, bool(instrumented), bool(debug), max_registers)
+                     max_registers=None, index=False, exits=2):
+    key = (connectivity, bool(instrumented), bool(debug), max_registers,
+           bool(index), int(exits))
     if key not in _LABEL_CACHE:
         _LABEL_CACHE[key] = _make_label_kernel(
-            connectivity == 8, bool(instrumented), bool(debug), max_registers)
+            connectivity == 8, bool(instrumented), bool(debug), max_registers,
+            bool(index), int(exits))
     return _LABEL_CACHE[key]
 
 
-def get_waves_kernel(connectivity=8, instrumented=False, debug=False):
-    key = (connectivity, bool(instrumented), bool(debug))
+def get_waves_kernel(connectivity=8, instrumented=False, debug=False,
+                     index=False):
+    key = (connectivity, bool(instrumented), bool(debug), bool(index))
     if key not in _WAVES_CACHE:
         _WAVES_CACHE[key] = _make_waves_kernel(
-            connectivity == 8, bool(instrumented), bool(debug))
+            connectivity == 8, bool(instrumented), bool(debug), bool(index))
     return _WAVES_CACHE[key]
 
 

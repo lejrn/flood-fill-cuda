@@ -158,6 +158,12 @@ CONFIGS = {
     "c4": dict(connectivity=4),
     "c4_one_block_L0": dict(connectivity=4, lattice=0, waves_tpb=32,
                             waves_blocks=1),
+    "index": dict(lookup="index"),
+    "index_one_block_L0": dict(lookup="index", lattice=0, waves_tpb=32,
+                               waves_blocks=1),
+    "index_c4_valve1": dict(lookup="index", connectivity=4, valve_round=1),
+    "exits_ch07": dict(label_exits=0),
+    "exits_frontier": dict(label_exits=1),
 }
 
 
@@ -380,11 +386,12 @@ RECORD_SCENES = ["noise_030", "noise_045", "size_31x97", "u_shape",
 def test_records_match_model(name, connectivity, lattice):
     """After K0 + K2 alone: every tile header, and every ring record's
     side words, anchor, direction bits, seed label and parent, equal the
-    CPU model's (computed from pixels)."""
+    CPU model's (computed from pixels). The index twin's frame words and
+    frame-pixel ordinals too."""
     img = _scene(name)
     tm = _model(name, connectivity)
     eng = TileWaves(img.shape[0], img.shape[1], connectivity=connectivity,
-                    instrumented=True, debug=True)
+                    instrumented=True, debug=True, lookup="index")
     dev = cuda.to_device(img)
     eng.pack(dev)
     eng.label_pass(lattice)
@@ -411,6 +418,26 @@ def test_records_match_model(name, connectivity, lattice):
     c = eng.read_counters()
     assert c["seeds"] == int(seed.sum())
     assert c["interior_comps"] == tm.n_interior
+    # index twin, tiles with 2+ ring comps: frame words = the tile's red
+    # frame pixels, and each red frame pixel's byte = the ordinal of the
+    # ring comp that owns it
+    frame = eng.frame.copy_to_host().reshape(-1, 4)
+    idx = eng.idx.copy_to_host().reshape(-1, 4, 32)
+    touched = np.flatnonzero(tm.n_ring_tile >= 2)   # indexed tiles only
+    exp_frame = np.zeros((tm.n_ring_tile.size, 4), np.uint32)
+    exp_idx = np.full((tm.n_ring_tile.size, 4, 32), -1, np.int32)
+    for c_i in ring:
+        t = tm.tile[c_i]
+        sides = (tm.side_n[c_i], tm.side_s[c_i], tm.side_w[c_i],
+                 tm.side_e[c_i])
+        for sd, word in enumerate(sides):
+            exp_frame[t, sd] |= word
+            for j in range(32):
+                if (int(word) >> j) & 1:
+                    exp_idx[t, sd, j] = tm.ordinal[c_i]
+    np.testing.assert_array_equal(frame[touched], exp_frame[touched])
+    sel = exp_idx[touched] >= 0
+    np.testing.assert_array_equal(idx[touched][sel], exp_idx[touched][sel])
 
 
 def test_ring_bound_is_62():
@@ -597,17 +624,18 @@ def test_fuzz(family, blocks):
         conn = 4 if seed % 4 == 3 else 8
         lat = (0, 8, 1, 4)[seed % 4] if seed % 5 else 8
         valve = 2 if seed % 7 == 6 else 128
+        lookup = "index" if seed % 2 else "scan"
         try:
             label, n = cpu_label(img, conn)
             run_and_check(img, label, n, tile_model(img, conn),
                           connectivity=conn, lattice=lat, valve_round=valve,
-                          **kw)
+                          lookup=lookup, **kw)
         except AssertionError as exc:
             path = os.path.join(SCRATCH, f"ch08_fuzz_{family}_{seed}.npy")
             np.save(path, img)
             raise AssertionError(
                 f"{family} seed {seed} (conn {conn}, L {lat}, valve "
-                f"{valve}) failed; image saved to {path}") from exc
+                f"{valve}, {lookup}) failed; image saved to {path}") from exc
 
 
 # ------------------------------------------- structural / robustness
@@ -618,7 +646,7 @@ def test_engine_reuse_with_poisoned_buffers():
     read before it is written in the same run (design 9.4)."""
     a = S5.random_blobs_scene(120, 120, 0.35, 21)[0]
     b = S5.random_blobs_scene(120, 120, 0.50, 22)[0]
-    eng = TileWaves(120, 120, instrumented=True, debug=True)
+    eng = TileWaves(120, 120, instrumented=True, debug=True, lookup="index")
     outs = []
     for img in (a, b, a):
         eng.poison()
@@ -660,7 +688,8 @@ def test_twins_agree(name):
     label, n = _oracle(name, 8)
     outs = []
     for kw in (dict(), dict(instrumented=True), dict(debug=True),
-               dict(instrumented=True, debug=True)):
+               dict(instrumented=True, debug=True), dict(lookup="index"),
+               dict(lookup="index", instrumented=True, debug=True)):
         res = recolor(img, emit_label=True, **kw)
         assert res.n_blobs == n
         np.testing.assert_array_equal(res.label, label)
@@ -742,15 +771,16 @@ BENCH_SCENES = {
 @pytest.mark.skipif(not SLOW, reason="set FLOOD_FILL_SLOW=1")
 @pytest.mark.parametrize("name", list(BENCH_SCENES))
 def test_benchmark_scenes(name):
-    """The 6 benchmark scenes: default, L0, L1, valve 1, coll 0 at the
-    cooperative max, and the mask contract."""
+    """The 6 benchmark scenes: default, L0, L1, valve 1, coll 0, the
+    index lookup at the cooperative max, and the mask contract."""
     img = BENCH_SCENES[name]()
     label, n = cpu_label_components(img)
     tm = tile_model(img, 8)
     for contract, kw in (("rgb", {}), ("rgb", dict(lattice=0)),
                          ("rgb", dict(lattice=1)),
                          ("rgb", dict(valve_round=1)),
-                         ("rgb", dict(coll_capacity=0)), ("mask", {})):
+                         ("rgb", dict(coll_capacity=0)),
+                         ("rgb", dict(lookup="index")), ("mask", {})):
         run_and_check(img, label, n, tm, contract=contract, **kw)
 
 
