@@ -301,51 +301,65 @@ class TileWaves:
             np.int32(self.words_per_row), np.int32(self.n_tiles),
             np.int32(lat))
 
-    def run(self, img_dev, contract="rgb", lattice=None, valve_round=None):
-        """Enqueue the pipeline; returns (phase names, events). No sync.
+    def stages(self, img_dev, contract="rgb", lattice=None,
+               valve_round=None, paint=True):
+        """The pipeline as (phase name, launch) pairs in stream order;
+        nothing is enqueued until a launch is called. The benchmark times
+        whole pipelines, single phases and the label-only part (paint
+        False, mask contract) from this one list.
 
         lattice and valve_round override the engine's values for this run
         only (both are runtime arguments, so one engine serves every seed
         rule and valve setting; valve_round 0 is "off")."""
         if contract not in CONTRACTS:
             raise ValueError(f"contract must be one of {CONTRACTS}")
-        lat = self.lattice if lattice is None else int(lattice)
-        valve = self.valve_round if valve_round is None else int(valve_round)
-        names = PHASES if contract == "rgb" else MASK_PHASES
-        events = [cuda.event(timing=True) for _ in range(len(names) + 1)]
-        i = 0
-        events[i].record()
-        if contract == "rgb":
+        lat = np.int32(self.lattice if lattice is None else lattice)
+        valve = np.int32(self.valve_round if valve_round is None
+                         else valve_round)
+        w, h = np.int32(self.width), np.int32(self.height)
+        wpr, nt = np.int32(self.words_per_row), np.int32(self.n_tiles)
+
+        def pack():
             self.pack_k[self.pack_grid, self.pack_tpb](img_dev, self.mask)
-            i += 1
-            events[i].record()
-        init_kernel[1, 64](self.q_state, self.counters)
-        i += 1
-        events[i].record()
-        self.label_k[self.label_grid[0], self.label_grid[1]](
-            self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-            self.ql, self.qd, self.q_state, self.counters, self.idx,
-            self.frame, np.int32(self.width), np.int32(self.height),
-            np.int32(self.words_per_row), np.int32(self.n_tiles),
-            np.int32(lat))
-        i += 1
-        events[i].record()
-        self.waves_k[self.waves_blocks, self.waves_tpb](
-            self.hdr, self.rec, self.parent, self.qc, self.ql, self.qd,
-            self.ca, self.cb, self.q_state, self.counters, self.bounds,
-            self.stamps, self.idx, self.frame, np.int32(self.words_per_row),
-            np.int32(self.n_tiles), np.int32(valve),
-            np.int32(self.coll_capacity), np.int32(self.dense_min))
-        i += 1
-        events[i].record()
-        self.paint_k[self.paint_grid[0], self.paint_grid[1]](
-            self._mask_flat, self.hdr, self.rec, img_dev, self._dummy_lmap,
-            self._dummy_seeds, self._seed_n, self.counters,
-            np.int32(self.width), np.int32(self.height),
-            np.int32(self.words_per_row), np.int32(self.n_tiles))
-        i += 1
-        events[i].record()
-        return names, events
+
+        def init():
+            init_kernel[1, 64](self.q_state, self.counters)
+
+        def label():
+            self.label_k[self.label_grid[0], self.label_grid[1]](
+                self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
+                self.ql, self.qd, self.q_state, self.counters, self.idx,
+                self.frame, w, h, wpr, nt, lat)
+
+        def waves():
+            self.waves_k[self.waves_blocks, self.waves_tpb](
+                self.hdr, self.rec, self.parent, self.qc, self.ql, self.qd,
+                self.ca, self.cb, self.q_state, self.counters, self.bounds,
+                self.stamps, self.idx, self.frame, wpr, nt, valve,
+                np.int32(self.coll_capacity), np.int32(self.dense_min))
+
+        def paint_():
+            self.paint_k[self.paint_grid[0], self.paint_grid[1]](
+                self._mask_flat, self.hdr, self.rec, img_dev,
+                self._dummy_lmap, self._dummy_seeds, self._seed_n,
+                self.counters, w, h, wpr, nt)
+
+        out = [("pack", pack)] if contract == "rgb" else []
+        out += [("init", init), ("label", label), ("waves", waves)]
+        if paint:
+            out.append(("paint", paint_))
+        return out
+
+    def run(self, img_dev, contract="rgb", lattice=None, valve_round=None):
+        """Enqueue the pipeline with a CUDA event after each phase;
+        returns (phase names, events). No sync."""
+        st = self.stages(img_dev, contract, lattice, valve_round)
+        events = [cuda.event(timing=True) for _ in range(len(st) + 1)]
+        events[0].record()
+        for i, (_, launch) in enumerate(st):
+            launch()
+            events[i + 1].record()
+        return [n for n, _ in st], events
 
     # ------------------------------------------------- off-clock twins
     def emit_label_map(self, label_dev):
