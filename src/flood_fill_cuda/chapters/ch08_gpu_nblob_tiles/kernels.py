@@ -173,8 +173,12 @@ ORDINAL_OVERFLOW = C["ordinal_overflow"]
 ANCHOR_MISMATCH = C["anchor_mismatch"]
 UNLABELLED = C["unlabelled"]
 
-# instrumented waves: %globaltimer stamps, fixed slots at the end
+# instrumented waves: %globaltimer stamps. Slot r is the end of round
+# r for r < ST_TAIL; slot ST_TAIL holds the end of the last round when
+# there are ST_TAIL rounds or more (so the union split never includes
+# rounds); then the fixed slots of the union and flatten passes.
 N_STAMPS = 256
+ST_TAIL = 252
 ST_UNION = 253
 ST_FLAT1 = 254
 ST_FLAT2 = 255
@@ -1044,8 +1048,7 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False,
             front = rear
             rear += n_new
             if instrumented and tid == 0:
-                if r < N_STAMPS - 3:
-                    stamps[r] = get_globaltimer()
+                stamps[min(r, ST_TAIL)] = get_globaltimer()
                 if r < n_bounds:
                     bounds[r] = rear
             r += 1

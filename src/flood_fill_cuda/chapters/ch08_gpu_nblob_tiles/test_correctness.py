@@ -574,6 +574,26 @@ def test_counter_rotation_over_many_rounds(blocks):
     assert st["frontier_comps"] == tm.waves(0, 128)["frontier"]
 
 
+def test_round_stats_past_the_stamp_slots():
+    """A 1-px line through 300 one-row tiles is a 300-comp chain: 300
+    rounds at L0 with the valve off. The instrumented twin stamps 251
+    rounds one by one and the rest in one bucket, so the union pass's
+    split holds no round."""
+    img = S8.from_mask(np.ones((1, 32 * 300), bool))
+    label, n = cpu_label_components(img)
+    run_and_check(img, label, n, tile_model(img, 8), lattice=0,
+                  valve_round=0)
+    eng = TileWaves(1, 32 * 300, lattice=0, valve_round=0,
+                    instrumented=True)
+    eng.run(cuda.to_device(img))
+    cuda.synchronize()
+    st = eng.round_stats()
+    assert st["rounds"] == 300
+    assert len(st["round_us"]) == 251
+    assert st["rounds_past_stamps"] == 49
+    assert st["rounds_past_stamps_us"] > st["union_us"] >= 0
+
+
 # ------------------------------------------------- the 4-conn oracle
 
 @pytest.mark.parametrize("name", sorted(SCENES))

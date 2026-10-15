@@ -49,7 +49,7 @@ from .kernels import (
     get_paint_kernel, gpu_sleep_kernel, fill_i32, pack_shape,
     MODE_RGB, MODE_LABEL, MODE_SEEDS, NUM_COUNTERS, COUNTER_NAMES,
     N_QSTATE, N_STAMPS, IDS_PER_TILE, REC, TILE, HDR_RING_MASK,
-    HDR_TOTAL_SHIFT, ST_UNION, ST_FLAT1, ST_FLAT2, INDEX_BYTES)
+    HDR_TOTAL_SHIFT, ST_TAIL, ST_UNION, ST_FLAT1, ST_FLAT2, INDEX_BYTES)
 
 CONTRACTS = ("rgb", "mask")
 LOOKUPS = ("scan", "index", "hybrid")
@@ -410,17 +410,25 @@ class TileWaves:
             seg = qc[b[r - 1]:b[r]]
             comps.append(int(seg.size))
             tiles.append(int(np.unique(seg >> 6).size))
+        # rounds 1 .. ST_TAIL-1 have a stamp each; rounds from ST_TAIL on
+        # share one bucket (the slot ST_TAIL holds the last round's end)
         times = []
-        ns = min(rounds, N_STAMPS - 4)
+        ns = min(rounds, ST_TAIL - 1)
         for r in range(1, ns + 1):
             times.append((int(stamps[r]) - int(stamps[r - 1])) / 1000.0)
+        tail_us = 0.0
         last = int(stamps[ns]) if ns else int(stamps[0])
+        if rounds >= ST_TAIL:
+            tail_us = (int(stamps[ST_TAIL]) - last) / 1000.0
+            last = int(stamps[ST_TAIL])
         return {
             "rounds": rounds,
             "frontier_comps": comps,
             "frontier_tiles": tiles,
             "tile_visits": int(sum(tiles)),
             "round_us": times,
+            "rounds_past_stamps": max(0, rounds - ns),
+            "rounds_past_stamps_us": tail_us,
             "union_us": (int(stamps[ST_UNION]) - last) / 1000.0,
             "flatten1_us": (int(stamps[ST_FLAT1])
                             - int(stamps[ST_UNION])) / 1000.0,
