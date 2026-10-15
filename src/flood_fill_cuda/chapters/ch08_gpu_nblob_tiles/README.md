@@ -396,7 +396,7 @@ ch08 against ch08 only. `180817Z` ran E13, `181414Z` redid E9.
 | E1 | pack store | input_blobs: ch06 1.450, direct 1.181 (206 GB/s), smem 1.188, tile-major ref 1.148 | direct |
 | E2 | closure exits | label 0.305 (ch07 loop), 0.268 (frontier), 0.268 (both) | both kept |
 | E3 | K2 registers, grid | 80 regs at 1536 x 128: label 0.257 vs 0.268, no spill, also faster on blocks and random | adopted |
-| E4 | lookup | index: input_blobs +1.1% (per-round), random -12%, serpentine -32%, blocks -7% | scan then; superseded by E13 |
+| E4 | lookup | index: input_blobs +1.1% (per-round), random -12%, serpentine -32%, blocks -7% | scan then (the session JSON says index, see deviation 4); superseded by E13 |
 | E5 | paint | 256 threads: input_blobs 0.636 vs 0.638 (tie), input_blocks +6.5%; fast path off +2-10% | 768 x 128, fast path on |
 | E6 | seed dial | L = 0 to 1, all within 0.4% on input_blobs; L0 pays 90 rounds on the disk | L8 |
 | E7 | union timing | inline: waves 0.131 vs 0.120 ms on input_blobs | deferred |
@@ -485,22 +485,27 @@ ch07's 157 tests and ch06's 109 also pass.
    comp is ordinal 0. Indexing every touched tile cost +2-4%.
 3. **K2 is capped at 80 registers on a 1536-block grid** (E3), and the
    hybrid K3 at 80 (E13). The index twin's K2 spills at 80 and keeps 96.
-4. **E5's mechanical winner is not taken.** 256-thread paint won by
+4. **E4's recorded decision is not taken.** Sessions `155420Z` and
+   `155822Z` recorded `index` (E4b: `index_rauto_g1536`). They read
+   the rule with the ratio of medians: 1.006 on input_blobs (E4b 1.007).
+   The rule's statistic is the per-round median, 1.011 (E4b 1.013).
+   That fails the +1% bound, so the scan stayed until E13.
+5. **E5's mechanical winner is not taken.** 256-thread paint won by
    0.3% on input_blobs (a tie) and lost 6.5% on input_blocks.
-5. **The valve fires at round 16**, not 128 (E9 redone, with the rule
+6. **The valve fires at round 16**, not 128 (E9 redone, with the rule
    fixed).
-6. **Timing differs from the design's.** Totals have two events, phases
+7. **Timing differs from the design's.** Totals have two events, phases
    come from their own pass, the labelling tier is timed directly, ch06
    is timed bare at its best merge grid, and ch05 runs after the rounds.
-7. **The respin is GPU-bound.** A respin of back-to-back runs is
+8. **The respin is GPU-bound.** A respin of back-to-back runs is
    launch-bound on small scenes and let the clock fall to 585-790 MHz.
-8. **Not counted:** `FIND_STEPS` and the unions' atomicMin calls.
+9. **Not counted:** `FIND_STEPS` and the unions' atomicMin calls.
    ch06's `_find` and `_union` are imported verbatim.
-9. **Not built:** E5's touched-tile list arm, E8's per-thread-atomics
-   arm, the optional E11 dense-tile path and E12 minprop twin.
-10. **The valve scenes are an anti-diagonal snake and two staircases.**
+10. **Not built:** E5's touched-tile list arm, E8's per-thread-atomics
+    arm, the optional E11 dense-tile path and E12 minprop twin.
+11. **The valve scenes are an anti-diagonal snake and two staircases.**
     A lin-monotone zigzag on tile borders is full of S2 seeds.
-11. **ch05 got 3 samples on input_blobs and dots_4k**: their first calls
+12. **ch05 got 3 samples on input_blobs and dots_4k**: their first calls
     took over 2 s (the design's rule).
 
 ## New problems and lessons
