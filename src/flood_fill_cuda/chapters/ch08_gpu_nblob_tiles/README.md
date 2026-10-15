@@ -42,8 +42,9 @@ about 1500 x 1500 px ch06 is faster.
    local labels per tile joined by ch06's union-find, with no rounds.
    That is block CCL. This chapter keeps the rounds on purpose.
 3. **Tiles came back.** In ch07 a tile was opened again whenever new
-   bits reached it after an earlier opening: 87,840 openings on 62,500
-   tiles in `sq_8000`.
+   bits reached it after an earlier opening: 98,195 openings on 62,500
+   tiles in `sq_8000`, 1.57 per tile (ch07's final session
+   `tiles_20261015T114440Z`).
 4. **Runs beat tiles on the connectivity core.** ch06's union-find did
    the connectivity part 2.5-9.5x cheaper than ch07's rounds on every
    single blob.

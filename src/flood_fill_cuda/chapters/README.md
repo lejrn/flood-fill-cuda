@@ -619,7 +619,8 @@ as BFS waves, and union-find only joins waves that meet.)*
    by union-find need no rounds at all. This chapter keeps the BFS:
    labels must travel as frontier waves.
 3. **Tiles came back.** ch07 opened a tile again for every wave that
-   reached it: 87,840 openings on 62,500 tiles in `sq_8000`.
+   reached it: 98,195 openings on 62,500 tiles in `sq_8000`, 1.57 per
+   tile (ch07 session `tiles_20261015T114440Z`).
 4. **Runs beat tiles on the core.** ch06's union-find did the
    connectivity part 2.5-9.5x cheaper than ch07's rounds.
 
