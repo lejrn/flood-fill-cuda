@@ -289,7 +289,7 @@ clock state cancels. They ran first after the spin-up, at 2,070 MHz.
 |---|---|
 | barrier ritual (2 `grid.sync` + a read), ch03's 48 x 256 | 2.40 us per step |
 | the same, ch07's 72 x 128 | 2.19 us per round |
-| the same, 1 x 32 / 24 x 256 / 72 x 256 / 240 x 64 | 1.49 / 1.84 / 3.05 / 3.35 us |
+| the same, 1 x 32 / 1 x 64 / 24 x 256 / 72 x 256 / 240 x 64 | 1.49 / 1.49 / 1.84 / 3.05 / 3.35 us |
 | one dependent L2 load, one warp | 304 cycles (155 ns) |
 | one dependent atomic OR, one warp | 335 cycles (161 ns) |
 | one 8-conn closure iteration, one warp | 599 cycles (280 ns) |
@@ -325,8 +325,8 @@ So a ch07 round on the serpentine costs 4.31 us against a ch03 level's
 | ch03 `wc_bare` | 72 x 256 | 576 | 65 | 16 | 70.51 | 17.35 | 135.48 |
 
 - **One block wins the serpentine, on both sides.** Its round is one
-  tile, and a 1 x 32 grid has the cheapest barrier (1.49 us). ch07 at
-  1 x 32 is 15% faster than at 72 x 128.
+  tile, and one-block grids have the cheapest barrier (1.49 us at
+  1 x 32 and 1 x 64). ch07 at 1 x 32 is 15% faster than at 72 x 128.
 - **A register cap buys warps and costs spills.** `w4_cap96` seats 480
   warps and lost on all ten scenes.
 - **The counters cost about 9 us on sq_2000** (9% of its rounds kernel,
@@ -386,7 +386,7 @@ closure iterations per visit. It still wins 11.1x, at 8.07 us per
 round.
 
 **The thin strip** (524288 x 32, a 32x32 blob) is all `pack` and
-`paint`: 0.565 of 0.601 ms. ch03's kernel touches only the blob (0.09
+`paint`: 0.564 of 0.601 ms. ch03's kernel touches only the blob (0.09
 ms); its 0.701 ms reset is off its clock.
 
 That strip once cost far more. ch06's pack launch (`(wpr*32/256, 64)`
@@ -488,7 +488,7 @@ page now handle each one.
   sessions read 210 MHz right after the last one). The two draft
   sessions disagreed on the disk: 20.6x and 16.3x.
 - **5 rounds were not enough.** Their medians also disagreed by 7% on
-  `sq_8000` (21.7x vs 23.2x) and 9% on `sq_6000` (23.0x vs 21.2x). Now:
+  `sq_8000` (21.7x vs 23.2x) and 8% on `sq_6000` (23.0x vs 21.2x). Now:
   9 rounds, the oracle last, a clock sampler, and per-round ratio ranges.
 - **A warm L2 helped ch07 on small images.** The restore copy left
   sq_2000's 12 MB image in L2, and `pack` read it at 186 GB/s (`094117Z`).
