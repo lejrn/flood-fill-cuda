@@ -179,6 +179,17 @@ CONFIGS = {
     "uncapped_k2": dict(label_max_registers=None, label_grid=(768, 128)),
     "exits_ch07": dict(label_exits=0),
     "exits_frontier": dict(label_exits=1),
+    # the bare twins, which the benchmark times (outputs and the counters
+    # they keep): every lookup, both connectivities
+    "bare": dict(instrumented=False, debug=False),
+    "bare_c4_one_block": dict(connectivity=4, instrumented=False,
+                              debug=False, waves_tpb=32, waves_blocks=1),
+    "bare_scan": dict(lookup="scan", instrumented=False, debug=False),
+    "bare_scan_c4": dict(lookup="scan", connectivity=4, instrumented=False,
+                         debug=False),
+    "bare_index": dict(lookup="index", instrumented=False, debug=False),
+    "bare_index_c4_L0": dict(lookup="index", connectivity=4, lattice=0,
+                             instrumented=False, debug=False),
 }
 
 
@@ -203,8 +214,10 @@ def _model(name, connectivity):
 
 
 def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
-    """Run ch08 instrumented + debug, check the outputs and every
-    invariant. Returns the result."""
+    """Run ch08 (instrumented + debug unless the config says otherwise),
+    check the outputs and every invariant the twin can show. The bare
+    twin (the timed one) keeps only rounds, roots, interior comps and
+    the valve counters, so it is checked on those. Returns the result."""
     kw = dict(kw)
     kw.setdefault("instrumented", True)
     kw.setdefault("debug", True)
@@ -220,6 +233,13 @@ def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
     lattice = kw.get("lattice", DEFAULT_LATTICE)
     valve = kw.get("valve_round", DEFAULT_VALVE_ROUND)
     wm = model.waves(lattice, valve)
+    if not kw["instrumented"]:
+        assert c["interior_comps"] == model.n_interior
+        assert c["roots"] + c["interior_comps"] == n_blobs
+        assert c["rounds"] == wm["rounds"]
+        assert c["valve_seeds"] == wm["valve_seeds"]
+        assert c["valve_round"] == wm["valve_round"]
+        return res
     assert c["ring_comps"] + c["interior_comps"] == c["comps"] \
         == model.n_comps
     assert c["ring_comps"] == model.n_ring
@@ -645,11 +665,13 @@ def test_fuzz(family, blocks):
         lat = (0, 8, 1, 4)[seed % 4] if seed % 5 else 8
         valve = 2 if seed % 7 == 6 else 128
         lookup = ("scan", "index", "hybrid")[seed % 3]
+        twin = ({} if seed % 6 != 5 else
+                dict(instrumented=False, debug=False))     # the bare twin
         try:
             label, n = cpu_label(img, conn)
             run_and_check(img, label, n, tile_model(img, conn),
                           connectivity=conn, lattice=lat, valve_round=valve,
-                          lookup=lookup, dense_min=seed % 5, **kw)
+                          lookup=lookup, dense_min=seed % 5, **twin, **kw)
         except AssertionError as exc:
             path = os.path.join(SCRATCH, f"ch08_fuzz_{family}_{seed}.npy")
             np.save(path, img)
