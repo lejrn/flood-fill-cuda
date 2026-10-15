@@ -162,6 +162,9 @@ H > 2,097,152 (65,536 words per row). ch03 caps at `W * H < 2**31`.
 reversed on odd rounds. Medians; brackets are the range of the 9
 per-round ratios.
 
+A speedup is a ratio of times (12.7x). A percentage is time saved or
+added: "takes 15% less time" means 0.85 of the time.
+
 Before every run, on every side: the image is restored from a device
 copy, a 96 MB buffer is read (no side finds its input in the 32 MB L2),
 and a GPU sleep kernel is queued. Every launch is timed with CUDA
@@ -326,7 +329,8 @@ So a ch07 round on the serpentine costs 4.31 us against a ch03 level's
 
 - **One block wins the serpentine, on both sides.** Its round is one
   tile, and one-block grids have the cheapest barrier (1.49 us at
-  1 x 32 and 1 x 64). ch07 at 1 x 32 is 15% faster than at 72 x 128.
+  1 x 32 and 1 x 64). ch07 at 1 x 32 takes 15% less time than at
+  72 x 128 (3.344 vs 3.916 ms).
 - **A register cap buys warps and costs spills.** `w4_cap96` seats 480
   warps and lost on all ten scenes.
 - **The counters cost about 9 us on sq_2000** (9% of its rounds kernel,
@@ -373,13 +377,13 @@ Inside a tile it is isolated pixels, so the closure adds nothing and
 every level is an export.
 
 Then rounds equal levels, and a round costs more than ch03's level.
-`zz_serp_1k` (one tile per round) loses 4%; at the best grids (ch03
-1 x 128, ch07 1 x 32) it loses 10%: 96.36 vs 107.12 ms.
+`zz_serp_1k` (one tile per round) takes 4% more time. At the best grids
+(ch03 1 x 128, ch07 1 x 32) it takes 11% more: 96.36 vs 107.12 ms.
 
 `zz_lattice_4k` puts a zigzag on every border, so ~127 tiles move per
 round. A wide front does not rescue it: each tile still advances one
-pixel per round, and the round grows from 4.02 to 4.91 us. It loses
-12% (bare pair: 4%).
+pixel per round, and the round grows from 4.02 to 4.91 us. It takes 14%
+more time (bare pair: 5%).
 
 **The maze** is tortuous but realistic: 12.4 visits per tile and 6.53
 closure iterations per visit. It still wins 11.1x, at 8.07 us per
@@ -478,9 +482,9 @@ An audit of that benchmark found eight problems; the benchmark and this
 page now handle each one.
 
 - **ch03's best was not the reference.** The draft timed only the
-  instrumented `wc` at 48 x 256. Its bare twin at its own grid is 15%
-  faster on `sq_8000` (70.51 vs 83.29 ms), so the bare pair is now the
-  headline.
+  instrumented `wc` at 48 x 256. Its bare twin at its own grid takes 15%
+  less time on `sq_8000` (70.51 vs 83.29 ms), so the bare pair is now
+  the headline.
 - **"The comparison favours ch03" was wrong.** ch03's off-clock reset
   (2.606 ms at 64 Mpx) is smaller than that bare-twin gap.
 - **A CPU pass between scenes relaxed the GPU.** The `@njit` oracle ran
