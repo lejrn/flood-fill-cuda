@@ -298,8 +298,12 @@ config and scene, and ch05's wherever ch05 ran.
 and the blob grid ch08 wins the rgb contract through its paint (disk:
 0.157 vs 0.615 ms): one word per row, where ch06's runs are long.
 
-ch06 still labels both faster (disk 0.073 vs 0.129 ms). Only on
-`input_blobs` does ch08 win the labelling itself.
+ch06 still labels both faster (disk 0.073 vs 0.129 ms). Among the six
+scenes, only on `input_blobs` does ch08 win the labelling itself.
+
+Elsewhere it also wins on the crops from 5000 on (below) and on
+`strip_1px_x` (3.737 vs 21.259 ms), where each of ch06's 2.1M runs is
+one pixel.
 
 **Where it loses:** many comps per tile. `input_blocks` has up to 47
 comps per tile and `random_4000` up to 86, closed one after another
