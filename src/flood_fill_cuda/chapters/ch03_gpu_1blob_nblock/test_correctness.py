@@ -108,6 +108,25 @@ def test_unreached_pixels_untouched():
     assert result.visited[60:80, 60:80].sum() == 0
 
 
+@pytest.mark.parametrize("dtype", [np.int8, np.uint8, np.int16, np.uint16,
+                                   np.int32, np.int64])
+def test_numpy_integer_seeds(dtype):
+    """Regression: the seed's linear index seed_x * height + seed_y ran in
+    the seed's own dtype (NumPy 2 does not widen a narrow NumPy scalar for
+    a Python int operand), so a uint8, int16 or uint16 seed wrapped it and
+    queued the wrong pixel: filled=1 where the blob has 59,400 px."""
+    img = np.full((300, 300, 3), 255, dtype=np.uint8)
+    img[60:280, 20:290] = scenes.RED
+    sx, sy = (250, 150) if np.iinfo(dtype).max >= 250 else (100, 100)
+    ref_visited, ref_depth, ref_levels, ref_filled = cpu_flood_fill(
+        img, sx, sy)
+    result = flood_fill(img, dtype(sx), dtype(sy))
+    assert result.filled == ref_filled == 220 * 270
+    assert result.levels == ref_levels
+    np.testing.assert_array_equal(result.visited, ref_visited)
+    np.testing.assert_array_equal(result.depth, ref_depth)
+
+
 def test_only_red_pixels_ever_visited():
     img, sx, sy = scenes.random_scene(200, 200, 0.65, rng_seed=5)
     originally_red = (img == scenes.RED).all(axis=2)

@@ -261,6 +261,9 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     else:
         launch_blocks = int(blocks)
 
+    # Python ints first: under NumPy 2 a narrow NumPy scalar seed (uint8,
+    # int16, ...) keeps its dtype through the product and wraps it.
+    seed_x, seed_y = int(seed_x), int(seed_y)
     seed_lin = np.array([seed_x * height + seed_y], dtype=np.int32)
     trace_capacity = min(width * height, LEVEL_TRACE_CAPACITY)
     instrumented = not bare
