@@ -477,9 +477,10 @@ Across sessions (`094117Z` to this one), the rounds kernel on `sq_8000`
 went from 1.419 to 1.283 ms, and on the serpentine from 4.191 to 3.896.
 
 A second Numba trap sits under all of this. Its shuffle intrinsic has
-only int32 and int64 overloads, and uint32 converts safely to int64. A
-plain uint32 shuffle is two `SHFL`s plus 64-bit arithmetic after it;
-`kernels._up` shuffles the int32 bit pattern instead.
+no uint32 overload (int32, int64, float32 and float64 only), and uint32
+converts safely to int64. A plain uint32 shuffle is two `SHFL`s plus
+64-bit arithmetic after it; `kernels._up` shuffles the int32 bit
+pattern instead.
 
 ## The measurement lessons (from the fairness audit)
 

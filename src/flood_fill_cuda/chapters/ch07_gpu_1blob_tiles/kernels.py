@@ -110,11 +110,12 @@ NUM_COUNTERS = 7
 def _up(v, k):
     """shfl_up of a uint32 word: lane i gets lane i-k's word.
 
-    Numba's shuffle intrinsic has int32 and int64 overloads only, and a
-    uint32 argument converts SAFELY to int64 - so a plain call shuffles
-    a 64-bit value (two SHFLs) and hands back an int64 that drags the
-    rest of the arithmetic to 64 bits. Shuffling the int32 bit pattern
-    and casting back is one SHFL and stays 32-bit.
+    Numba's shuffle intrinsic has no uint32 overload (int32, int64,
+    float32 and float64 only), and a uint32 argument converts SAFELY to
+    int64 - so a plain call shuffles a 64-bit value (two SHFLs) and
+    hands back an int64 that drags the rest of the arithmetic to 64
+    bits. Shuffling the int32 bit pattern and casting back is one SHFL
+    and stays 32-bit.
     """
     return uint32(cuda.shfl_up_sync(FULL, int32(v), k))
 
