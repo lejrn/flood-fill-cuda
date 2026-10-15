@@ -162,6 +162,7 @@ CONFIGS = {
     "index_one_block_L0": dict(lookup="index", lattice=0, waves_tpb=32,
                                waves_blocks=1),
     "index_c4_valve1": dict(lookup="index", connectivity=4, valve_round=1),
+    "uncapped_k2": dict(label_max_registers=None, label_grid=(768, 128)),
     "exits_ch07": dict(label_exits=0),
     "exits_frontier": dict(label_exits=1),
 }

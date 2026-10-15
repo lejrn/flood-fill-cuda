@@ -57,10 +57,16 @@ PHASES = ("pack", "init", "label", "waves", "paint")
 MASK_PHASES = PHASES[1:]
 LABEL_ONLY_PHASES = ("init", "label", "waves")
 
-# Plain launch shapes (design: 768 x 128 for K2 and K4, grid-stride over
-# every tile). K3 is cooperative at 256 threads per block and the
-# cooperative maximum of its compiled twin.
-LABEL_GRID = (768, 128)
+# Plain launch shapes, grid-stride over every tile. K2 runs 1536 x 128
+# with an 80-register cap on the scan twin (experiment E3: label 0.268 ->
+# 0.257 ms on input_blobs, 24 warps/SM instead of 20, no spills; also
+# faster on input_blocks and random_4000). The index twin's K2 spills 16
+# bytes at 80, so it keeps the compiler's 96 (E4b). K4 stays 768 x 128
+# (E5: 256 threads tied on input_blobs and lost 6.5% on input_blocks).
+# K3 is cooperative at 256 threads per block and the cooperative maximum
+# of its compiled twin (E10: 128 threads tied).
+LABEL_GRID = (1536, 128)
+LABEL_MAX_REGISTERS = {"scan": 80, "index": None}
 PAINT_GRID = (768, 128)
 WAVES_TPB = 256
 DEFAULT_LATTICE = 8
@@ -108,7 +114,7 @@ class TileWaves:
                  lookup="scan", coll_capacity=None, instrumented=False,
                  debug=False, waves_tpb=WAVES_TPB, waves_blocks=None,
                  label_grid=LABEL_GRID, paint_grid=PAINT_GRID,
-                 label_max_registers=None, paint_fast=True,
+                 label_max_registers="auto", paint_fast=True,
                  pack_variant="direct", label_exits=2, _skip_warmup=False):
         width, height = int(width), int(height)
         if width < 1 or height < 1:
@@ -142,6 +148,8 @@ class TileWaves:
         self.valve_round = int(valve_round)
         self.lookup = lookup
         self.index = lookup == "index"
+        if label_max_registers == "auto":
+            label_max_registers = LABEL_MAX_REGISTERS[lookup]
         self.label_exits = int(label_exits)
         self.instrumented = bool(instrumented)
         self.debug = bool(debug)
@@ -406,9 +414,11 @@ def max_blocks(threads_per_block=WAVES_TPB, connectivity=8,
 
 
 def kernel_resources(connectivity=8, instrumented=False, debug=False,
-                     label_max_registers=None, paint_fast=True,
+                     label_max_registers="auto", paint_fast=True,
                      lookup="scan", label_exits=2):
     """Registers and spill bytes per thread of each compiled kernel."""
+    if label_max_registers == "auto":
+        label_max_registers = LABEL_MAX_REGISTERS[lookup]
     _warmup(connectivity, instrumented, debug, label_max_registers,
             paint_fast, lookup=lookup, label_exits=label_exits)
     index = lookup == "index"
@@ -427,9 +437,11 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
 
 
 def _warmup(connectivity=8, instrumented=False, debug=False,
-            label_max_registers=None, paint_fast=True, pack_variant="direct",
-            lookup="scan", label_exits=2):
+            label_max_registers="auto", paint_fast=True,
+            pack_variant="direct", lookup="scan", label_exits=2):
     """JIT-compile every kernel of a configuration once, on a tiny image."""
+    if label_max_registers == "auto":
+        label_max_registers = LABEL_MAX_REGISTERS[lookup]
     key = (connectivity, bool(instrumented), bool(debug),
            label_max_registers, bool(paint_fast), pack_variant, lookup,
            int(label_exits))

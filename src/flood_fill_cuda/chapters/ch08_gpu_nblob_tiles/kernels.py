@@ -427,14 +427,18 @@ def _make_pack_kernel(variant):
     variant "smem": the block stages a [32][8] word tile in shared
     memory and stores whole row sectors (8 words per row, 4 rows per
     warp instruction).
+    variant "tilemajor": design 3's store, lane r writes word
+    (t * 32 + r) of a flat tile-major array. A different layout that no
+    later kernel reads: experiment E1's reference arm only.
     """
     smem = variant == "smem"
+    tilemajor = variant == "tilemajor"
 
     @cuda.jit
     def pack_tiles(img, mask):
         width = img.shape[0]
         height = img.shape[1]
-        wpr = mask.shape[1]
+        wpr = (height + 31) // 32      # == mask.shape[1] when row-major
         tiles_x = (width + 31) // 32
         g = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
         ty = g >> 5
@@ -472,6 +476,8 @@ def _make_pack_kernel(variant):
                     if wi < nwb and tw < wpr and x0 + r < width:
                         mask[x0 + r, tw] = sh[idx]
                 cuda.syncthreads()
+            elif tilemajor:
+                mask[(tx * wpr + ty) * 32 + lane, 0] = m
             else:
                 if x0 + lane < width:
                     mask[x0 + lane, ty] = m
@@ -483,9 +489,9 @@ _PACK_CACHE = {}
 
 
 def get_pack_kernel(variant="direct"):
-    if variant not in ("direct", "smem"):
-        raise ValueError(f"pack variant must be 'direct' or 'smem', "
-                         f"got {variant!r}")
+    if variant not in ("direct", "smem", "tilemajor"):
+        raise ValueError(f"pack variant must be 'direct', 'smem' or "
+                         f"'tilemajor', got {variant!r}")
     if variant not in _PACK_CACHE:
         _PACK_CACHE[variant] = _make_pack_kernel(variant)
     return _PACK_CACHE[variant]
