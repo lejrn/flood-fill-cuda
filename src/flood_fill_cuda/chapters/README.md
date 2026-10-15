@@ -646,7 +646,7 @@ as BFS waves, and union-find only joins waves that meet.)*
 | where tiles win | disk 0.544, blob grid 0.838: one paint word per row where ch06's runs are long |
 | where tiles lose | many comps per tile: `input_blocks` 1.85x, `random_4000` 1.18x, a dot lattice with 256 comps per tile 2.6x (and 3.2x ch05). Long border shapes: serpentine 2.3x, `zz_lattice_4k` 4.0x |
 | small images | a crossover at a 1500 x 1500 crop (1.000); the labelling alone only wins from 5000 x 5000 |
-| the hybrid lookup | `zz_lattice_4k` 16.33 → 6.89 ms, the decoy staircase 0.584 → 0.310 ms against the scan, input_blobs 0.991 of the scan (E13) |
+| the hybrid lookup | `zz_lattice_4k` 16.33 → 6.89 ms, the decoy staircase 0.584 → 0.310 ms against the scan, input_blobs a tie with the scan (1.005 here; E13 had 0.991) |
 | fairness | phase events stalled ch06 on small scenes (`input_blocks` 1.21 became 1.85), and ch06's merge grid had been tuned for its instrumented twin; both fixed before the headline |
 
 ### New problems and lessons

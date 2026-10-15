@@ -402,7 +402,7 @@ ch08 against ch08 only. `180817Z` ran E13, `181414Z` redid E9.
 | E7 | union timing | inline: waves 0.131 vs 0.120 ms on input_blobs | deferred |
 | E8 | counter cost | instrumented: waves +0.09, label +0.11 ms on input_blobs | bare twins timed |
 | E10 | waves launch | 256 vs 128 threads: identical (72 vs 144 blocks) | 256 |
-| **E13** | lookup x K3 registers | hybrid, dense_min 4, 80 regs: input_blobs 0.991 of the scan, decoy staircase 0.287, zz_lattice 0.423, zz_serp_1k 0.692, maze 0.871, serpentine 0.929. Index: 1.020 on input_blobs | **hybrid, dense_min 4, 80 regs** |
+| **E13** | lookup x K3 registers | hybrid, dense_min 4, 80 regs: input_blobs 0.991 of the scan, decoy staircase 0.287, zz_lattice 0.423, zz_serp_1k 0.692, maze 0.871, serpentine 0.929. Index: 1.020 on input_blobs. The headline session differs (below) | **hybrid, dense_min 4, 80 regs** |
 | **E9** (redone) | valve round at L8 | where the valve fires, 16 is fastest: decoy staircase 0.394 of the 128 arm, plain staircase 0.308, diagonal snake 0.620. Main scenes need at most 8 rounds | **16** |
 
 **E13's rule** was E4's: input_blobs may move under +1% (per-round
@@ -410,6 +410,19 @@ median), and at least 2 other scenes must gain 10%. Among the arms that
 pass, the lowest geometric mean over the other scenes wins. The index
 lookup fails the first part: its K2 writes a byte index and spills at
 80 registers.
+
+**Two of E13's numbers did not hold in the headline session.** There
+the hybrid is 1.005 of the scan on input_blobs (2.214 vs 2.201 ms): a
+tie, not E13's 0.991. The scan also edges it on input_blocks (0.252 vs
+0.254) and the disk (0.550 vs 0.552).
+
+E13's decoy staircase window ran at a 285 MHz SM median (P4, memory 810
+MHz), with the valve still at 128 (129 rounds). Its input_blobs window
+logged 210 and 405 MHz minima.
+
+At full clocks and with the valve at 16, the decoy staircase's hybrid
+is 0.531 of the scan (0.310 vs 0.584 ms), not 0.287. The big gains
+hold: `zz_lattice_4k` 6.888 vs 16.330 ms, `zz_serp_4k` 3.232 vs 5.915.
 
 **The 80-register cap matters for a cooperative kernel.** The hybrid
 twin takes 97 registers by itself: 2 blocks of 256 per SM, 48 in all.
