@@ -23,7 +23,7 @@ import pytest
 from numba import cuda
 
 from . import kernels
-from .flood_fill import flood_fill, max_blocks, TileFill
+from .flood_fill import flood_fill, max_blocks, plain_shape, TileFill
 from ..ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill, cpu_flood_fill_8
 from ..ch03_gpu_1blob_nblock import scenes
 from ..ch03_gpu_1blob_nblock.flood_fill import flood_fill as ch03_flood_fill
@@ -207,6 +207,32 @@ def test_sizes_not_multiples_of_32(shape, connectivity):
     if w > 2 and h > 2:
         img, sx, sy = scenes.random_scene(w, h, 0.62, rng_seed=w * h)
         assert_matches_reference(img, sx, sy, connectivity)
+
+
+@pytest.mark.parametrize("width, wpr", [(1, 1), (64, 1), (1 << 20, 1),
+                                        (5000, 2), (5000, 7), (5000, 8),
+                                        (5000, 9), (8000, 250), (70, 3000)])
+def test_plain_shape_covers_every_word(width, wpr):
+    """pack/paint launch: whole warps, every word of a row covered along
+    x, gridDim.y legal and no larger than the image."""
+    (gx, gy), tpb = plain_shape(width, wpr)
+    assert tpb % 32 == 0 and 32 <= tpb <= 256
+    assert gx * tpb >= 32 * wpr > (gx - 1) * tpb
+    assert 1 <= gy <= min(width, 65535)
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("shape", [(20000, 1), (9000, 32), (5000, 64),
+                                   (3000, 200), (1500, 300)])
+def test_thin_images(shape, connectivity):
+    """Thin images get a different pack/paint grid (narrow blocks, many
+    rows in flight). Full red from the middle, then noise."""
+    w, h = shape
+    full = np.zeros((w, h, 3), dtype=np.uint8)
+    full[:, :] = RED
+    assert_matches_reference(full, w // 2, h // 2, connectivity)
+    img, sx, sy = scenes.random_scene(w, h, 0.62, rng_seed=w + h)
+    assert_matches_reference(img, sx, sy, connectivity)
 
 
 @pytest.mark.parametrize("connectivity", [4, 8])

@@ -66,10 +66,16 @@ PHASES = ("pack", "init", "rounds", "paint")
 
 # Plain (non-cooperative) launch shapes for the three streaming kernels.
 # pack/paint use ch06's 2D grid: word along x (one warp per word), rows
-# strided along y with gridDim.y capped (one block per row is ch06's
-# measured 2.4x trap). init is a 1D grid-stride.
+# strided along y. init is a 1D grid-stride.
 PLAIN_TPB = 256
 INIT_BLOCKS = 512
+# pack/paint shape (see TileFill.plain_shape): a block is at most one
+# row's words wide (32 * min(8, words_per_row) threads), and gridDim.y
+# puts about PACK_WARPS_IN_FLIGHT working warps on the image, never fewer
+# than ch06's PACK_ROW_BLOCKS rows of blocks. ch06's fixed (wpr*32/256,
+# 64) x 256 left 7 of 8 warps idle and only 64 rows in flight on a thin
+# image: H = 32 packed and painted in 5.5 ms instead of 0.69.
+PACK_WARPS_IN_FLIGHT = 8192
 
 # Image-size limits from the queue-entry format (tx << 16) | ty.
 MAX_TILES_X = 1 << (31 - TY_BITS)
@@ -134,6 +140,24 @@ def local_bytes_per_thread(connectivity=4, bare=False,
     lm = get_rounds_kernel(connectivity, bare,
                            max_registers).get_local_mem_per_thread()
     return int(next(iter(lm.values()))) if isinstance(lm, dict) else int(lm)
+
+
+def plain_shape(width, words_per_row):
+    """((gridDim.x, gridDim.y), blockDim.x) for pack_kernel / paint_kernel.
+
+    Both kernels give one warp one word of a row and stride rows along
+    gridDim.y; warps with w >= words_per_row return at once. So a block
+    is at most one row's words wide, and gridDim.y is chosen for about
+    PACK_WARPS_IN_FLIGHT working warps (words_per_row x gridDim.y), with
+    ch06's 64 rows as the floor. On squares of 4 to 64 Mpx this is ch06's
+    shape (to within 2%); on images with H <= 256 it is 1.6-7.5x faster
+    (measured in the chapter's A/B, outputs bit-identical).
+    """
+    tpb = 32 * min(8, words_per_row)
+    gx = (words_per_row * 32 + tpb - 1) // tpb
+    gy = max(PACK_ROW_BLOCKS,
+             -(-PACK_WARPS_IN_FLIGHT // words_per_row))
+    return (gx, min(width, 65535, gy)), tpb
 
 
 def unpack_bits(words, height):
@@ -224,12 +248,12 @@ class TileFill:
         self._reached_flat = self.reached.reshape(n_words)
         self._stamp_flat = self.stamp.reshape(self.n_tiles)
 
-        self.plain_grid = ((self.words_per_row * 32 + PLAIN_TPB - 1) // PLAIN_TPB,
-                           min(self.width, PACK_ROW_BLOCKS))
+        self.plain_grid, self.plain_tpb = plain_shape(self.width,
+                                                      self.words_per_row)
 
     def pack(self, img_dev):
         """RGB -> packed mask only (untimed helper, used by the tests)."""
-        pack_kernel[self.plain_grid, PLAIN_TPB](img_dev, self.mask)
+        pack_kernel[self.plain_grid, self.plain_tpb](img_dev, self.mask)
 
     def seed_args(self, seed_x, seed_y):
         """(seed word, seed bit, seed tile, first queue entry).
@@ -253,7 +277,7 @@ class TileFill:
             seed_x, seed_y)
         events = [cuda.event(timing=True) for _ in range(len(PHASES) + 1)]
         events[0].record()
-        pack_kernel[self.plain_grid, PLAIN_TPB](img_dev, self.mask)
+        pack_kernel[self.plain_grid, self.plain_tpb](img_dev, self.mask)
         events[1].record()
         init_kernel[INIT_BLOCKS, PLAIN_TPB](
             self._reached_flat, self._stamp_flat, self.queues, self.q_state,
@@ -265,7 +289,7 @@ class TileFill:
             np.int32(self.width), np.int32(self.words_per_row),
             np.int32(self.n_tiles))
         events[3].record()
-        paint_kernel[self.plain_grid, PLAIN_TPB](self.reached, img_dev)
+        paint_kernel[self.plain_grid, self.plain_tpb](self.reached, img_dev)
         events[4].record()
         return PHASES, events
 
