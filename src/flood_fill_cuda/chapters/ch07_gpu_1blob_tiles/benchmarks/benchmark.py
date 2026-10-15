@@ -68,10 +68,12 @@ end-to-end time (pageable H2D of the image + pipeline + D2H of the
 painted image, reused buffers) is measured after the timed rounds.
 
 Clocks. The GPU clock is spun up first (ch06's lesson: this GPU idles
-low and does not boost for short kernels), and again for 1 s before each
-scene. A background `nvidia-smi -lms 100` sampler records the SM and
+low and does not boost for short kernels), and again for 1 s right
+before each scene's timed rounds (the untimed pass before them is
+seconds of host-side image compares at 64 Mpx). A background `nvidia-smi -lms 100` sampler records the SM and
 memory clocks and the P-state for the whole session; each scene row
-carries what they were during its timed rounds. The micro-probes in
+carries what they were during its timed rounds (timed_window_s, in the
+trace's seconds). The micro-probes in
 probes.py run after the spin-up and land in the same JSON.
 
 The @njit 8-conn CPU oracle (shared/cpu_oracle.py: allocates visited,
@@ -459,8 +461,6 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
         phases, total = ff.phase_times(events)
         return {"total": total, **phases}
 
-    _spin_up(SCENE_SPIN_SECONDS)
-
     # -- untimed pass: correctness (painted image vs ch03's) + counters
     refs = {}
     meta = {}
@@ -500,7 +500,10 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
     del refs
     gc.collect()
 
-    # -- timed rounds, interleaved, order reversed on odd rounds
+    # -- timed rounds, interleaved, order reversed on odd rounds. The
+    #    untimed pass is mostly host work at 36-64 Mpx (image copies and
+    #    compares: seconds of GPU idle), so the clock is ramped again here.
+    _spin_up(SCENE_SPIN_SECONDS)
     samples = {n: [] for n in names}
     t_timed0 = time.time()
     for i in range(GPU_REPEATS):
@@ -527,6 +530,8 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
            "filled": meta["ch03_conn8"]["filled"],
            "tiles": engines[HEADLINE].n_tiles,
            "configs_timed": names}
+    row["timed_window_s"] = [round(t_timed0 - sampler.t0, 2),
+                             round(t_timed1 - sampler.t0, 2)]
     row.update(sampler.window(t_timed0, t_timed1))
     for n in names:
         tot = [s["total"] for s in samples[n]]
