@@ -609,8 +609,8 @@ benchmarks/
 
 Result files are in `results/ch08_gpu_nblob_tiles/benchmark_results/`.
 `waves_20261015T183401Z` is this page's session.
-`waves_20261015T160144Z` is the draft's, from the benchmark before the fairness review. The experiment
-sessions are named above.
+`waves_20261015T160144Z` is the draft's, from the benchmark before the
+fairness review. The experiment sessions are named above.
 
 ## Run
 
