@@ -1,7 +1,7 @@
 """Correctness tests: multi-block GPU flood fill vs the 4-conn CPU reference.
 
-The kernel must match the reference exactly (visited mask, depth map —
-which catches level-mixing races a visited-only check would miss — level
+The kernel must match the reference exactly (visited mask, depth map -
+which catches level-mixing races a visited-only check would miss - level
 and filled counts) at EVERY block count, recolor reached pixels solid blue,
 and leave everything else untouched.
 
@@ -63,7 +63,7 @@ def test_matches_cpu_reference(name):
 @pytest.mark.parametrize("blocks", [1, 2, 3, 8, None])
 @pytest.mark.parametrize("tpb", [64, 256, 512])
 def test_block_count_and_tpb_invariance(blocks, tpb):
-    """The BFS result must not depend on grid shape — including blocks=1
+    """The BFS result must not depend on grid shape - including blocks=1
     (grid.sync degenerates) and the deliberately odd blocks=3."""
     img, sx, sy = scenes.random_scene(256, 256, 0.65, rng_seed=3)
     assert_matches_reference(img, sx, sy, threads_per_block=tpb, blocks=blocks)
@@ -137,7 +137,7 @@ def test_only_red_pixels_ever_visited():
 @pytest.mark.parametrize("blocks", [2, None])
 def test_depth_is_true_bfs_distance(blocks):
     """On a full-red image seeded at the corner, 4-connected BFS depth is
-    the Manhattan distance x + y — at any block count, which proves the
+    the Manhattan distance x + y - at any block count, which proves the
     grid-wide level barrier preserves level-exactness."""
     img, sx, sy = scenes.full_red_scene(64, 64)
     result = flood_fill(img, sx, sy, blocks=blocks)
@@ -200,7 +200,7 @@ def test_owner_census():
 
 
 def test_all_blocks_participate():
-    """On a scene whose frontiers dwarf the grid, no block may sit idle —
+    """On a scene whose frontiers dwarf the grid, no block may sit idle -
     the grid-stride partition guarantees work reaches every block. (The
     corner-seeded full-red diagonal peaks at width pixels, so the grid must
     stay below that: 8 x 64 = 512 threads < 1024-pixel peak frontiers.)"""
@@ -259,7 +259,7 @@ def test_model_bytes_consistency():
 
 # The 8-conn kernels are different algorithms with different results: depth
 # is Chebyshev distance, and random scenes percolate at ~0.407 instead of
-# the 4-conn threshold — hence their own density bracket (0.30 / 0.60).
+# the 4-conn threshold - hence their own density bracket (0.30 / 0.60).
 SCENES8 = dict(SCENES)
 SCENES8["random_subcritical"] = lambda: scenes.random_scene(200, 200, 0.30,
                                                             rng_seed=7)
@@ -276,7 +276,7 @@ def test_matches_cpu_reference_8(name):
 @pytest.mark.parametrize("blocks", [2, None])
 def test_depth_is_chebyshev_distance(blocks):
     """On a full-red image seeded at the corner, 8-connected BFS depth is
-    the Chebyshev distance max(x, y) — square waves, not diamonds — and a
+    the Chebyshev distance max(x, y) - square waves, not diamonds - and a
     64x64 image fills in 64 levels instead of the 4-conn 127."""
     img, sx, sy = scenes.full_red_scene(64, 64)
     result = flood_fill(img, sx, sy, blocks=blocks, connectivity=8)
@@ -319,7 +319,7 @@ def test_bare_twin_matches_reference_8():
 @pytest.mark.parametrize("name", ["square_64", "disk_101", "serpentine_128"])
 def test_4_vs_8_on_solid_scenes(name):
     """On scenes without diagonal-only gaps the two connectivities fill the
-    IDENTICAL pixel set — only the timeline differs: 8-conn reaches every
+    IDENTICAL pixel set - only the timeline differs: 8-conn reaches every
     pixel at least as early (Chebyshev <= Manhattan) in strictly fewer
     levels (serpentine: <=, its 1-px corridors only save U-turn corners)."""
     img, sx, sy = SCENES[name]()
@@ -358,7 +358,7 @@ def test_rejects_bad_connectivity(conn):
 # keeps every ring-2 jump inside true 8-connectivity) but not its
 # depth/levels: BFS on a supergraph advances Chebyshev distance 2 through
 # interior, so assert_matches_reference (which checks depth) is unusable.
-# The guard is static — "all 8 ring-1 in-bounds and originally red" — so
+# The guard is static - "all 8 ring-1 in-bounds and originally red" - so
 # depth/levels/interior are still fully deterministic and grid-invariant.
 
 
@@ -384,7 +384,7 @@ def test_r2_fill_set_matches_reference(name):
 def test_r2_never_leaks_across_gap():
     """THE guard test: two components at Chebyshev distance 2 (one white
     row between two red stripes). An unguarded 5x5 neighborhood would jump
-    the gap; the guard must not — every stripe-edge pixel has a non-blob
+    the gap; the guard must not - every stripe-edge pixel has a non-blob
     ring-1 neighbor, so no pixel whose ring-2 reaches the far stripe ever
     fires its second ring."""
     img = np.full((60, 60, 3), 255, dtype=np.uint8)
@@ -398,7 +398,7 @@ def test_r2_never_leaks_across_gap():
 
 def test_r2_serpentine_guard_never_fires():
     """1-px corridors: no pixel has an all-red ring-1, so interior == 0 and
-    the supergraph degenerates to plain conn8 — fill set AND depth
+    the supergraph degenerates to plain conn8 - fill set AND depth
     identical. This is the pure-guard-overhead scene of the benchmark."""
     img, sx, sy = scenes.serpentine_scene(128, 128)
     r2 = flood_fill(img, sx, sy, connectivity=8, radius=2)
@@ -455,7 +455,7 @@ def test_r2_block_count_and_tpb_invariance(blocks, tpb):
 
 
 def test_r2_bare_twin_parity():
-    """The bare twin runs the identical supergraph BFS — visited/depth/
+    """The bare twin runs the identical supergraph BFS - visited/depth/
     levels/filled equality against the instrumented run."""
     img, sx, sy = scenes.random_scene(200, 200, 0.60, rng_seed=9)
     inst = flood_fill(img, sx, sy, connectivity=8, radius=2)
@@ -490,7 +490,7 @@ def test_rejects_bad_radius(kwargs):
 
 # ------------------------------------------------- warp-cooperative twins
 
-# Same BFS graph as conn8 — only the work distribution changes (4 entries
+# Same BFS graph as conn8 - only the work distribution changes (4 entries
 # x 8 directions across a warp's 32 lanes), so results must be
 # bit-identical to conn8's and the full reference assertion applies
 # unchanged, depth and levels included.

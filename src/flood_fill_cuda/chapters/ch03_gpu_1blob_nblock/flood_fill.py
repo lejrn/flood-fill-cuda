@@ -7,7 +7,7 @@ Public API:
 
 connectivity=4 explores right/down/left/up (Manhattan-distance waves,
 diamond fronts); connectivity=8 adds the diagonals (Chebyshev waves,
-square fronts — fewer, wider levels for the same blob). The two are
+square fronts - fewer, wider levels for the same blob). The two are
 different algorithms: fills agree only on scenes without diagonal-only
 gaps, and depth/levels always differ.
 
@@ -15,7 +15,7 @@ radius=2 (requires connectivity=8) selects the guarded radius-2 twin:
 ring-1 is always probed first with the unchanged protocol; only pixels
 whose entire ring-1 is in-bounds blob material additionally probe the 16
 ring-2 cells. Fill set identical to plain conn8 (the guard keeps every
-jump inside true 8-connectivity); depth/levels are its own — roughly
+jump inside true 8-connectivity); depth/levels are its own - roughly
 half the levels on solid blobs. Instrumented results report `interior`
 (guard passes; ring-2 probes == 16 * interior).
 
@@ -23,11 +23,11 @@ probe_layout="warp" (requires connectivity=8, radius=1) selects the
 warp-cooperative twin: each warp takes 4 queue entries and assigns each
 lane one (entry, direction) pair, so all 32 probes issue in one round
 instead of 8 lockstep loop iterations. Results are bit-identical to the
-plain conn8 twin (same BFS graph — only work distribution changes).
+plain conn8 twin (same BFS graph - only work distribution changes).
 
 blocks=None launches the maximum cooperative grid the GPU can host for the
 chosen threads_per_block (queried from the compiled kernel, never hardcoded
-— oversizing deadlocks grid.sync). An explicit block count is validated
+- oversizing deadlocks grid.sync). An explicit block count is validated
 against the same limit; blocks=1 is legal (grid.sync degenerates to a
 block-wide barrier) and serves as the equivalence anchor in tests.
 
@@ -101,7 +101,7 @@ class MultiFloodFillResult:
     interior: int          # radius-2 only: guard passes (else 0)
     processed_per_block: np.ndarray = field(repr=False)  # (blocks,) int64
     balance_min_max_pct: float  # 100 * min / max of per-block processed
-    balance_cv_pct: float       # 100 * std / mean — N-way imbalance in one number
+    balance_cv_pct: float       # 100 * std / mean - N-way imbalance in one number
     # Placement (observed via %smid, not assumed; -1s for bare)
     sm_ids: list
     distinct_sms: int
@@ -186,7 +186,7 @@ def max_blocks(threads_per_block=256, bare=False, connectivity=4, radius=1,
                probe_layout="thread"):
     """The largest cooperative grid this GPU can host at threads_per_block
     (what blocks=None resolves to). Compiles the kernel on first call.
-    Queried per kernel — no twin's capacity is ever assumed equal to
+    Queried per kernel - no twin's capacity is ever assumed equal to
     another's (a register-count difference would change it)."""
     _warmup(bare, connectivity, radius, probe_layout)
     return _coop_max_blocks(
@@ -211,7 +211,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     if not (0 <= seed_x < width and 0 <= seed_y < height):
         raise ValueError(f"seed ({seed_x}, {seed_y}) outside {width}x{height} image")
     if not _is_red(img_host, seed_x, seed_y):
-        raise ValueError(f"seed pixel ({seed_x}, {seed_y}) is not red — nothing to fill")
+        raise ValueError(f"seed pixel ({seed_x}, {seed_y}) is not red - nothing to fill")
     # 512 cap (vs the single-block package's 1024): the kernel's ~104
     # registers per thread mean a 1024-thread block would need more than
     # the SM's entire 64K register file and could never be resident.
@@ -314,7 +314,7 @@ def flood_fill(img_host, seed_x, seed_y, threads_per_block=256, blocks=None,
     counters = d_counters.copy_to_host()
     if counters[OVERFLOW]:
         raise RuntimeError(
-            "structural tripwire fired — this indicates a kernel bug: the "
+            "structural tripwire fired - this indicates a kernel bug: the "
             "queue cannot legitimately overflow")
     levels = int(counters[LEVELS])
     truncated = instrumented and levels > trace_capacity
