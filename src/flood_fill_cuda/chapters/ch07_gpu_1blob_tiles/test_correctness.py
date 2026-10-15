@@ -290,6 +290,43 @@ def test_non_red_seed_raises_like_ch03(connectivity):
         ch03_flood_fill(img, 0, 0, connectivity=connectivity)
 
 
+NARROW_SEED_DTYPES = [np.int8, np.uint8, np.int16, np.uint16, np.int32,
+                      np.int64]
+
+
+@pytest.mark.parametrize("dtype", NARROW_SEED_DTYPES)
+def test_seed_args_ignore_the_seed_dtype(dtype):
+    """Under NumPy 2 a narrow NumPy scalar keeps its dtype through
+    `tx << 16`, `1 << (y % 32)` and `x * wpr + ty`, so an int16 seed
+    once named tile (0, ty) and a uint8 seed set no bit at all. The queue
+    entry, seed word, seed bit and stamp index must not depend on the
+    integer type the caller happened to hold."""
+    eng = TileFill(100, 100, connectivity=8, _skip_warmup=True)
+    want = eng.seed_args(40, 40)
+    assert eng.seed_args(dtype(40), dtype(40)) == want
+    assert want[3] == (1 << kernels.TY_BITS) | 1      # tile (1, 1)
+    if np.iinfo(dtype).max >= 30000:
+        # x * wpr + ty past 2**15: the seed word / stamp index wrap too
+        wide = TileFill(30001, 64, connectivity=8, _skip_warmup=True)
+        assert wide.seed_args(dtype(30000), dtype(40)) == \
+            wide.seed_args(30000, 40)
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("dtype", NARROW_SEED_DTYPES)
+def test_numpy_integer_seeds_fill_the_blob(dtype, connectivity):
+    """Regression: an np.int16 seed at (40, 40) filled 1 px where ch03
+    and the oracle fill the 3,600-px square."""
+    img = np.full((100, 100, 3), 255, dtype=np.uint8)
+    img[10:70, 10:70] = RED
+    exp_img, exp_visited, exp_filled = expected_image(img, 40, 40,
+                                                      connectivity)
+    r = flood_fill(img, dtype(40), dtype(40), connectivity=connectivity)
+    assert r.filled == exp_filled == 3600
+    np.testing.assert_array_equal(r.visited, exp_visited)
+    np.testing.assert_array_equal(r.img, exp_img)
+
+
 @pytest.mark.parametrize("connectivity", [4, 8])
 @pytest.mark.parametrize("shape", [(1, 1), (5, 7), (20, 12), (31, 32)])
 def test_image_smaller_than_one_tile(shape, connectivity):

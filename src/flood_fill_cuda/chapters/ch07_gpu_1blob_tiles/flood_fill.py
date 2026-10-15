@@ -232,6 +232,14 @@ class TileFill:
         pack_kernel[self.plain_grid, PLAIN_TPB](img_dev, self.mask)
 
     def seed_args(self, seed_x, seed_y):
+        """(seed word, seed bit, seed tile, first queue entry).
+
+        The seed is made a Python int first. Under NumPy 2 (NEP 50) a
+        Python int operand does not widen a NumPy scalar, so an np.int16
+        seed wrapped `tx << 16` to 0 (round 0 closed the wrong tile) and
+        an np.uint8 seed wrapped `1 << (y % 32)` to 0 (no seed bit).
+        """
+        seed_x, seed_y = int(seed_x), int(seed_y)
         tx = seed_x // TILE
         ty = seed_y // 32
         return (int(seed_x * self.words_per_row + ty),
