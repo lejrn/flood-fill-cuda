@@ -145,6 +145,7 @@ class TileWaves:
             raise ValueError(f"waves_tpb must be a multiple of 32 in "
                              f"[32, 1024], got {waves_tpb}")
         _check_grid("label_grid", label_grid)
+        _check_grid("paint_grid", paint_grid)
         self.width = width
         self.height = height
         self.connectivity = connectivity

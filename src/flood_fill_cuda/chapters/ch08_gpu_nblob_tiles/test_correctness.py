@@ -752,15 +752,28 @@ def test_label_grid_is_validated(grid):
         TileWaves(64, 64, label_grid=grid, _skip_warmup=True)
 
 
-def test_odd_but_whole_warp_grids_are_exact():
+@pytest.mark.parametrize("grid", [(8, 48), (16, 40), (4, 100), (1, 16),
+                                  (0, 128), (1, 2048)])
+def test_paint_grid_is_validated(grid):
+    """K4 and its label-map and seed twins split warps the same way as
+    K2 (warp = grid(1) >> 5, FULL-mask calls). At 48 threads the paint,
+    the label map and the seeds come out wrong (139 seeds for 133
+    blobs). The engine must refuse such a grid."""
+    with pytest.raises(ValueError, match="paint_grid"):
+        TileWaves(64, 64, paint_grid=grid, _skip_warmup=True)
+
+
+@pytest.mark.parametrize("grid_arg", ["label_grid", "paint_grid"])
+def test_odd_but_whole_warp_grids_are_exact(grid_arg):
     """Block sizes that are whole warps stay exact on small grids."""
     img = S5.random_blobs_scene(64, 64, 0.35, 2)[0]
     label, n = cpu_label_components(img)
     for grid in ((3, 96), (8, 64), (1, 32)):
-        res = recolor(img, emit_label=True, label_grid=grid)
+        res = recolor(img, emit_label=True, **{grid_arg: grid})
         assert res.n_blobs == n
         np.testing.assert_array_equal(res.label, label)
         np.testing.assert_array_equal(res.img, expected_paint(img, label))
+        assert res.seeds == expected_seeds(label, img.shape[1])
 
 
 def test_cooperative_grid_is_bounded():
