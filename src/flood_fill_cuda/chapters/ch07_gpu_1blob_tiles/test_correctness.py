@@ -27,6 +27,7 @@ from .flood_fill import flood_fill, max_blocks, plain_shape, TileFill
 from ..ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill, cpu_flood_fill_8
 from ..ch03_gpu_1blob_nblock import scenes
 from ..ch03_gpu_1blob_nblock.flood_fill import flood_fill as ch03_flood_fill
+from .benchmarks import worst_cases
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 RED = scenes.RED
@@ -268,6 +269,33 @@ def test_diagonal_staircase_crosses_tile_corners(anti):
     assert r8.filled == n
     r4 = assert_matches_reference(img, 0, sy, 4)
     assert r4.filled == 1
+
+
+WORST_CASES = {
+    "zz_serpentine": lambda: worst_cases.zz_serpentine_scene(256, 256),
+    "zz_lattice": lambda: worst_cases.zz_lattice_scene(512, 512),
+    "maze": lambda: worst_cases.maze_scene(cells=48),
+    "thin_h32_blob": lambda: worst_cases.thin_h32_blob_scene(1 << 13),
+}
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", WORST_CASES.keys())
+def test_worst_case_scenes(name, connectivity):
+    """The benchmark's worst cases, small. On the zigzags every pixel step
+    crosses a tile border, so at 8-conn ch07 needs about one round per
+    level; 4-conn fills only the seed there."""
+    img, sx, sy = WORST_CASES[name]()
+    r = assert_matches_reference(img, sx, sy, connectivity)
+    red = int((img == RED).all(axis=2).sum())
+    if connectivity == 8:
+        assert r.filled == red        # one blob: ch06's check relies on it
+    if name == "zz_serpentine":
+        if connectivity == 8:
+            levels = cpu_flood_fill_8(img, sx, sy)[2]
+            assert r.rounds >= 0.9 * levels
+        else:
+            assert r.filled == 1
 
 
 @pytest.mark.parametrize("connectivity", [4, 8])

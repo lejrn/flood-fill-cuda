@@ -1,4 +1,4 @@
-"""Benchmark: tile BFS (ch07) head to head with ch03's BFS kernels.
+"""Benchmark: tile BFS (ch07) head to head with ch03's BFS and ch06's CCL.
 
 One session, one interleaved round-robin per scene: every config timed
 once per round, the order reversed on odd rounds (ch03's connectivity
@@ -40,6 +40,23 @@ timed and the README says which one it quotes:
   ch03_conn8         the thread-layout 8-conn kernel at its default.
 ch07's best-grid column takes the best of w2/w4/w8/cap96 and, on the
 narrow scenes, the one-block grids 1 x 32 and 1 x 64.
+
+`ch06_runs` is the CCL reference: ch06's run-table pipeline (pack,
+count, scan, emit, merge, flatten, paint: union-find over horizontal
+runs, 8-connected, no seed, no BFS) on its own reusable buffers, in
+ch06's rgb contract (RGB on the device in, painted RGB out), timed with
+the same restore, flush, sleep, events and interleaving. It labels every
+red blob; on these one-blob scenes that is the same job. It paints
+palette[label % 6], not blue, so its check is the set of pixels it
+CHANGED, which must equal the set ch03's 8-conn fill changed. Its run
+table is sized to the scene's run count when ch06's n/16 heuristic is
+too small (the maze): ch06's recolor() would resize and rerun.
+
+Scenes: ch03's six (the README's), then four worst cases from the
+chapter's perf-adversary review (worst_cases.py): a serpentine of
+zigzags on the tile borders (one tile per round), a zigzag lattice on
+every border (rounds == levels with a wide front), a 1-px maze, and a
+524288 x 32 strip with a 32x32 blob (pack/paint dominated).
 
 What each ch07 number covers: `pack` (ch06's RGB -> 1 bit/px), `init`
 (the per-run state, on the device), `rounds` (the cooperative tile
@@ -94,6 +111,12 @@ from ...ch03_gpu_1blob_nblock import scenes
 from ...ch03_gpu_1blob_nblock import kernels as k3
 from ...ch03_gpu_1blob_nblock import flood_fill as ch03_ff
 from ...ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill_8
+from ...ch06_gpu_nblob_runs import kernels as k6
+from ...ch06_gpu_nblob_runs.recolor import (
+    RunRecolor, PHASE_BLOCKS as CH06_PHASE_BLOCKS,
+    PACK_ROW_BLOCKS as CH06_PACK_ROW_BLOCKS, MIN_RUN_CAPACITY,
+    PIXELS_PER_RUN_SLOT, DEFAULT_GRID as CH06_GRID, _warmup as ch06_warmup)
+from . import worst_cases
 from ....shared import results_paths
 
 warnings.simplefilter("ignore", NumbaPerformanceWarning)
@@ -126,6 +149,17 @@ SCENES = [
      "36M px", False),
     ("sq_8000_center", lambda: scenes.square_scene(8000, 8000, 8000, 8000),
      "64M px: ch03 wc's 88.5 ms headline scene", False),
+    # worst cases (worst_cases.py)
+    ("zz_serp_1k", worst_cases.zz_serpentine_scene,
+     "serpentine of zigzags on the x tile borders, 1024x1024: one tile "
+     "per round, rounds == levels", True),
+    ("zz_lattice_4k", worst_cases.zz_lattice_scene,
+     "zigzag on every tile border, 4096x4096: rounds == levels with a "
+     "wide front", False),
+    ("maze_1k", worst_cases.maze_scene,
+     "perfect maze, 1-px corridors, 1023x1023", False),
+    ("thin_h32_blob", worst_cases.thin_h32_blob_scene,
+     "524288x32 strip (16.8M px), 32x32 blob: pack/paint dominated", False),
 ]
 
 # ch03 configs: name -> (layout, connectivity, bare, tpb, blocks, narrow
@@ -167,14 +201,20 @@ CH07 = {
 CH07_NARROW_ONLY = {"ch07_1x32", "ch07_1x64"}
 CH07_GRIDS = ["ch07_w2", "ch07_w4", "ch07_w8", "ch07_w4_cap96",
               "ch07_1x32", "ch07_1x64"]
+# ch06's run-table CCL, rgb contract, its own launch shapes.
+CH06 = "ch06_runs"
+CH06_PHASES = ("pack", "count", "scan", "emit", "merge", "flatten", "paint")
+CH06_CORE = ("count", "scan", "emit", "merge", "flatten")
 CONN = {**{n: spec[1] for n, spec in CH03.items()},
-        **{n: kw["connectivity"] for n, kw in CH07.items()}}
+        **{n: kw["connectivity"] for n, kw in CH07.items()},
+        CH06: 8}
 HEADLINE = "ch07_w4"      # the default flood_fill() configuration
 # per-round ratios (numerator / denominator: > 1 = ch07 faster)
 PAIRS = {
     "w4_vs_wc": ("ch03_wc", "ch07_w4"),
     "w4_bare_vs_wc_bare": ("ch03_wc_bare", "ch07_w4_bare"),
     "c4_w4_vs_conn4": ("ch03_conn4", "ch07_c4_w4"),
+    "w4_vs_ch06": (CH06, "ch07_w4"),
 }
 
 
@@ -360,6 +400,13 @@ def _spin_up(seconds=SPIN_SECONDS):
     del eng, d_img
 
 
+def _run_count(img):
+    """Maximal red runs along y (ch06's unit), counted on the host."""
+    red = (img[..., 0] == 255) & (img[..., 1] == 0) & (img[..., 2] == 0)
+    return int(np.count_nonzero(red[:, 0])
+               + np.count_nonzero(red[:, 1:] & ~red[:, :-1]))
+
+
 def _ratio_stats(num, den):
     r = [a / b for a, b in zip(num, den)]
     return statistics.median(r), min(r), max(r)
@@ -377,7 +424,11 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
     r3 = Ch03Runner(width, height,
                     max(ch03_launch[n]["blocks"] for n in ch03_names))
     engines = {n: ff.TileFill(width, height, **CH07[n]) for n in ch07_names}
-    names = ch03_names + ch07_names
+    n_runs_host = _run_count(img)
+    run_cap = max(MIN_RUN_CAPACITY, width * height // PIXELS_PER_RUN_SLOT,
+                  n_runs_host)
+    r6 = RunRecolor(width, height, run_capacity=run_cap)
+    names = ch03_names + ch07_names + [CH06]
     sink = cuda.device_array(1, np.uint32)
 
     def run_once(n):
@@ -396,6 +447,13 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
             return {"total": cuda.event_elapsed_time(e0, e1),
                     "reset": cuda.event_elapsed_time(rev[0], rev[2]),
                     "reset_visited": cuda.event_elapsed_time(rev[0], rev[1])}
+        if n == CH06:
+            ph, events = r6.run(d_img, contract="rgb")
+            events[-1].synchronize()
+            out = {p: cuda.event_elapsed_time(events[i], events[i + 1])
+                   for i, p in enumerate(ph)}
+            out["total"] = cuda.event_elapsed_time(events[0], events[-1])
+            return out
         _, events = engines[n].run(d_img, sx, sy)
         events[-1].synchronize()
         phases, total = ff.phase_times(events)
@@ -415,6 +473,23 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
             meta[n] = r3.read()
             if conn not in refs:
                 refs[conn] = out
+        elif n == CH06:
+            c6 = r6.counters.copy_to_host()
+            if c6[k6.RUN_OVERFLOW]:
+                raise RuntimeError(f"ch06 run table overflowed on {name}")
+            # ch06 paints palette colours (none of them red): compare the
+            # SET of pixels it changed with the set ch03's 8-conn changed
+            changed = np.any(out != img, axis=2)
+            ref_changed = np.any(refs[8] != img, axis=2)
+            meta[n] = {"runs": int(c6[k6.N_RUNS]),
+                       "blobs": int(c6[k6.N_BLOBS]),
+                       "union_attempts": int(c6[k6.UNION_ATTEMPTS]),
+                       "run_capacity": run_cap,
+                       "filled": int(np.count_nonzero(changed))}
+            check[n] = bool(np.array_equal(changed, ref_changed)
+                            and meta[n]["runs"] == n_runs_host)
+            del out, changed, ref_changed
+            continue
         else:
             meta[n] = engines[n].read_counters()
             meta[n]["filled"] = engines[n].filled()
@@ -459,13 +534,17 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
         row[f"{n}_ms_min"] = min(tot)
         row[f"{n}_ms_max"] = max(tot)
         row[f"{n}_ms_stdev"] = statistics.stdev(tot)
-        if n in CH07:
-            for ph in ff.PHASES:
-                row[f"{n}_{ph}_ms"] = statistics.median(
-                    s[ph] for s in samples[n])
+        phases = ff.PHASES if n in CH07 else (CH06_PHASES if n == CH06
+                                              else ())
+        for ph in phases:
+            row[f"{n}_{ph}_ms"] = statistics.median(
+                s[ph] for s in samples[n])
         for k, v in meta[n].items():
             row[f"{n}_{k}"] = v
-        row[f"{n}_paint_matches_ch03"] = check[n]
+        if n == CH06:
+            row[f"{n}_fillset_matches_ch03"] = check[n]
+        else:
+            row[f"{n}_paint_matches_ch03"] = check[n]
     row["ch03_reset_ms"] = statistics.median(
         s["reset"] for s in samples["ch03_wc"])
     row["ch03_reset_visited_ms"] = statistics.median(
@@ -487,6 +566,22 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
                                           / row["ch07_c4_w4_ms"])
     row["ch07_c4_w4_speedup_vs_conn4_min"] = (row["ch03_conn4_ms_min"]
                                               / row["ch07_c4_w4_ms_min"])
+    row[f"{CH06}_speedup_vs_wc"] = row[f"{wc}_ms"] / row[f"{CH06}_ms"]
+    row[f"{CH06}_speedup_vs_wc_min"] = (row[f"{wc}_ms_min"]
+                                        / row[f"{CH06}_ms_min"])
+    # > 1: the tile BFS beats the CCL reference
+    row[f"{HEADLINE}_speedup_vs_ch06"] = (row[f"{CH06}_ms"]
+                                          / row[f"{HEADLINE}_ms"])
+    row[f"{HEADLINE}_speedup_vs_ch06_min"] = (row[f"{CH06}_ms_min"]
+                                              / row[f"{HEADLINE}_ms_min"])
+    # the connectivity work alone, without the shared ends: ch06's
+    # count..flatten vs ch07's init + rounds (both start from the same
+    # packed mask, made by the same pack kernel)
+    row[f"{CH06}_core_ms"] = sum(row[f"{CH06}_{p}_ms"] for p in CH06_CORE)
+    row[f"{HEADLINE}_core_ms"] = (row[f"{HEADLINE}_init_ms"]
+                                  + row[f"{HEADLINE}_rounds_ms"])
+    row[f"{HEADLINE}_core_speedup_vs_ch06"] = (row[f"{CH06}_core_ms"]
+                                               / row[f"{HEADLINE}_core_ms"])
     for key, (num, den) in PAIRS.items():
         med, lo, hi = _ratio_stats([s["total"] for s in samples[num]],
                                    [s["total"] for s in samples[den]])
@@ -533,12 +628,13 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
           f"bare {row['ch03_wc_bare_ms']:8.2f} / {row['ch07_w4_bare_ms']:7.3f} "
           f"x{row['ch07_w4_bare_speedup_vs_wc_bare']:6.1f} | "
           f"best {b3}/{b7} x{row['best_vs_best_speedup']:6.1f} | "
+          f"ch06 {row[f'{CH06}_ms']:7.3f} | "
           f"lv {lv8:>6,d} -> rounds {h['rounds']:>5d} "
           f"sm {row.get('clk_sm_min', '?')}-{row.get('clk_sm_median', '?')} "
           f"mem {row.get('clk_mem_min', '?')} "
           f"{'OK' if row['all_paint_match'] else 'MISMATCH'}", flush=True)
 
-    del engines, r3, d_img, d_pristine, img, sink
+    del engines, r3, r6, d_img, d_pristine, img, sink
     gc.collect()
     try:
         cuda.current_context().deallocations.clear()
@@ -640,6 +736,12 @@ def main():
         del eng
     for n, m in config_meta.items():
         print(f"  {n:16s} " + " ".join(f"{k}={v}" for k, v in m.items()))
+    ch06_warmup()       # JIT ch06's kernels off the clock
+    config_meta[CH06] = {"connectivity": 8, "contract": "rgb",
+                         "tpb": CH06_GRID[1],
+                         "phase_blocks": dict(CH06_PHASE_BLOCKS),
+                         "pack_row_blocks": CH06_PACK_ROW_BLOCKS,
+                         "run_capacity": "max(8192, n/16, runs in the scene)"}
     flush = cuda.to_device(np.zeros(L2_FLUSH_BYTES // 4, np.uint32))
     _l2_flush[512, 256](flush, cuda.device_array(1, np.uint32))
     probes.warm()
@@ -653,7 +755,8 @@ def main():
     print(f"  clocks: {clocks_start}")
 
     print("Probes (latency, column fill, barrier ritual, registers)...")
-    grids = sorted({(m["blocks"], m["tpb"]) for m in config_meta.values()})
+    grids = sorted({(m["blocks"], m["tpb"]) for m in config_meta.values()
+                    if "blocks" in m})        # ch06 is not cooperative
     probe_res = probes.run_all(grids)
     for k, v in probe_res.items():
         print(f"  {k}: {v}")
@@ -682,9 +785,9 @@ def main():
         "experiment": (
             "tile BFS (ch07: 32x32 tiles closed in registers, rounds of "
             "tiles, two grid.sync per round) vs ch03's conn4 / conn8 / "
-            "warp-coop BFS kernels (instrumented and bare, several grids), "
-            "one interleaved round-robin per scene, CUDA-event timings on "
-            "every side"),
+            "warp-coop BFS kernels (instrumented and bare, several grids) "
+            "and ch06's run-table CCL, one interleaved round-robin per "
+            "scene, CUDA-event timings on every side"),
         "headline_config": HEADLINE,
         "configs": config_meta,
         "config": {"gpu_repeats": GPU_REPEATS, "njit_repeats": NJIT_REPEATS,
@@ -698,7 +801,9 @@ def main():
         "timing_note": (
             "ch07 *_ms = pack + init + rounds + paint (first event to "
             "last). ch03 *_ms = its one kernel launch; its device reset "
-            "is off the clock and timed separately (ch03_reset_ms). Every "
+            "is off the clock and timed separately (ch03_reset_ms). "
+            "ch06_runs *_ms = pack + count + scan + emit + merge + flatten "
+            "+ paint, rgb contract. Every "
             "run: image restored from a device copy, 96 MB L2 flush read, "
             "GPU sleep kernel queued ahead so host launch overhead is "
             "excluded. ch07_w4_e2e_ms = pageable H2D + pipeline + D2H of "
