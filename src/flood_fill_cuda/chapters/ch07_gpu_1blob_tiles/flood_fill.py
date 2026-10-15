@@ -1,7 +1,7 @@
 """Host driver for the tile-BFS flood fill.
 
 Public API:
-    flood_fill(img, seed_x, seed_y, connectivity=4, threads_per_block=256,
+    flood_fill(img, seed_x, seed_y, connectivity=4, threads_per_block=128,
                blocks=None) -> TileFloodFillResult      one-shot, allocates
     TileFill(width, height, connectivity, threads_per_block, blocks)
         .run(img_dev, seed_x, seed_y) -> (names, events)  reusable buffers
@@ -49,12 +49,18 @@ from .kernels import (
 
 # Register cap of the rounds kernel unless the caller picks one (see
 # kernels.get_rounds_kernel; None = whatever the linker allocates).
-# Uncapped, the linked 8-conn kernel takes 154 registers/thread (ptxas
-# compiles the same PTX standalone to 94; linking the external grid.sync
-# call adds the rest) and the cooperative grid is 288 warps. At 80 the grid doubles
-# to 576 warps for ~100 bytes of spills, which wins on every big blob;
-# the serpentine, a pure latency chain, prefers no cap.
-DEFAULT_MAX_REGISTERS = 80
+# Linked, the 8-conn kernel takes 143 registers/thread (ptxas compiles
+# the same PTX standalone to 87; linking the external grid.sync call adds
+# the rest), which seats 288 warps. A cap of 80 doubled that to 576 warps
+# and won while every closure shuffle took a slow path (see
+# kernels._col_fill); with the shuffles fixed, its spills cost more than
+# the extra warps buy, so the default is no cap.
+DEFAULT_MAX_REGISTERS = None
+
+# 4 warps per block: 72 blocks x 128 seat all 288 warps the registers
+# allow. At 256 threads the same registers seat only 24 blocks (192
+# warps), so ch03's tpb=256 default is not carried over.
+DEFAULT_TPB = 128
 
 PHASES = ("pack", "init", "rounds", "paint")
 
@@ -98,7 +104,7 @@ def _warmup(connectivity, bare=False, max_registers=DEFAULT_MAX_REGISTERS):
     _warmed.add(key)
 
 
-def max_blocks(threads_per_block=256, connectivity=4, bare=False,
+def max_blocks(threads_per_block=DEFAULT_TPB, connectivity=4, bare=False,
                max_registers=DEFAULT_MAX_REGISTERS):
     """Largest cooperative grid of the rounds kernel at this block size
     (what blocks=None resolves to). Queried per twin, never assumed."""
@@ -147,8 +153,9 @@ class TileFill:
     so the caller owns the clock boundaries.
     """
 
-    def __init__(self, width, height, connectivity=4, threads_per_block=256,
-                 blocks=None, bare=False, max_registers=DEFAULT_MAX_REGISTERS,
+    def __init__(self, width, height, connectivity=4,
+                 threads_per_block=DEFAULT_TPB, blocks=None, bare=False,
+                 max_registers=DEFAULT_MAX_REGISTERS,
                  _skip_warmup=False):
         if width < 1 or height < 1:
             raise ValueError(f"bad shape {width}x{height}")
@@ -275,6 +282,17 @@ class TileFill:
         words = self.reached.copy_to_host()
         return int(np.unpackbits(words.view(np.uint8)).sum())
 
+    def tiles_touched(self):
+        """Tiles holding at least one reached pixel: the visits a perfect
+        schedule would need (each tile closed exactly once)."""
+        words = self.reached.copy_to_host()
+        pad = self.tiles_x * TILE - self.width
+        if pad:
+            words = np.concatenate(
+                [words, np.zeros((pad, self.words_per_row), words.dtype)])
+        per_tile = words.reshape(self.tiles_x, TILE, self.words_per_row)
+        return int(np.count_nonzero(per_tile.any(axis=1)))
+
 
 def phase_times(events):
     """Event list -> (per-phase ms dict, total ms)."""
@@ -309,8 +327,9 @@ class TileFloodFillResult:
     total_ms: float = 0.0
 
 
-def flood_fill(img_host, seed_x, seed_y, connectivity=4, threads_per_block=256,
-               blocks=None, bare=False, max_registers=DEFAULT_MAX_REGISTERS):
+def flood_fill(img_host, seed_x, seed_y, connectivity=4,
+               threads_per_block=DEFAULT_TPB, blocks=None, bare=False,
+               max_registers=DEFAULT_MAX_REGISTERS):
     """Flood-fill the red blob containing (seed_x, seed_y) by tile BFS.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is

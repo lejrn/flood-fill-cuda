@@ -191,7 +191,16 @@ def _col_fill(f, m, lane):
     from above, which is the tile's top edge; the windows they leave
     unclamped are never used, because lane j only reads its own `p` at a
     step k with j >= k, and that window lies entirely inside the tile.
+
+    The syncwarp() is a 15x speed-up, measured: without it this function
+    costs 4.4 us per call from a lone warp, with it 0.29 us (same
+    results). Inside a loop ptxas cannot prove the warp converged, so it
+    guards every shuffle with a runtime convergence test and a slow path
+    (a call to __cuda_sm70_shflsync_up_p); after the loop back-edge the
+    warp tests as diverged and all twenty shuffles take the slow path.
+    An explicit syncwarp() reconverges it, and the fast SHFL runs.
     """
+    cuda.syncwarp()
     p = m
     f, p = _col_step_up(f, p, lane, 1)
     f, p = _col_step_up(f, p, lane, 2)
@@ -220,7 +229,9 @@ def _diag_step(f, m, lane):
 
     Lane 0 gets nothing from above and lane 31 nothing from below - those
     rows belong to the neighbouring tiles and arrive as exports.
+    (syncwarp: see _col_fill.)
     """
+    cuda.syncwarp()
     d = _dilate(f)
     du = _up(d, 1)
     dd = _down(d, 1)
@@ -275,15 +286,13 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None):
     Registers, measured. Every array here is flat and indexed with a
     uint32 (Numba then emits no negative-index wraparound), the side and
     corner exports are spread over lanes 0-2 and 29-31 so each lane owns
-    at most three targets, and the counters are uint32. None of that
-    lowered the LINKED 8-conn register count (130 before, 135 after,
-    154 once the filter loads moved ahead of the closure). ptxas
-    compiles the same PTX on its own (`-c`, nothing linked) to 94
-    registers, or to 80 under a cap of 80, with zero spills either way;
-    the other ~60 arrive with linking the external grid.sync() call from
-    libcudadevrt. The
-    lever that works is a link-time cap (`max_registers`), which is why
-    it is a parameter here.
+    at most three targets, and the counters are uint32. The LINKED 8-conn
+    kernel still reports 143 registers/thread: ptxas compiles the same
+    PTX on its own (`-c`, nothing linked) to 87 with zero spills, and the
+    other ~56 arrive with linking the external grid.sync() call from
+    libcudadevrt. A link-time cap (`max_registers`) trades them for
+    spills and more resident warps; it is a parameter so the benchmark
+    can price that trade.
     """
 
     jit_kw = {} if max_registers is None else {"max_registers": max_registers}
@@ -388,6 +397,7 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None):
                     c_iters = uint32(c_iters + it)
 
                 # ---- export bits (every lane runs the shuffles)
+                cuda.syncwarp()  # fast-path shuffles: see _col_fill
                 if conn8:
                     fu = _up(f, 1)
                     fd = _down(f, 1)
@@ -432,6 +442,7 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None):
 
                 # ---- enqueue: one lane per target tile. Side lanes own
                 # theirs; lane 3 speaks for ty-1 and lane 4 for ty+1.
+                cuda.syncwarp()  # reconverge after the atomics' branches
                 b_up = cuda.ballot_sync(FULL, add_up)
                 b_dn = cuda.ballot_sync(FULL, add_dn)
                 want = add_e
