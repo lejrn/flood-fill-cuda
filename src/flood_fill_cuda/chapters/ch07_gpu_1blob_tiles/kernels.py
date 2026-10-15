@@ -406,7 +406,12 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None):
                     if lane == 31:
                         fd = U0
                     v = uint32(f | fu | fd)
-                    src = _bcast(f, 0) if left else _bcast(f, 31)
+                    # ONE shuffle with a per-lane source, run by all 32
+                    # lanes. `_bcast(f, 0) if left else _bcast(f, 31)`
+                    # compiled to two full-mask shuffles in divergent
+                    # branches (legal PTX on sm_70+, undefined on sm_6x)
+                    # and cost 1-5% of the rounds kernel.
+                    src = _bcast(f, 0 if left else 31)
                     if sel == 0:
                         ce = _dilate(src)               # side row, word ty
                     elif sel == 1:
