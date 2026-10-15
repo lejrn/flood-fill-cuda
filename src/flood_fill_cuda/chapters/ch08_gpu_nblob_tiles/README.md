@@ -210,8 +210,9 @@ moves the method between two ends.
 
 - **L = 0 (S2 seeds only, valve off): pure waves.** 7,936 seeds, 8
   rounds, 28,852 claims. On `input_blobs` it costs the same as the
-  default (0.998 of L8). On long shapes it pays one round per comp: 90
-  rounds on the disk (1.60x), 64 on the serpentine (1.50x).
+  default (0.998 of L8). On long shapes it pays one round per comp hop
+  from the farthest comp to its nearest seed: 90 rounds on the disk
+  (12,513 comps, 1.60x), 64 on the serpentine (64,576 comps, 1.50x).
 - **L = 8 (the default): waves plus a seed lattice.** 6 rounds, 25,179
   claims, 9,162 links.
 - **L = 1: every ring comp a seed.** Zero claims and one round: block
