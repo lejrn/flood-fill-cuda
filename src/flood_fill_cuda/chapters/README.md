@@ -572,7 +572,7 @@ Chapters 2 and 3 both named.)*
 | fewer steps | 27.8-36.1× fewer rounds than levels on ch03's six scenes (4,001 → 127 on `sq_8000`) |
 | fewer atomics | 210.9M CAS → 5.1M OR + stamp on `sq_8000` (41×) |
 | the serpentine | 34.4× ch03 (bare pair), but one CPU core is still 4.2× faster (0.94 vs 3.92 ms) |
-| **against ch06's run CCL** | ch06 wins `sq_8000` (2.38 vs 3.49 ms), `sq_4000` and the serpentine (29×). ch07 wins `sq_2000` (1.77×) and the disk (1.12×) only through ch06's paint launch. ch06's connectivity core is 2.6-9.5× cheaper on every blob |
+| **against ch06's run CCL** | ch06 wins `sq_8000` (2.38 vs 3.49 ms), `sq_4000` and the serpentine (29×). ch07 wins `sq_2000` (1.77×) and the disk (1.12×) only through ch06's paint launch. ch06's connectivity core is 2.5-9.5× cheaper on every blob |
 | where tiles degrade | zigzags on the tile borders make rounds equal levels: 0.96× and 0.88× ch03. A 1-px maze still wins 11.1× |
 | a launch shape | on a 524288×32 strip ch06's pack grid left 7 of 8 warps idle; sizing the block by the row's words took the same kernel from 3.16 to 0.41 ms |
 | the `syncwarp` lesson | one reconverging `cuda.syncwarp()` before the closure's shuffles: column fill 6,520 → 429 cycles (15.2×), rounds kernel 2.1-3.0× faster |

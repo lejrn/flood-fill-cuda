@@ -233,7 +233,7 @@ job.
 
 "Core" is the connectivity work alone, after the shared `pack`: ch06's
 count, scan, emit, merge and flatten against ch07's init and rounds.
-**ch06's core is cheaper on all six scenes**, by 2.6x (sq_2000) to 9.5x
+**ch06's core is cheaper on all six scenes**, by 2.5x (sq_2000) to 9.5x
 (sq_4000) on the blobs and 35x on the serpentine (*derived*).
 
 So ch07's two wins come from the ends, not the middle. ch06's paint
@@ -522,7 +522,7 @@ kernel, the dependent chain per visit, and ch06's paint occupancy.
 
 - **A frontier of tiles beats a frontier of pixels, not the absence of
   a frontier.** ch07 is 20-26x faster than ch03's BFS on the big
-  blobs. But ch06's run CCL does the connectivity part 2.6-9.5x cheaper
+  blobs. But ch06's run CCL does the connectivity part 3.6-9.5x cheaper
   on the same blobs and 35x cheaper on the serpentine.
 - **Fewer steps is a property of the shape.** Rounds are ~31x fewer than
   levels when paths run through tiles, and equal when every pixel step
