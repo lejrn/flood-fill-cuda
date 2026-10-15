@@ -53,6 +53,9 @@ from .kernels import (
 
 CONTRACTS = ("rgb", "mask")
 LOOKUPS = ("scan", "index")
+# row-major stores of the mask K2-K4 read; get_pack_kernel also builds
+# "tilemajor", experiment E1's reference store, which no engine may use
+PACK_VARIANTS = ("direct", "smem")
 PHASES = ("pack", "init", "label", "waves", "paint")
 MASK_PHASES = PHASES[1:]
 LABEL_ONLY_PHASES = ("init", "label", "waves")
@@ -146,6 +149,9 @@ class TileWaves:
                              f"[32, 1024], got {waves_tpb}")
         _check_grid("label_grid", label_grid)
         _check_grid("paint_grid", paint_grid)
+        if pack_variant not in PACK_VARIANTS:
+            raise ValueError(f"pack_variant must be one of {PACK_VARIANTS}, "
+                             f"got {pack_variant!r}")
         self.width = width
         self.height = height
         self.connectivity = connectivity

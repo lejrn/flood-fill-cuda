@@ -763,6 +763,20 @@ def test_paint_grid_is_validated(grid):
         TileWaves(64, 64, paint_grid=grid, _skip_warmup=True)
 
 
+def test_pack_variant_is_validated():
+    """'tilemajor' is experiment E1's reference store: a tile-major
+    layout with no row guard, which no later kernel reads. Through the
+    engine it moved pixel (0, 32) to (32, 0) and stored past the mask.
+    The engine and recolor() must refuse it; the kernel itself stays
+    available to E1."""
+    img = S8.from_mask(np.zeros((33, 33), bool))
+    with pytest.raises(ValueError, match="pack_variant"):
+        TileWaves(33, 33, pack_variant="tilemajor", _skip_warmup=True)
+    with pytest.raises(ValueError, match="pack_variant"):
+        recolor(img, pack_variant="tilemajor")
+    assert k.get_pack_kernel("tilemajor") is not None
+
+
 @pytest.mark.parametrize("grid_arg", ["label_grid", "paint_grid"])
 def test_odd_but_whole_warp_grids_are_exact(grid_arg):
     """Block sizes that are whole warps stay exact on small grids."""
