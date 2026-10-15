@@ -264,9 +264,14 @@ each call. The `@njit` oracle runs after every GPU scene.
 
 Clocks: the SM clock's median was 2,070 MHz in every timed window but
 `crop_7000` (2,047.5). Its minimum was 2,025 MHz or more everywhere but
-`dots_4k` (see the worst cases). The memory clock dipped to 7,001 MHz
-(P3) on several scenes and to 5,501 on `maze_1k`; the ratios are per
-round, so both sides share a dip.
+`dots_4k` (see the worst cases).
+
+The memory clock dipped to 7,001 MHz on several scenes (in P0 as well
+as P3) and ran at 5,501 on `maze_1k` (P3). Its lowest sample was 405
+MHz on `dots_4k`: one trace sample, the same one as that scene's 210
+MHz SM minimum.
+
+The ratios are per round, so both sides share a dip.
 
 Every painted image equals ch06's own `RunRecolor.run`, for every
 config and scene, and ch05's wherever ch05 ran.
@@ -369,8 +374,9 @@ The last four come from the perf review of this chapter.
 MHz median SM clock (its host work idles the GPU), so the true gap is
 larger. The hybrid lookup turned the other ch05 losses into wins.
 
-The `dots_4k` GPU window also logged a minimum of 210 MHz, with a
-2,070 MHz median, so its ch08 and ch06 times may carry a small dip.
+The `dots_4k` GPU window also logged one sample at 210 MHz SM and 405
+MHz memory (P3), with a 2,070 MHz SM median, so its ch08 and ch06 times
+may carry a small dip.
 
 ## Experiments
 
