@@ -1,0 +1,763 @@
+"""Chapter 8 correctness: seeded tile waves against the CPU oracles.
+
+The output contract is ch05's and ch06's, bit for bit:
+
+    label map      every red pixel's canonical label (its blob's min lin
+                   x*height + y), -1 off-blob
+    painted image  palette[label % 6] on red, untouched elsewhere
+    n_blobs        the component count
+    seeds          one canonical (lex-min) pixel per blob, label order
+
+plus the invariants of the algorithm (design section 11.2), checked on
+every end-to-end case against an independent CPU model of the tiles and
+the waves (cpu_model.py, built from pixels, not from side words):
+
+    ring + interior == comps == the model's comp count
+    claims + seeds + valve seeds == ring comps   (each claimed ONCE)
+    links == seeds + valve seeds - roots          (each link retires a root)
+    n_blobs == roots + interior comps == the oracle's
+    rounds == the model's multi-source BFS rounds, exactly
+    tasks == sum of popc(dirs) over the ring comps
+    seeds == the model's seeds for the same rule
+    debug twin: ordinal overflow, anchor mismatch, unlabelled all 0
+
+The unit tests come first (closure, records, pack), so a failure further
+down can be localised.
+
+Slow cases (the 6 benchmark scenes, 16 Mpx strips) run only with
+FLOOD_FILL_SLOW=1; the PNG scenes also need FLOOD_FILL_IMAGES=<dir with
+input_blobs.png and input_blocks.png>.
+
+Run:
+    uv run pytest src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/test_correctness.py -q
+"""
+
+import os
+
+os.environ.setdefault('NUMBA_CUDA_USE_NVIDIA_BINDING', '1')
+
+import functools
+import tempfile
+
+import numpy as np
+import pytest
+from numba import cuda, int32, uint32
+
+from . import kernels as k
+from . import scenes as S8
+from .flood_fill import TileWaves, recolor, max_blocks
+from .cpu_oracle import cpu_label, cpu_label_components, red_mask
+from .cpu_model import tile_model
+from ..ch05_gpu_nblob_nblock import scenes as S5
+from ..ch05_gpu_nblob_nblock.kernels import PALETTE_HOST, N_PALETTE
+from ..ch06_gpu_nblob_runs.kernels import pack_kernel
+from ..ch06_gpu_nblob_runs.recolor import recolor as ch06_recolor
+from ..ch07_gpu_1blob_tiles.flood_fill import plain_shape
+from ..ch07_gpu_1blob_tiles.benchmarks import worst_cases as W7
+
+pytestmark = [pytest.mark.filterwarnings("ignore::UserWarning"),
+              pytest.mark.filterwarnings(
+                  "ignore::numba.core.errors.NumbaPerformanceWarning")]
+
+SLOW = os.environ.get("FLOOD_FILL_SLOW") == "1"
+IMAGES = os.environ.get("FLOOD_FILL_IMAGES")
+SCRATCH = os.environ.get("FLOOD_FILL_SCRATCH", tempfile.gettempdir())
+
+FULL = np.uint32(0xFFFFFFFF)
+
+
+# ------------------------------------------------------------ helpers
+
+def _stripes(width, height, step):
+    img = np.full((width, height, 3), 255, dtype=np.uint8)
+    for y in range(0, height, step):
+        img[:, y] = (255, 0, 0)
+    return img
+
+
+def expected_paint(img, label):
+    out = img.copy()
+    red = red_mask(img)
+    out[red] = PALETTE_HOST[(label % N_PALETTE)[red]]
+    return out
+
+
+def expected_seeds(label, height):
+    return [(int(v) // height, int(v) % height)
+            for v in np.unique(label[label >= 0])]
+
+
+# ch06's 20-scene battery, plus the ch07 worst cases and ch08's own
+SCENES = {
+    "two_squares": lambda: S5.two_squares_scene(64, 64, 20, 20, gap=4)[0],
+    "two_disks": lambda: S5.two_disks_scene(80, 80, 15, gap=6)[0],
+    "asym_squares": lambda: S5.asym_squares_scene(80, 80, 30, 8, gap=4)[0],
+    "two_pixels": lambda: S5.two_pixels_scene(32, 32)[0],
+    "u_shape": lambda: S5.u_shape_scene(40, 40)[0],
+    "comb_80_teeth": lambda: S5.comb_scene(64, 200, teeth=80)[0],
+    "serpentine": lambda: S5.serpentine_scene(64, 64)[0],
+    "single_pixel": lambda: S5.single_pixel_scene(16, 16)[0],
+    "full_red": lambda: S5.full_red_scene(48, 48)[0],
+    "blank": lambda: S5.blank_scene(32, 32)[0],
+    "blob_grid_100": lambda: S5.blob_grid_scene(200, 200, 10, 10, 12,
+                                                gap=4)[0],
+    "noise_030": lambda: S5.random_blobs_scene(120, 120, 0.30, 1)[0],
+    "noise_045": lambda: S5.random_blobs_scene(100, 100, 0.45, 7)[0],
+    "noise_010": lambda: S5.random_blobs_scene(150, 150, 0.10, 3)[0],
+    "size_33x33": lambda: S5.random_blobs_scene(33, 33, 0.35, 2)[0],
+    "size_31x97": lambda: S5.random_blobs_scene(31, 97, 0.35, 4)[0],
+    "size_97x131": lambda: S5.blob_grid_scene(97, 131, 4, 5, 11, gap=5)[0],
+    "one_row": lambda: _stripes(1, 64, 3),
+    "one_col": lambda: _stripes(64, 1, 1),
+    "stripes_1px": lambda: _stripes(40, 97, 2),
+    # ch07 worst cases (single blobs that stress the comp graph)
+    "zz_serp_1k": lambda: W7.zz_serpentine_scene()[0],
+    "zz_lattice_1k": lambda: W7.zz_lattice_scene(1024, 1024)[0],
+    "maze_1k": lambda: W7.maze_scene(512)[0],
+    # ch08 adversarial
+    "corner_main": lambda: S8.corner_joined_scene("main"),
+    "corner_anti": lambda: S8.corner_joined_scene("anti"),
+    "corner_main_px": lambda: S8.corner_joined_scene("main", solid=False),
+    "corner_anti_px": lambda: S8.corner_joined_scene("anti", solid=False),
+    "all_eight": S8.all_eight_scene,
+    "frame_comb_31": lambda: S8.frame_comb_scene(31),
+    "frame_comb_32": lambda: S8.frame_comb_scene(32),
+    "frame_comb_33": lambda: S8.frame_comb_scene(33),
+    "frame_comb_60": lambda: S8.frame_comb_scene(60),
+    "frame_comb_62_c4": lambda: S8.frame_comb_scene(62, connectivity=4),
+    "dot_lattice_256": lambda: S8.dot_lattice_scene((2, 3)),
+    "checker_512_c4": lambda: S8.checker_tile_scene((2, 2)),
+    "rmin_trap": S8.rmin_trap_scene,
+    "lexmin_multi": S8.lexmin_multi_scene,
+    "spiral": S8.spiral_scene,
+    "diag_snake": lambda: S8.diag_snake_scene(13),
+    "tile_corner_px": lambda: S8.tile_corners_scene(100, 100),
+    "tile_corner_blocks": lambda: S8.tile_corners_scene(100, 100,
+                                                        block=True),
+    "size_1x1": lambda: S5.full_red_scene(1, 1)[0],
+    "size_31x31_full": lambda: S5.full_red_scene(31, 31)[0],
+    "size_1x97": lambda: S5.random_blobs_scene(1, 97, 0.5, 5)[0],
+    "size_97x1": lambda: S5.random_blobs_scene(97, 1, 0.5, 6)[0],
+    "size_63x95": lambda: S5.random_blobs_scene(63, 95, 0.4, 8)[0],
+    "size_65x33": lambda: S5.random_blobs_scene(65, 33, 0.4, 9)[0],
+    "full_red_100": lambda: S5.full_red_scene(100, 100)[0],
+}
+
+# the end-to-end config matrix: one axis at a time from the base config
+# (L8, valve 128, default collision cap, max blocks, 8-conn, rgb, fast
+# paint), every case instrumented + debug so the invariants can be read
+CONFIGS = {
+    "base": {},
+    "one_block": dict(waves_tpb=32, waves_blocks=1),
+    "L0": dict(lattice=0),
+    "L1": dict(lattice=1),
+    "valve1": dict(valve_round=1),
+    "coll0": dict(coll_capacity=0),
+    "mask": dict(_contract="mask"),
+    "slow_paint": dict(paint_fast=False),
+    "c4": dict(connectivity=4),
+    "c4_one_block_L0": dict(connectivity=4, lattice=0, waves_tpb=32,
+                            waves_blocks=1),
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _scene(name):
+    img = SCENES[name]()
+    img.setflags(write=False)
+    return img
+
+
+@functools.lru_cache(maxsize=None)
+def _oracle(name, connectivity):
+    img = _scene(name)
+    if connectivity == 8:
+        return cpu_label_components(img)
+    return cpu_label(img, 4)
+
+
+@functools.lru_cache(maxsize=None)
+def _model(name, connectivity):
+    return tile_model(_scene(name), connectivity)
+
+
+def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
+    """Run ch08 instrumented + debug, check the outputs and every
+    invariant. Returns the result."""
+    kw = dict(kw)
+    kw.setdefault("instrumented", True)
+    kw.setdefault("debug", True)
+    res = recolor(np.ascontiguousarray(img), contract=contract,
+                  emit_label=True, **kw)
+    c = res.counters
+    height = img.shape[1]
+    np.testing.assert_array_equal(res.label, label)
+    np.testing.assert_array_equal(res.img, expected_paint(img, label))
+    assert res.n_blobs == n_blobs
+    assert res.seeds == expected_seeds(label, height)
+    # ---- invariants (design 11.2)
+    lattice = kw.get("lattice", 8)
+    valve = kw.get("valve_round", 128)
+    wm = model.waves(lattice, valve)
+    assert c["ring_comps"] + c["interior_comps"] == c["comps"] \
+        == model.n_comps
+    assert c["ring_comps"] == model.n_ring
+    assert c["claims"] + c["seeds"] + c["valve_seeds"] == c["ring_comps"]
+    assert c["union_done"] == c["seeds"] + c["valve_seeds"] - c["roots"]
+    assert c["roots"] + c["interior_comps"] == n_blobs
+    assert c["rounds"] == wm["rounds"]
+    assert c["tasks"] == model.tasks
+    assert c["seeds"] == wm["seeds"]
+    assert c["seeds_lattice"] == wm["seeds_lattice"]
+    assert c["seeds_queued"] == wm["seeds_queued"]
+    assert c["claims"] == wm["claims"]
+    assert c["valve_seeds"] == wm["valve_seeds"]
+    assert c["valve_round"] == wm["valve_round"]
+    assert c["union_calls"] == c["collisions"]
+    if kw.get("coll_capacity", None) == 0:
+        assert c["coll_inline"] == c["collisions"]
+    if kw.get("debug"):
+        assert c["ordinal_overflow"] == 0
+        assert c["anchor_mismatch"] == 0
+        assert c["unlabelled"] == 0
+    assert c["max_ring_tile"] <= 62
+    return res
+
+
+# ----------------------------------------------------- unit: closure
+
+def _make_comps_probe(conn8, ch07_loop):
+    @cuda.jit
+    def probe(masks, out, iters):
+        """One warp per 32x32 mask (block = 32 threads): every pixel gets
+        the order index of its comp, in K2's comp order."""
+        tile = cuda.blockIdx.x
+        lane = cuda.threadIdx.x
+        m = masks[tile, lane]
+        rem = m
+        c = 0
+        n_it = 0
+        while cuda.any_sync(k.FULL, rem != k.U0):
+            f, a, bit = k._first_pixel(rem, lane)
+            if ch07_loop:
+                while True:
+                    old = f
+                    f = k._row_fill(f, rem)
+                    if conn8:
+                        f = k._diag_step(f, rem, lane)
+                    f = k._col_fill(f, rem, lane)
+                    n_it += 1
+                    if not cuda.any_sync(k.FULL, f != old):
+                        break
+            else:
+                f, it, last = k._close(f, rem, lane, conn8)
+                n_it += it
+            rem = uint32(rem & ~f)
+            for j in range(32):
+                if (f >> uint32(j)) & k.U1:
+                    out[tile, lane, j] = c
+            c += 1
+        if lane == 0:
+            iters[tile] = n_it
+
+    return probe
+
+
+_PROBES = {}
+
+
+def _probe(conn8, ch07_loop):
+    key = (conn8, ch07_loop)
+    if key not in _PROBES:
+        _PROBES[key] = _make_comps_probe(conn8, ch07_loop)
+    return _PROBES[key]
+
+
+def _cpu_tile_comps(bits, conn8):
+    """bits (32, 32) bool, [row, y]: comp order index per pixel, comps in
+    (row, bit) order of their first pixel, BFS inside the tile."""
+    out = np.full((32, 32), -1, np.int32)
+    c = 0
+    for x in range(32):
+        for y in range(32):
+            if not bits[x, y] or out[x, y] >= 0:
+                continue
+            out[x, y] = c
+            stack = [(x, y)]
+            while stack:
+                px, py = stack.pop()
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        if (dx, dy) == (0, 0):
+                            continue
+                        if not conn8 and dx and dy:
+                            continue
+                        nx, ny = px + dx, py + dy
+                        if 0 <= nx < 32 and 0 <= ny < 32 and bits[nx, ny] \
+                                and out[nx, ny] < 0:
+                            out[nx, ny] = c
+                            stack.append((nx, ny))
+            c += 1
+    return out
+
+
+def _closure_masks():
+    rng = np.random.default_rng(2026)
+    masks = []
+    for _ in range(500):
+        d = rng.uniform(0.05, 0.7)
+        masks.append(rng.random((32, 32)) < d)
+    xx, yy = np.meshgrid(np.arange(32), np.arange(32), indexing="ij")
+    masks.append(np.ones((32, 32), bool))
+    masks.append(np.zeros((32, 32), bool))
+    masks.append((xx + yy) % 2 == 0)                 # checkerboard
+    masks.append((xx % 2 == 0) & (yy % 2 == 0))      # 256 isolated px
+    one_row = np.zeros((32, 32), bool)
+    one_row[7] = True
+    masks.append(one_row)
+    one_col = np.zeros((32, 32), bool)
+    one_col[:, 19] = True
+    masks.append(one_col)
+    spiral = S8.spiral_scene(32)[..., 1] == 0
+    masks.append(spiral)
+    return masks
+
+
+def _pack_rows(bits):
+    w = np.zeros(32, np.uint32)
+    for x in range(32):
+        v = 0
+        for y in range(32):
+            if bits[x, y]:
+                v |= 1 << y
+        w[x] = v
+    return w
+
+
+@pytest.mark.parametrize("connectivity", [8, 4])
+@pytest.mark.parametrize("ch07_loop", [False, True])
+def test_closure_comps_match_cpu(connectivity, ch07_loop):
+    """K2's comp loop (lowest remaining pixel first, ch07 closure with
+    the last-comp and frontier exits) finds exactly the CPU's comps, in
+    the same order. The ch07_loop twin (no early exits) agrees too."""
+    masks = _closure_masks()
+    words = np.stack([_pack_rows(m) for m in masks])
+    out = cuda.to_device(np.full((len(masks), 32, 32), -1, np.int32))
+    iters = cuda.device_array(len(masks), np.int32)
+    _probe(connectivity == 8, ch07_loop)[len(masks), 32](
+        cuda.to_device(words), out, iters)
+    got = out.copy_to_host()
+    for i, m in enumerate(masks):
+        exp = _cpu_tile_comps(m, connectivity == 8)
+        np.testing.assert_array_equal(got[i], exp, err_msg=f"mask {i}")
+
+
+def test_closure_exits_save_trips():
+    """The two exits never cost more trips than ch07's proving loop."""
+    masks = _closure_masks()
+    words = cuda.to_device(np.stack([_pack_rows(m) for m in masks]))
+    trips = {}
+    for loop in (False, True):
+        out = cuda.to_device(np.full((len(masks), 32, 32), -1, np.int32))
+        it = cuda.device_array(len(masks), np.int32)
+        _probe(True, loop)[len(masks), 32](words, out, it)
+        trips[loop] = it.copy_to_host()
+    assert (trips[False] <= trips[True]).all()
+    assert trips[False].sum() < trips[True].sum()
+
+
+# ------------------------------------------- unit: records after K2
+
+RECORD_SCENES = ["noise_030", "noise_045", "size_31x97", "u_shape",
+                 "all_eight", "frame_comb_33", "frame_comb_60",
+                 "dot_lattice_256", "corner_main_px", "corner_anti_px",
+                 "tile_corner_blocks", "rmin_trap", "spiral", "size_65x33"]
+
+
+@pytest.mark.parametrize("name", RECORD_SCENES)
+@pytest.mark.parametrize("connectivity", [8, 4])
+@pytest.mark.parametrize("lattice", [0, 8, 1])
+def test_records_match_model(name, connectivity, lattice):
+    """After K0 + K2 alone: every tile header, and every ring record's
+    side words, anchor, direction bits, seed label and parent, equal the
+    CPU model's (computed from pixels)."""
+    img = _scene(name)
+    tm = _model(name, connectivity)
+    eng = TileWaves(img.shape[0], img.shape[1], connectivity=connectivity,
+                    instrumented=True, debug=True)
+    dev = cuda.to_device(img)
+    eng.pack(dev)
+    eng.label_pass(lattice)
+    cuda.synchronize()
+    hdr = eng.hdr.copy_to_host()
+    np.testing.assert_array_equal(hdr & 63, tm.n_ring_tile)
+    np.testing.assert_array_equal(hdr >> 8, tm.n_total_tile)
+    rec = eng.rec.copy_to_host().reshape(-1, 8)
+    parent = eng.parent.copy_to_host()
+    seed, _ = tm.seeds(lattice)
+    ring = np.flatnonzero(tm.ordinal >= 0)
+    ids = 64 * tm.tile[ring].astype(np.int64) + tm.ordinal[ring]
+    r = rec[ids]
+    np.testing.assert_array_equal(r[:, 0].view(np.uint32), tm.side_n[ring])
+    np.testing.assert_array_equal(r[:, 1].view(np.uint32), tm.side_s[ring])
+    np.testing.assert_array_equal(r[:, 2].view(np.uint32), tm.side_w[ring])
+    np.testing.assert_array_equal(r[:, 3].view(np.uint32), tm.side_e[ring])
+    np.testing.assert_array_equal(r[:, 4], tm.anchor[ring])
+    np.testing.assert_array_equal(r[:, 5], tm.dirs[ring])
+    exp_label = np.where(seed[ring], ids, -1)
+    np.testing.assert_array_equal(r[:, 6], exp_label)
+    s_ids = ids[seed[ring]]
+    np.testing.assert_array_equal(parent[s_ids], s_ids)
+    c = eng.read_counters()
+    assert c["seeds"] == int(seed.sum())
+    assert c["interior_comps"] == tm.n_interior
+
+
+def test_ring_bound_is_62():
+    """62 ring comps in one tile at 4-conn and 60 at 8-conn (the frame
+    comb): the ordinal bound of the README is reached, never passed."""
+    for conn, n, name in ((4, 62, "frame_comb_62_c4"),
+                          (8, 60, "frame_comb_60")):
+        tm = _model(name, conn)
+        assert tm.n_ring_tile.max() == n
+
+
+# ------------------------------------------------- unit: pack_tiles
+
+PACK_SIZES = [1, 31, 32, 33, 63, 64, 65, 97]
+
+
+@pytest.mark.parametrize("variant", ["direct", "smem"])
+def test_pack_tiles_equals_ch06_pack(variant):
+    """K1 writes exactly ch06's mask, padding bits included, on every
+    size pair from PACK_SIZES and on a few scenes. The mask is poisoned
+    first, so an unwritten word cannot pass."""
+    pack = k.get_pack_kernel(variant)
+    rng = np.random.default_rng(5)
+    imgs = []
+    for w in PACK_SIZES:
+        for h in PACK_SIZES:
+            red = rng.random((w, h)) < 0.5
+            img = S8.from_mask(red)
+            # non-red colours that share bytes with red must not count
+            img[rng.random((w, h)) < 0.1] = (255, 0, 1)
+            img[rng.random((w, h)) < 0.1] = (254, 0, 0)
+            imgs.append(img)
+    imgs += [_scene(n) for n in ("noise_030", "size_31x97", "full_red",
+                                 "blank", "one_row", "one_col")]
+    for img in imgs:
+        w, h = img.shape[:2]
+        wpr = (h + 31) // 32
+        dev = cuda.to_device(img)
+        ref = cuda.to_device(np.full((w, wpr), 0xDEADBEEF, np.uint32))
+        got = cuda.to_device(np.full((w, wpr), 0xDEADBEEF, np.uint32))
+        g6, t6 = plain_shape(w, wpr)
+        pack_kernel[g6, t6](dev, ref)
+        grid, tpb = k.pack_shape(w, wpr)
+        pack[grid, tpb](dev, got)
+        cuda.synchronize()
+        np.testing.assert_array_equal(got.copy_to_host(), ref.copy_to_host(),
+                                      err_msg=f"{w}x{h}")
+        tail = got.copy_to_host()[:, -1]
+        if h % 32:
+            assert ((tail >> np.uint32(h % 32)) == 0).all()
+
+
+def test_pack_tiles_thin_shapes():
+    """The launch shapes of the 524288 x 32 and 32 x 524288 strips (one
+    word per row; one tile row)."""
+    pack = k.get_pack_kernel("direct")
+    imgs = [S8.thin_strip_scene(1 << 19, 32, axis=0),
+            S8.thin_strip_scene(1 << 19, 32, axis=1),
+            S8.from_mask(np.random.default_rng(1).random((70000, 33)) < 0.3)]
+    for img in imgs:
+        w, h = img.shape[:2]
+        wpr = (h + 31) // 32
+        dev = cuda.to_device(img)
+        ref = cuda.to_device(np.full((w, wpr), 0xDEADBEEF, np.uint32))
+        got = cuda.to_device(np.full((w, wpr), 0xDEADBEEF, np.uint32))
+        g6, t6 = plain_shape(w, wpr)
+        pack_kernel[g6, t6](dev, ref)
+        grid, tpb = k.pack_shape(w, wpr)
+        pack[grid, tpb](dev, got)
+        cuda.synchronize()
+        np.testing.assert_array_equal(got.copy_to_host(), ref.copy_to_host())
+
+
+# ------------------------------------------------ unit: the rotation
+
+@pytest.mark.parametrize("blocks", ["one", "max"])
+def test_counter_rotation_over_many_rounds(blocks):
+    """A scene needing far more than 7 rounds reuses each of the three
+    rotating append counters many times; rounds and frontiers must equal
+    the model's at 1 block of 32 threads and at the cooperative max."""
+    name = "diag_snake"
+    img = _scene(name)
+    label, n = _oracle(name, 8)
+    tm = _model(name, 8)
+    kw = dict(waves_tpb=32, waves_blocks=1) if blocks == "one" else {}
+    res = run_and_check(img, label, n, tm, lattice=0, **kw)
+    assert res.rounds == 14 == tm.waves(0, 128)["rounds"]
+    eng = TileWaves(img.shape[0], img.shape[1], lattice=0,
+                    instrumented=True, **kw)
+    dev = cuda.to_device(img)
+    eng.run(dev)
+    cuda.synchronize()
+    st = eng.round_stats()
+    assert st["frontier_comps"] == tm.waves(0, 128)["frontier"]
+
+
+# ------------------------------------------------- the 4-conn oracle
+
+@pytest.mark.parametrize("name", sorted(SCENES))
+def test_4conn_oracle_port_matches_ch05_at_8conn(name):
+    """cpu_label (ported from the scout) equals ch05's oracle at 8-conn,
+    so it can be trusted at 4-conn."""
+    img = _scene(name)
+    a, na = cpu_label(img, 8)
+    b, nb = cpu_label_components(img)
+    assert na == nb
+    np.testing.assert_array_equal(a, b)
+
+
+# ------------------------------------------------------- end to end
+
+@pytest.mark.parametrize("config", list(CONFIGS))
+@pytest.mark.parametrize("name", sorted(SCENES))
+def test_end_to_end(name, config):
+    """Label map, paint, n_blobs, seeds and every invariant, bit for bit,
+    for each scene under each config of the matrix."""
+    kw = dict(CONFIGS[config])
+    contract = kw.pop("_contract", "rgb")
+    conn = kw.get("connectivity", 8)
+    img = _scene(name)
+    label, n = _oracle(name, conn)
+    run_and_check(img, label, n, _model(name, conn), contract=contract, **kw)
+
+
+@pytest.mark.parametrize("name", ["noise_030", "u_shape", "blob_grid_100",
+                                  "comb_80_teeth", "serpentine",
+                                  "size_97x131", "rmin_trap", "spiral",
+                                  "frame_comb_60", "maze_1k"])
+def test_paint_equals_ch06_and_ch05(name):
+    """All three chapters paint palette[canonical % 6]: ch08's image
+    equals ch06's recolor() and ch05's flood_fill() exactly."""
+    from ..ch05_gpu_nblob_nblock.flood_fill import flood_fill as ch05_fill
+    img = np.ascontiguousarray(_scene(name))
+    a = recolor(img).img
+    b = ch06_recolor(img).img
+    np.testing.assert_array_equal(a, b)
+    c = ch05_fill(img, variant="seed_merge", lattice=8, build="split").img
+    np.testing.assert_array_equal(a, c)
+
+
+@pytest.mark.parametrize("lattice", [0, 2, 4, 8, 16, 32, 1])
+def test_every_seed_rule_gives_identical_labels(lattice):
+    """The strongest single check of the union protocol and of rmin:
+    every seed rule must give the same labels."""
+    for name in ("noise_045", "maze_1k", "spiral", "rmin_trap",
+                 "zz_lattice_1k", "frame_comb_60", "diag_snake"):
+        img = _scene(name)
+        label, n = _oracle(name, 8)
+        run_and_check(img, label, n, _model(name, 8), lattice=lattice)
+
+
+@pytest.mark.parametrize("valve", [1, 2, 3, 5, 9])
+def test_valve_fires_and_stays_exact(valve):
+    """The diagonal snake needs 14 rounds at L0: a valve at round v < 14
+    self-seeds the rest, then at most one more round has work."""
+    name = "diag_snake"
+    img = _scene(name)
+    label, n = _oracle(name, 8)
+    tm = _model(name, 8)
+    res = run_and_check(img, label, n, tm, lattice=0, valve_round=valve)
+    assert res.counters["valve_round"] == valve
+    assert res.counters["valve_seeds"] > 0
+    assert res.rounds <= valve + 1
+
+
+# ---------------------------------------------------------- fuzzing
+
+FUZZ_SEEDS = {"noise": 200, "rects_and_disks": 60, "walks": 60,
+              "border_zigzags": 60, "stitched_tiles": 60}
+
+
+@pytest.mark.parametrize("blocks", ["one", "max"])
+@pytest.mark.parametrize("family", list(FUZZ_SEEDS))
+def test_fuzz(family, blocks):
+    """Seeded fuzz families: oracle, invariants and model rounds. A
+    failure names the seed and saves the image (np.save) to
+    FLOOD_FILL_SCRATCH."""
+    builder = S8.FUZZ_FAMILIES[family]
+    kw = dict(waves_tpb=32, waves_blocks=1) if blocks == "one" else {}
+    for seed in range(FUZZ_SEEDS[family]):
+        rng = np.random.default_rng(10_000 * (1 + list(FUZZ_SEEDS).index(
+            family)) + seed)
+        img = builder(rng)
+        conn = 4 if seed % 4 == 3 else 8
+        lat = (0, 8, 1, 4)[seed % 4] if seed % 5 else 8
+        valve = 2 if seed % 7 == 6 else 128
+        try:
+            label, n = cpu_label(img, conn)
+            run_and_check(img, label, n, tile_model(img, conn),
+                          connectivity=conn, lattice=lat, valve_round=valve,
+                          **kw)
+        except AssertionError as exc:
+            path = os.path.join(SCRATCH, f"ch08_fuzz_{family}_{seed}.npy")
+            np.save(path, img)
+            raise AssertionError(
+                f"{family} seed {seed} (conn {conn}, L {lat}, valve "
+                f"{valve}) failed; image saved to {path}") from exc
+
+
+# ------------------------------------------- structural / robustness
+
+def test_engine_reuse_with_poisoned_buffers():
+    """A, B, A on one engine, every reusable buffer filled with
+    0x5A5A5A5A between runs: the outputs must not change. Nothing is
+    read before it is written in the same run (design 9.4)."""
+    a = S5.random_blobs_scene(120, 120, 0.35, 21)[0]
+    b = S5.random_blobs_scene(120, 120, 0.50, 22)[0]
+    eng = TileWaves(120, 120, instrumented=True, debug=True)
+    outs = []
+    for img in (a, b, a):
+        eng.poison()
+        cuda.synchronize()
+        res = recolor(img, engine=eng, emit_label=True)
+        label, n = cpu_label_components(img)
+        np.testing.assert_array_equal(res.label, label)
+        np.testing.assert_array_equal(res.img, expected_paint(img, label))
+        assert res.n_blobs == n
+        outs.append(res)
+    np.testing.assert_array_equal(outs[0].img, outs[2].img)
+
+
+def test_repeatability():
+    """20 runs: labels, paint, rounds, seeds, claims and links identical.
+    Which wave claims a comp is a race, so collision counts may vary."""
+    img = _scene("maze_1k")
+    eng = TileWaves(img.shape[0], img.shape[1], instrumented=True)
+    first = None
+    for _ in range(20):
+        res = recolor(img, engine=eng, emit_label=True)
+        c = res.counters
+        key = (res.rounds, c["seeds"], c["claims"], c["union_done"],
+               c["roots"], tuple(res.seeds))
+        if first is None:
+            first = (key, res.img, res.label)
+        else:
+            assert key == first[0]
+            np.testing.assert_array_equal(res.img, first[1])
+            np.testing.assert_array_equal(res.label, first[2])
+
+
+@pytest.mark.parametrize("name", ["noise_045", "maze_1k", "zz_serp_1k",
+                                  "frame_comb_60", "blob_grid_100"])
+def test_twins_agree(name):
+    """Bare, instrumented and debug twins give identical outputs; the
+    bare twin's n_blobs comes from its two kept counters."""
+    img = _scene(name)
+    label, n = _oracle(name, 8)
+    outs = []
+    for kw in (dict(), dict(instrumented=True), dict(debug=True),
+               dict(instrumented=True, debug=True)):
+        res = recolor(img, emit_label=True, **kw)
+        assert res.n_blobs == n
+        np.testing.assert_array_equal(res.label, label)
+        outs.append(res.img)
+        if kw.get("debug"):
+            c = res.counters
+            assert c["ordinal_overflow"] == c["anchor_mismatch"] \
+                == c["unlabelled"] == 0
+    for o in outs[1:]:
+        np.testing.assert_array_equal(o, outs[0])
+
+
+def test_contracts_agree():
+    """rgb and mask produce identical images, labels and counters."""
+    for name in ("noise_030", "maze_1k", "size_63x95"):
+        img = _scene(name)
+        a = recolor(img, contract="rgb", emit_label=True, instrumented=True)
+        b = recolor(img, contract="mask", emit_label=True, instrumented=True)
+        np.testing.assert_array_equal(a.img, b.img)
+        np.testing.assert_array_equal(a.label, b.label)
+        for key in ("rounds", "seeds", "claims", "roots", "ring_comps",
+                    "interior_comps", "tasks"):
+            assert a.counters[key] == b.counters[key]
+
+
+def test_blank_image_is_valid():
+    img = S5.blank_scene(64, 64)[0]
+    res = recolor(img, emit_label=True)
+    assert (res.n_blobs, res.seeds, res.rounds) == (0, [], 0)
+    np.testing.assert_array_equal(res.img, img)
+    assert (res.label == -1).all()
+
+
+def test_shape_limits():
+    """The shape asserts raise without allocating anything."""
+    with pytest.raises(ValueError, match="2\\*\\*31"):
+        TileWaves(50000, 50000, _skip_warmup=True)
+    with pytest.raises(ValueError, match="record words"):
+        TileWaves(1, 1 << 30, _skip_warmup=True)   # 2**25 one-row tiles
+    with pytest.raises(ValueError, match="bad shape"):
+        TileWaves(0, 5, _skip_warmup=True)
+    with pytest.raises(ValueError, match="connectivity"):
+        TileWaves(8, 8, connectivity=6, _skip_warmup=True)
+    with pytest.raises(ValueError, match="uint8"):
+        recolor(np.zeros((8, 8, 3), np.int32))
+    with pytest.raises(ValueError, match="contract"):
+        recolor(np.zeros((8, 8, 3), np.uint8), contract="nope")
+
+
+def test_cooperative_grid_is_bounded():
+    cap = max_blocks(256, 8, False, False)
+    assert cap >= 1
+    with pytest.raises(RuntimeError, match="grid.sync"):
+        TileWaves(64, 64, waves_blocks=cap + 1)
+
+
+# ------------------------------------------------------- slow scenes
+
+def _png(name):
+    if not IMAGES:
+        pytest.skip("set FLOOD_FILL_IMAGES to the folder with the PNGs")
+    path = os.path.join(IMAGES, f"{name}.png")
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    return S5.png_scene(path)[0]
+
+
+BENCH_SCENES = {
+    "input_blobs": lambda: _png("input_blobs"),
+    "input_blocks": lambda: _png("input_blocks"),
+    "blob_grid_100": lambda: S5.blob_grid_scene(4000, 4000, 10, 10, 360,
+                                                gap=40)[0],
+    "random_4000": lambda: S5.random_blobs_scene(4000, 4000, 0.30, 0)[0],
+    "disk_r2000": lambda: S5.disk_scene(4200, 4200, 2000)[0],
+    "serpentine_2048": lambda: S5.serpentine_scene(2048, 2048)[0],
+}
+
+
+@pytest.mark.skipif(not SLOW, reason="set FLOOD_FILL_SLOW=1")
+@pytest.mark.parametrize("name", list(BENCH_SCENES))
+def test_benchmark_scenes(name):
+    """The 6 benchmark scenes: default, L0, L1, valve 1, coll 0 at the
+    cooperative max, and the mask contract."""
+    img = BENCH_SCENES[name]()
+    label, n = cpu_label_components(img)
+    tm = tile_model(img, 8)
+    for contract, kw in (("rgb", {}), ("rgb", dict(lattice=0)),
+                         ("rgb", dict(lattice=1)),
+                         ("rgb", dict(valve_round=1)),
+                         ("rgb", dict(coll_capacity=0)), ("mask", {})):
+        run_and_check(img, label, n, tm, contract=contract, **kw)
+
+
+@pytest.mark.skipif(not SLOW, reason="set FLOOD_FILL_SLOW=1")
+@pytest.mark.parametrize("axis", [0, 1])
+def test_thin_strips(axis):
+    """524288 x 32 and 32 x 524288 noise strips (16.8 Mpx each)."""
+    img = S8.thin_strip_scene(1 << 19, 32, axis)
+    label, n = cpu_label_components(img)
+    run_and_check(img, label, n, tile_model(img, 8))
