@@ -585,8 +585,9 @@ Chapters 2 and 3 both named.)*
 - **Fewer steps is a property of the shape.** Paths that run along the
   tile borders erase it; a tiling is a bet on the image.
 - **A step is now a latency chain.** Half a serpentine round is the
-  barrier pair, half is ~9-10 dependent memory trips. On big blobs the
-  RGB read and write are most of the pipeline.
+  barrier pair, half is one tile visit: ~2.1 closure iterations and
+  ~9-10 dependent memory trips. On big blobs the RGB read and write are
+  most of the pipeline.
 - **Warp intrinsics in loops need an explicit reconvergence.** The
   compiler's fallback is a slow path that runs silently.
 - **Measure the baseline's best, not its default.**

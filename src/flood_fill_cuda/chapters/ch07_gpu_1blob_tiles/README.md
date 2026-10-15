@@ -47,7 +47,7 @@ y). One warp owns one tile per visit. Lane *i* holds row x0+*i* as two
 
 | piece | the bet |
 |---|---|
-| **closure in registers** | Kogge-Stone fills along the word (5 shifts) and across the lanes (5 shuffles) close a tile with no memory traffic. A solid tile needs 2 passes: one fills, one proves it |
+| **closure in registers** | Kogge-Stone fills close a tile with no memory traffic: 5 doubling steps each way, as shifts along the word and as shuffles across the lanes (20 shuffles per column fill). A solid tile needs 2 passes: one fills, one proves it |
 | **border exports** | only border bits leave a tile. Plain loads filter them first (red in the target, not yet reached), so atomics touch only new bits |
 | **rounds of tiles** | ch03's skeleton: a global queue, the warp-aggregated enqueue (copied), a cooperative launch, two `grid.sync` per round. A round moves the frontier one tile, not one pixel |
 | **a per-tile stamp** | `atomic.max` of the round number lets a tile into a round's queue once, so ping-pong queues of `n_tiles` entries cannot overflow |
@@ -105,16 +105,22 @@ fixed point (נקודת שבת), so the wave goes as far as the blob goes
 within that tile. On solid squares that is about one tile:
 `sq_8000` needs 4,001 levels and 127 rounds, 31.5 levels per round.
 
-The serpentine winds inside each tile, so a round covers 36.1 levels
-(32,641 -> 904). The maze re-enters its tiles, so only 22.4. A zigzag on
-the tile borders gains nothing inside a tile: 1.03 levels per round.
+The serpentine turns only in its end tiles, where one visit takes a
+whole U-turn. So a round covers 36.1 levels (32,641 -> 904), more than
+a tile's 32. The maze re-enters its tiles, so only 22.4.
+
+A zigzag on the tile borders gains nothing inside a tile: 1.03 levels
+per round.
 
 **Tiles come back.** A pixel BFS processes each pixel once. Here a tile
 is visited again whenever new bits reach it after its closure.
 
 On solid blobs that costs 1.4-1.6 visits per tile: a neighbour's bits
-land after the tile's closure. The serpentine passes through each tile
-once per red row: 14.1 visits per tile. The maze: 12.4.
+land after the tile's closure. The maze: 12.4.
+
+The serpentine has 16 red rows per tile. Its 48 interior tiles are
+visited once per red row (16 each). Its 16 end tiles take a U-turn,
+two rows, per visit: about 8.5 each (*derived*). That averages 14.1.
 
 **The step count is a property of the shape.** "About 30x fewer
 barriers" holds on all six of ch03's scenes (27.8x to 36.1x). It fails
@@ -535,8 +541,9 @@ kernel, the dependent chain per visit, and ch06's paint occupancy.
   rounds kernel is 37% of the pipeline. `pack` and `paint` are the RGB
   read and write, as in Chapter 6.
 - **A round is a latency chain, not a barrier.** On the serpentine half
-  of a round is the barrier pair, half is one visit's ~9-10 dependent
-  memory trips. Spreading the queue counter did not help (the audit
+  of a round is the barrier pair, half is one tile visit. A visit is
+  ~2.1 closure iterations (about 30%) and ~9-10 dependent memory trips
+  (about 70%, *derived*). Spreading the queue counter did not help (the audit
   measured it); overlapping the export atomics did.
 - **Warp intrinsics in loops need an explicit reconvergence.** The
   compiler's safety net is a slow path that runs silently. Only a
