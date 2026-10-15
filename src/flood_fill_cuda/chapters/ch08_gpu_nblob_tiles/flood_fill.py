@@ -2,8 +2,8 @@
 
 Public API (mirrors ch06's recolor.py):
     TileWaves(width, height, connectivity=8, lattice=8, valve_round=128,
-              lookup="scan", coll_capacity=None, instrumented=False,
-              debug=False, ...)                       reusable buffers
+              lookup="hybrid", dense_min=4, coll_capacity=None,
+              instrumented=False, debug=False, ...)   reusable buffers
         .pack(img_dev)                 RGB -> mask (mask contract, untimed)
         .run(img_dev, contract="rgb")  enqueue only -> (phases, events)
         .emit_label_map(label_dev)     int32 (W, H), -1 off-blob (off clock)
@@ -52,7 +52,7 @@ from .kernels import (
     HDR_TOTAL_SHIFT, ST_UNION, ST_FLAT1, ST_FLAT2, INDEX_BYTES)
 
 CONTRACTS = ("rgb", "mask")
-LOOKUPS = ("scan", "index")
+LOOKUPS = ("scan", "index", "hybrid")
 # row-major stores of the mask K2-K4 read; get_pack_kernel also builds
 # "tilemajor", experiment E1's reference store, which no engine may use
 PACK_VARIANTS = ("direct", "smem")
@@ -69,11 +69,26 @@ LABEL_ONLY_PHASES = ("init", "label", "waves")
 # K3 is cooperative at 256 threads per block and the cooperative maximum
 # of its compiled twin (E10: 128 threads tied).
 LABEL_GRID = (1536, 128)
-LABEL_MAX_REGISTERS = {"scan": 80, "index": None}
+LABEL_MAX_REGISTERS = {"scan": 80, "index": None, "hybrid": 80}
+# K3's register cap per lookup (None: the compiler's choice); "auto" in
+# the API means this table. The hybrid twin takes 97 registers by
+# itself, which allows 2 cooperative blocks of 256 per SM; at 80 it
+# keeps 3 (72 blocks), with no more local memory than the scan twin
+# (experiment E13).
+WAVES_MAX_REGISTERS = {"scan": None, "index": None, "hybrid": 80}
+# K3's neighbour lookup (E13, session experiments_20261015T180817Z): the
+# hybrid at dense_min 4 and 80 registers; input_blobs 0.991 of the scan
+# (per-round median), 0.29 on the decoy staircase, 0.42 on zz_lattice_4k.
+# The index twin is faster on long shapes but costs 1.5-2.0% on
+# input_blobs (its K2 writes the byte index).
+DEFAULT_LOOKUP = "hybrid"
 PAINT_GRID = (768, 128)
 WAVES_TPB = 256
 DEFAULT_LATTICE = 8
 DEFAULT_VALVE_ROUND = 128
+# hybrid lookup: a neighbour tile with more ring comps than this is
+# scanned by the whole warp at once (a runtime argument of K3, E13)
+DEFAULT_DENSE_MIN = 4
 # collision list soft cap per tile; entries past it become inline unions
 COLL_PER_TILE = 16
 
@@ -125,11 +140,14 @@ class TileWaves:
 
     def __init__(self, width, height, connectivity=8,
                  lattice=DEFAULT_LATTICE, valve_round=DEFAULT_VALVE_ROUND,
-                 lookup="scan", coll_capacity=None, instrumented=False,
-                 debug=False, waves_tpb=WAVES_TPB, waves_blocks=None,
+                 lookup=DEFAULT_LOOKUP, coll_capacity=None,
+                 instrumented=False, debug=False, waves_tpb=WAVES_TPB,
+                 waves_blocks=None,
                  label_grid=LABEL_GRID, paint_grid=PAINT_GRID,
                  label_max_registers="auto", paint_fast=True,
-                 pack_variant="direct", label_exits=2, _skip_warmup=False):
+                 pack_variant="direct", label_exits=2,
+                 dense_min=DEFAULT_DENSE_MIN, waves_max_registers="auto",
+                 _skip_warmup=False):
         width, height = int(width), int(height)
         if width < 1 or height < 1:
             raise ValueError(f"bad shape {width}x{height}")
@@ -167,8 +185,15 @@ class TileWaves:
         self.valve_round = int(valve_round)
         self.lookup = lookup
         self.index = lookup == "index"
+        self.hybrid = lookup == "hybrid"
+        self.dense_min = int(dense_min)
+        if self.dense_min < 0:
+            raise ValueError("dense_min must be >= 0")
         if label_max_registers == "auto":
             label_max_registers = LABEL_MAX_REGISTERS[lookup]
+        if waves_max_registers == "auto":
+            waves_max_registers = WAVES_MAX_REGISTERS[lookup]
+        self.waves_max_registers = waves_max_registers
         self.label_exits = int(label_exits)
         self.instrumented = bool(instrumented)
         self.debug = bool(debug)
@@ -188,7 +213,8 @@ class TileWaves:
                                         self.debug, label_max_registers,
                                         self.index, self.label_exits)
         self.waves_k = get_waves_kernel(connectivity, self.instrumented,
-                                        self.debug, self.index)
+                                        self.debug, self.index, self.hybrid,
+                                        waves_max_registers)
         self.paint_k = get_paint_kernel(connectivity, MODE_RGB,
                                         self.paint_fast, self.instrumented,
                                         self.debug)
@@ -237,9 +263,9 @@ class TileWaves:
             return
         _warmup(connectivity, self.instrumented, self.debug,
                 label_max_registers, self.paint_fast, pack_variant,
-                lookup, self.label_exits)
+                lookup, self.label_exits, waves_max_registers)
         cap = max_blocks(self.waves_tpb, connectivity, self.instrumented,
-                         self.debug, lookup)
+                         self.debug, lookup, waves_max_registers)
         if cap < 1:
             raise RuntimeError("this GPU cannot host one cooperative block "
                                f"of the waves kernel at {waves_tpb} threads")
@@ -304,7 +330,7 @@ class TileWaves:
             self.ca, self.cb, self.q_state, self.counters, self.bounds,
             self.stamps, self.idx, self.frame, np.int32(self.words_per_row),
             np.int32(self.n_tiles), np.int32(valve),
-            np.int32(self.coll_capacity))
+            np.int32(self.coll_capacity), np.int32(self.dense_min))
         i += 1
         events[i].record()
         self.paint_k[self.paint_grid[0], self.paint_grid[1]](
@@ -418,15 +444,20 @@ def phase_times(names, events):
 
 
 def max_blocks(threads_per_block=WAVES_TPB, connectivity=8,
-               instrumented=False, debug=False, lookup="scan"):
+               instrumented=False, debug=False, lookup=DEFAULT_LOOKUP,
+               waves_max_registers="auto"):
     """Cooperative capacity of the waves kernel twin, queried after its
     first compile (an uncompiled dispatcher has no overload)."""
+    if waves_max_registers == "auto":
+        waves_max_registers = WAVES_MAX_REGISTERS[lookup]
     key = (threads_per_block, connectivity, bool(instrumented), bool(debug),
-           lookup)
+           lookup, waves_max_registers)
     if key not in _coop:
-        _warmup(connectivity, instrumented, debug, lookup=lookup)
+        _warmup(connectivity, instrumented, debug, lookup=lookup,
+                waves_max_registers=waves_max_registers)
         kern = get_waves_kernel(connectivity, instrumented, debug,
-                                lookup == "index")
+                                lookup == "index", lookup == "hybrid",
+                                waves_max_registers)
         _coop[key] = _overload(kern).max_cooperative_grid_blocks(
             threads_per_block)
     return _coop[key]
@@ -434,12 +465,16 @@ def max_blocks(threads_per_block=WAVES_TPB, connectivity=8,
 
 def kernel_resources(connectivity=8, instrumented=False, debug=False,
                      label_max_registers="auto", paint_fast=True,
-                     lookup="scan", label_exits=2):
-    """Registers and spill bytes per thread of each compiled kernel."""
+                     lookup=DEFAULT_LOOKUP, label_exits=2,
+                     waves_max_registers="auto"):
+    """Registers and local (spill) bytes per thread of each kernel."""
     if label_max_registers == "auto":
         label_max_registers = LABEL_MAX_REGISTERS[lookup]
+    if waves_max_registers == "auto":
+        waves_max_registers = WAVES_MAX_REGISTERS[lookup]
     _warmup(connectivity, instrumented, debug, label_max_registers,
-            paint_fast, lookup=lookup, label_exits=label_exits)
+            paint_fast, lookup=lookup, label_exits=label_exits,
+            waves_max_registers=waves_max_registers)
     index = lookup == "index"
     out = {}
     for name, kern in (
@@ -447,7 +482,8 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
                                        label_max_registers, index,
                                        label_exits)),
             ("waves", get_waves_kernel(connectivity, instrumented, debug,
-                                       index)),
+                                       index, lookup == "hybrid",
+                                       waves_max_registers)),
             ("paint", get_paint_kernel(connectivity, MODE_RGB, paint_fast,
                                        instrumented, debug))):
         out[name] = {"regs": _one(kern.get_regs_per_thread()),
@@ -457,13 +493,16 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
 
 def _warmup(connectivity=8, instrumented=False, debug=False,
             label_max_registers="auto", paint_fast=True,
-            pack_variant="direct", lookup="scan", label_exits=2):
+            pack_variant="direct", lookup=DEFAULT_LOOKUP, label_exits=2,
+            waves_max_registers="auto"):
     """JIT-compile every kernel of a configuration once, on a tiny image."""
     if label_max_registers == "auto":
         label_max_registers = LABEL_MAX_REGISTERS[lookup]
+    if waves_max_registers == "auto":
+        waves_max_registers = WAVES_MAX_REGISTERS[lookup]
     key = (connectivity, bool(instrumented), bool(debug),
            label_max_registers, bool(paint_fast), pack_variant, lookup,
-           int(label_exits))
+           int(label_exits), waves_max_registers)
     if key in _warmed:
         return
     tiny = np.full((40, 40, 3), 255, dtype=np.uint8)
@@ -475,6 +514,7 @@ def _warmup(connectivity=8, instrumented=False, debug=False,
                     label_max_registers=label_max_registers,
                     paint_fast=paint_fast, pack_variant=pack_variant,
                     lookup=lookup, label_exits=label_exits,
+                    waves_max_registers=waves_max_registers,
                     waves_tpb=32, waves_blocks=1, label_grid=(1, 32),
                     paint_grid=(1, 32), _skip_warmup=True)
     dev = cuda.to_device(tiny)

@@ -294,6 +294,19 @@ class TileModel:
             self.dirs[self.ordinal >= 0].astype(np.uint32))
         return int(np.unpackbits(d.view(np.uint8)).sum())
 
+    def dense_tasks(self, dense_min):
+        """Tasks whose neighbour tile holds more than dense_min ring
+        comps: the hybrid lookup's warp-cooperative tasks."""
+        wpr = self.words_per_row
+        ring = np.flatnonzero(self.ordinal >= 0)
+        n = 0
+        for d, (dx, dy) in enumerate(((-1, 0), (1, 0), (0, -1), (0, 1),
+                                      (-1, -1), (-1, 1), (1, -1), (1, 1))):
+            has = ring[(self.dirs[ring] >> d) & 1 == 1]
+            t2 = self.tile[has].astype(np.int64) + dx * wpr + dy
+            n += int(np.count_nonzero(self.n_ring_tile[t2] > dense_min))
+        return n
+
     def seeds(self, lattice):
         wpr = self.words_per_row
         tx = self.tile // wpr

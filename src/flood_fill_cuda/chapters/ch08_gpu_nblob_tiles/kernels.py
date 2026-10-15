@@ -115,7 +115,8 @@ COUNTER_NAMES = (
     "exit_frontier", "seeds", "seeds_lattice", "seeds_queued",
     "seed_append_atomics",
     # K3 waves
-    "rounds", "tasks", "ksteps", "sig_tests", "cas", "claims",
+    "rounds", "tasks", "dense_tasks", "ksteps", "sig_tests", "cas",
+    "claims",
     "collisions", "coll_inline", "pred_skips", "append_atomics",
     "coll_append_atomics", "union_calls", "union_done",
     "peak_frontier", "valve_round", "valve_seeds",
@@ -145,6 +146,7 @@ SEEDS_QUEUED = C["seeds_queued"]
 SEED_APPEND_ATOMICS = C["seed_append_atomics"]
 ROUNDS = C["rounds"]
 TASKS = C["tasks"]
+DENSE_TASKS = C["dense_tasks"]
 KSTEPS = C["ksteps"]
 SIG_TESTS = C["sig_tests"]
 CAS = C["cas"]
@@ -290,6 +292,42 @@ def _warp_slot(pred, lane, state, slot):
         pos = base + rank
         n_atomic = 1
     return pos, n_atomic
+
+
+@cuda.jit(device=True, inline=True)
+def _claim(hit, c2, d2, lab, succ, lane, rec, parent, qc, ql, qd, ca, cb,
+           q_state, slot, rear, coll_cap):
+    """One K3 step's claims, at a CONVERGENT point (every lane calls it):
+    a CAS on comp c2's label for lanes with a hit, the warp-aggregated
+    queue append of the winners, and the collision record (SUCC side
+    only) of a hit on another wave's comp. Past the collision list's
+    soft cap the pair is unioned at once (ch06's _union is lock-free).
+
+    Returns (claimed, collided, inline, union done, pred skip, append
+    atomic, collision append atomic)."""
+    old = int32(0)
+    if hit:
+        old = cuda.atomic.cas(rec, uint32(REC * c2 + R_LABEL), NEG1, lab)
+    claimed = hit and old == -1
+    other = hit and old != -1 and old != lab
+    collided = other and succ
+    pos, na = _warp_slot(claimed, lane, q_state, slot)
+    if claimed:
+        p = rear + pos
+        qc[uint32(p)] = c2
+        ql[uint32(p)] = lab
+        qd[uint32(p)] = d2
+    cpos, cna = _warp_slot(collided, lane, q_state, Q_COLL)
+    inline = 0
+    done = 0
+    if collided:
+        if cpos < coll_cap:
+            ca[uint32(cpos)] = lab
+            cb[uint32(cpos)] = old
+        else:
+            done = _union(parent, lab, old)
+            inline = 1
+    return (claimed, collided, inline, done, other and not succ, na, cna)
 
 
 @cuda.jit(device=True, inline=True)
@@ -743,7 +781,8 @@ def _make_label_kernel(conn8, instrumented, debug, max_registers=None,
 
 # ------------------------------------------------------------ K3 waves
 
-def _make_waves_kernel(conn8, instrumented, debug, index=False):
+def _make_waves_kernel(conn8, instrumented, debug, index=False,
+                       hybrid=False, max_registers=None):
     """K3: cooperative. Rounds of claims over the comp graph, one
     grid.sync per round (three rotating append counters), the escalation
     valve, one union pass over the recorded collisions, two flatten
@@ -756,19 +795,29 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False):
              the lowest hit bit's ordinal (K2's byte index) names the
              comp, and all of that comp's bits leave `hit`: one step per
              DISTINCT adjacent comp, at the price of a dependent chain
-             (frame word, ordinal, record)."""
-    link = [SMID_CU] if instrumented else []
+             (frame word, ordinal, record)
+      hybrid scan for a neighbour tile with at most dense_min ring
+             comps; above that the whole warp takes the task: lane k
+             tests ring comp k (one coalesced step per 32 comps), one
+             dense task after another. The k-steps of the sparse lanes
+             stay bounded by dense_min, and K2 is the scan's.
 
-    @cuda.jit(link=link)
+    dense_min is a runtime argument; the scan and index twins ignore
+    it."""
+    link = [SMID_CU] if instrumented else []
+    jit_kw = {} if max_registers is None else {"max_registers": max_registers}
+
+    @cuda.jit(link=link, **jit_kw)
     def waves_kernel(hdr, rec, parent, qc, ql, qd, ca, cb, q_state,
                      counters, bounds, stamps, idx, frame, wpr, n_tiles,
-                     valve_round, coll_cap):
+                     valve_round, coll_cap, dense_min):
         grid = cuda.cg.this_grid()
         tid = cuda.grid(1)
         stride = cuda.gridsize(1)
         lane = cuda.laneid
         n_bounds = bounds.shape[0]
         c_tasks = 0
+        c_dense = 0
         c_ksteps = 0
         c_tests = 0
         c_cas = 0
@@ -837,15 +886,19 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False):
                             hits = U1
                         else:
                             hits = uint32(want & fw)
-                    if instrumented:
-                        c_tasks += 1
-                        if not index:
-                            c_tests += n2
+                dense = False
+                if hybrid:
+                    dense = valid and n2 > dense_min
+                if instrumented and valid:
+                    c_tasks += 1
+                    c_dense += int32(dense)
+                    if not index and not dense:
+                        c_tests += n2
                 k = 0
                 if index:
                     active = hits != U0
                 else:
-                    active = k < n2
+                    active = k < n2 and not dense
                 while cuda.any_sync(FULL, active):    # uniform k-steps
                     hit = False
                     c2 = IDS_PER_TILE * t2 + k
@@ -872,6 +925,8 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False):
                             hit = uint32(s2 & want) != U0
                             if hit:
                                 d2 = rec[uint32(REC * c2 + R_DIRS)]
+                    # (written out, not through _claim: the scan twin
+                    # keeps 80 registers and 3 cooperative blocks per SM)
                     old = int32(0)
                     if hit:
                         old = cuda.atomic.cas(rec, uint32(REC * c2 + R_LABEL),
@@ -911,7 +966,52 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False):
                     if index:
                         active = hits != U0
                     else:
-                        active = k < n2
+                        active = k < n2 and not dense
+                if hybrid:
+                    # dense tasks, one at a time, by the whole warp: lane
+                    # j tests ring comp base + j of the leader's tile
+                    pend = dense
+                    while cuda.any_sync(FULL, pend):
+                        cuda.syncwarp()
+                        bal = uint32(cuda.ballot_sync(FULL, pend))
+                        ld = int32(cuda.ffs(bal) - 1)
+                        if lane == ld:
+                            pend = False
+                        t2l = cuda.shfl_sync(FULL, int32(t2), ld)
+                        wl = _bcast(want, ld)
+                        fsl = cuda.shfl_sync(FULL, int32(fs), ld)
+                        labl = cuda.shfl_sync(FULL, lab, ld)
+                        n2l = cuda.shfl_sync(FULL, int32(n2), ld)
+                        sl = cuda.shfl_sync(FULL, int32(succ), ld) != 0
+                        base = 0
+                        while base < n2l:              # uniform
+                            kk = base + lane
+                            c2 = IDS_PER_TILE * t2l + kk
+                            hit = False
+                            d2 = int32(0)
+                            if kk < n2l:
+                                s2 = uint32(rec[uint32(REC * c2 + fsl)])
+                                hit = uint32(s2 & wl) != U0
+                                if hit:
+                                    d2 = rec[uint32(REC * c2 + R_DIRS)]
+                            claimed, collided, inl, done, pskip, na, cna = \
+                                _claim(hit, c2, d2, labl, sl, lane, rec,
+                                       parent, qc, ql, qd, ca, cb, q_state,
+                                       slot, rear, coll_cap)
+                            c_inline += inl
+                            if instrumented:
+                                c_tests += int32(kk < n2l)
+                                c_udone += done
+                                c_ucalls += inl
+                                c_cas += int32(hit)
+                                c_claims += int32(claimed)
+                                c_coll += int32(collided)
+                                c_pskip += int32(pskip)
+                                if lane == 0:
+                                    c_ksteps += 1
+                                    c_app += na
+                                    c_capp += cna
+                            base += 32
             grid.sync()
             n_new = q_state[Q_C0 + r % 3]
             if tid == 0:
@@ -1005,6 +1105,7 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False):
                 cuda.atomic.add(counters, COLL_INLINE, inline)
         if instrumented:
             v_tasks = _warp_sum(np.int64(c_tasks))
+            v_dense = _warp_sum(np.int64(c_dense))
             v_ksteps = _warp_sum(np.int64(c_ksteps))
             v_tests = _warp_sum(np.int64(c_tests))
             v_cas = _warp_sum(np.int64(c_cas))
@@ -1016,6 +1117,7 @@ def _make_waves_kernel(conn8, instrumented, debug, index=False):
             v_rmin = _warp_sum(np.int64(c_rmin))
             if lane == 0:
                 cuda.atomic.add(counters, TASKS, v_tasks)
+                cuda.atomic.add(counters, DENSE_TASKS, v_dense)
                 cuda.atomic.add(counters, KSTEPS, v_ksteps)
                 cuda.atomic.add(counters, SIG_TESTS, v_tests)
                 cuda.atomic.add(counters, CAS, v_cas)
@@ -1232,11 +1334,15 @@ def get_label_kernel(connectivity=8, instrumented=False, debug=False,
 
 
 def get_waves_kernel(connectivity=8, instrumented=False, debug=False,
-                     index=False):
-    key = (connectivity, bool(instrumented), bool(debug), bool(index))
+                     index=False, hybrid=False, max_registers=None):
+    if index and hybrid:
+        raise ValueError("index and hybrid are separate lookups")
+    key = (connectivity, bool(instrumented), bool(debug), bool(index),
+           bool(hybrid), max_registers)
     if key not in _WAVES_CACHE:
         _WAVES_CACHE[key] = _make_waves_kernel(
-            connectivity == 8, bool(instrumented), bool(debug), bool(index))
+            connectivity == 8, bool(instrumented), bool(debug), bool(index),
+            bool(hybrid), max_registers)
     return _WAVES_CACHE[key]
 
 

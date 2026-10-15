@@ -20,6 +20,9 @@ scene, and the clock sampler's window is kept per experiment.
   E10 waves launch      256 | 128 threads per block
   E4b lookup x K2       follow-up: scan at E3's pick vs index at three
                         K2 register/grid settings (index spills at 80)
+  E13 lookup x K3 regs  scan | index | hybrid (dense_min 4, 8, 16), each
+                        at the compiler's registers and at an 80 cap
+                        (80 keeps 3 cooperative blocks of 256 per SM)
 
 The decision rules are applied at the end and written to the JSON.
 
@@ -48,7 +51,8 @@ from numba.core.errors import NumbaPerformanceWarning
 from .. import flood_fill as ff
 from .. import scenes as S8
 from ..kernels import (gpu_sleep_kernel, get_pack_kernel, pack_shape,
-                       get_label_kernel, get_paint_kernel, MODE_RGB)
+                       get_label_kernel, get_paint_kernel, get_waves_kernel,
+                       MODE_RGB)
 from ...ch05_gpu_nblob_nblock import scenes as S5
 from ...ch06_gpu_nblob_runs.recolor import RunRecolor
 from ...ch06_gpu_nblob_runs.kernels import pack_kernel as ch06_pack
@@ -152,6 +156,7 @@ def _instrumented_counters(img, **kw):
                               "union_calls", "union_done", "collisions",
                               "coll_inline", "roots", "valve_round",
                               "valve_seeds", "sig_tests", "ksteps", "tasks",
+                              "dense_tasks", "max_ring_tile",
                               "close_iters", "exit_last", "exit_frontier",
                               "paint_uniform", "paint_reclosed_tiles",
                               "paint_single_interior")}
@@ -274,6 +279,46 @@ def e8_counters(img, d_img, d_pr, sampler):
     return interleave(arms, d_img, d_pr, sampler)
 
 
+E13_ARMS = {   # name: (lookup, dense_min, K3 max_registers)
+    "scan": ("scan", 8, None),
+    "scan_r80": ("scan", 8, 80),
+    "index": ("index", 8, None),
+    "index_r80": ("index", 8, 80),
+    "hybrid8": ("hybrid", 8, None),
+    "hybrid8_r80": ("hybrid", 8, 80),
+    "hybrid4_r80": ("hybrid", 4, 80),
+    "hybrid16_r80": ("hybrid", 16, 80),
+}
+
+
+def e13_lookup(img, d_img, d_pr, sampler):
+    """K3's neighbour lookup and register cap. One engine per K2 (scan
+    and hybrid share the scan K2; index writes its byte index), the K3
+    twin, its cooperative block count and dense_min set per arm."""
+    w, h = img.shape[:2]
+    engs = {"scan": ff.TileWaves(w, h, lookup="hybrid"),
+            "index": ff.TileWaves(w, h, lookup="index")}
+    arms = {}
+    meta = {}
+    for name, (lk, dm, regs) in E13_ARMS.items():
+        kern = get_waves_kernel(8, False, False, lk == "index",
+                                lk == "hybrid", regs)
+        blocks = ff.max_blocks(256, 8, False, False, lk, regs)
+        eng = engs["index" if lk == "index" else "scan"]
+        arms[name] = _ch08_arm(eng, attrs={"waves_k": kern,
+                                           "waves_blocks": blocks,
+                                           "dense_min": dm})
+        meta[name] = {"blocks": blocks, "resources": ff.kernel_resources(
+            8, lookup=lk, waves_max_registers=regs)["waves"]}
+    _respin(engs["scan"], d_img)
+    res = interleave(arms, d_img, d_pr, sampler)
+    for name, (lk, dm, regs) in E13_ARMS.items():
+        res[name].update(meta[name])
+        res[name]["counters"] = _instrumented_counters(
+            img, lookup=lk, dense_min=dm)
+    return res
+
+
 def e9_valve(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
     eng = ff.TileWaves(w, h, lattice=0)
@@ -323,7 +368,7 @@ def e4b_lookup_k2(img, d_img, d_pr, sampler):
 EXPERIMENTS = {"E1": e1_pack, "E2": e2_exits, "E3": e3_label,
                "E4": e4_lookup, "E5": e5_paint, "E6": e6_dial,
                "E7": e7_union, "E8": e8_counters, "E9": e9_valve,
-               "E10": e10_waves, "E4b": e4b_lookup_k2}
+               "E10": e10_waves, "E4b": e4b_lookup_k2, "E13": e13_lookup}
 
 
 def plan(pngs):
@@ -338,25 +383,28 @@ def plan(pngs):
         return build
     return [
         ("input_blobs", blobs,
-         ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E10", "E4b"]),
+         ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E10", "E4b",
+          "E13"]),
         ("input_blocks", lambda: S5.png_scene(pngs["input_blocks"])[0],
-         ["E2", "E3", "E4", "E5", "E6", "E8", "E4b"]),
+         ["E2", "E3", "E4", "E5", "E6", "E8", "E4b", "E13"]),
         ("blob_grid_100",
          lambda: S5.blob_grid_scene(4000, 4000, 10, 10, 360, gap=40)[0],
          ["E1", "E5", "E6", "E7", "E8"]),
         ("random_4000",
          lambda: S5.random_blobs_scene(4000, 4000, 0.30, 0)[0],
-         ["E3", "E4", "E6", "E4b"]),
+         ["E3", "E4", "E6", "E4b", "E13"]),
         ("disk_r2000", lambda: S5.disk_scene(4200, 4200, 2000)[0],
-         ["E1", "E6", "E7", "E10"]),
+         ["E1", "E6", "E7", "E10", "E13"]),
         ("serpentine_2048", lambda: S5.serpentine_scene(2048, 2048)[0],
-         ["E2", "E4", "E6", "E9", "E10", "E4b"]),
+         ["E2", "E4", "E6", "E9", "E10", "E4b", "E13"]),
         ("crop_2000", crop(2000), ["E1"]),
         ("crop_4000", crop(4000), ["E1"]),
         ("crop_6000", crop(6000), ["E1"]),
-        ("zz_serp_1k", lambda: W7.zz_serpentine_scene()[0], ["E9"]),
+        ("zz_serp_1k", lambda: W7.zz_serpentine_scene()[0], ["E9", "E13"]),
         ("diag_snake_159", lambda: S8.diag_snake_scene(159), ["E9"]),
-        ("maze_1k", lambda: W7.maze_scene()[0], ["E9"]),
+        ("maze_1k", lambda: W7.maze_scene()[0], ["E9", "E13"]),
+        ("stair_decoy_19", lambda: S8.stair_scene(19), ["E13"]),
+        ("zz_lattice_4k", lambda: W7.zz_lattice_scene()[0], ["E13"]),
     ]
 
 
@@ -468,6 +516,28 @@ def decide(res):
                 break
         out["E9_valve_round"] = pick
         out["E9_max_rounds_on_6_scenes_at_L8"] = max_rounds
+    # E13: E4's rule against the scan at the compiler's registers: an arm
+    # qualifies if input_blobs moves under +1% (per-round median) and at
+    # least 2 other scenes gain 10%; the qualifier with the lowest
+    # geometric mean ratio over the other scenes wins
+    if "E13" in res:
+        others = [sc for sc in res["E13"] if sc != "input_blobs"]
+        score = {}
+        for a in E13_ARMS:
+            if a == "scan":
+                continue
+            blobs = res["E13"]["input_blobs"][a]["ratio_to_first_median"]
+            r = [_t(res, "E13", sc, a) / _t(res, "E13", sc, "scan")
+                 for sc in others]
+            gm = float(np.exp(np.mean(np.log(r))))
+            score[a] = {"input_blobs": blobs, "geomean_others": gm,
+                        "gains_10pct": sum(x <= 0.90 for x in r)}
+        ok = [a for a, v in score.items()
+              if v["input_blobs"] < 1.01 and v["gains_10pct"] >= 2]
+        out["E13_scores"] = score
+        out["E13_lookup_arm"] = (min(ok, key=lambda a:
+                                     score[a]["geomean_others"])
+                                 if ok else "scan")
     # E10: fastest waves on input_blobs
     if "E10" in res:
         out["E10_waves_tpb"] = min(("tpb256", "tpb128"), key=lambda a: _t(
@@ -484,7 +554,7 @@ def main():
     args = ap.parse_args()
     pngs = B._resolve_pngs(args.images)
     print(B._free_m())
-    for lk in ("scan", "index"):
+    for lk in ff.LOOKUPS:
         ff._warmup(8, False, False, lookup=lk)
         ff._warmup(8, True, False, lookup=lk)
     flush = cuda.to_device(np.zeros(B.L2_FLUSH_BYTES // 4, np.uint32))

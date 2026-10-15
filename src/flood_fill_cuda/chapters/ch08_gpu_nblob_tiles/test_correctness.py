@@ -45,7 +45,9 @@ from numba import cuda, int32, uint32
 
 from . import kernels as k
 from . import scenes as S8
-from .flood_fill import TileWaves, recolor, max_blocks
+from .flood_fill import (TileWaves, recolor, max_blocks, DEFAULT_LOOKUP,
+                         DEFAULT_DENSE_MIN, DEFAULT_LATTICE,
+                         DEFAULT_VALVE_ROUND)
 from .cpu_oracle import cpu_label, cpu_label_components, red_mask
 from .cpu_model import tile_model
 from ..ch05_gpu_nblob_nblock import scenes as S5
@@ -141,11 +143,13 @@ SCENES = {
     "size_63x95": lambda: S5.random_blobs_scene(63, 95, 0.4, 8)[0],
     "size_65x33": lambda: S5.random_blobs_scene(65, 33, 0.4, 9)[0],
     "full_red_100": lambda: S5.full_red_scene(100, 100)[0],
+    "stair_decoy_3": lambda: S8.stair_scene(3),
 }
 
 # the end-to-end config matrix: one axis at a time from the base config
-# (L8, valve 128, default collision cap, max blocks, 8-conn, rgb, fast
-# paint), every case instrumented + debug so the invariants can be read
+# (L8, the default valve and lookup, default collision cap, max blocks,
+# 8-conn, rgb, fast paint), every case instrumented + debug so the
+# invariants can be read
 CONFIGS = {
     "base": {},
     "one_block": dict(waves_tpb=32, waves_blocks=1),
@@ -158,10 +162,20 @@ CONFIGS = {
     "c4": dict(connectivity=4),
     "c4_one_block_L0": dict(connectivity=4, lattice=0, waves_tpb=32,
                             waves_blocks=1),
+    "scan": dict(lookup="scan"),
+    "scan_one_block_L0": dict(lookup="scan", lattice=0, waves_tpb=32,
+                              waves_blocks=1),
     "index": dict(lookup="index"),
     "index_one_block_L0": dict(lookup="index", lattice=0, waves_tpb=32,
                                waves_blocks=1),
     "index_c4_valve1": dict(lookup="index", connectivity=4, valve_round=1),
+    "hybrid_dense8_uncapped_k3": dict(lookup="hybrid", dense_min=8,
+                                      waves_max_registers=None),
+    "hybrid_all_dense_one_block_L0": dict(lookup="hybrid", dense_min=0,
+                                          lattice=0, waves_tpb=32,
+                                          waves_blocks=1),
+    "hybrid_c4_coll0_dense1": dict(lookup="hybrid", connectivity=4,
+                                   coll_capacity=0, dense_min=1),
     "uncapped_k2": dict(label_max_registers=None, label_grid=(768, 128)),
     "exits_ch07": dict(label_exits=0),
     "exits_frontier": dict(label_exits=1),
@@ -203,8 +217,8 @@ def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
     assert res.n_blobs == n_blobs
     assert res.seeds == expected_seeds(label, height)
     # ---- invariants (design 11.2)
-    lattice = kw.get("lattice", 8)
-    valve = kw.get("valve_round", 128)
+    lattice = kw.get("lattice", DEFAULT_LATTICE)
+    valve = kw.get("valve_round", DEFAULT_VALVE_ROUND)
     wm = model.waves(lattice, valve)
     assert c["ring_comps"] + c["interior_comps"] == c["comps"] \
         == model.n_comps
@@ -214,6 +228,11 @@ def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
     assert c["roots"] + c["interior_comps"] == n_blobs
     assert c["rounds"] == wm["rounds"]
     assert c["tasks"] == model.tasks
+    if kw.get("lookup", DEFAULT_LOOKUP) == "hybrid":
+        assert c["dense_tasks"] == model.dense_tasks(
+            kw.get("dense_min", DEFAULT_DENSE_MIN))
+    else:
+        assert c["dense_tasks"] == 0
     assert c["seeds"] == wm["seeds"]
     assert c["seeds_lattice"] == wm["seeds_lattice"]
     assert c["seeds_queued"] == wm["seeds_queued"]
@@ -625,18 +644,19 @@ def test_fuzz(family, blocks):
         conn = 4 if seed % 4 == 3 else 8
         lat = (0, 8, 1, 4)[seed % 4] if seed % 5 else 8
         valve = 2 if seed % 7 == 6 else 128
-        lookup = "index" if seed % 2 else "scan"
+        lookup = ("scan", "index", "hybrid")[seed % 3]
         try:
             label, n = cpu_label(img, conn)
             run_and_check(img, label, n, tile_model(img, conn),
                           connectivity=conn, lattice=lat, valve_round=valve,
-                          lookup=lookup, **kw)
+                          lookup=lookup, dense_min=seed % 5, **kw)
         except AssertionError as exc:
             path = os.path.join(SCRATCH, f"ch08_fuzz_{family}_{seed}.npy")
             np.save(path, img)
             raise AssertionError(
                 f"{family} seed {seed} (conn {conn}, L {lat}, valve "
-                f"{valve}, {lookup}) failed; image saved to {path}") from exc
+                f"{valve}, {lookup}, dense_min {seed % 5}) failed; image "
+                f"saved to {path}") from exc
 
 
 # ------------------------------------------- structural / robustness
@@ -690,7 +710,11 @@ def test_twins_agree(name):
     outs = []
     for kw in (dict(), dict(instrumented=True), dict(debug=True),
                dict(instrumented=True, debug=True), dict(lookup="index"),
-               dict(lookup="index", instrumented=True, debug=True)):
+               dict(lookup="scan"),
+               dict(lookup="index", instrumented=True, debug=True),
+               dict(lookup="hybrid", dense_min=0),
+               dict(lookup="hybrid", dense_min=0, instrumented=True,
+                    debug=True)):
         res = recolor(img, emit_label=True, **kw)
         assert res.n_blobs == n
         np.testing.assert_array_equal(res.label, label)
@@ -831,7 +855,10 @@ def test_benchmark_scenes(name):
                          ("rgb", dict(lattice=1)),
                          ("rgb", dict(valve_round=1)),
                          ("rgb", dict(coll_capacity=0)),
-                         ("rgb", dict(lookup="index")), ("mask", {})):
+                         ("rgb", dict(lookup="index")),
+                         ("rgb", dict(lookup="hybrid", dense_min=0)),
+                         ("rgb", dict(lookup="scan")),
+                         ("mask", {})):
         run_and_check(img, label, n, tm, contract=contract, **kw)
 
 

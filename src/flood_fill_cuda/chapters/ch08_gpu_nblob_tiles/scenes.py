@@ -22,7 +22,10 @@ by the tests and the benchmark; these are the cases new to ch08.
                     one seed, one comp per tile, rounds = its length
   tile_corners      single pixels and 2x2 blocks on tile corners, and
                     the four image corners
-  thin_strip        a long strip of noise, 32 px across
+  stair             a lattice-avoiding staircase chain (one seed), with
+                    ~45-58 isolated decoy pixels on every path tile's
+                    frame: each a ring comp that every scan task tests
+  thin_strip        a long strip of noise, 32 px across (or 1)
 fuzz builders (seeded): noise, rects_and_disks, walks, border_zigzags,
 stitched_tiles.
 """
@@ -223,6 +226,56 @@ def diag_snake_scene(m=45):
     ok = ys < n
     img[xs[ok], ys[ok]] = RED
     return img
+
+
+def stair_scene(bands=19, decoys=True, lane=16):
+    """One 8-conn path through tiles (b, 7b+1+i), i = 0..6, for b = 0 ..
+    bands-1: six 'right' steps, then one 'DR' step per band. The tile
+    sums tx + ty run over 8b+1 .. 8b+7, so no tile is on the L8 (or L16)
+    lattice, and every path comp but the first has its predecessor in a
+    PRED tile (left or UL): ONE seed and a chain of 7*bands comps, one
+    comp per round until the valve fires.
+
+    decoys=True adds isolated pixels on the frame of every path tile
+    (greedy, no red 8-neighbour anywhere, across tile borders too): each
+    is its own blob, a ring comp with dirs 0, never queued, but every
+    scan of that tile tests it (up to 59 ring comps per tile).
+
+    Size (32*bands) x (32*(7*bands+1)); bands=19 is 608 x 4288. Built
+    by the perf-adversary review of ch08."""
+    wpr = 7 * bands + 1
+    w, h = 32 * bands, 32 * wpr
+    red = np.zeros((w, h), bool)
+    path = [(b, 7 * b + 1 + i, i) for b in range(bands) for i in range(7)]
+    for n, (tx, ty, i) in enumerate(path):
+        x0, y0 = 32 * tx, 32 * ty
+        pts = []
+        if i == 0 and n > 0:           # entered diagonally from the UL
+            pts += [(k, k) for k in range(0, lane + 1)]
+            yc = lane
+        else:
+            pts.append((lane, 0))
+            yc = 0
+        if i == 6:                     # leave diagonally to the DR
+            pts += [(lane, y) for y in range(yc, lane + 1)]
+            pts += [(lane + k, lane + k) for k in range(1, 32 - lane)]
+        else:
+            pts += [(lane, y) for y in range(yc, 32)]
+        for a, c in pts:
+            red[x0 + a, y0 + c] = True
+    if decoys:
+        frame = ([(0, j) for j in range(32)]
+                 + [(i, 31) for i in range(1, 32)]
+                 + [(31, j) for j in range(30, -1, -1)]
+                 + [(i, 0) for i in range(30, 0, -1)])
+        for tx, ty, _ in path:
+            x0, y0 = 32 * tx, 32 * ty
+            for a, c in frame:
+                x, y = x0 + a, y0 + c
+                if not red[max(0, x - 1):min(w, x + 2),
+                           max(0, y - 1):min(h, y + 2)].any():
+                    red[x, y] = True
+    return from_mask(red)
 
 
 def tile_corners_scene(width=100, height=100, block=False):
