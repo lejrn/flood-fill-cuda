@@ -155,8 +155,8 @@ neighbour of a reached pixel is reached, and a set closed like that
 which holds the seed contains the whole component.
 
 So any order ends on the same set, and the paint depends only on the
-set. Every painted image in this session equals ch03's, for every config
-and scene.
+set. Every ch07 painted image in this session equals ch03's, for every
+ch07 config and scene.
 
 **Size limits.** A queue entry packs a tile as `(tx << 16) | ty`, so
 `TileFill` raises `ValueError` for W > 1,048,576 (32,768 tile rows) or
@@ -184,7 +184,7 @@ A background `nvidia-smi` sampler logged the clocks. The SM clock was
 2,070 MHz in every timed window; the memory clock's median was 8,001
 MHz in every scene.
 
-Every painted image matched ch03's, every ch06 fill set matched ch03's,
+Every ch07 painted image matched ch03's, every ch06 fill set matched ch03's,
 and every `@njit` fill count matched.
 
 ### ch07 against ch03 (8-conn)
@@ -217,8 +217,12 @@ fastest instrumented grid on that scene.
 Three framings, one answer: 20-26x on the blobs from 11 Mpx up,
 12-13x on the 1 Mpx one, 29-34x on the serpentine.
 
-The bare pair is the lowest on the big blobs, because ch03's bare twin
-fits 72 blocks where the instrumented one fits 48.
+The bare pair is the lowest on the big blobs. ch03's bare twin drops
+its counters and fits 72 blocks where the instrumented one fits 48.
+
+This session does not split the two. At one grid (48 x 256), ch03's own
+session `neighbors_20260721T000108Z` puts the counters alone at about
+6% of the time on `sq_8000` (88.50 vs 82.88 ms, an older method).
 
 ch03's grids are 48 x 256, 120 x 128, 240 x 64 and (on the serpentine)
 1 x 128. ch07's are `w2`, `w4`, `w8`, `w4_cap96` and (on the
@@ -228,8 +232,8 @@ serpentine) 1 x 32 and 1 x 64.
 
 ch06 never runs a BFS. It packs the mask, lists the maximal red runs of
 every row, joins touching runs with union-find (איחוד-חיפוש), and
-paints. It labels every blob; on these one-blob scenes that is the same
-job.
+paints. It labels every blob; on these one-blob scenes it changes the
+same pixels, in its own label colour instead of blue.
 
 | scene | ch06 ms | ch07 `w4` ms | ch07 vs ch06 | ch06 core | ch07 core |
 |---|---:|---:|---|---:|---:|
@@ -425,10 +429,16 @@ copy and the copy of the painted image back.
 | `maze_1k` | 27.44 | 20.59 | 1.33x | 22.08 | 1.24x |
 | `thin_h32_blob` | 68.50 | 0.601 | 114x | 12.77 | 5.4x |
 
-**ch07 beats one CPU core only when a round has many tiles.** The maze
-(5 tile visits per round) is near parity. On one-tile fronts the CPU
-wins: 4.2x on the serpentine and 71x on `zz_serp_1k` (1.79 vs 127.31
-ms).
+**When the fill is the oracle's work, ch07 beats one CPU core only
+when a round has many tiles.** The maze (5 tile visits per round) is
+near parity.
+
+On one-tile fronts the CPU wins: 4.2x on the serpentine and 71x on
+`zz_serp_1k` (1.79 vs 127.31 ms).
+
+The thin strip is a one-tile front too, yet ch07 wins 114x. Its blob is
+1,024 px, but the oracle allocates full-image arrays (visited, depth, a
+W x H queue) for 16.8 Mpx. That setup, not the fill, decides its time.
 
 `zz_serp_1k` has no end-to-end row: its perf_counter clock read below
 its event clock (125.5 vs 127.3 ms).
