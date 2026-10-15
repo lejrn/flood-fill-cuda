@@ -16,7 +16,11 @@ scene, and the clock sampler's window is kept per experiment.
   E6  seed dial         L = 0, 32, 16, 8, 4, 2, 1 (+ counters)
   E7  union timing      deferred | inline (coll_capacity 0)
   E8  counter cost      bare | instrumented (waves phase)
-  E9  valve round       32, 64, 128, off, at L0 (+ rounds, valve seeds)
+  E9  valve round       128, 64, 32, 16, off, at L8 (+ rounds, valve
+                        seeds); the rule looks only at scenes where some
+                        arm fires the valve (elsewhere the arms run the
+                        same code); R8 records the rounds the main scenes
+                        need at L8, which a valve must stay above
   E10 waves launch      256 | 128 threads per block
   E4b lookup x K2       follow-up: scan at E3's pick vs index at three
                         K2 register/grid settings (index spills at 80)
@@ -279,6 +283,29 @@ def e8_counters(img, d_img, d_pr, sampler):
     return interleave(arms, d_img, d_pr, sampler)
 
 
+E9_VALVES = (128, 64, 32, 16, 0)
+
+
+def e9_valve(img, d_img, d_pr, sampler):
+    """The valve at the default lattice and lookup (L8)."""
+    w, h = img.shape[:2]
+    eng = ff.TileWaves(w, h)
+    arms = {f"valve{v or 'off'}": _ch08_arm(eng, valve_round=v)
+            for v in E9_VALVES}
+    _respin(eng, d_img)
+    res = interleave(arms, d_img, d_pr, sampler)
+    for v in E9_VALVES:
+        res[f"valve{v or 'off'}"]["counters"] = _instrumented_counters(
+            img, valve_round=v)
+    return res
+
+
+def r8_rounds(img, d_img, d_pr, sampler):
+    """Counters only (no timing): the rounds a scene needs at L8."""
+    return {"_clock": {}, "L8": {"counters": _instrumented_counters(
+        img, valve_round=0)}}
+
+
 E13_ARMS = {   # name: (lookup, dense_min, K3 max_registers)
     "scan": ("scan", 8, None),
     "scan_r80": ("scan", 8, 80),
@@ -319,19 +346,6 @@ def e13_lookup(img, d_img, d_pr, sampler):
     return res
 
 
-def e9_valve(img, d_img, d_pr, sampler):
-    w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h, lattice=0)
-    arms = {f"valve{v or 'off'}": _ch08_arm(eng, valve_round=v)
-            for v in (128, 32, 64, 0)}
-    _respin(eng, d_img)
-    res = interleave(arms, d_img, d_pr, sampler)
-    for v in (128, 32, 64, 0):
-        res[f"valve{v or 'off'}"]["counters"] = _instrumented_counters(
-            img, lattice=0, valve_round=v)
-    return res
-
-
 def e10_waves(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
     eng = ff.TileWaves(w, h)
@@ -368,7 +382,8 @@ def e4b_lookup_k2(img, d_img, d_pr, sampler):
 EXPERIMENTS = {"E1": e1_pack, "E2": e2_exits, "E3": e3_label,
                "E4": e4_lookup, "E5": e5_paint, "E6": e6_dial,
                "E7": e7_union, "E8": e8_counters, "E9": e9_valve,
-               "E10": e10_waves, "E4b": e4b_lookup_k2, "E13": e13_lookup}
+               "E10": e10_waves, "E4b": e4b_lookup_k2, "E13": e13_lookup,
+               "R8": r8_rounds}
 
 
 def plan(pngs):
@@ -384,26 +399,28 @@ def plan(pngs):
     return [
         ("input_blobs", blobs,
          ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E10", "E4b",
-          "E13"]),
+          "E13", "R8"]),
         ("input_blocks", lambda: S5.png_scene(pngs["input_blocks"])[0],
-         ["E2", "E3", "E4", "E5", "E6", "E8", "E4b", "E13"]),
+         ["E2", "E3", "E4", "E5", "E6", "E8", "E4b", "E13", "R8"]),
         ("blob_grid_100",
          lambda: S5.blob_grid_scene(4000, 4000, 10, 10, 360, gap=40)[0],
-         ["E1", "E5", "E6", "E7", "E8"]),
+         ["E1", "E5", "E6", "E7", "E8", "R8"]),
         ("random_4000",
          lambda: S5.random_blobs_scene(4000, 4000, 0.30, 0)[0],
-         ["E3", "E4", "E6", "E4b", "E13"]),
+         ["E3", "E4", "E6", "E4b", "E13", "R8"]),
         ("disk_r2000", lambda: S5.disk_scene(4200, 4200, 2000)[0],
-         ["E1", "E6", "E7", "E10", "E13"]),
+         ["E1", "E6", "E7", "E10", "E13", "R8"]),
         ("serpentine_2048", lambda: S5.serpentine_scene(2048, 2048)[0],
-         ["E2", "E4", "E6", "E9", "E10", "E4b", "E13"]),
+         ["E2", "E4", "E6", "E9", "E10", "E4b", "E13", "R8"]),
         ("crop_2000", crop(2000), ["E1"]),
         ("crop_4000", crop(4000), ["E1"]),
         ("crop_6000", crop(6000), ["E1"]),
         ("zz_serp_1k", lambda: W7.zz_serpentine_scene()[0], ["E9", "E13"]),
         ("diag_snake_159", lambda: S8.diag_snake_scene(159), ["E9"]),
         ("maze_1k", lambda: W7.maze_scene()[0], ["E9", "E13"]),
-        ("stair_decoy_19", lambda: S8.stair_scene(19), ["E13"]),
+        ("stair_decoy_19", lambda: S8.stair_scene(19), ["E9", "E13"]),
+        ("stair_plain_19", lambda: S8.stair_scene(19, decoys=False),
+         ["E9"]),
         ("zz_lattice_4k", lambda: W7.zz_lattice_scene()[0], ["E13"]),
     ]
 
@@ -501,21 +518,30 @@ def decide(res):
                                            "inline")
                             < _t(res, "E7", "input_blobs", "deferred")
                             else "deferred")
-    # E9: 128 unless a smaller value never fires on the 6 scenes (at the
-    # default lattice, from E6's counters) and costs less on the worst
-    if "E9" in res and "E6" in res:
-        max_rounds = max(res["E6"][sc]["L8"]["counters"]["rounds"]
-                         for sc in res["E6"])
+    # E9: 128 unless a smaller value never fires on the main scenes at
+    # L8 (R8's rounds), is never slower where some arm fires, and is
+    # faster on at least one such scene. A scene where no arm fires runs
+    # the same code in every arm, so its medians differ by noise only;
+    # session 155420Z kept 128 on such a tie (maze_1k, 0.001 ms).
+    if "E9" in res and "R8" in res:
+        max_rounds = max(res["R8"][sc]["L8"]["counters"]["rounds"]
+                         for sc in res["R8"])
+        firing = [sc for sc in res["E9"]
+                  if any(res["E9"][sc][a]["counters"]["valve_round"] > 0
+                         for a in res["E9"][sc] if not a.startswith("_"))]
         pick = 128
-        for v in (32, 64):
-            cheaper = all(_t(res, "E9", sc, f"valve{v}")
-                          < _t(res, "E9", sc, "valve128")
-                          for sc in res["E9"])
-            if max_rounds < v and cheaper:
+        for v in (16, 32, 64):
+            if max_rounds >= v:
+                continue
+            ts = [(_t(res, "E9", sc, f"valve{v}"),
+                   _t(res, "E9", sc, "valve128")) for sc in firing]
+            if ts and all(a <= b for a, b in ts) and any(a < b
+                                                         for a, b in ts):
                 pick = v
                 break
         out["E9_valve_round"] = pick
-        out["E9_max_rounds_on_6_scenes_at_L8"] = max_rounds
+        out["E9_firing_scenes"] = firing
+        out["E9_max_rounds_main_scenes_at_L8"] = max_rounds
     # E13: E4's rule against the scan at the compiler's registers: an arm
     # qualifies if input_blobs moves under +1% (per-round median) and at
     # least 2 other scenes gain 10%; the qualifier with the lowest
@@ -593,6 +619,8 @@ def main():
                 f"{a} {v['total_ms']:.3f}" + (
                     f"({v['ratio_to_first_median']:.3f})"
                     if "ratio_to_first_median" in v else "")
+                if "total_ms" in v else
+                f"{a} rounds {v['counters']['rounds']}"
                 for a, v in r.items() if not a.startswith("_"))
             print(f"{e:4s} {scene:16s} {line} | sm "
                   f"{r['_clock'].get('clk_sm_min', '?')} mem "

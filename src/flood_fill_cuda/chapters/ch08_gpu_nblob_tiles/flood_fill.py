@@ -1,7 +1,7 @@
 """Host driver for the seeded tile waves (ch08).
 
 Public API (mirrors ch06's recolor.py):
-    TileWaves(width, height, connectivity=8, lattice=8, valve_round=128,
+    TileWaves(width, height, connectivity=8, lattice=8, valve_round=16,
               lookup="hybrid", dense_min=4, coll_capacity=None,
               instrumented=False, debug=False, ...)   reusable buffers
         .pack(img_dev)                 RGB -> mask (mask contract, untimed)
@@ -85,7 +85,12 @@ DEFAULT_LOOKUP = "hybrid"
 PAINT_GRID = (768, 128)
 WAVES_TPB = 256
 DEFAULT_LATTICE = 8
-DEFAULT_VALVE_ROUND = 128
+# The escalation valve: if round 16 still claims comps, every unclaimed
+# ring comp seeds itself. E9 (session experiments_20261015T181414Z, at
+# L8 and the hybrid lookup): the main scenes need at most 8 rounds, so
+# it never fires there; where it fires, 16 beat 128 on every scene
+# (decoy staircase 0.394, diagonal snake 0.620 of the 128 arm).
+DEFAULT_VALVE_ROUND = 16
 # hybrid lookup: a neighbour tile with more ring comps than this is
 # scanned by the whole warp at once (a runtime argument of K3, E13)
 DEFAULT_DENSE_MIN = 4
