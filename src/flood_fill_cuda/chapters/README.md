@@ -8,12 +8,12 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs ──"one pixel per step?"──► 1 blob, tiles
-                                     │                                      │                            │                                    │                                   │                                    │                                     │
-                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:        "one step closes a 32×32 tile:
-                                     ▼                            one BFS? where do they run?"    what stops it - and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,      BFS over tiles, ~31× fewer steps;
-                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write   but ch06's runs still beat its core
-                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)       (70.5 ms → 3.49 ms vs ch03, bare)
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs ──"one pixel per step?"──► 1 blob, tiles ──"many blobs on tiles?"──► N blobs, tile comps
+                                     │                                      │                            │                                    │                                   │                                    │                                     │                                           │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:        "one step closes a 32×32 tile:              "the node is a tile comp:
+                                     ▼                            one BFS? where do they run?"    what stops it - and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,      BFS over tiles, ~31× fewer steps;            each claimed once, 6 rounds;
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write   but ch06's runs still beat its core          beats ch06 on input_blobs
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)       (70.5 ms → 3.49 ms vs ch03, bare)            (2.62 ms → 2.21 ms, core 0.76×)
                                                                                                   plateau at 512 threads/SM      (1.6-1.8×)                        (755k blobs in 25 ms)
 ```
 
@@ -21,7 +21,9 @@ Chapters 1-5 all ask *how should pixels move?* Chapter 6 asks whether
 they should be the unit at all, and the answer - runs, not pixels - is
 worth more than every scheduling result before it combined. Chapter 7
 goes back to one blob and asks the BFS question again with a bigger
-step: a tile, not a pixel.
+step: a tile, not a pixel. Chapter 8 takes that BFS back to many blobs,
+with a tile's local component as the node, and beats ch06 on the
+81 Mpx image.
 
 ---
 
@@ -601,6 +603,74 @@ Chapters 2 and 3 both named.)*
 3. **ch06's launch shapes on thin images**, and `pack` folded into the
    rounds.
 4. **`ncu`**, still owed (`ERR_NVGPUCTRPERM` on this machine).
+
+*(Chapter 8 took up candidate 1, but kept the rounds: tile labels travel
+as BFS waves, and union-find only joins waves that meet.)*
+
+---
+
+## Chapter 8 - many blobs, waves over tile components (`ch08_gpu_nblob_tiles/`)
+
+### Inherited problems
+1. **ch07 filled one blob.** ch05 and ch06 label many, with no seeds
+   given. Can ch07's tiles do that job, and how close do they get to
+   ch06 on `input_blobs.png`?
+2. **ch07's own candidate was CCL, not BFS.** Local tile labels joined
+   by union-find need no rounds at all. This chapter keeps the BFS:
+   labels must travel as frontier waves.
+3. **Tiles came back.** ch07 opened a tile again for every wave that
+   reached it: 87,840 openings on 62,500 tiles in `sq_8000`.
+4. **Runs beat tiles on the core.** ch06's union-find did the
+   connectivity part 2.5-9.5x cheaper than ch07's rounds.
+
+### Approaches - what each bets
+| approach | the bet |
+|---|---|
+| **the tile comp as the node** | a blob falls apart into local components inside a tile; making each one a node means each is claimed exactly once, so the revisits disappear |
+| **seeds without a pre-pass** | a comp with no red neighbour in a lex-smaller tile is a seed (every blob has one in its lex-min tile), plus a diagonal lattice of seed tiles every 8 diagonals: few rounds, no adjacency pass |
+| **CAS claims, one barrier per round** | each frontier comp claims its unclaimed neighbours with one CAS; three rotating counters remove the second `grid.sync` |
+| **collisions, then one union pass** | where two waves of one blob meet, the pair is recorded from one side of the edge only, and ch06's `_union` joins them after the last round; a min-anchor flatten gives ch05's canonical label |
+| **a hybrid neighbour lookup** | sparse neighbour tiles are scanned per lane; tiles with more than 4 ring comps are tested by the whole warp in one coalesced step |
+| **design 3's pack, a colour-uniform paint** | reading RGB tile by tile is 0.28 ms faster than ch06's pack; most tiles paint one colour with no closure |
+
+### Results (RTX 4060 Laptop, session `waves_20261015T183401Z`)
+| finding | number |
+|---|---|
+| **headline** (`input_blobs`, 81 Mpx, 2,522 blobs) | rgb **2.214 ms** vs ch06 2.617 (at its best bare merge grid): **0.862** [0.784, 0.960]. Mask contract 1.018 vs 1.103 (0.923). ch05 `split_L8` 47.45 ms (host clock) |
+| like for like | ch06 with ch08's pack: 2.291 ms, so ch08 is **0.962** [0.898, 1.071]. 0.28 ms of the 0.40 ms gain is the pack |
+| the labelling itself | **0.381 vs 0.500 ms (0.760)**: 36,863 tile comps against 539,207 runs |
+| still BFS | 11,609 seeds, **6 rounds**, frontier 11,586 / 14,744 / 7,834 / 2,306 / 289 / 6 comps; every comp claimed once; 30,979 collision pairs unioned. Pure waves (S2 seeds, no valve): 8 rounds, 0.998 of the default |
+| where tiles win | disk 0.544, blob grid 0.838: one paint word per row where ch06's runs are long |
+| where tiles lose | many comps per tile: `input_blocks` 1.85x, `random_4000` 1.18x, a dot lattice with 256 comps per tile 2.6x (and 3.2x ch05). Long border shapes: serpentine 2.3x, `zz_lattice_4k` 4.0x |
+| small images | a crossover at a 1500 x 1500 crop (1.000); the labelling alone only wins from 5000 x 5000 |
+| the hybrid lookup | `zz_lattice_4k` 16.33 → 6.89 ms, the decoy staircase 0.584 → 0.310 ms against the scan, input_blobs 0.991 of the scan (E13) |
+| fairness | phase events stalled ch06 on small scenes (`input_blocks` 1.21 became 1.85), and ch06's merge grid had been tuned for its instrumented twin; both fixed before the headline |
+
+### New problems and lessons
+- **The node decides the work.** A tile node is opened again for every
+  wave; a comp node is claimed exactly once.
+- **The pack is the biggest single gain, and it is portable.** ch06
+  with ch08's pack runs at 0.899 of itself.
+- **A lookup has a cost model.** A scan costs one dependent step per
+  ring comp of the neighbour tile; dense tiles need the whole warp.
+- **A cooperative kernel's registers set its grid.** 97 to 80
+  registers took K3 from 48 to 72 resident blocks.
+- **On this driver the number of commands in a timed window is itself
+  a variable.** Totals now have two events; phases get their own pass.
+- **Tune the baseline in the same harness.** ch06's merge grid was
+  right for the twin it was tuned on, and wrong for the one timed here.
+
+### Open problems → Chapter 9 candidates
+1. **Dense tiles.** One closure per comp, in K2 and again in K4, makes
+   noise and dot lattices lose. A bulk path for isolated pixels or a
+   shared-memory union-find per dense tile.
+2. **An index for dense tiles only**, to take the index lookup's wins on
+   long shapes without its K2 cost on `input_blobs`.
+3. **Thin images.** A 1-px strip puts 32 px in a tile and ~100 B/px of
+   buffers in memory.
+4. **Port `pack_tiles` to ch06** (0.33 ms there), and CUDA graphs for
+   the small-image floor.
+5. **`ncu`** on the paint floor, still owed.
 
 ---
 

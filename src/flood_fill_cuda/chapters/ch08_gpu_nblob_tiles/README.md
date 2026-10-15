@@ -1,53 +1,61 @@
 # Chapter 8 - many blobs, waves over tile components (`ch08_gpu_nblob_tiles/`)
 
-> **Draft.** The numbers are measured and final for this session; the
-> prose, figures and the top-level chapter index are not done yet.
-
 **Can ch07's tiles label many blobs, and how close do they get to ch06?**
 Yes, if the BFS node is a tile component, not a tile.
 
-On `input_blobs.png` the tile waves beat ch06's run-based labelling.
-They stay BFS-like: labels travel as frontier (חזית) waves.
+On `input_blobs.png` the tile waves beat ch06's run-based labelling in
+all three contracts. They stay BFS-like: labels travel as frontier
+(חזית) waves, one barrier per round.
 
-| `input_blobs.png` (81 Mpx, 2,522 blobs) | ch05 `split_L8` | ch06 runs | ch06 + ch08's pack | **ch08** |
-|---|---:|---:|---:|---:|
-| rgb contract (RGB in, recoloured RGB out) | 45.17 (host clock) | 2.756 | 2.476 | **2.242** |
-| mask contract (packed mask in) | | 1.237 | | **1.072** |
-| label-only (no paint, no pack) | | 0.630 | | **0.384** |
-| ch08 / baseline, rgb (per-round median [range]) | about 1/20 (different clocks) | **0.827** [0.776, 0.961] | **0.927** [0.856, 1.031] | |
+| `input_blobs.png` (81 Mpx, 2,522 blobs) | ch05 `split_L8` | ch06 runs | ch06 + ch08's pack | **ch08** | ch08 / ch06 |
+|---|---:|---:|---:|---:|---:|
+| rgb contract (RGB in, recoloured RGB out) | 47.45 (host clock) | 2.617 | 2.291 | **2.214** | **0.862** [0.784, 0.960] |
+| mask contract (packed mask in, RGB painted) | | 1.103 | | **1.018** | **0.923** [0.661, 0.930] |
+| labelling only (no pack, no paint) | | 0.500 | | **0.381** | **0.760** [0.759, 0.772] |
 
 All times are medians in ms from one session,
-`waves_20261015T160144Z.json`, unless a line names another session.
-Ratios are medians of the per-round ratios, with their range.
+`waves_20261015T183401Z.json`, unless a line names another session.
+Ratios are medians of the 9 per-round ratios, with their range.
 
-**The short version.** About half of the 0.51 ms gain is the faster
-pack read (1.217 vs 1.452 ms), which ch06 can take too: the ch06+tp
-column. The other half is the connectivity core: 0.384 vs 0.630 ms.
+ch06 runs at its fastest merge grid for this image (4096 blocks, swept
+in the same session). At its shipped 512 blocks it takes 2.675 ms.
+ch05 is timed by its own host clock, so "21x" is only indicative.
 
-ch08 does that work on 36,863 tile comps. ch06 does it on 539,207 runs.
+**The short version.** ch08 is 0.40 ms faster than ch06 in the rgb
+contract. About 0.28 ms of that is the faster pack read, which ch06 can
+take too: with the same pack, ch08 is 0.962 [0.898, 1.071] of ch06.
 
-Tiles still lose where tiles are dense: noise, the 1-px serpentine, and
-zigzags on tile borders. The index twin halves some of those losses.
+The labelling itself is 0.12 ms faster (0.381 vs 0.500 ms). ch08 does
+it on 36,863 tile comps, ch06 on 539,207 runs. ch08's paint is 0.045
+ms slower.
 
-## The question
+Tiles still lose where a tile holds many comps (noise, dot lattices),
+on long thin shapes along tile borders, and on small images: below
+about 1500 x 1500 px ch06 is faster.
 
-ch07 filled ONE blob by a BFS over 32x32 tiles closed in registers
-(אוגרים). ch05 and ch06 labelled MANY blobs.
+## Inherited problems
 
-The job here is ch05's: find every blob and give it its canonical
-(קנוני) label, with no seeds given. The method must stay BFS-like.
+1. **ch07 filled ONE blob.** Its BFS over 32x32 tiles closed in
+   registers (אוגרים) beat ch03's pixel BFS 20x, but ch05 and ch06 label
+   MANY blobs with no seeds given.
+2. **ch07's own candidate was not BFS.** Its open problem 1 proposed
+   local labels per tile joined by ch06's union-find, with no rounds.
+   That is block CCL. This chapter keeps the rounds on purpose.
+3. **Tiles came back.** In ch07 a tile was opened again whenever new
+   bits reached it after an earlier opening: 87,840 openings on 62,500
+   tiles in `sq_8000`.
+4. **Runs beat tiles on the connectivity core.** ch06's union-find did
+   the connectivity part 2.5-9.5x cheaper than ch07's rounds on every
+   single blob.
 
 ## From tiles to comps
 
 **A tile can hold a blob more than once.** A U-shaped blob that leaves a
 tile and comes back gives two local components (רכיבים) in that tile.
 
-In ch07 such a tile was opened once per arriving wave. That was the
-revisit (ביקור חוזר): 87,840 openings on 62,500 tiles in `sq_8000`.
-
-It was not overlap. A revisit happened only when new pixels arrived,
-and those pixels belonged to a comp not yet reached. But each opening
-paid for the whole tile.
+In ch07 such a tile was opened once per arriving wave. Each opening ran
+the closure (סגור) over the whole tile again. That was repeated work on
+the same tile, not overlap: no pixel ever got two different answers.
 
 **So the node of the BFS is the comp.** Two comps are adjacent when two
 of their pixels are 8-adjacent across a tile border.
@@ -59,34 +67,35 @@ A **ring comp** touches the 124-pixel frame of its tile, so it may have
 neighbours in other tiles. An **interior comp** touches no frame pixel:
 it is a whole blob by itself, and its label is its own anchor (עוגן).
 
-On `input_blobs`, 28,276 tiles are touched. They hold 36,863 comps:
-36,788 ring comps and 75 interior ones, at most 8 per tile.
+On `input_blobs`, 28,276 of 79,524 tiles hold red. They hold 36,863
+comps: 36,788 ring comps and 75 interior ones, at most 8 per tile.
 
 ## The pipeline
 
-One stream, five launches, a CUDA event after each. The mask contract
-drops K1.
+One stream, five launches. The mask contract drops K1; the labelling
+tier also drops K4.
 
-| # | kernel | what it does | input_blobs (ms) |
-|---|---|---|---:|
-| K1 | `pack_tiles` | RGB to 1 bit/px, read tile by tile (design 3's read), row-major store equal to ch06's mask | 1.217 |
-| K0 | `init` | zero the queue state and the counters | 0.004 |
-| K2 | `label` | one warp per tile: close every comp in registers, write a 32-byte record per ring comp, seed it or leave it unclaimed | 0.256 |
-| K3 | `waves` | cooperative (שיגור שיתופי): rounds of CAS claims, one `grid.sync` per round, then one union pass and two flatten passes | 0.121 |
-| K4 | `paint` | `palette[label % 6]` on red, 96 contiguous bytes per row word | 0.643 |
-| | **total** | first event to last | **2.242** |
+| # | kernel | what it does | input_blobs (ms) | ch06 for comparison |
+|---|---|---|---:|---|
+| K1 | `pack_tiles` | RGB to 1 bit/px, read tile by tile (design 3's read), stored row-major, equal to ch06's mask bit for bit | 1.183 | pack 1.464 |
+| K0 | `init` | zero the queue state and the counters | 0.005 | |
+| K2 | `label` | one warp per tile: close every comp in registers, write a 32-byte record per ring comp, seed it or leave it unclaimed | 0.256 | count 0.048, scan 0.024, emit 0.221 |
+| K3 | `waves` | cooperative (שיגור שיתופי): rounds of CAS claims, one `grid.sync` per round, then one union pass and two flatten passes | 0.123 | merge 0.181, flatten 0.032 |
+| K4 | `paint` | `palette[label % 6]` on red, 96 contiguous bytes per row word | 0.650 | paint 0.605 |
+| | **total** | one event before K1, one after K4 | **2.214** | **2.617** |
 
-ch06 in the same rounds: pack 1.452, count 0.048, scan 0.024, emit
-0.221, merge 0.304, flatten 0.032, paint 0.636.
+The phase times come from a separate pass, each phase in its own run
+(see the method below). They sum to 2.217 ms for ch08 and 2.575 for
+ch06.
 
 ### K2: comps, records, seeds
 
-A warp holds the tile as 32 words, lane i is row `x0+i`. The comp loop
+A warp holds the tile as 32 words; lane i is row `x0+i`. The comp loop
 takes the lowest remaining pixel and closes its comp with ch07's
-closure (סגור).
+closure.
 
 That pixel is the min lin of what remains, so it is the comp's anchor.
-The same order is replayed by K4.
+K4 replays the same order.
 
 Two exits replace ch07's proving trip. The **last-comp exit** stops when
 the fill covers all that remains. The **frontier exit** stops when no
@@ -114,19 +123,27 @@ and claims each adjacent unclaimed comp with one CAS on its label.
 **One barrier (מחסום) per round.** Appends go to three rotating
 counters, so no second `grid.sync` is needed to reset one.
 
+**The hybrid lookup (new in this chapter's final version).** The scan
+tests the neighbour tile's ring comps one step at a time, so a tile
+with 60 ring comps costs 60 dependent steps per task.
+
+Above `dense_min = 4` ring comps the whole warp takes the task instead:
+lane j tests ring comp j, one coalesced step per 32 comps. The scan
+keeps the sparse tasks, and K2 is unchanged (E13).
+
 **Collisions (התנגשויות).** When a wave meets a comp claimed by
 another wave, the pair of seed ids is recorded, but only from the SUCC
 side of the edge. Every edge has exactly one SUCC side, so every
 collision is seen once.
 
-After the last round, one pass unions the pairs with ch06's
-`_union` (verbatim). Two flatten passes then give each class the
-minimum anchor of its comps: ch05's canonical label, not just an
-equivalent partition.
+After the last round, one pass unions the pairs with ch06's `_union`
+(verbatim). Two flatten passes then give each class the minimum anchor
+of its comps: ch05's canonical (קנוני) label, not just an equivalent
+partition.
 
-**Escalation valve (שסתום).** If round 128 still claims comps, every
-unclaimed ring comp seeds itself. It never fires on the six benchmark
-scenes (max 8 rounds at L8).
+**Escalation valve (שסתום).** If round 16 still claims comps, every
+unclaimed ring comp seeds itself. The main scenes and crops need at
+most 8 rounds, so it never fires there (E9).
 
 ### K4: paint
 
@@ -135,140 +152,272 @@ comp and all labels give one palette colour, the whole mask word is
 painted in that colour.
 
 On `input_blobs`: 27,534 tiles painted uniform, 68 single interior comps,
-674 tiles re-closed. Paint costs what ch06's does (0.643 vs 0.636 ms):
-both are scattered byte writes of the same 40 MB.
+674 tiles re-closed (3,552 closure iterations). Both paints write the
+same 40 MB of scattered bytes: 0.650 vs 0.605 ms.
+
+## Is this still BFS?
+
+Start from what BFS is. A **frontier** is the set of nodes reached in
+the last step. One step visits every neighbour of the frontier, and the
+new nodes become the next frontier.
+
+Here a node is a tile comp, and an edge joins two comps that touch
+across a tile border. One round is one step: every frontier comp tests
+its neighbours and claims the unclaimed ones. Those form the next
+frontier.
+
+**It is a multi-source BFS.** The waves start from 11,609 seeds at
+once, not from one seed per blob. A comp is claimed in round r exactly
+when its distance to the nearest seed is r. The tests check the round
+count against a CPU BFS on every run, exactly.
+
+On `input_blobs` the frontier holds 11,586, 14,744, 7,834, 2,306, 289
+and 6 comps in its 6 rounds.
+
+**Waves of one blob meet, and then they merge.** Two seeds in one blob
+send two waves. Where they meet, the pair is recorded and later joined
+by union-find (איחוד-חיפוש). ch05's `seed_merge` did the same; it was
+still BFS.
+
+The unions touch only the 30,979 edges where two waves met. That is
+43% of the 72,127 comp adjacencies (E6's L = 1 row, experiments
+`155420Z`), and far from ch06's 681,039 union attempts over runs
+(ch06 session `runs_20260725T161448Z`).
+
+**The dial (חוגה) shows how much BFS is left.** The lattice spacing L
+moves the method between two ends.
+
+- **L = 0 (S2 seeds only, valve off): pure waves.** 7,936 seeds, 8
+  rounds, 28,852 claims. On `input_blobs` it costs the same as the
+  default (0.998 of L8). On long shapes it pays one round per comp: 90
+  rounds on the disk (1.60x), 64 on the serpentine (1.50x).
+- **L = 8 (the default): waves plus a seed lattice.** 6 rounds, 25,179
+  claims, 9,162 links.
+- **L = 1: every ring comp a seed.** Zero claims and one round: block
+  union-find CCL over comp adjacencies. That is not BFS, and in E6 it
+  was not faster (experiments `155420Z`).
+
+**The valve is an escape hatch, not the method.** At L8 it fires only
+on chains that avoid the lattice for 16 rounds: the diagonal snake and
+the staircases below. There it stops the waves and lets the unions
+finish.
+
+So yes: on every main scene the labels travel as frontier waves over
+the comp graph, and union-find only joins waves of one blob that met.
+
+## What it gives up
+
+**Per-pixel BFS depth.** Inside a tile the closure moves bits by
+doubling, so a round counts comp hops, not pixel steps. Labels live per
+comp, as ch06's live per run. The per-pixel label map is an off-clock
+twin.
+
+**Which wave wins is a race.** Labels, paint, rounds, seeds and claims
+are deterministic. Which wave claims a comp is not, so the collision
+count varies from run to run (30,979 in this session, 31,104 in the
+draft's).
+
+**The two labelling tiers end at different points.** ch06's ends with
+a canonical label per run, which maps straight to pixels. ch08's ends
+with a label per comp; its paint still re-closes the 674 tiles that hold
+two or more colours.
+
+**Memory per tile, not per pixel.** Every tile reserves 64 record ids,
+whatever it holds: about 3.2 KB of buffers plus its mask words. That is
+253 MiB at 81 Mpx, but 416 MiB (104 B/px) for a 4 Mpx 1-px strip, with
+32 px per tile (*derived* from the buffer sizes).
 
 ## Results (RTX 4060 Laptop, 24 SMs)
 
-Session `waves_20261015T160144Z`. Policy (ch07's): restore the image,
-96 MB L2 flush read, a ~2 ms GPU sleep kernel, CUDA events, 9
-interleaved (משולב לסירוגין) rounds, order reversed on odd rounds.
+**Method.** One interleaved round-robin per scene: 9 rounds, every
+config once per round, the order reversed on odd rounds.
 
-Clocks: P0, 2070 MHz SM for nearly every sample. On `input_blobs` the
-sampler saw a dip to 1875 MHz and 7001 MHz memory (74 samples).
+Before every run, on every side: the image is restored from a device
+copy, the mask is packed if the contract starts from it (off the
+clock), a 96 MB read flushes the L2, and a ~2 ms GPU sleep kernel is
+queued.
+
+**Totals have two CUDA events:** one before the first launch, one after
+the last. Phase times come from a separate pass of 5 rounds: each phase
+in its own run, with its two events around that one launch.
+
+**ch06 runs at its best merge grid**, swept per scene (512 to 8192
+blocks, bare, the merge phase alone). `ch06_m512` keeps its shipped
+grid as a reference row.
+
+ch05 runs after the GPU rounds, with a 0.5 s GPU-bound respin before
+each call. The `@njit` oracle runs after every GPU scene.
+
+Clocks: the SM clock's median was 2,070 MHz in every timed window but
+`crop_7000` (2,047.5). Its minimum was 2,025 MHz or more everywhere but
+`dots_4k` (see the worst cases). The memory clock dipped to 7,001 MHz
+(P3) on several scenes and to 5,501 on `maze_1k`; the ratios are per
+round, so both sides share a dip.
+
+Every painted image equals ch06's own `RunRecolor.run`, for every
+config and scene, and ch05's wherever ch05 ran.
 
 ### The six scenes
 
-| scene | ch08 L8 (scan) | ch08 index twin | ch06 rgb | ch08 / ch06 | ch06+tp | ch05 (host) |
-|---|---:|---:|---:|---:|---:|---:|
-| input_blobs | **2.242** | 2.344 | 2.756 | **0.827** | 2.476 | 45.17 |
-| input_blocks | 0.259 | 0.242 | 0.214 | 1.211 | 0.212 | 1.21 |
-| blob_grid_100 | **0.556** | 0.564 | 0.683 | **0.827** | 0.633 | 26.84 |
-| random_4000 | 7.460 | 6.570 | 5.924 | 1.258 | 5.874 | 21.54 |
-| disk_r2000 | **0.550** | 0.556 | 1.029 | **0.535** | 0.959 | 24.80 |
-| serpentine_2048 | 0.613 | 0.415 | 0.314 | 1.967 | 0.301 | 18.22 |
+| scene | ch08 (hybrid) | scan lookup | index lookup | ch06 rgb | ch08 / ch06 | labelling only, ch08 / ch06 | ch05 (host) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| input_blobs | **2.214** | 2.201 | 2.265 | 2.617 | **0.862** | **0.381 / 0.500** | 47.45 |
+| input_blocks | 0.254 | 0.252 | 0.227 | 0.137 | 1.851 | 0.139 / 0.043 | 1.37 |
+| blob_grid_100 | **0.551** | 0.556 | 0.553 | 0.669 | **0.838** | 0.133 / 0.102 | 26.00 |
+| random_4000 | 6.893 | 7.879 | 6.918 | 5.892 | 1.178 | 3.113 / 2.068 | 22.57 |
+| disk_r2000 | **0.552** | 0.550 | 0.555 | 1.004 | **0.544** | 0.129 / 0.073 | 25.29 |
+| serpentine_2048 | 0.558 | 0.601 | 0.421 | 0.242 | 2.309 | 0.461 / 0.037 | 19.05 |
 
-Label-only tier (ms, ch08 / ch06): input_blobs 0.384 / 0.630, blocks
-0.141 / 0.051, blob_grid 0.137 / 0.102, random 3.903 / 2.343, disk
-0.132 / 0.081, serpentine 0.512 / 0.044.
+**Where ch08 wins:** few comps per tile and big images. On the disk
+and the blob grid ch08 wins the rgb contract through its paint (disk:
+0.157 vs 0.615 ms): one word per row, where ch06's runs are long.
 
-**Where ch08 wins:** few comps per tile. On the disk ch06's run paint is
-slow on long runs (0.615 vs 0.155 ms); ch08 paints whole words.
+ch06 still labels both faster (disk 0.073 vs 0.129 ms). Only on
+`input_blobs` does ch08 win the labelling itself.
 
-**Where it loses:** many comps per tile. `random_4000` has up to 86
-comps per tile, closed one after another (label 2.48 ms); paint costs
-3.30 ms for both chapters.
+**Where it loses:** many comps per tile. `input_blocks` has up to 47
+comps per tile and `random_4000` up to 86, closed one after another
+(label 2.697 ms on `random_4000`). Paint costs the same there (3.313 vs
+3.292 ms).
 
-The serpentine has 16 comps per tile in one long chain. Its 2.03M
-signature tests are what the index twin removes (129k).
+The serpentine has 16 ring comps per tile in one long chain: 2.03M
+signature tests. The index lookup cuts them to 129k and the time to
+0.421 ms, still 1.7x ch06.
 
 ### The crop sweep
 
-Centred crops of `input_blobs`, ch08 L8 vs ch06 (rgb):
+Centred crops of `input_blobs`, ch08 against ch06 (rgb), ch06 with
+ch08's pack, and the labelling tiers:
 
 | side | 1000 | 1500 | 2000 | 3000 | 4000 | 5000 | 6000 | 7000 | 8000 | 9000 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| ch08 (ms) | 0.102 | 0.129 | 0.176 | 0.280 | 0.444 | 0.712 | 0.967 | 1.329 | 1.735 | 2.208 |
-| ch06 (ms) | 0.147 | 0.185 | 0.249 | 0.342 | 0.562 | 0.888 | 1.242 | 1.657 | 2.173 | 2.681 |
-| ratio | 0.687 | 0.691 | 0.700 | 0.817 | 0.790 | 0.795 | 0.781 | 0.803 | 0.799 | 0.824 |
+| ch08 rgb (ms) | 0.095 | 0.122 | 0.169 | 0.273 | 0.443 | 0.664 | 0.966 | 1.335 | 1.756 | 2.210 |
+| ch06 rgb (ms) | 0.088 | 0.123 | 0.181 | 0.330 | 0.553 | 0.835 | 1.184 | 1.583 | 2.059 | 2.551 |
+| ch08 / ch06 | 1.081 | 1.000 | 0.938 | 0.830 | 0.794 | 0.795 | 0.816 | 0.835 | 0.853 | 0.866 |
+| ch08 / ch06 + ch08's pack | 1.107 | 1.052 | 1.012 | 0.905 | 0.865 | 0.862 | 0.907 | 0.938 | 0.941 | 0.962 |
+| labelling, ch08 / ch06 | 1.556 | 1.348 | 1.400 | 1.143 | 1.008 | 0.900 | 0.852 | 0.820 | 0.785 | 0.762 |
 
-There is no crossover: ch08 wins at every size. The design guessed one
-near 2000-4000, from the waves' fixed cost.
+**There is a crossover**, as the design predicted. ch08 ties ch06 at
+1500 (2.25 Mpx) and wins from 2000 on. Against the same pack it wins
+from 3000 on.
 
-The waves do cost more on crops (0.051 ms at 2000 against ch06's
-merge 0.020). But ch08's paint is about 2x faster there (0.028 vs 0.097
-ms at 2000, 0.067 vs 0.137 at 4000), and the two paints converge on
-the full image (0.643 vs 0.636). Why ch06's paint scales that way is
-not measured yet.
+The labelling itself crosses much later: a tie at 4000 x 4000 (1.008)
+and a win from 5000 on. Below that the waves' fixed cost shows: 0.043
+ms of waves at 1000 against ch06's merge of 0.015.
 
 ### The work, counted (input_blobs, L8)
 
 | | ch08 | |
 |---|---:|---|
-| seeds | 11,609 | 3,673 from the lattice |
+| seeds | 11,609 | 3,673 from the lattice; 11,586 queued |
 | rounds | 6 | frontier comps 11,586 / 14,744 / 7,834 / 2,306 / 289 / 6 |
-| frontier tiles per round | 8,579 / 13,837 / 6,744 / 1,700 / 205 / 5 | 31,070 tile visits on 28,276 touched tiles |
-| tasks (comp, direction) | 136,764 | |
-| signature tests | 170,995 | 1.25 per task |
+| frontier tiles per round | 8,579 / 13,837 / 6,744 / 1,700 / 205 / 5 | 31,070 tile visits on 28,276 touched tiles (1.10 each) |
+| tasks (comp, direction) | 136,764 | 739 of them dense (the warp-cooperative path) |
+| warp steps / signature tests | 23,022 / 170,995 | 1.25 tests per task |
 | claims | 25,179 | |
-| collisions recorded | 31,104 | varies run to run (a race) |
+| collisions recorded = union calls | 30,979 | varies run to run |
 | links (unions that retired a root) | 9,162 | = seeds - roots |
-| closure iterations | 76,355 | |
-| atomics, without the unions' atomicMin | 205,843 | |
-| ch06 | 539,207 runs, 681,039 union attempts | |
-
-Per round (instrumented twin): 66.6, 89.1, 44.0, 14.3, 6.1, 6.1 us;
-union pass 20.5 us, flatten 46.1 us.
-
-### Seeds and the dial (חוגה), E6
-
-| L | seeds | rounds | claims | union calls | links | input_blobs (ms) | disk | serpentine |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 0 (S2 alone) | 7,936 | 8 | 28,852 | 20,594 | 5,489 | 2.217 | 0.845 | 0.902 |
-| 32 | 8,849 | 8 | 27,939 | 23,388 | 6,402 | 2.226 | 0.584 | 0.771 |
-| 16 | 9,796 | 8 | 26,992 | 25,884 | 7,349 | 2.226 | 0.558 | 0.658 |
-| **8** | 11,609 | 6 | 25,179 | 31,059 | 9,162 | 2.223 | 0.550 | 0.609 |
-| 4 | 15,167 | 4 | 21,621 | 39,926 | 12,720 | 2.217 | 0.551 | 0.592 |
-| 2 | 22,335 | 2 | 14,453 | 54,899 | 19,888 | 2.214 | 0.553 | 0.586 |
-| 1 | 36,788 | 1 | 0 | 72,127 | 34,341 | 2.226 | 0.556 | 0.642 |
-
-Session `experiments_20261015T155420Z`. On `input_blobs` the dial does
-not matter (all within 0.4%). On long shapes S2 alone pays 90 rounds
-(disk) and 64 (serpentine).
-
-L = 1 makes every ring comp a seed: zero claims, one round, pure
-union-find over comp adjacencies. That is block CCL, not BFS, and it is
-not faster. L8 stays the default.
+| roots + interior comps | 2,447 + 75 | = 2,522 blobs |
+| closure iterations (K2) | 76,355 | |
+| atomics, without the unions' atomicMin | 206,466 | |
+| ch06 | 539,207 runs, 681,039 union attempts | ch06 session `runs_20260725T161448Z` |
 
 ### Worst cases
 
-| scene | ch08 L8 scan | valve off | ch08 L0 | index twin | ch06 |
-|---|---:|---:|---:|---:|---:|
-| zz_serp_1k | 0.523 | 0.532 | 0.582 | 0.340 | 0.209 |
-| maze_1k | 0.351 | 0.351 | 0.342 | 0.285 | 0.495 |
-| diag_snake_159 | 0.863 (129 rounds) | 0.949 (160) | 0.865 | 0.870 | 0.602 |
-| zz_lattice_4k | 15.698 | 15.693 | 15.762 | 5.443 | 1.824 |
+| scene | ch08 | scan | index | valve off | ch06 | ch08 / ch06 | labelling, ch08 / ch06 | ch05 (host) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| zz_serp_1k | 0.361 | 0.517 | 0.312 | 0.358 | 0.188 | 1.882 | 0.326 / 0.128 | 0.989 |
+| maze_1k | **0.297** | 0.344 | 0.258 | 0.297 | 0.460 | **0.646** | 0.258 / 0.169 | 1.896 |
+| diag_snake_159 | **0.528** | 0.535 | 0.524 | 0.956 | 0.574 | **0.919** | 0.124 / 0.083 | 35.53 |
+| zz_lattice_4k | 6.888 | 16.330 | 6.199 | 7.029 | 1.729 | 3.985 | 6.252 / 0.441 | 7.94 |
+| stair_decoy_19 | 0.310 | 0.584 | 0.294 | 0.798 | 0.125 | 2.504 | 0.197 / 0.051 | 0.844 |
+| zz_serp_4k | 3.232 | 5.915 | 3.055 | 3.069 | 1.398 | 2.351 | 2.766 / 0.647 | 4.53 |
+| dots_4k | 16.080 | 16.071 | 16.256 | 16.065 | 6.244 | 2.577 | 7.093 / 1.526 | 4.95 |
+| strip_1px_x | 8.011 | 8.184 | 8.360 | 7.992 | **48.160** | **0.167** | 3.737 / 21.259 | 5.36 |
 
-`diag_snake_159` is a chain of 160 comps through tile corners that no
-lattice tile touches: one seed. The valve cuts it at round 128.
+The last four come from the perf review of this chapter.
 
-`zz_lattice_4k` puts 60 ring comps in each of 16,384 tiles. The scan
-does 64M signature tests (13.3 ms of waves); the index does 2.0M
-(2.9 ms). 306,695 collisions overflow the soft cap and become inline
-unions.
+- **`zz_lattice_4k`** puts 60 ring comps in each of 16,384 tiles. The
+  scan makes 14.6M warp steps (16.3 ms); the hybrid 2.1M (6.9 ms).
+- **`stair_decoy_19`** (608 x 4288) is a lattice-avoiding staircase:
+  one seed and a 133-comp chain. Isolated decoy pixels sit on every
+  path tile's frame, up to 59 ring comps per tile, and the scan must
+  test each one. The valve fires at round 16 (17 rounds); off, 133.
+- **`zz_serp_4k`**: 32 ring comps per tile, 17.6M signature tests.
+- **`dots_4k`**: red at even (x, y), 256 one-pixel comps per tile. There
+  are no waves at all (0 rounds): K2 closes 4.19M comps one by one
+  (6.74 ms) and the paint re-closes them (8.86 ms).
+- **`strip_1px_x`** (4194304 x 1): a tile holds 32 px, so 131,072
+  tiles for 4 Mpx. ch06 suffers more (its pack takes 24.8 ms).
 
-## Experiments E1-E10
+**ch08 loses to ch05 on two of them**: `dots_4k` (16.08 vs 4.95 ms) and
+`strip_1px_x` (8.01 vs 5.36). ch05's `dots_4k` samples ran at a 510
+MHz median SM clock (its host work idles the GPU), so the true gap is
+larger. The hybrid lookup turned the other ch05 losses into wins.
 
-Sessions `experiments_20261015T155420Z` and `155822Z` (E4b), same
-policy, 9 interleaved rounds each.
+The `dots_4k` GPU window also logged a minimum of 210 MHz, with a
+2,070 MHz median, so its ch08 and ch06 times may carry a small dip.
+
+## Experiments
+
+Sessions `experiments_20261015T155420Z` and `155822Z` (E4b) ran E1-E10
+with the scan lookup, the valve at 128 and an event after every phase:
+ch08 against ch08 only. `180817Z` ran E13, `181414Z` redid E9.
 
 | id | question | result | decision |
 |---|---|---|---|
 | E1 | pack store | input_blobs: ch06 1.450, direct 1.181 (206 GB/s), smem 1.188, tile-major ref 1.148 | direct |
 | E2 | closure exits | label 0.305 (ch07 loop), 0.268 (frontier), 0.268 (both) | both kept |
-| E3 | K2 registers, grid | 80 regs at 1536 x 128: label 0.257 vs 0.268, no spill, also faster on blocks and random | adopted for scan |
-| E4 | lookup | index: input_blobs +1.1% (per-round), random -12%, serpentine -32%, blocks -7% | scan stays (see deviations) |
-| E4b | lookup x K2 | index (uncapped K2) vs scan at E3's pick: input_blobs +1.3% | scan stays |
+| E3 | K2 registers, grid | 80 regs at 1536 x 128: label 0.257 vs 0.268, no spill, also faster on blocks and random | adopted |
+| E4 | lookup | index: input_blobs +1.1% (per-round), random -12%, serpentine -32%, blocks -7% | scan then; superseded by E13 |
 | E5 | paint | 256 threads: input_blobs 0.636 vs 0.638 (tie), input_blocks +6.5%; fast path off +2-10% | 768 x 128, fast path on |
-| E6 | seed dial | table above | L8 |
+| E6 | seed dial | L = 0 to 1, all within 0.4% on input_blobs; L0 pays 90 rounds on the disk | L8 |
 | E7 | union timing | inline: waves 0.131 vs 0.120 ms on input_blobs | deferred |
 | E8 | counter cost | instrumented: waves +0.09, label +0.11 ms on input_blobs | bare twins timed |
-| E9 | valve round, at L0 | 32: snake 0.582 vs 0.865, serpentine 0.783 vs 0.900; ties on maze_1k and zz_serp_1k | 128 (the coded rule needs a strict win on every worst case; 32 is defensible) |
 | E10 | waves launch | 256 vs 128 threads: identical (72 vs 144 blocks) | 256 |
+| **E13** | lookup x K3 registers | hybrid, dense_min 4, 80 regs: input_blobs 0.991 of the scan, decoy staircase 0.287, zz_lattice 0.423, zz_serp_1k 0.692, maze 0.871, serpentine 0.929. Index: 1.020 on input_blobs | **hybrid, dense_min 4, 80 regs** |
+| **E9** (redone) | valve round at L8 | where the valve fires, 16 is fastest: decoy staircase 0.394 of the 128 arm, plain staircase 0.308, diagonal snake 0.620. Main scenes need at most 8 rounds | **16** |
 
-The prototype's ~0.10 ms waves floor on 3-5 round scenes is gone:
-`blob_grid_100` waves take 0.054 ms in 5 rounds, `input_blocks` 0.071 ms
-in 3. Counters are reduced per warp now, and timed runs are bare.
+**E13's rule** was E4's: input_blobs may move under +1% (per-round
+median), and at least 2 other scenes must gain 10%. Among the arms that
+pass, the lowest geometric mean over the other scenes wins. The index
+lookup fails the first part: its K2 writes a byte index and spills at
+80 registers.
+
+**The 80-register cap matters for a cooperative kernel.** The hybrid
+twin takes 97 registers by itself: 2 blocks of 256 per SM, 48 in all.
+Capped at 80 it keeps 3 per SM (72) with no extra local memory.
+
+**E9's old rule needed a strict win on maze_1k and zz_serp_1k.** No arm
+can fire the valve there, so the arms run the same code, and 128 "won"
+maze_1k by 0.001 ms of noise. The rule now looks only at scenes where
+some arm fires.
+
+## The measurement lessons (from the fairness review)
+
+The draft of this page quoted session `waves_20261015T160144Z`. A review
+of its benchmark found three fairness problems. The benchmark and this
+page now handle each one.
+
+- **Phase events stalled ch06 on small scenes.** An event after every
+  phase put 16 commands behind the sync for ch06 and 12 for ch08. With
+  that many, the driver stalls inside the timed window (the review's
+  sweep tied it to the command count, not to a kernel). ch06 read
+  0.214 ms on `input_blocks` then and 0.137 now: 1.211 x ch06 became
+  1.851. `crop_1000` went from 0.687 to 1.081.
+- **"No crossover" was that stall.** The draft said ch08 wins at every
+  crop size. It ties at 1500 and loses at 1000. Its "ch06 paints 0.097
+  ms at 2000" was mostly stall too: the phase pass gives 0.048.
+- **ch06's merge grid was tuned for its instrumented twin.** ch06 chose
+  512 blocks with counter atomics in every thread. Bare, this session's
+  sweep gives 0.181 ms at 4096 blocks on `input_blobs`, 0.305 at 512.
+- **So the core gain was overstated.** The draft's labelling ratio was
+  0.607 (0.384 vs 0.630 ms); with ch06 at its best it is 0.760.
+- **ch05 in the timed loop dropped the clocks.** Its slow host calls let
+  the GPU idle between GPU rounds. It now runs after them.
+
+The headline moved from 0.827 to 0.862 against ch06, and from 0.927 to
+0.962 against ch06 with the same pack.
 
 ## Correctness
 
@@ -282,68 +431,91 @@ The proof (design section 7) in five lines:
    side, so the unions join exactly each blob's seeds.
 5. Flatten takes the min anchor into the root: the canonical label.
 
-Tests (`test_correctness.py`, 962): the closure against a CPU flood
-(both exits and ch07's loop), K2's records and the index bytes against a
-CPU model built from pixels, `pack_tiles` against ch06's pack on odd
-sizes, a 16-config end-to-end matrix on 48 scenes with every invariant,
-paint equal to ch06 and ch05, every seed rule giving identical labels,
-the valve, five fuzz families at 1 block and at max blocks, poisoned
-engine reuse, repeatability, twins, limits. The six benchmark scenes and
-two 16 Mpx strips run with `FLOOD_FILL_SLOW=1`.
+The hybrid lookup keeps step 3: a dense task tests every ring comp of
+the neighbour tile, with the same CAS and collision rule.
+
+Tests (`test_correctness.py`, 1,534, 8 of them behind
+`FLOOD_FILL_SLOW=1`):
+
+- the closure against a CPU flood (both exits and ch07's loop)
+- K2's records and the index bytes against a CPU model built from pixels
+- `pack_tiles` against ch06's pack on odd sizes
+- a 27-config end-to-end matrix on 49 scenes, every invariant checked,
+  including the bare (timed) twins of every lookup at both connectivities
+- paint equal to ch06 and ch05; every seed rule giving identical labels
+- the valve, rounds past the 252 stamp slots, five fuzz families at 1
+  block and at max blocks (every lookup, every sixth case bare)
+- poisoned engine reuse, repeatability, twins, limits, launch grids
+  that are not whole warps, the E1-only pack store
+
+ch07's 157 tests and ch06's 109 also pass.
 
 ## Deviations from the design (and why)
 
-1. **The index twin is built, and scan stays the default.** E4's rule
-   ("input_blobs moves under +1%") passed by the ratio of medians
-   (1.006) and failed by the per-round ratio median (1.011; E4b 1.013).
-   The per-round median is the design's pair statistic (13.4), and pack
-   noise (the same kernel in both arms) moved the other one. The phases
-   that differ cost +0.033 ms on input_blobs. The session JSON still
-   stores the first reading; the code now applies the stricter one.
+1. **The default lookup is a new hybrid** (E13), not the scan or the
+   index. The scan and index twins stay, and every scene times all three.
 2. **The index covers only tiles with 2+ ring comps.** A single ring
-   comp is ordinal 0, so K3 takes it without a lookup. Indexing every
-   touched tile cost +2-4% on input_blobs in a first A/B.
-3. **K2 is capped at 80 registers on a 1536-block grid** (E3), scan twin
-   only: the index twin's K2 spills 16 bytes at 80.
+   comp is ordinal 0. Indexing every touched tile cost +2-4%.
+3. **K2 is capped at 80 registers on a 1536-block grid** (E3), and the
+   hybrid K3 at 80 (E13). The index twin's K2 spills at 80 and keeps 96.
 4. **E5's mechanical winner is not taken.** 256-thread paint won by
    0.3% on input_blobs (a tie) and lost 6.5% on input_blocks.
-5. **The respin is GPU-bound.** A respin of back-to-back runs is
-   launch-bound on small scenes: a smoke session timed `input_blocks`
-   at 585-790 MHz SM and 810 MHz memory. The respin now interleaves 96
-   MB flush reads with runs; every scene since ran at P0.
-6. **ch06 is timed bare** (`instrumented=False`), as ch08 is.
-7. **Not counted:** `FIND_STEPS` and the unions' atomicMin calls.
-   ch06's `_find` and `_union` are imported verbatim (risk 8), so the
-   "atomics" column excludes them.
-8. **Not built:** E5's touched-tile list arm, E8's per-thread-atomics
+5. **The valve fires at round 16**, not 128 (E9 redone, with the rule
+   fixed).
+6. **Timing differs from the design's.** Totals have two events, phases
+   come from their own pass, the labelling tier is timed directly, ch06
+   is timed bare at its best merge grid, and ch05 runs after the rounds.
+7. **The respin is GPU-bound.** A respin of back-to-back runs is
+   launch-bound on small scenes and let the clock fall to 585-790 MHz.
+8. **Not counted:** `FIND_STEPS` and the unions' atomicMin calls.
+   ch06's `_find` and `_union` are imported verbatim.
+9. **Not built:** E5's touched-tile list arm, E8's per-thread-atomics
    arm, the optional E11 dense-tile path and E12 minprop twin.
-9. **The valve scene is an anti-diagonal snake.** A lin-monotone zigzag
-   on tile borders is full of S2 seeds (the comps on the low side of an
-   x-border have only SUCC neighbours), so it never needs the valve.
-10. **ch05 got 3 samples on input_blobs**: its first call took 2.2 s
-    (the design's rule: over 2 s, 3 samples).
+10. **The valve scenes are an anti-diagonal snake and two staircases.**
+    A lin-monotone zigzag on tile borders is full of S2 seeds.
+11. **ch05 got 3 samples on input_blobs and dots_4k**: their first calls
+    took over 2 s (the design's rule).
 
-## Where tiles lose
+## New problems and lessons
 
-- **Dense noise.** `random_4000`: 907,448 comps, up to 86 per tile,
-  closed one at a time (label 2.48 ms, 1.79M closure trips). ch06's
-  merge does it in 1.43 ms.
-- **Long thin shapes on tile borders.** `zz_serp_1k` and the serpentine
-  have 16-32 ring comps per tile; even the index twin trails ch06.
-- **Zigzags on every border.** `zz_lattice_4k`: 3.0x behind ch06 with
-  the index, 8.6x with the scan.
+- **The node decides the work.** A tile node is opened again for every
+  wave that reaches it; a comp node is claimed exactly once.
+- **The pack is the biggest single gain, and it is portable.** 0.28 ms
+  of the 0.40 ms comes from reading the RGB tile by tile. ch06 with that
+  pack is 0.899 of itself.
+- **A lookup has a cost model.** The scan costs one dependent step per
+  ring comp of the neighbour tile. Dense tiles need the whole warp, or
+  an index.
+- **A cooperative kernel's registers set its grid.** 97 to 80 registers
+  took the hybrid K3 from 48 to 72 resident blocks.
+- **Paint is the shared floor.** Both chapters write 40 MB of scattered
+  bytes in about 0.6 ms.
+- **On this WDDM driver, the number of commands in the timed window is
+  itself a variable.** Count them, or keep the window to two events.
+- **Tune the baseline in the same harness.** ch06's merge grid was
+  right for the twin it was tuned on, and wrong for the twin timed here.
 
-## Open problems
+## Open problems (next steps)
 
-1. **A dense-tile path (E11).** Label tiles with many corners by a
-   run union-find in shared memory instead of sequential closures.
-2. **The paint floor.** Both chapters paint at ~63 GB/s of scattered
-   bytes; why is unproven without a profiler. `ncu` needs the GPU
-   performance counters enabled (NVIDIA Control Panel, then a full
-   Windows restart).
-3. **A bigger collision buffer on dense scenes**, or a per-round union
-   pass, so `zz_lattice` stops paying 300k inline unions.
-4. **Port `pack_tiles` to ch06.** It is worth 0.28 ms there (ch06+tp).
+1. **Dense tiles (E11).** `dots_4k` and `random_4000` are bound by one
+   closure per comp, in K2 and again in K4. A bulk path for isolated
+   pixels (`m & ~dilate(m)`) or a shared-memory union-find for dense
+   tiles would attack both.
+2. **An index for dense tiles only.** The index lookup wins on long
+   shapes (serpentine 0.421 vs 0.558 ms) but costs on `input_blobs`
+   because K2 indexes every tile with 2+ ring comps.
+3. **Degenerate shapes.** A 1-px strip puts 32 px in a tile: 131,072
+   tiles and about 416 MB of buffers for 4 Mpx. A 1-D tiling, or
+   routing thin images to another method, would fix both.
+4. **Port `pack_tiles` to ch06.** It is worth 0.33 ms there (2.617 to
+   2.291 ms on input_blobs).
+5. **Small images.** The waves' fixed cost (about 0.04 ms) loses below
+   1500 x 1500 px. CUDA graphs and a narrow-front mode without
+   `grid.sync` are candidates.
+6. **The paint floor and `ncu`.** Why scattered bytes cap near 63 GB/s
+   is unproven. `ncu` needs the NVIDIA Control Panel's "Allow access to
+   the GPU performance counters to all users" and a full Windows
+   restart (`ERR_NVGPUCTRPERM` until then).
 
 ## Glossary
 
@@ -355,28 +527,37 @@ two 16 Mpx strips run with `FLOOD_FILL_SLOW=1`.
 - **Seed** (זרע) - a comp that starts a wave with its own id.
 - **Lattice** (סריג) - the tiles with `(tx + ty) % L == 0`, all seeds.
 - **Wave** (גל) - the comps that carry one seed's label.
+- **Frontier** (חזית) - the comps claimed in the last round.
 - **Collision** (התנגשות) - two waves meeting on one edge.
 - **Union-find** (איחוד-חיפוש) - ch06's structure for joining labels.
 - **Valve** (שסתום) - the round after which unclaimed comps self-seed.
 - **Dial** (חוגה) - the lattice spacing L, from pure waves to pure CCL.
 - **Ordinal** (מספר סידורי) - a ring comp's index in its tile.
+- **Signature test** - one side word tested against one ring comp.
+- **Dense task** - a task whose neighbour tile has more than
+  `dense_min` ring comps; the whole warp takes it.
+- **Spill** (שפיכה) - a value moved from a register to local memory.
 - **Interleaving** (שזירה) - timing every config once per round.
 
 ## Files
 
 ```
 kernels.py           K0-K4, the off-clock twins, factories and caches
-flood_fill.py        TileWaves, recolor(), phase_times, max_blocks
+flood_fill.py        TileWaves (stages, run), recolor(), max_blocks
 cpu_oracle.py        ch05's 8-conn oracle, a 4-conn port with the same labels
 cpu_model.py         per-tile comps from pixels, the wave model with the valve
-scenes.py            adversarial scenes and five fuzz families
-test_correctness.py  962 tests (8 behind FLOOD_FILL_SLOW=1)
+scenes.py            adversarial scenes (staircase, snake, frame combs, ...)
+                     and five fuzz families
+test_correctness.py  1,534 tests (8 behind FLOOD_FILL_SLOW=1)
 benchmarks/
   benchmark.py       the interleaved session vs ch06 and ch05
-  experiments.py     E1-E10 and E4b, with the decision rules
+  experiments.py     E1-E10, E4b, E13, R8 and E9, with the decision rules
 ```
 
-Results: `results/ch08_gpu_nblob_tiles/benchmark_results/`.
+Result files are in `results/ch08_gpu_nblob_tiles/benchmark_results/`.
+`waves_20261015T183401Z` is this page's session. `waves_160144Z` is the
+draft's, from the benchmark before the fairness review. The experiment
+sessions are named above.
 
 ## Run
 
