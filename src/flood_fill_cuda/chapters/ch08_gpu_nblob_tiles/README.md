@@ -368,8 +368,9 @@ ms of waves at 1000 against ch06's merge of 0.015.
 
 The last four come from the perf review of this chapter.
 
-- **`zz_lattice_4k`** puts 60 ring comps in each of 16,384 tiles. The
-  scan makes 14.6M warp steps (16.3 ms); the hybrid 2.1M (6.9 ms).
+- **`zz_lattice_4k`** puts up to 60 ring comps in each of its 16,384
+  tiles (59.6 on average). The scan makes 14.6M warp steps (16.3 ms);
+  the hybrid 2.1M (6.9 ms).
 - **`stair_decoy_19`** (608 x 4288) is a lattice-avoiding staircase:
   one seed and a 133-comp chain. Isolated decoy pixels sit on every
   path tile's frame, up to 59 ring comps per tile, and the scan must
