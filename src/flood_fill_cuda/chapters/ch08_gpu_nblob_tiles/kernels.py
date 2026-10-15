@@ -8,10 +8,12 @@ one grid-wide barrier per round.
 THE NODE IS A TILE COMPONENT, NOT A TILE
 Inside one tile a blob can fall apart into several local components
 ("comps"): a U that leaves the tile and comes back gives two comps in
-that tile. ch07 opened such a tile once per arriving wave (98,195
-openings on 62,500 tiles in sq_8000, ch07 session
-tiles_20261015T114440Z). Here every comp is a node of its own, and
-every node is claimed exactly once.
+that tile. ch07 reopened a tile whenever new bits reached it after its
+closure, for two reasons: bits that landed late (98,195 openings on
+62,500 tiles in the solid sq_8000, one comp per tile, ch07 session
+tiles_20261015T114440Z), and waves reaching a tile's next comp (the
+serpentine, the maze). Here K2 closes every comp once before the waves,
+every comp is a node of its own, and every node is claimed exactly once.
 
 THE TILE (ch07's, unchanged)
 32 consecutive rows x0 .. x0+31 times one mask word (32 consecutive y).

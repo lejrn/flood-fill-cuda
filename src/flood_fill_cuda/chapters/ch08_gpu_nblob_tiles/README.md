@@ -54,12 +54,25 @@ about 1500 x 1500 px ch06 is faster.
 **A tile can hold a blob more than once.** A U-shaped blob that leaves a
 tile and comes back gives two local components (רכיבים) in that tile.
 
-In ch07 such a tile was opened once per arriving wave. Each opening ran
-the closure (סגור) over the whole tile again. That was repeated work on
-the same tile, not overlap: no pixel ever got two different answers.
+**ch07 reopened tiles for two reasons.** The first is timing: a
+neighbour's bits often landed after the tile's closure (סגור) had run.
+That alone gave 1.57 openings per tile on the solid `sq_8000`, with one
+comp per tile.
 
-**So the node of the BFS is the comp.** Two comps are adjacent when two
-of their pixels are 8-adjacent across a tile border.
+The second is shape: a tile with several comps was opened again when a
+wave reached the next one. ch07's serpentine, 16 red rows per tile, took
+14.1 visits per tile, and the maze 12.4.
+
+Each opening ran the closure over the whole tile again. That was
+repeated work on the same tile, not overlap: no pixel ever got two
+different answers.
+
+**So the node of the BFS is the comp.** K2 closes every comp once,
+before any wave starts, and a claim takes the whole comp. That removes
+both reasons.
+
+Two comps are adjacent when two of their pixels are 8-adjacent across a
+tile border.
 
 Every comp is claimed exactly once. The tests assert it on every run:
 `CLAIMS + SEEDS + VALVE_SEEDS == RING_COMPS`.
@@ -479,8 +492,9 @@ ch07's 157 tests and ch06's 109 also pass.
 
 ## New problems and lessons
 
-- **The node decides the work.** A tile node is opened again for every
-  wave that reaches it; a comp node is claimed exactly once.
+- **The node decides the work.** A tile node is opened again whenever
+  new bits reach it; a comp node, closed once in K2, is claimed exactly
+  once.
 - **The pack is the biggest single gain, and it is portable.** 0.28 ms
   of the 0.40 ms comes from reading the RGB tile by tile. ch06 with that
   pack is 0.899 of itself.

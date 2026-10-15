@@ -618,9 +618,11 @@ as BFS waves, and union-find only joins waves that meet.)*
 2. **ch07's own candidate was CCL, not BFS.** Local tile labels joined
    by union-find need no rounds at all. This chapter keeps the BFS:
    labels must travel as frontier waves.
-3. **Tiles came back.** ch07 opened a tile again for every wave that
-   reached it: 98,195 openings on 62,500 tiles in `sq_8000`, 1.57 per
-   tile (ch07 session `tiles_20261015T114440Z`).
+3. **Tiles came back.** ch07 opened a tile again whenever new bits
+   reached it after its closure: late bits on solid blobs, and waves
+   reaching a tile's next comp on the serpentine and the maze. 98,195
+   openings on 62,500 tiles in the solid `sq_8000`, 1.57 per tile (ch07
+   session `tiles_20261015T114440Z`).
 4. **Runs beat tiles on the core.** ch06's union-find did the
    connectivity part 2.5-9.5x cheaper than ch07's rounds.
 
@@ -648,8 +650,9 @@ as BFS waves, and union-find only joins waves that meet.)*
 | fairness | phase events stalled ch06 on small scenes (`input_blocks` 1.21 became 1.85), and ch06's merge grid had been tuned for its instrumented twin; both fixed before the headline |
 
 ### New problems and lessons
-- **The node decides the work.** A tile node is opened again for every
-  wave; a comp node is claimed exactly once.
+- **The node decides the work.** A tile node is opened again whenever
+  new bits reach it; a comp node, closed once in K2, is claimed exactly
+  once.
 - **The pack is the biggest single gain, and it is portable.** ch06
   with ch08's pack runs at 0.899 of itself.
 - **A lookup has a cost model.** A scan costs one dependent step per
