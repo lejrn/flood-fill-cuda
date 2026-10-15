@@ -86,6 +86,17 @@ def _one(v):
     return int(next(iter(v.values()))) if isinstance(v, dict) else int(v)
 
 
+def _check_grid(name, grid):
+    """A plain launch shape (blocks, threads) for a one-warp-per-tile
+    kernel: warp = grid(1) >> 5 and FULL-mask warp calls need whole
+    warps, or a logical warp straddles two hardware warps and the tiles
+    come out wrong with no error."""
+    blocks, tpb = (int(v) for v in grid)
+    if blocks < 1 or tpb % 32 or not 32 <= tpb <= 1024:
+        raise ValueError(f"{name} must be (blocks >= 1, threads a multiple "
+                         f"of 32 in [32, 1024]), got {tuple(grid)}")
+
+
 @dataclass
 class TileWavesResult:
     img: np.ndarray            # painted copy (empty unless copy_img)
@@ -133,6 +144,7 @@ class TileWaves:
         if waves_tpb % 32 or not 32 <= waves_tpb <= 1024:
             raise ValueError(f"waves_tpb must be a multiple of 32 in "
                              f"[32, 1024], got {waves_tpb}")
+        _check_grid("label_grid", label_grid)
         self.width = width
         self.height = height
         self.connectivity = connectivity

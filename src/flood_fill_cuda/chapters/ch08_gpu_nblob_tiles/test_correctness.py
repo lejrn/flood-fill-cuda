@@ -740,6 +740,29 @@ def test_shape_limits():
         recolor(np.zeros((8, 8, 3), np.uint8), contract="nope")
 
 
+@pytest.mark.parametrize("grid", [(8, 48), (16, 40), (4, 100), (1, 16),
+                                  (0, 128), (1, 2048)])
+def test_label_grid_is_validated(grid):
+    """K2 takes warp = grid(1) >> 5 and runs FULL-mask ballots and
+    shuffles, so its block must be a whole number of warps. At 48
+    threads a logical warp straddles two hardware warps: tiles are
+    closed twice or half, with no error (140 blobs for 133 on a 64x64
+    noise scene). The engine must refuse such a grid."""
+    with pytest.raises(ValueError, match="label_grid"):
+        TileWaves(64, 64, label_grid=grid, _skip_warmup=True)
+
+
+def test_odd_but_whole_warp_grids_are_exact():
+    """Block sizes that are whole warps stay exact on small grids."""
+    img = S5.random_blobs_scene(64, 64, 0.35, 2)[0]
+    label, n = cpu_label_components(img)
+    for grid in ((3, 96), (8, 64), (1, 32)):
+        res = recolor(img, emit_label=True, label_grid=grid)
+        assert res.n_blobs == n
+        np.testing.assert_array_equal(res.label, label)
+        np.testing.assert_array_equal(res.img, expected_paint(img, label))
+
+
 def test_cooperative_grid_is_bounded():
     cap = max_blocks(256, 8, False, False)
     assert cap >= 1
