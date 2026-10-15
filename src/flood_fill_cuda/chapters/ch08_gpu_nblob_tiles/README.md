@@ -22,12 +22,15 @@ in the same session). At its shipped 512 blocks it takes 2.675 ms.
 ch05 is timed by its own host clock, so "21x" is only indicative.
 
 **The short version.** ch08 is 0.40 ms faster than ch06 in the rgb
-contract. About 0.28 ms of that is the faster pack read, which ch06 can
-take too: with the same pack, ch08 is 0.962 [0.898, 1.071] of ch06.
+contract (2.214 vs 2.617 ms). Most of that is the faster pack read,
+which ch06 can take too.
 
-The labelling itself is 0.12 ms faster (0.381 vs 0.500 ms). ch08 does
-it on 36,863 tile comps, ch06 on 539,207 runs. ch08's paint is 0.045
-ms slower.
+With ch08's pack, ch06 takes 2.291 ms: the pack is worth 0.33 ms end to
+end. Against that ch06, ch08 is 0.962 [0.898, 1.071], 0.08 ms faster.
+
+Those 0.08 ms are roughly the labelling, 0.12 ms faster (0.381 vs 0.500
+ms), less ch08's paint, 0.045 ms slower. ch08 labels 36,863 tile comps,
+ch06 539,207 runs.
 
 Tiles still lose where a tile holds many comps (noise, dot lattices),
 on long thin shapes along tile borders, and on small images: below
@@ -101,6 +104,10 @@ tier also drops K4.
 The phase times come from a separate pass, each phase in its own run
 (see the method below). They sum to 2.217 ms for ch08 and 2.575 for
 ch06.
+
+In this pass the pack alone is 0.28 ms faster (1.183 vs 1.464). The
+gains on this page come from the totals instead: there a shared pack is
+worth 0.33 ms.
 
 ### K2: comps, records, seeds
 
@@ -501,9 +508,9 @@ ch07's 157 tests and ch06's 109 also pass.
 - **The node decides the work.** A tile node is opened again whenever
   new bits reach it; a comp node, closed once in K2, is claimed exactly
   once.
-- **The pack is the biggest single gain, and it is portable.** 0.28 ms
-  of the 0.40 ms comes from reading the RGB tile by tile. ch06 with that
-  pack is 0.899 of itself.
+- **The pack is the biggest single gain, and it is portable.** 0.33 ms
+  of the 0.40 ms comes from reading the RGB tile by tile: ch06 with that
+  pack drops from 2.617 to 2.291 ms (0.899 of itself).
 - **A lookup has a cost model.** The scan costs one dependent step per
   ring comp of the neighbour tile. Dense tiles need the whole warp, or
   an index.

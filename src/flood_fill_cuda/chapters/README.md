@@ -634,13 +634,13 @@ as BFS waves, and union-find only joins waves that meet.)*
 | **CAS claims, one barrier per round** | each frontier comp claims its unclaimed neighbours with one CAS; three rotating counters remove the second `grid.sync` |
 | **collisions, then one union pass** | where two waves of one blob meet, the pair is recorded from one side of the edge only, and ch06's `_union` joins them after the last round; a min-anchor flatten gives ch05's canonical label |
 | **a hybrid neighbour lookup** | sparse neighbour tiles are scanned per lane; tiles with more than 4 ring comps are tested by the whole warp in one coalesced step |
-| **design 3's pack, a colour-uniform paint** | reading RGB tile by tile is 0.28 ms faster than ch06's pack; most tiles paint one colour with no closure |
+| **design 3's pack, a colour-uniform paint** | reading RGB tile by tile is faster than ch06's pack (it takes 0.33 ms off ch06's total when ch06 uses it); most tiles paint one colour with no closure |
 
 ### Results (RTX 4060 Laptop, session `waves_20261015T183401Z`)
 | finding | number |
 |---|---|
 | **headline** (`input_blobs`, 81 Mpx, 2,522 blobs) | rgb **2.214 ms** vs ch06 2.617 (at its best bare merge grid): **0.862** [0.784, 0.960]. Mask contract 1.018 vs 1.103 (0.923). ch05 `split_L8` 47.45 ms (host clock) |
-| like for like | ch06 with ch08's pack: 2.291 ms, so ch08 is **0.962** [0.898, 1.071]. 0.28 ms of the 0.40 ms gain is the pack |
+| like for like | ch06 with ch08's pack: 2.291 ms, so ch08 is **0.962** [0.898, 1.071]. 0.33 ms of the 0.40 ms gain is the pack; 0.08 ms is left for the tiles |
 | the labelling itself | **0.381 vs 0.500 ms (0.760)**: 36,863 tile comps against 539,207 runs |
 | still BFS | 11,609 seeds, **6 rounds**, frontier 11,586 / 14,744 / 7,834 / 2,306 / 289 / 6 comps; every comp claimed once; 30,979 collision pairs unioned. Pure waves (S2 seeds, no valve): 8 rounds, 0.998 of the default |
 | where tiles win | disk 0.544, blob grid 0.838: one paint word per row where ch06's runs are long |
@@ -654,7 +654,7 @@ as BFS waves, and union-find only joins waves that meet.)*
   new bits reach it; a comp node, closed once in K2, is claimed exactly
   once.
 - **The pack is the biggest single gain, and it is portable.** ch06
-  with ch08's pack runs at 0.899 of itself.
+  with ch08's pack runs at 0.899 of itself (0.33 ms faster).
 - **A lookup has a cost model.** A scan costs one dependent step per
   ring comp of the neighbour tile; dense tiles need the whole warp.
 - **A cooperative kernel's registers set its grid.** 97 to 80
