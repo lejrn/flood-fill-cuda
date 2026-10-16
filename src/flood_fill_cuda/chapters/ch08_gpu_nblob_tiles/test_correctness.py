@@ -1039,6 +1039,23 @@ def test_dense_twins_limit_the_block(grid_arg):
         TileWaves(64, 64, dense=False, lookup="dindex", _skip_warmup=True)
 
 
+@pytest.mark.parametrize("cap", [64, 96])
+def test_k2b_register_cap_builds_and_stays_exact(cap):
+    """label_dense_max_registers caps K2b's registers. The warm-up used
+    to compile only the uncapped twin, so under the default fit_grids
+    the constructor asked a dispatcher with no overload for its capacity
+    and raised StopIteration (and with fit_grids off it launched the
+    uncapped twin). A capped engine must build and stay exact."""
+    img = S8.dot_lattice_scene((2, 3))
+    label, n = cpu_label_components(img)
+    for kw in (dict(), dict(fit_grids=False), dict(instrumented=True)):
+        res = recolor(img, emit_label=True, label_dense_max_registers=cap,
+                      **kw)
+        assert res.n_blobs == n
+        np.testing.assert_array_equal(res.label, label)
+        np.testing.assert_array_equal(res.img, expected_paint(img, label))
+
+
 def test_dense_path_takes_the_dense_tiles():
     """On a dot lattice (256 one-pixel comps per tile) every tile goes to
     K2b and K4b, and every tile with 2+ ring comps is indexed; on a solid

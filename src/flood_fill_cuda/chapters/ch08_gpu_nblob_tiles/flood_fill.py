@@ -298,6 +298,7 @@ class TileWaves:
         self.paint_wpb = self.paint_grid[1] // 32
         self.waves_tpb = int(waves_tpb)
         self.label_max_registers = label_max_registers
+        self.label_dense_max_registers = label_dense_max_registers
         self.coll_capacity = int(COLL_PER_TILE * self.n_tiles
                                  if coll_capacity is None else coll_capacity)
         if self.coll_capacity < 0:
@@ -400,7 +401,7 @@ class TileWaves:
                 label_max_registers, self.paint_fast, pack_variant,
                 lookup, self.label_exits, waves_max_registers, self.dense,
                 self.flat_opt, self.label_wpb, self.paint_wpb,
-                self.waves_compact)
+                self.waves_compact, label_dense_max_registers)
         if self.dense and self.fit_grids:
             for name, grid in (("label_dense_grid", self.label_grid),
                                ("paint_dense_grid", self.paint_grid)):
@@ -708,7 +709,8 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
                      label_max_registers="auto", paint_fast=True,
                      lookup=DEFAULT_LOOKUP, label_exits=2,
                      waves_max_registers="auto", dense=DEFAULT_DENSE,
-                     flat_opt=DEFAULT_FLAT_OPT, compact=DEFAULT_COMPACT):
+                     flat_opt=DEFAULT_FLAT_OPT, compact=DEFAULT_COMPACT,
+                     label_dense_max_registers=LABEL_DENSE_MAX_REGISTERS):
     """Registers and local (spill) bytes per thread of each kernel (the
     default grids' block sizes)."""
     if lookup != "dindex":
@@ -721,7 +723,8 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
     _warmup(connectivity, instrumented, debug, label_max_registers,
             paint_fast, lookup=lookup, label_exits=label_exits,
             waves_max_registers=waves_max_registers, dense=dense,
-            flat_opt=flat_opt, label_wpb=lw, paint_wpb=pw, compact=compact)
+            flat_opt=flat_opt, label_wpb=lw, paint_wpb=pw, compact=compact,
+            label_dense_max_registers=label_dense_max_registers)
     max_blocks(WAVES_TPB, connectivity, instrumented, debug, lookup,
                waves_max_registers, flat_opt, compact)
     index = lookup == "index"
@@ -739,7 +742,7 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
     if dense:
         kerns += [
             ("label_ccl", get_label_dense_kernel(
-                connectivity, instrumented, debug, LABEL_DENSE_MAX_REGISTERS,
+                connectivity, instrumented, debug, label_dense_max_registers,
                 lw, pindex)),
             ("paint_ccl", get_paint_dense_kernel(
                 connectivity, MODE_RGB, paint_fast, instrumented, debug,
@@ -755,10 +758,11 @@ def _warmup(connectivity=8, instrumented=False, debug=False,
             pack_variant="direct", lookup=DEFAULT_LOOKUP, label_exits=2,
             waves_max_registers="auto", dense=DEFAULT_DENSE,
             flat_opt=DEFAULT_FLAT_OPT, label_wpb=None, paint_wpb=None,
-            compact=DEFAULT_COMPACT):
+            compact=DEFAULT_COMPACT,
+            label_dense_max_registers=LABEL_DENSE_MAX_REGISTERS):
     """JIT-compile every kernel of a configuration once, on a tiny image
     (with the given block sizes: the dense twins are compiled per warps
-    per block)."""
+    per block, K2b also per register cap)."""
     if label_max_registers == "auto":
         label_max_registers = LABEL_MAX_REGISTERS[lookup]
     if waves_max_registers == "auto":
@@ -770,7 +774,8 @@ def _warmup(connectivity=8, instrumented=False, debug=False,
            int(label_exits), waves_max_registers, bool(dense),
            bool(flat_opt) and lookup == "dindex",
            bool(compact) and lookup == "dindex", lw if dense else 0,
-           pw if dense else 0)
+           pw if dense else 0,
+           label_dense_max_registers if dense else None)
     if key in _warmed:
         return
     tiny = np.full((40, 40, 3), 255, dtype=np.uint8)
@@ -786,6 +791,7 @@ def _warmup(connectivity=8, instrumented=False, debug=False,
                     waves_tpb=32, waves_blocks=1, label_grid=(1, 32 * lw),
                     paint_grid=(1, 32 * pw), dense=dense, flat_opt=flat_opt,
                     waves_compact=compact, fit_grids=False,
+                    label_dense_max_registers=label_dense_max_registers,
                     _skip_warmup=True)
     dev = cuda.to_device(tiny)
     eng.run(dev, "rgb")
