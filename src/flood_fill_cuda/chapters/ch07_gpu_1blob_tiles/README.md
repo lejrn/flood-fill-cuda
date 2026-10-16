@@ -881,9 +881,12 @@ in cycles, which do not move with the clock.
   issue-bound (74.7% of issue slots). On the thin strip it reads 0.1 MB
   of stamps instead of 2.1 MB of `reached` words.
 - **`pack` is unchanged**: ch06's kernel, about 1.5x a pure read of its
-  bytes. ptxas cannot move a row's load above the previous row's store
-  (the arrays may alias), so each warp has one row in flight. It is now
-  37% of `sq_8000`'s pipeline.
+  bytes, and now 37% of `sq_8000`'s pipeline. 56% of its samples wait
+  right after a load.
+- A likely cause (inferred from the source, not checked in SASS): the
+  compiler cannot move a row's load above the previous row's store,
+  since nothing tells it the arrays do not alias. Then each warp has one
+  row in flight.
 - **The fused pack** links at 247 registers: 16.8% achieved occupancy
   and 32,588 cycles per round on `sq_8000`.
 
