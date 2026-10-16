@@ -892,7 +892,7 @@ fairness. Each bug got a failing test first, then the fix.
    `blob_grid_100`: rgb 1.034, mask 1.075, labelling 1.131.
    `disk_r2000`: 1.028, 1.058, 1.087. `diag_snake_159`: 1.009, 1.132,
    1.116. The crops: rgb 1.119 at 1000 down to 1.040 at 4000,
-   labelling 1.143 to 1.102.
+   labelling 1.102-1.161 (most at 1500).
 3. **On `blob_grid_100` the phase pass shows where:** K3 0.0645 vs
    0.0553 ms, K2 0.0809 vs 0.0768, and the two empty launches 0.005
    each.
