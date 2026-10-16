@@ -858,18 +858,23 @@ def test_fuzz(family, blocks):
         rng = np.random.default_rng(10_000 * (1 + list(FUZZ_SEEDS).index(
             family)) + seed)
         img = builder(rng)
-        conn = 4 if seed % 4 == 3 else 8
-        lat = (0, 8, 1, 4)[seed % 4] if seed % 5 else 8
-        valve = 2 if seed % 7 == 6 else 128
-        lookup = ("scan", "index", "hybrid", "dindex")[seed % 4]
-        twin = ({} if seed % 6 != 5 else
+        # the config is drawn on its own stream, every choice apart from
+        # the others: a seed % 4 for both the lookup and the connectivity
+        # never ran the default lookup (dindex) at 8-connectivity
+        pick = np.random.default_rng(
+            [17, 1 + list(FUZZ_SEEDS).index(family), seed])
+        conn = (8, 4)[int(pick.integers(2))]
+        lat = (0, 8, 1, 4, 8)[int(pick.integers(5))]
+        valve = 2 if pick.integers(7) == 0 else 128
+        lookup = ("scan", "index", "hybrid", "dindex")[int(pick.integers(4))]
+        twin = ({} if pick.integers(6) else
                 dict(instrumented=False, debug=False))     # the bare twin
         # the dense path: forced on every tile, at small thresholds, at
         # the defaults, or off (the old path) - dindex needs it on
         dense = [dict(ALL_CCL),
                  dict(ccl_min=seed % 7, paint_ccl_min=seed % 5,
                       ccl_rpc=1 + seed % 13, paint_rpc=1 + seed % 11),
-                 {}, dict(dense=False)][(seed // 4) % 4]
+                 {}, dict(dense=False)][int(pick.integers(4))]
         if lookup == "dindex" and dense.get("dense") is False:
             dense = dict(ALL_CCL, waves_compact=False)
         try:
