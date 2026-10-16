@@ -16,6 +16,13 @@ events so the phases are attributable individually:
     rounds   the cooperative tile BFS     (two grid.sync per round)
     paint    reached -> (0, 0, 255)       (one coalesced pass)
 
+The rounds kernel's switches (SWITCHES, kernels._make_rounds_kernel)
+change the middle: one_sync (one grid.sync per round), fused_pack (no
+pack launch: the rounds read each reached tile's RGB, and paint is
+paint_tiles_kernel), skip_full (no exports into full tiles already
+queued) and fused_paint (no paint launch; needs fused_pack). With a
+fused phase its events are recorded back to back (an empty interval).
+
 `kernel_ms` is the first event to the last: all four phases, no
 allocation and no host copies. ch03's `kernel_ms` covers its one launch
 and leaves its own buffer initialisation (visited, depth, owner, queue)
@@ -41,10 +48,11 @@ from numba import cuda
 
 from ..ch06_gpu_nblob_runs.recolor import PACK_ROW_BLOCKS
 from .kernels import (
-    pack_kernel, init_kernel, paint_kernel, get_rounds_kernel,
-    gpu_sleep_kernel,
+    pack_kernel, init_kernel, paint_kernel, paint_tiles_kernel,
+    get_rounds_kernel, gpu_sleep_kernel,
     TILE, TY_BITS, NUM_COUNTERS, ROUNDS, TILE_VISITS, CLOSURE_ITERS,
-    OR_ATOMICS, STAMP_ATOMICS, PEAK_ROUND, OVERFLOW,
+    OR_ATOMICS, STAMP_ATOMICS, PEAK_ROUND, OVERFLOW, PACKED_TILES,
+    SKIPPED_EXPORTS, FIRST_ENTRY, NOT_PACKED,
 )
 
 # Register cap of the rounds kernel unless the caller picks one (see
@@ -64,11 +72,28 @@ DEFAULT_TPB = 128
 
 PHASES = ("pack", "init", "rounds", "paint")
 
+# The rounds kernel's switches (kernels._make_rounds_kernel), each one an
+# ablation the benchmark times against the original kernel:
+#   one_sync     one grid.sync per round: three rotating queue counters
+#   fused_pack   no pack launch: a tile's first visit reads its own RGB
+#   skip_full    drop exports into full tiles already queued this round
+#   fused_paint  no paint launch: each visit paints what it added
+#                (needs fused_pack)
+# flood_fill() and TileFill take None for "this module's default", so the
+# tests can run the whole suite under every combination.
+SWITCHES = ("one_sync", "fused_pack", "skip_full", "fused_paint")
+DEFAULT_SWITCHES = {"one_sync": False, "fused_pack": False,
+                    "skip_full": False, "fused_paint": False}
+
 # Plain (non-cooperative) launch shapes for the three streaming kernels.
 # pack/paint use ch06's 2D grid: word along x (one warp per word), rows
 # strided along y. init is a 1D grid-stride.
 PLAIN_TPB = 256
 INIT_BLOCKS = 512
+# paint_tiles_kernel: 8 warps per block, one tile per warp up to 65,536
+# tiles, grid-stride beyond.
+PAINT_TILE_TPB = 256
+PAINT_TILE_MAX_BLOCKS = 8192
 # pack/paint shape (see TileFill.plain_shape): a block is at most one
 # row's words wide (32 * min(8, words_per_row) threads), and gridDim.y
 # puts about PACK_WARPS_IN_FLIGHT working warps on the image, never fewer
@@ -93,52 +118,72 @@ def _overload(kernel_fn):
     return next(iter(kernel_fn.overloads.values()))
 
 
-def _warmup(connectivity, bare=False, max_registers=DEFAULT_MAX_REGISTERS):
+def resolve_switches(**switches):
+    """{name: bool} for every name in SWITCHES; None (or absent) means
+    DEFAULT_SWITCHES[name] at call time."""
+    unknown = set(switches) - set(SWITCHES)
+    if unknown:
+        raise TypeError(f"unknown switch(es) {sorted(unknown)}")
+    return {k: bool(DEFAULT_SWITCHES[k] if switches.get(k) is None
+                    else switches[k]) for k in SWITCHES}
+
+
+def _sw_key(sw):
+    return tuple(sw[k] for k in SWITCHES)
+
+
+def _warmup(connectivity, bare=False, max_registers=DEFAULT_MAX_REGISTERS,
+            **switches):
     """JIT-compile every kernel of the pipeline once on a tiny image."""
-    key = (connectivity, bare, max_registers)
+    sw = resolve_switches(**switches)
+    key = (connectivity, bare, max_registers) + _sw_key(sw)
     if key in _warmed:
         return
     tiny = np.full((8, 8, 3), 255, dtype=np.uint8)
     tiny[1, 1] = (255, 0, 0)
-    eng = TileFill(8, 8, connectivity=connectivity, threads_per_block=32,
-                   blocks=1, bare=bare, max_registers=max_registers,
-                   _skip_warmup=True)
-    dev = cuda.to_device(tiny)
-    eng.run(dev, 1, 1)
+    for h in (8, 7):      # both RGB read paths of the fused pack
+        eng = TileFill(8, h, connectivity=connectivity, threads_per_block=32,
+                       blocks=1, bare=bare, max_registers=max_registers,
+                       _skip_warmup=True, **sw)
+        dev = cuda.to_device(np.ascontiguousarray(tiny[:, :h]))
+        eng.run(dev, 1, 1)
     gpu_sleep_kernel[1, 32](1)
     cuda.synchronize()
     _warmed.add(key)
 
 
 def max_blocks(threads_per_block=DEFAULT_TPB, connectivity=4, bare=False,
-               max_registers=DEFAULT_MAX_REGISTERS):
+               max_registers=DEFAULT_MAX_REGISTERS, **switches):
     """Largest cooperative grid of the rounds kernel at this block size
     (what blocks=None resolves to). Queried per twin, never assumed."""
-    _warmup(connectivity, bare, max_registers)
-    key = (connectivity, bare, max_registers, threads_per_block)
+    sw = resolve_switches(**switches)
+    _warmup(connectivity, bare, max_registers, **sw)
+    key = (connectivity, bare, max_registers, threads_per_block) + _sw_key(sw)
     if key not in _coop_cache:
-        kern = get_rounds_kernel(connectivity, bare, max_registers)
+        kern = get_rounds_kernel(connectivity, bare, max_registers, **sw)
         _coop_cache[key] = _overload(kern).max_cooperative_grid_blocks(
             threads_per_block)
     return _coop_cache[key]
 
 
 def regs_per_thread(connectivity=4, bare=False,
-                    max_registers=DEFAULT_MAX_REGISTERS):
+                    max_registers=DEFAULT_MAX_REGISTERS, **switches):
     """Registers per thread of the compiled (linked) rounds kernel."""
-    _warmup(connectivity, bare, max_registers)
-    regs = get_rounds_kernel(connectivity, bare,
-                             max_registers).get_regs_per_thread()
+    sw = resolve_switches(**switches)
+    _warmup(connectivity, bare, max_registers, **sw)
+    regs = get_rounds_kernel(connectivity, bare, max_registers,
+                             **sw).get_regs_per_thread()
     return int(next(iter(regs.values()))) if isinstance(regs, dict) \
         else int(regs)
 
 
 def local_bytes_per_thread(connectivity=4, bare=False,
-                           max_registers=DEFAULT_MAX_REGISTERS):
+                           max_registers=DEFAULT_MAX_REGISTERS, **switches):
     """Local memory per thread (register spills) of the rounds kernel."""
-    _warmup(connectivity, bare, max_registers)
-    lm = get_rounds_kernel(connectivity, bare,
-                           max_registers).get_local_mem_per_thread()
+    sw = resolve_switches(**switches)
+    _warmup(connectivity, bare, max_registers, **sw)
+    lm = get_rounds_kernel(connectivity, bare, max_registers,
+                           **sw).get_local_mem_per_thread()
     return int(next(iter(lm.values()))) if isinstance(lm, dict) else int(lm)
 
 
@@ -180,7 +225,7 @@ class TileFill:
     def __init__(self, width, height, connectivity=4,
                  threads_per_block=DEFAULT_TPB, blocks=None, bare=False,
                  max_registers=DEFAULT_MAX_REGISTERS,
-                 _skip_warmup=False):
+                 _skip_warmup=False, **switches):
         if width < 1 or height < 1:
             raise ValueError(f"bad shape {width}x{height}")
         if connectivity not in (4, 8):
@@ -209,12 +254,19 @@ class TileFill:
 
         self.bare = bool(bare)
         self.max_registers = max_registers
+        self.switches = resolve_switches(**switches)
+        self.one_sync = self.switches["one_sync"]
+        self.fused_pack = self.switches["fused_pack"]
+        self.skip_full = self.switches["skip_full"]
+        self.fused_paint = self.switches["fused_paint"]
+        if self.fused_paint and not self.fused_pack:
+            raise ValueError("fused_paint needs fused_pack")
         self.kernel_fn = get_rounds_kernel(connectivity, self.bare,
-                                           max_registers)
+                                           max_registers, **self.switches)
         if not _skip_warmup:
-            _warmup(connectivity, self.bare, max_registers)
+            _warmup(connectivity, self.bare, max_registers, **self.switches)
             coop_max = max_blocks(self.threads_per_block, connectivity,
-                                  self.bare, max_registers)
+                                  self.bare, max_registers, **self.switches)
             if coop_max < 1:
                 raise RuntimeError(
                     f"this GPU cannot host one cooperative block of the "
@@ -239,9 +291,29 @@ class TileFill:
                                          dtype=np.uint32)
         self.stamp = cuda.device_array((self.tiles_x, self.words_per_row),
                                        dtype=np.int32)
-        self.queues = cuda.device_array(2 * self.n_tiles, dtype=np.int32)
-        self.q_state = cuda.device_array(2, dtype=np.int32)
+        n_queues = 3 if self.one_sync else 2
+        self.queues = cuda.device_array(n_queues * self.n_tiles,
+                                        dtype=np.int32)
+        self.q_state = cuda.device_array(3, dtype=np.int32)
         self.counters = cuda.device_array(NUM_COUNTERS, dtype=np.int64)
+        # per-tile info (packed round, full bit) for the fused pack and
+        # the skip-full test; a 1-element dummy otherwise
+        use_tinfo = self.fused_pack or self.skip_full
+        self.tinfo = cuda.device_array(self.n_tiles if use_tinfo else 1,
+                                       dtype=np.int32)
+        self.tinfo_init = np.int32(NOT_PACKED if self.fused_pack else 0)
+        # the fused pack reads RGB as uint32 words: 3 per 4 pixels when
+        # every row starts 4-byte aligned (height % 4 == 0), 4 and a
+        # funnel shift otherwise
+        self.aligned = self.height % 4 == 0
+        self.painted = cuda.device_array(
+            self.width * self.words_per_row if self.fused_paint else 1,
+            dtype=np.uint32)
+        self._dummy_u8 = cuda.device_array(1, dtype=np.uint8)
+        self._dummy_u32 = cuda.device_array(1, dtype=np.uint32)
+        n_tile_warps = -(-self.n_tiles * 32 // PAINT_TILE_TPB)
+        self.paint_tile_blocks = max(1, min(PAINT_TILE_MAX_BLOCKS,
+                                            n_tile_warps))
         # flat views: the rounds kernel indexes everything with a uint32
         n_words = self.width * self.words_per_row
         self._mask_flat = self.mask.reshape(n_words)
@@ -272,24 +344,50 @@ class TileFill:
                 int((tx << TY_BITS) | ty))
 
     def run(self, img_dev, seed_x, seed_y):
-        """Enqueue the four phases; returns (phase names, 5 events)."""
+        """Enqueue the four phases; returns (phase names, 5 events).
+
+        With fused_pack there is no pack launch (its interval is empty:
+        the RGB is read inside `rounds`), and `paint` is
+        paint_tiles_kernel."""
         seed_word, seed_bits, seed_tile, seed_entry = self.seed_args(
             seed_x, seed_y)
+        if self.fused_pack or self.skip_full:
+            seed_entry |= FIRST_ENTRY     # the seed tile's first visit
+        if self.fused_pack:
+            img8 = img_dev.reshape(self.width * self.height * 3)
+            n32 = img8.shape[0] // 4
+            img32 = (img8[:4 * n32].view(np.uint32) if n32
+                     else self._dummy_u32)
+        else:
+            img8, img32, n32 = self._dummy_u8, self._dummy_u32, 0
         events = [cuda.event(timing=True) for _ in range(len(PHASES) + 1)]
         events[0].record()
-        pack_kernel[self.plain_grid, self.plain_tpb](img_dev, self.mask)
+        if not self.fused_pack:
+            pack_kernel[self.plain_grid, self.plain_tpb](img_dev, self.mask)
         events[1].record()
         init_kernel[INIT_BLOCKS, PLAIN_TPB](
             self._reached_flat, self._stamp_flat, self.queues, self.q_state,
-            self.counters, seed_word, seed_bits, seed_tile, seed_entry)
+            self.counters, seed_word, seed_bits, seed_tile, seed_entry,
+            self.tinfo, self.tinfo_init, self.painted)
         events[2].record()
         self.kernel_fn[self.blocks, self.threads_per_block](
             self._mask_flat, self._reached_flat, self._stamp_flat,
             self.queues, self.q_state, self.counters,
             np.int32(self.width), np.int32(self.words_per_row),
-            np.int32(self.n_tiles))
+            np.int32(self.n_tiles), img8, img32, np.int64(n32),
+            np.int32(self.height), self.aligned, self.tinfo, self.painted)
         events[3].record()
-        paint_kernel[self.plain_grid, self.plain_tpb](self.reached, img_dev)
+        if self.fused_paint:
+            pass                          # painted inside the rounds
+        elif self.fused_pack:
+            paint_tiles_kernel[self.paint_tile_blocks, PAINT_TILE_TPB](
+                self._reached_flat, self._mask_flat, self.tinfo, img8,
+                img32, self.aligned, np.int32(self.width),
+                np.int32(self.height), np.int32(self.words_per_row),
+                np.int32(self.n_tiles))
+        else:
+            paint_kernel[self.plain_grid, self.plain_tpb](self.reached,
+                                                          img_dev)
         events[4].record()
         return PHASES, events
 
@@ -307,17 +405,29 @@ class TileFill:
             "or_atomics": int(c[OR_ATOMICS]),
             "stamp_atomics": int(c[STAMP_ATOMICS]),
             "peak_round_tiles": int(c[PEAK_ROUND]),
+            "packed_tiles": int(c[PACKED_TILES]),
+            "skipped_exports": int(c[SKIPPED_EXPORTS]),
         }
 
-    def filled(self):
-        """Reached pixels (popcount of the reached bitmap)."""
+    def reached_words(self):
+        """The fill set as packed words (host). With fused_pack, `reached`
+        may hold candidate bits that are not red, and the fill set is
+        reached & mask (mask words of never-packed tiles are garbage, but
+        such tiles hold no reached bit)."""
         words = self.reached.copy_to_host()
+        if self.fused_pack:
+            words &= self.mask.copy_to_host()
+        return words
+
+    def filled(self):
+        """Reached pixels (popcount of the fill set)."""
+        words = self.reached_words()
         return int(np.unpackbits(words.view(np.uint8)).sum())
 
     def tiles_touched(self):
         """Tiles holding at least one reached pixel: the visits a perfect
         schedule would need (each tile closed exactly once)."""
-        words = self.reached.copy_to_host()
+        words = self.reached_words()
         pad = self.tiles_x * TILE - self.width
         if pad:
             words = np.concatenate(
@@ -350,6 +460,12 @@ class TileFloodFillResult:
     blocks: int
     coop_max_blocks: int
     bare: bool             # uninstrumented twin: work counters read 0
+    one_sync: bool         # one grid.sync per round (three queues)
+    fused_pack: bool       # RGB read on a tile's first visit
+    skip_full: bool        # exports into queued full tiles dropped
+    fused_paint: bool      # each visit paints what it added
+    packed_tiles: int      # fused pack: tiles whose RGB was read
+    skipped_exports: int   # skip-full: export words dropped
     regs_per_thread: int
     phase_ms: dict = field(repr=False)  # pack / init / rounds / paint
     kernel_ms: float = 0.0  # first event to last: the four phases
@@ -361,7 +477,8 @@ class TileFloodFillResult:
 
 def flood_fill(img_host, seed_x, seed_y, connectivity=4,
                threads_per_block=DEFAULT_TPB, blocks=None, bare=False,
-               max_registers=DEFAULT_MAX_REGISTERS):
+               max_registers=DEFAULT_MAX_REGISTERS, one_sync=None,
+               fused_pack=None, skip_full=None, fused_paint=None):
     """Flood-fill the red blob containing (seed_x, seed_y) by tile BFS.
 
     img_host: (width, height, 3) uint8. Not modified; a recolored copy is
@@ -381,7 +498,9 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
     t0 = time.perf_counter()
     eng = TileFill(width, height, connectivity=connectivity,
                    threads_per_block=threads_per_block, blocks=blocks,
-                   bare=bare, max_registers=max_registers)
+                   bare=bare, max_registers=max_registers,
+                   one_sync=one_sync, fused_pack=fused_pack,
+                   skip_full=skip_full, fused_paint=fused_paint)
     d_img = cuda.device_array_like(img_host)
     cuda.synchronize()
     t1 = time.perf_counter()
@@ -394,7 +513,7 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
     t3 = time.perf_counter()
     stats = eng.read_counters()
     img_out = d_img.copy_to_host()
-    visited = unpack_bits(eng.reached.copy_to_host(), height)
+    visited = unpack_bits(eng.reached_words(), height)
     t4 = time.perf_counter()
     phase_ms, kernel_ms = phase_times(events)
 
@@ -408,8 +527,12 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
         blocks=eng.blocks,
         coop_max_blocks=eng.coop_max_blocks,
         bare=eng.bare,
+        one_sync=eng.one_sync,
+        fused_pack=eng.fused_pack,
+        skip_full=eng.skip_full,
+        fused_paint=eng.fused_paint,
         regs_per_thread=regs_per_thread(connectivity, eng.bare,
-                                        max_registers),
+                                        max_registers, **eng.switches),
         phase_ms=phase_ms,
         kernel_ms=kernel_ms,
         alloc_ms=(t1 - t0) * 1000,

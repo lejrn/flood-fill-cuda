@@ -7,6 +7,11 @@ set (ch01's for 4-connectivity, shared/'s for 8). The bit helpers the
 closure is built from are tested on their own against plain-Python
 references first, so a failure further down can be localised.
 
+Every test runs once per switch mode (MODES: the rounds kernel's
+one_sync / fused_pack / skip_full / fused_paint switches, set through
+flood_fill.DEFAULT_SWITCHES), so the whole suite checks each path; the
+tests at the end target the switches themselves.
+
 Run:
 
     uv run pytest src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/test_correctness.py -v
@@ -22,7 +27,10 @@ import numpy as np
 import pytest
 from numba import cuda
 
+from numba import uint64
+
 from . import kernels
+from . import flood_fill as ff
 from .flood_fill import flood_fill, max_blocks, plain_shape, TileFill
 from ..ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill, cpu_flood_fill_8
 from ..ch03_gpu_1blob_nblock import scenes
@@ -31,6 +39,37 @@ from .benchmarks import worst_cases
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 RED = scenes.RED
+
+# switch modes the whole module runs under (unset switches are off)
+MODES = {
+    "old": {},
+    "one_sync": {"one_sync": True},
+    "fused_pack": {"fused_pack": True},
+    "skip_full": {"skip_full": True},
+    "one_sync+fused_pack": {"one_sync": True, "fused_pack": True},
+    "one_sync+fused_pack+skip_full": {"one_sync": True, "fused_pack": True,
+                                      "skip_full": True},
+    "all+fused_paint": {"one_sync": True, "fused_pack": True,
+                        "skip_full": True, "fused_paint": True},
+}
+
+
+@pytest.fixture(autouse=True, scope="module", params=list(MODES))
+def switch_mode(request):
+    """Run every test of the module with these switches as the defaults
+    of flood_fill() and TileFill (module scope: grouped by mode)."""
+    saved = dict(ff.DEFAULT_SWITCHES)
+    ff.DEFAULT_SWITCHES.update({k: False for k in ff.SWITCHES})
+    ff.DEFAULT_SWITCHES.update(MODES[request.param])
+    yield request.param
+    ff.DEFAULT_SWITCHES.clear()
+    ff.DEFAULT_SWITCHES.update(saved)
+
+
+def only_in(mode, *wanted):
+    """Skip a mode-independent test in all but the listed modes."""
+    if mode not in wanted:
+        pytest.skip(f"switch-independent: runs in mode {wanted[0]} only")
 
 
 def expected_image(img, seed_x, seed_y, connectivity):
@@ -480,3 +519,214 @@ def test_rejects_bad_arguments(kwargs, exc):
 def test_cooperative_capacity_is_positive():
     for conn in (4, 8):
         assert max_blocks(256, conn) >= 1
+
+
+# ------------------------------------------------------------ switches
+
+def _near_red_image(w, h, rng, p_red=0.5):
+    """RGB noise of red, near-red ((254,0,0), (255,1,0), (255,0,1),
+    (255,0,255)), white, blue and random colours: every byte the pack's
+    word test looks at is exercised."""
+    palette = np.array([[255, 0, 0], [254, 0, 0], [255, 1, 0], [255, 0, 1],
+                        [255, 0, 255], [255, 255, 255], [0, 0, 255],
+                        [0, 0, 0]], dtype=np.uint8)
+    pick = rng.integers(1, len(palette), size=(w, h))
+    pick[rng.random((w, h)) < p_red] = 0
+    img = palette[pick]
+    rnd = rng.random((w, h)) < 0.05
+    img[rnd] = rng.integers(0, 256, size=(int(rnd.sum()), 3), dtype=np.uint8)
+    return np.ascontiguousarray(img)
+
+
+@cuda.jit
+def _pack_probe(img32, aligned, width, height, wpr, n32, tail, out):
+    """kernels._pack_tile on every tile (one warp per tile)."""
+    lane = cuda.laneid
+    t = cuda.grid(1) >> 5
+    tiles_x = (width + 31) // 32
+    if t < tiles_x * wpr:                       # warp-uniform
+        tx = t // wpr
+        ty = t - tx * wpr
+        h34 = (uint64(height) * kernels.Q3) >> kernels.Q2
+        n32m1 = uint64(max(n32 - 1, 0))
+        m = kernels._pack_tile(img32, aligned, tx * 32, ty, width, height,
+                               h34, uint64(n32), n32m1, tail, lane)
+        x = tx * 32 + lane
+        if x < width:
+            out[x * wpr + ty] = m
+
+
+@pytest.mark.parametrize("shape", [
+    (64, 64), (100, 96), (37, 128),              # rows 4-byte aligned
+    (33, 65), (97, 161), (50, 1), (31, 31),      # height % 4 = 1, 1, 1, 3
+    (70, 66), (5, 7), (40, 34), (3, 99),         # height % 4 = 2, 3, 2, 3
+    (1, 1), (1, 2), (2, 1), (1, 5), (7, 33)])    # 3-15 bytes, tail words
+def test_fused_pack_equals_ch06_pack(shape, switch_mode):
+    """The fused pack's word test (three XOR-ed words per 4 pixels, a
+    funnel shift and the image's partial last word when rows are not
+    4-byte aligned) against ch06's pack_kernel, on near-red noise."""
+    only_in(switch_mode, "old")
+    w, h = shape
+    img = _near_red_image(w, h, np.random.default_rng(w * 1000 + h))
+    eng = TileFill(w, h, connectivity=8)
+    d_img = cuda.to_device(img)
+    eng.pack(d_img)
+    want = eng.mask.copy_to_host()
+    n = w * h * 3
+    n32 = n // 4
+    flat = img.reshape(n)
+    tail = np.uint32(sum(int(b) << (8 * k)
+                         for k, b in enumerate(flat[4 * n32:])))
+    img32 = (d_img.reshape(n)[:4 * n32].view(np.uint32) if n32
+             else cuda.device_array(1, np.uint32))
+    wpr = (h + 31) // 32
+    out = cuda.to_device(np.zeros(w * wpr, np.uint32))
+    tiles = ((w + 31) // 32) * wpr
+    _pack_probe[tiles, 32](img32, h % 4 == 0, w, h, wpr, n32, tail, out)
+    np.testing.assert_array_equal(out.copy_to_host().reshape(w, wpr), want)
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("blocks, tpb", [(1, 32), (1, 64), (2, 32), (2, 64)])
+@pytest.mark.parametrize("name", ["serpentine", "zz_serpentine", "maze",
+                                  "random"])
+def test_tiny_grids_many_rounds(name, blocks, tpb, connectivity):
+    """One and two blocks: every round's warps share one or two SMs, and
+    on the serpentines a round holds one tile, so the barrier (one or
+    two grid.sync per round) is crossed thousands of times."""
+    img, sx, sy = {
+        "serpentine": lambda: scenes.serpentine_scene(128, 160),
+        "zz_serpentine": lambda: worst_cases.zz_serpentine_scene(256, 256),
+        "maze": lambda: worst_cases.maze_scene(cells=40),
+        "random": lambda: scenes.random_scene(200, 230, 0.62, rng_seed=11),
+    }[name]()
+    assert_matches_reference(img, sx, sy, connectivity,
+                             threads_per_block=tpb, blocks=blocks)
+
+
+@pytest.mark.parametrize("blocks", [1, 2, None])
+@pytest.mark.parametrize("name", ["serpentine", "zz_serpentine"])
+def test_one_sync_keeps_the_rounds(name, blocks, switch_mode):
+    """A one-tile front has a fixed schedule, so one grid.sync per round
+    must take exactly the rounds (and visits) of two."""
+    only_in(switch_mode, "old")
+    img, sx, sy = (scenes.serpentine_scene(128, 160) if name == "serpentine"
+                   else worst_cases.zz_serpentine_scene(256, 256))
+    two = flood_fill(img, sx, sy, connectivity=8, blocks=blocks,
+                     one_sync=False)
+    one = assert_matches_reference(img, sx, sy, 8, blocks=blocks,
+                                   one_sync=True)
+    assert one.one_sync and not two.one_sync
+    assert one.rounds == two.rounds > 250
+    assert one.tile_visits == two.tile_visits
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+def test_fused_pack_reads_only_reached_tiles(connectivity):
+    """A 21x13 blob in a 4096 x 2048 image (8,192 tiles), and the thin
+    strip: only the tiles the blob covers are packed. Neither blob reaches
+    a tile border of a white tile, so no candidate lands outside them."""
+    img = np.full((4096, 2048, 3), 255, dtype=np.uint8)
+    img[1010:1031, 700:713] = RED     # x across 1023|1024, y across 703|704
+    r = assert_matches_reference(img, 1020, 705, connectivity,
+                                 fused_pack=True)
+    assert r.fused_pack and r.filled == 21 * 13
+    assert r.packed_tiles == 4
+    img, sx, sy = worst_cases.thin_h32_blob_scene(1 << 15)
+    r = assert_matches_reference(img, sx, sy, connectivity, fused_pack=True)
+    assert r.packed_tiles == 2
+    r = flood_fill(img, sx, sy, connectivity=connectivity, fused_pack=False,
+                   fused_paint=False)
+    assert r.packed_tiles == 0
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+def test_near_red_neighbours_are_never_painted(connectivity):
+    """Candidates (unfiltered border bits into unpacked tiles) land on
+    near-red pixels here: the blob ends on tile borders (x 64 and 255,
+    y 32 and 223) and a near-red ring sits just across them, so every
+    border export of the blob's edge tiles is a near-red candidate. None
+    may be painted."""
+    rng = np.random.default_rng(5)
+    img = _near_red_image(300, 260, rng, p_red=0.0)
+    img[63:257, 31:225] = (254, 0, 0)                  # the ring ...
+    img[64:256, 32:224] = RED                          # ... around the blob
+    img[100:200, 96:98] = (255, 0, 1)                  # a near-red wall
+    r = assert_matches_reference(img, 150, 120, connectivity)
+    changed = np.any(r.img != img, axis=2)
+    red = np.all(img == RED, axis=2)
+    assert not np.any(changed & ~red)
+
+
+@pytest.mark.parametrize("name", ["full_red_300", "random_supercritical",
+                                  "disk_301"])
+def test_repeated_runs_are_identical(name):
+    """Races (same-round exports, packing while another warp exports,
+    skipped exports) change the work, never the result: 12 runs on
+    reused buffers, at the default grid and at one block."""
+    img, sx, sy = {
+        "full_red_300": lambda: scenes.full_red_scene(300, 300),
+        "random_supercritical": lambda: scenes.random_scene(
+            256, 256, 0.62, rng_seed=17),
+        "disk_301": lambda: scenes.disk_scene(301, 301, 140),
+    }[name]()
+    exp_img, _, _ = expected_image(img, sx, sy, 8)
+    d0 = cuda.to_device(img)
+    for blocks in (None, 1):
+        eng = TileFill(img.shape[0], img.shape[1], connectivity=8,
+                       blocks=blocks)
+        d = cuda.device_array_like(img)
+        for _ in range(12):
+            d.copy_to_device(d0)
+            eng.run(d, sx, sy)
+            np.testing.assert_array_equal(d.copy_to_host(), exp_img)
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("shape", [(512, 512), (300, 200), (97, 161)])
+def test_skip_full_visits_each_full_tile_once(shape, connectivity,
+                                              switch_mode):
+    """Fused pack + skip-full on an all-red image: every tile is full, so
+    every export into an already packed tile is dropped and each tile is
+    visited exactly once (its full bit is visible from the round after
+    its pack on). Without skip-full, 8-conn races re-visit tiles. (At
+    4-conn the tile graph is bipartite: no two tiles of a round touch,
+    so there is nothing to skip and nothing to re-visit.)"""
+    only_in(switch_mode, "old")
+    w, h = shape
+    full = np.zeros((w, h, 3), dtype=np.uint8)
+    full[:, :] = RED
+    for sx, sy in ((0, 0), (w // 2, h // 2), (w - 1, h // 3)):
+        r = assert_matches_reference(full, sx, sy, connectivity,
+                                     fused_pack=True, skip_full=True,
+                                     one_sync=True)
+        assert r.tile_visits == r.n_tiles == r.packed_tiles
+        if r.n_tiles > 4 and connectivity == 8:
+            assert r.skipped_exports > 0
+
+
+def test_counters_of_the_switches(switch_mode):
+    """packed_tiles counts the fused pack's reads: every touched tile, at
+    most every tile; 0 without it. skipped_exports is 0 without
+    skip-full."""
+    img, sx, sy = scenes.disk_scene(301, 301, 140)
+    r = assert_matches_reference(img, sx, sy, 8)
+    eng = TileFill(301, 301, connectivity=8)
+    d = cuda.to_device(img)
+    eng.run(d, sx, sy)
+    touched = eng.tiles_touched()
+    if r.fused_pack:
+        assert touched <= r.packed_tiles <= r.n_tiles
+    else:
+        assert r.packed_tiles == 0
+    if not r.skip_full:
+        assert r.skipped_exports == 0
+
+
+def test_switch_validation(switch_mode):
+    only_in(switch_mode, "old")
+    img, sx, sy = scenes.square_scene(64, 64, 20, 20)
+    with pytest.raises(ValueError, match="fused_pack"):
+        flood_fill(img, sx, sy, fused_pack=False, fused_paint=True)
+    with pytest.raises(TypeError, match="unknown switch"):
+        TileFill(64, 64, connectivity=8, fused_pak=True)
