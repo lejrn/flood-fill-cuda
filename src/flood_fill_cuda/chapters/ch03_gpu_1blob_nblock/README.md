@@ -1,22 +1,22 @@
-# Multi-Block Flood Fill — 2 blocks → N blocks, one global queue
+# Multi-Block Flood Fill - 2 blocks → N blocks, one global queue
 
 Chapter 3 of the single-blob evolution (see `../README.md`). The dual-block
 stage's verdict was that the **global-memory queue kernel wins**, so this
-stage scales exactly that design — one monotonic global queue, grid-stride
-work loops, two `grid.sync()` per level — to any cooperative grid size, and
+stage scales exactly that design - one monotonic global queue, grid-stride
+work loops, two `grid.sync()` per level - to any cooperative grid size, and
 sweeps **blocks × threads-per-block** to find where the scaling stops and
 why. It also adds the project's first **bandwidth instrumentation**,
 because the stage hypothesis says bandwidth is what the scaling will hit.
 
-## The predictions (stated before measuring — house style)
+## The predictions (stated before measuring - house style)
 
 | # | prediction | verdict |
 |---|---|---|
 | 0 | The frontier queue's hot window fits L2 even at huge blob sizes (a 10000² blob's frontier ≈ 40K px × 4 B ≈ 160 KB ≪ 32 MB), so queue traffic stays cheap | consistent with everything measured; direct proof needs `ncu` |
-| 1 | `grid.sync` costs more across 24 SMs than across 2 | **mildly** — ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 (serpentine-derived); mostly fixed, but the growth is real and turns the capacity ends into losses |
-| 2 | The single global rear becomes an atomic hotspot at 48+ blocks | unproven — a plateau exists but cannot be attributed without `ncu` |
-| 3 | The serpentine still loses | **confirmed, emphatically** — it got *worse* (145 ms vs the single-block kernel's 71 ms) |
-| 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** — flat from 48 → 96 → 192 blocks; attribution open (see below) |
+| 1 | `grid.sync` costs more across 24 SMs than across 2 | **mildly** - ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 (serpentine-derived); mostly fixed, but the growth is real and turns the capacity ends into losses |
+| 2 | The single global rear becomes an atomic hotspot at 48+ blocks | unproven - a plateau exists but cannot be attributed without `ncu` |
+| 3 | The serpentine still loses | **confirmed, emphatically** - it got *worse* (145 ms vs the single-block kernel's 71 ms) |
+| 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** - flat from 48 → 96 → 192 blocks; attribution open (see below) |
 
 ## What changed from `dual_block` (and what didn't)
 
@@ -28,7 +28,7 @@ the instrumentation stopped assuming two blocks:
 - per-block work counts and %smid observations moved from fixed counter
   slots (`PROCESSED_B0/B1`, `SMID_B0/B1`) to a **`block_stats` int64
   `(blocks, 2)` array**;
-- the per-level trace collapsed to **one grid-wide 1D row** — a per-block
+- the per-level trace collapsed to **one grid-wide 1D row** - a per-block
   per-level trace at this stage's grid sizes would cost 400 MB (48 blocks)
   to 4.8 GB (576), and the owner map already answers "who filled what";
 - `owner` widened **int8 → int16** (cooperative capacity reaches 192
@@ -37,7 +37,7 @@ the instrumentation stopped assuming two blocks:
   (`max_cooperative_grid_blocks`, never hardcoded); `blocks=1` is legal and
   is the equivalence anchor in the tests.
 
-## Cooperative capacity — registers now cap the *grid*
+## Cooperative capacity - registers now cap the *grid*
 
 Measured on the RTX 4060 Laptop GPU (24 SMs, 64 K registers/SM):
 
@@ -52,30 +52,30 @@ Measured on the RTX 4060 Laptop GPU (24 SMs, 64 K registers/SM):
 Every instrumented column multiplies out to the same **12,288 threads =
 512 per SM**: the kernel's ~104 registers/thread exhaust the register file
 at exactly 512 resident threads regardless of how they are grouped into
-blocks — so the smallest legal block size yields the most blocks, and
+blocks - so the smallest legal block size yields the most blocks, and
 **384 (tpb=32) is this kernel's absolute block ceiling**. At the dual
 stage register pressure capped the *block* (tpb ≤ 512); here it caps the
 *whole grid*. The leaner bare twin fits 768/SM, and at tpb=32 its 576
-blocks are **Ada's hard architectural cap of 24 blocks per SM** — no
+blocks are **Ada's hard architectural cap of 24 blocks per SM** - no
 kernel on this GPU can place more; only a register diet gets the
 instrumented kernel near it. The 8-conn twins measure **identical**
-capacity at every tpb — the doubled neighbor loop did not move the
+capacity at every tpb - the doubled neighbor loop did not move the
 register wall.
 
 ## Bandwidth instrumentation (`bandwidth.py`)
 
-1. **Measured peak** — a saturating D2D grid-stride copy (two 256 MB int64
-   buffers, CUDA-event timed, median of 10): **187–193 GB/s** across
+1. **Measured peak** - a saturating D2D grid-stride copy (two 256 MB int64
+   buffers, CUDA-event timed, median of 10): **187-193 GB/s** across
    sessions on this machine (laptop clocks). Every derived figure is
    expressed against the same-session measurement, never a spec-sheet
    number.
-2. **Derived model** — algorithmic bytes from the kernel's own
+2. **Derived model** - algorithmic bytes from the kernel's own
    exactly-once counters: `processed × (4 queue-read + 3 img-recolor + 4
    depth [+ 2 owner]) + processed × 4 neighbors × 3 img-read +
    cas_attempts × 8 + (filled−1) × 4` ≈ 61 B/pixel on solid interiors.
    **A lower bound on traffic, not a measurement**: L2 absorbs the queue's
    hot window (deflating real DRAM bytes) while 32 B sector granularity
-   inflates them — each scattered 3–4 B access pulls a whole sector.
+   inflates them - each scattered 3-4 B access pulls a whole sector.
 
 ## Results (median of 5, blocks=None → 48, tpb=256)
 
@@ -94,13 +94,13 @@ register wall.
 | sq_8000 center | 64M | 2041.2 | 1062.6 | 516.9 | **133.7** | 7.95× | **15.27×** | 21.6 (11.6%) |
 
 (Numbers are the newest committed run; medians move a few percent between
-sessions with this laptop's clocks — earlier runs' JSON/CSVs remain in
+sessions with this laptop's clocks - earlier runs' JSON/CSVs remain in
 `benchmark_results/` as the durable record.)
 
 v2 = single-block spill kernel; dual = dual-block global kernel, both
 re-measured fresh in the same session. The 64M px scene is the guarded
 stretch run: it completed; **10000² (the hypothesis scale) cannot even be
-attempted — its ~3 GB of host arrays exceed this laptop's free RAM.** The
+attempted - its ~3 GB of host arrays exceed this laptop's free RAM.** The
 Chapter 1 host-RAM ceiling, not the GPU, is the binding constraint.
 
 ## The centerpiece: blocks × tpb sweep (Mpx/s, median of 3)
@@ -141,16 +141,16 @@ Chapter 1 host-RAM ceiling, not the GPU, is the binding constraint.
 | 192 | 430.1 | 443.2* | - | - | - |
 | 384 | 358.4* | - | - | - | - |
 
-**serpentine_256** (kernel ms — lower is better): ~113 ms at 1 block,
+**serpentine_256** (kernel ms - lower is better): ~113 ms at 1 block,
 drifting up to **169 ms at 384 blocks**. 65,792 `grid.sync`s *are* the
 runtime (1.7 → 2.6 µs each as the barrier population grows); no
 configuration of blocks and threads can help a shape that starves every
-block between barriers — more blocks only make the barrier costlier.
+block between barriers - more blocks only make the barrier costlier.
 
 ### What the sweep says
 
-- **Near-linear scaling to ~8–16 blocks, then a plateau — and past it a
-  measured decline.** The capacity ends (384×32, 192×64) run 10–30% below
+- **Near-linear scaling to ~8-16 blocks, then a plateau - and past it a
+  measured decline.** The capacity ends (384×32, 192×64) run 10-30% below
   the best cells: every extra block is another barrier arrival, and past
   ~48 blocks that is all it is. Prediction 4's plateau is real, and the
   block ceiling overshoots it.
@@ -160,27 +160,27 @@ block between barriers — more blocks only make the barrier costlier.
   the disk's peak ring is ~7,600 px → best is 128×64 = 8,192 threads
   (478 Mpx/s). Mid-plateau neighbors (48×128, 96×64…) sit within clock
   noise of them.
-- **Why smaller blocks win — spreading, observed via %smid.** The
-  scheduler places consecutive block ids on *different* SMs (blocks 0–7
+- **Why smaller blocks win - spreading, observed via %smid.** The
+  scheduler places consecutive block ids on *different* SMs (blocks 0-7
   land on SMs 0, 2, 4, …, 14), and grid-stride work goes to the first
-  ⌈level/tpb⌉ blocks — so a 2,000-px level runs on 4 SMs at tpb=512 but
+  ⌈level/tpb⌉ blocks - so a 2,000-px level runs on 4 SMs at tpb=512 but
   ~16 SMs at tpb=128: same pixels, four times the L1s, load/store units
   and issue slots. At a fixed 12,288 threads the square reads 202.7
-  (24×512) → 280.3 (48×256) → 262.5–273.0 (96×128 / 192×64) → 223.9
+  (24×512) → 280.3 (48×256) → 262.5-273.0 (96×128 / 192×64) → 223.9
   (384×32): small blocks beat big blocks until barrier arrivals eat the
-  gain — the optimum is interior.
+  gain - the optimum is interior.
 - **Attribution is honestly open.** At the plateau the *model* says only
-  ~7–11% of the measured ~190 GB/s copy peak. But the model is a lower
-  bound: with 32 B sectors, the kernel's scattered 3–4 B accesses can
-  inflate real DRAM traffic ~8×, and 11% × 8 ≈ 90% of peak — *consistent
+  ~7-11% of the measured ~190 GB/s copy peak. But the model is a lower
+  bound: with 32 B sectors, the kernel's scattered 3-4 B accesses can
+  inflate real DRAM traffic ~8×, and 11% × 8 ≈ 90% of peak - *consistent
   with* bandwidth saturation, but consistency is not proof. Candidate
   culprits (DRAM sectors, L2 thrash, the single rear atomic) need `ncu`.
 - **Balance is structural, not a defect:** grid-stride ownership follows
   thread id, so any level smaller than the grid feeds low block ids first.
-  The per-block CV falls from 686% (tiny scenes — most blocks idle) to 42%
+  The per-block CV falls from 686% (tiny scenes - most blocks idle) to 42%
   at 64M px. Another instance of the Chapter 2 lesson that aggregate
   metrics need reading against the frontier trace.
-- **Instrumentation overhead is below this laptop's clock noise** — the
+- **Instrumentation overhead is below this laptop's clock noise** - the
   bare twin (pinned to the same block count; its leaner registers would
   otherwise resolve `blocks=None` to a bigger grid) swings −36%…+11%
   between runs. The serpentine's +1.9% on a barrier-dominated scene is the
@@ -189,22 +189,22 @@ block between barriers — more blocks only make the barrier costlier.
 ## The 8-direction experiment (`connectivity=8`)
 
 The thesis (the user's): 8 directions might **slow** the fill (each thread
-probes 8 neighbors — more work and traffic per pixel) or **speed** it
-(each level reaches more pixels — fewer, wider levels: fewer barriers,
+probes 8 neighbors - more work and traffic per pixel) or **speed** it
+(each level reaches more pixels - fewer, wider levels: fewer barriers,
 better warp engagement). Twin kernels (`multi_block_global8_kernel` +
 bare), verbatim copies of the 4-conn pair except the offset table and
 `range(8)`; cooperative capacity measured **identical** (the doubled loop
-did not move the register wall). Depth becomes Chebyshev distance —
+did not move the register wall). Depth becomes Chebyshev distance -
 square waves instead of diamonds (see the wavefront pair).
 
 ### Predictions (stated before measuring) and verdicts
 
 | mechanism | arithmetic | prediction | verdict |
 |---|---|---|---|
-| barriers | levels halve (7,999→4,000 corner square; 2,688→1,901 disk; serpentine ~unchanged) | barrier-heavy scenes wash-or-faster; serpentine slower | **half right** — levels halved exactly as computed, but the speed-up went far beyond "wash" |
-| traffic | model 61 → ~105 B/px (+72%) | plateau-bound big blobs **slower** by tens of % | **WRONG** — they got 1.34–1.37× *faster*. See the post-mortem below |
-| coverage | peak frontier ~doubles → best cell needs ~2× threads | best cell shifts one tpb step up | **confirmed** — square 128×32 → 48×128, disk 128×64 → 48×256 |
-| utilization | wider, fewer levels | thread_util up everywhere | **confirmed** — roughly doubled (e.g. 61.6% → 80.8% at 64M px) |
+| barriers | levels halve (7,999→4,000 corner square; 2,688→1,901 disk; serpentine ~unchanged) | barrier-heavy scenes wash-or-faster; serpentine slower | **half right** - levels halved exactly as computed, but the speed-up went far beyond "wash" |
+| traffic | model 61 → ~105 B/px (+72%) | plateau-bound big blobs **slower** by tens of % | **WRONG** - they got 1.34-1.37× *faster*. See the post-mortem below |
+| coverage | peak frontier ~doubles → best cell needs ~2× threads | best cell shifts one tpb step up | **confirmed** - square 128×32 → 48×128, disk 128×64 → 48×256 |
+| utilization | wider, fewer levels | thread_util up everywhere | **confirmed** - roughly doubled (e.g. 61.6% → 80.8% at 64M px) |
 
 ### Results (median of 5, blocks=None → 48×256, same session)
 
@@ -223,7 +223,7 @@ square waves instead of diamonds (see the wavefront pair).
 | sq_8000 center | 137.8 | **100.3** | 1.37× | 8,001→4,001 | 62→81 | 42.3 (22.4%) |
 
 Fill sets verified identical per scene (all suite scenes are solid/
-corridor — no diagonal-only gaps); only the timeline differs.
+corridor - no diagonal-only gaps); only the timeline differs.
 
 ### The sweep at 8-conn (Mpx/s, same grid, same session)
 
@@ -262,15 +262,15 @@ corridor — no diagonal-only gaps); only the timeline differs.
 | 384 | 421.0* | - | - | - | - |
 
 **503.5 Mpx/s (disk, 48×256) is the project's fastest fill to date.** Note
-the grid crossover inside the tables: at 1–16 blocks 8-conn *loses* to
-4-conn cell-for-cell (pure probe cost with nothing to feed) — the
+the grid crossover inside the tables: at 1-16 blocks 8-conn *loses* to
+4-conn cell-for-cell (pure probe cost with nothing to feed) - the
 8-direction bet pays only once the grid is wide enough to eat the wider
 levels.
 
 ### Post-mortem on the failed traffic prediction
 
 The model said +72% bytes per pixel; the big blobs sped up anyway, and the
-modeled rate reached **42 GB/s (22% of peak) — double what any 4-conn
+modeled rate reached **42 GB/s (22% of peak) - double what any 4-conn
 configuration ever sustained on the same hardware.** Two things the model
 cannot see:
 
@@ -284,47 +284,47 @@ cannot see:
    loads = better-hidden latency = higher achieved bandwidth.
 
 Consequence for the standing plateau question: **the 4-conn plateau was
-not a hard DRAM wall** — the same machine just sustained 2× the modeled
+not a hard DRAM wall** - the same machine just sustained 2× the modeled
 traffic. The plateau's cause shifts toward level-width/latency/barrier
 structure. `ncu` remains the arbiter, but the evidence moved.
 
 ## The per-barrier work experiments (`radius=2`, `probe_layout="warp"`)
 
-Two independent bets on the same question — can a level do more work
-before paying its two `grid.sync` barriers? — attacking opposite regimes:
+Two independent bets on the same question - can a level do more work
+before paying its two `grid.sync` barriers? - attacking opposite regimes:
 
 - **Radius-2** (`multi_block_global8r2_kernel` + bare): ring-1 probed
   first, unconditionally, unchanged protocol; only pixels whose entire
   ring-1 is in-bounds blob material also probe the 16 ring-2 cells. The
   guard is static ("all 8 ring-1 in-bounds and originally red"), which
-  keeps every jump inside true 8-connectivity — fill sets identical to
+  keeps every jump inside true 8-connectivity - fill sets identical to
   conn8 (tested against the oracle plus a two-stripe 1-px-gap leak
   detector), depth/levels deterministic. Levels ≈ halve on solid blobs.
 - **Warp-coop** (`multi_block_global8wc_kernel` + bare): each warp takes
   4 queue entries and assigns each lane one (entry, direction) pair, so
   all 32 probes for 4 pixels issue in ONE round instead of 8 lockstep
-  loop iterations. Same BFS graph — results bit-identical to conn8
+  loop iterations. Same BFS graph - results bit-identical to conn8
   (asserted, depth and levels included); only work distribution changes.
 
 Measured before benchmarking (the register question): conn8 104
-regs/thread, r2 112 (cooperative capacity unchanged — 48 @ tpb256), wc
-**96** (capacity at tpb64 rises to 240 vs conn8's 192 — the benchmark
+regs/thread, r2 112 (cooperative capacity unchanged - 48 @ tpb256), wc
+**96** (capacity at tpb64 rises to 240 vs conn8's 192 - the benchmark
 pins all configs to a common grid so ratios never compare unequal grids).
 
 ### Predictions (stated before measuring) and verdicts
 
 | bet | arithmetic | prediction | verdict |
 |---|---|---|---|
-| r2 barriers | levels halve again (sq_8000 4,001→~2,001; disk 1,901→~951) → saves ~2,000 levels × 2 syncs × ~1.4 µs ≈ 6 ms of sq_8000's 100 ms | mild win alone (~6%) — the real lever is width, as in the conn8 experiment | **arithmetic exact, win never materialized** — levels halved to the pixel (4,001→2,001, interior ≈100%), and r2 still lost every scene |
-| r2 width | peak frontier doubles again, but utilization is already 81% at 64M px | less headroom than conn8 had: solid scenes 1.05–1.25×, best where util was lowest (mid-size squares) | **WRONG** — 0.50–0.88×, and *worst* where utilization was highest. Util did rise (81→90% at 64M) — and it didn't matter |
-| r2 traffic | probes 8→24 per interior pixel: model ~105 → ~153 B/px (+46%), CAS attempts ~triple | after the conn8 sector-locality post-mortem: real cost far below modeled (ring-2 spans 5 rows vs ring-1's 3) — traffic does not decide it | **WRONG, in reverse** — CAS attempts measured 2.5–2.9×, and traffic is exactly what decided it. See the post-mortem |
-| r2 serpentine | interior == 0 (proven in tests) — pure guard cost: ~8 extra visited loads per pixel | 0.85–1.0×, the losing scene | **CONFIRMED** — 0.90× (min-ratio 0.89), and ironically its *best* scene |
-| wc narrow | serpentine spends ~5.5 µs/level at conn8; ~2.8 µs is syncs, most of the rest is 8 serial probe rounds → collapse to 1 | serpentine 1.3–1.6× vs conn8 — the headline bet | **CONFIRMED** — 1.45× (min 1.43). 123.8 ms: the serpentine drops below conn4 (145.0 ms) for the first time in the project |
-| wc wide | same loads in flight, reshuffled; 8× more loop trips + redundant decode | wash to slightly slower on big solid scenes (0.9–1.05×) | **WRONG, pleasantly** — 1.12–1.53× everywhere. conn8's "wide" scenes still idled 19% of lanes; 8-lanes-per-entry closed that to 2% |
+| r2 barriers | levels halve again (sq_8000 4,001→~2,001; disk 1,901→~951) → saves ~2,000 levels × 2 syncs × ~1.4 µs ≈ 6 ms of sq_8000's 100 ms | mild win alone (~6%) - the real lever is width, as in the conn8 experiment | **arithmetic exact, win never materialized** - levels halved to the pixel (4,001→2,001, interior ≈100%), and r2 still lost every scene |
+| r2 width | peak frontier doubles again, but utilization is already 81% at 64M px | less headroom than conn8 had: solid scenes 1.05-1.25×, best where util was lowest (mid-size squares) | **WRONG** - 0.50-0.88×, and *worst* where utilization was highest. Util did rise (81→90% at 64M) - and it didn't matter |
+| r2 traffic | probes 8→24 per interior pixel: model ~105 → ~153 B/px (+46%), CAS attempts ~triple | after the conn8 sector-locality post-mortem: real cost far below modeled (ring-2 spans 5 rows vs ring-1's 3) - traffic does not decide it | **WRONG, in reverse** - CAS attempts measured 2.5-2.9×, and traffic is exactly what decided it. See the post-mortem |
+| r2 serpentine | interior == 0 (proven in tests) - pure guard cost: ~8 extra visited loads per pixel | 0.85-1.0×, the losing scene | **CONFIRMED** - 0.90× (min-ratio 0.89), and ironically its *best* scene |
+| wc narrow | serpentine spends ~5.5 µs/level at conn8; ~2.8 µs is syncs, most of the rest is 8 serial probe rounds → collapse to 1 | serpentine 1.3-1.6× vs conn8 - the headline bet | **CONFIRMED** - 1.45× (min 1.43). 123.8 ms: the serpentine drops below conn4 (145.0 ms) for the first time in the project |
+| wc wide | same loads in flight, reshuffled; 8× more loop trips + redundant decode | wash to slightly slower on big solid scenes (0.9-1.05×) | **WRONG, pleasantly** - 1.12-1.53× everywhere. conn8's "wide" scenes still idled 19% of lanes; 8-lanes-per-entry closed that to 2% |
 
 Both experiments are benchmarked head-to-head against conn4/conn8 in ONE
 interleaved round-robin per scene
-(`benchmarks/benchmark_connectivity_and_barrier_work.py`) — the
+(`benchmarks/benchmark_connectivity_and_barrier_work.py`) - the
 dual_blob stage's Finding-3 lesson: sequential A-then-B timing on this
 drifting GPU produces sign-flipping artifacts; only interleaving makes
 the ratios trustworthy.
@@ -340,66 +340,66 @@ the ratios trustworthy.
 | sq_6000 center | 78.9 | 55.8 | 106.0 | **49.9** | 0.53× (0.53) | 1.12× (1.10) | 3,001→1,501 | 74/87/97 |
 | sq_8000 center | 136.1 | 99.6 | 200.1 | **88.5** | **0.50× (0.50)** | 1.13× (1.16) | 4,001→2,001 | 81/90/98 |
 
-\* the one median/min disagreement (1.25 vs 1.05) — the disk drifted; every
+\* the one median/min disagreement (1.25 vs 1.05) - the disk drifted; every
 other ratio's two forms agree, so the signs are real. Fill sets
 cross-checked against the 8-conn oracle on every scene, every config.
-**wc wins every scene** — sq_8000 in 88.5 ms is 64M px at 723 Mpx/s, the
+**wc wins every scene** - sq_8000 in 88.5 ms is 64M px at 723 Mpx/s, the
 fastest whole-scene rate this project has measured, and the serpentine
 finally beats its own 4-conn baseline. **r2 loses every scene**, scaling
 *worse* with size: 0.88× at 1M px down to 0.50× at 64M.
 
 ### Post-mortem: why r2 lost and wc won
 
-**Radius-2 fell into the hole conn8 climbed out of — at the top.** conn8
+**Radius-2 fell into the hole conn8 climbed out of - at the top.** conn8
 won by halving levels *where utilization had headroom* (62→81% at 64M):
 doubling level width put idle lanes to work, and the extra probes hid
 behind latency that was going spare. r2 repeated the trick starting from
-81–90% utilization — there were no idle lanes left to feed. What remained
-was the bill: 16 extra probes per interior pixel and 2.5–2.9× the CAS
+81-90% utilization - there were no idle lanes left to feed. What remained
+was the bill: 16 extra probes per interior pixel and 2.5-2.9× the CAS
 attempts, none of it hideable. The modeled rate hit 51.7 GB/s (29% of
-peak — a project record; the machine genuinely moved more bytes per
+peak - a project record; the machine genuinely moved more bytes per
 second than ever) and *still lost half its wall-clock*: work-efficiency
 loss, not machine inefficiency. The width lever is exhausted; pulling it
 harder just buys traffic.
 
 **Warp-coop won for the mirror reason: it adds zero work and wastes zero
-lanes.** Same BFS graph, same probes, same atomics — redistributed so
+lanes.** Same BFS graph, same probes, same atomics - redistributed so
 that a level of L entries occupies 8L lanes instead of L. Every scene
 still had lane-idleness to harvest (even sq_8000 idled 19% of lanes at
 conn8), so every scene won. The serpentine's 1.45× also splits the
 standing "barrier cost" story: of conn8's ~5.5 µs/level, ~1.9 µs was the
-8 serial probe rounds wc collapsed into one — the two grid.syncs were
+8 serial probe rounds wc collapsed into one - the two grid.syncs were
 never the whole bill.
 
 One more free observation: the bare twins compile leaner (72-block
-capacity vs 48 instrumented at tpb=256) — instrumentation, not the BFS,
+capacity vs 48 instrumented at tpb=256) - instrumentation, not the BFS,
 sets this stage's register wall.
 
 ## Wavefront renders (`wavefront.py` → `wavefront/`)
 
 The kernel records `depth[x,y]` (when) and `owner[x,y]` (which block), so
 the BFS replays as animation with zero extra GPU work. Color legend: **hue
-= block** (golden-angle spacing inside 30°–330° — the red band is excluded
+= block** (golden-angle spacing inside 30°-330° - the red band is excluded
 because unfilled scene pixels ARE red), **lightness = fill level**
 (light → dark), frontier band = near-white tint of the owner's hue.
 
 | artifact | config | what it shows |
 |---|---|---|
 | `square256_b8_t32.gif/.png` | 8×32 | all 8 blocks share the wave; per-block coherence near the seed decays into speckle |
-| `square256_b8_t32_conn8.gif/.png` | 8×32, `connectivity=8` | the same scene as a **square** wave (Chebyshev ball) — the walls arrive in half the levels |
+| `square256_b8_t32_conn8.gif/.png` | 8×32, `connectivity=8` | the same scene as a **square** wave (Chebyshev ball) - the walls arrive in half the levels |
 | `fullred256_b8_t32.gif/.png` | 8×32, corner seed | blocks come online one by one as the frontier outgrows the threads in front of them |
 | `disk512_b8_t64.gif/.png` | 8×64 | the frontier ring sweeping a disk, 8-hue trail behind it |
-| `square256_b48_t256.png` | 48×256 — the benchmark's own config | a ~440 px frontier feeds exactly 2 of 48 blocks; 46 idle at every barrier |
+| `square256_b48_t256.png` | 48×256 - the benchmark's own config | a ~440 px frontier feeds exactly 2 of 48 blocks; 46 idle at every barrier |
 | `serpentine128_b8_t32.png` | 8×32 | starvation itself: block 0 owns every single pixel |
 
 **The speckle is a finding, not an artifact.** A block owns contiguous
 chunks of the queue window, but queue order is warp-aggregated discovery
-order, which spatially scrambles within a few levels — ownership becomes
+order, which spatially scrambles within a few levels - ownership becomes
 fine-grained noise (with visible horizontal streaks: individual warp
 slabs). That scatter is the picture behind the bandwidth section's
 sector-inflation argument: adjacent pixels are touched by unrelated warps,
 so small scattered accesses drag whole 32 B sectors. Compare the dual
-stage's `split` render (two solid territories) — spatial coherence was the
+stage's `split` render (two solid territories) - spatial coherence was the
 one thing its losing kernel had that the winner doesn't.
 
 ## Run
@@ -427,70 +427,70 @@ uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.wavef
 
 ## Glossary (the stage's load-bearing terms)
 
-- **Throughput** (תפוקה) — finished work per second: **Mpx/s**, pixels
-  recolored per second. **Bandwidth** (רוחב פס) — bytes carried per second
+- **Throughput** (תפוקה) - finished work per second: **Mpx/s**, pixels
+  recolored per second. **Bandwidth** (רוחב פס) - bytes carried per second
   between the GPU cores and memory: **GB/s**. Throughput is the product
   coming off the line; bandwidth is the trucking capacity feeding it.
   Every pixel needs ~dozens of bytes moved, so saturated trucks cap the
   line even with idle workers.
-- **Register** — a thread's private scratch slot, the fastest storage on
+- **Register** - a thread's private scratch slot, the fastest storage on
   the chip. The compiler counts how many live variables one thread of the
-  kernel needs (`x, y, pixel, front, rear, level`, loop state…) — this
+  kernel needs (`x, y, pixel, front, rear, level`, loop state…) - this
   kernel needs **~104 per thread**. Per *thread* because in SIMT every
   thread holds its own copy of every variable.
-- **Register file** — each SM's fixed supply of **65,536 registers**,
+- **Register file** - each SM's fixed supply of **65,536 registers**,
   shared by all threads seated on it. 65,536 ÷ 104 ≈ 630, rounded down by
   the hardware's coarse allocation granularity to **512 threads per SM**
-  (that's threads per SM — the registers per SM are the fixed 65,536).
+  (that's threads per SM - the registers per SM are the fixed 65,536).
   ×24 SMs = the ubiquitous **12,288 threads**: every capacity number in
   this stage (384×32, 192×64, 96×128, 48×256, 24×512) is this one wall in
   different clothing.
-- **Resident / co-resident** — a thread (or block) is *resident* when its
+- **Resident / co-resident** - a thread (or block) is *resident* when its
   seat and registers are physically allocated on an SM right now, rather
   than waiting in the scheduler's queue. Blocks are *co-resident* when all
-  of them are seated simultaneously — the precondition for `grid.sync`:
+  of them are seated simultaneously - the precondition for `grid.sync`:
   a block that never gets a seat can never arrive at the barrier, so the
   seated ones would wait forever. That is why cooperative launch refuses
   more blocks than can all be seated at once (the queried max), and why
   exceeding it is deadlock, not slowness.
-- **`grid.sync`** — the all-blocks checkpoint: nobody starts level L+1
+- **`grid.sync`** - the all-blocks checkpoint: nobody starts level L+1
   until everyone finished level L. Block-local `syncthreads` costs tens of
-  cycles; `grid.sync` spans all SMs and costs **~1.7–2.6 µs (~4,000
+  cycles; `grid.sync` spans all SMs and costs **~1.7-2.6 µs (~4,000
   cycles)**, growing with the block count. Two per level (publish the new
   queue rear; everyone reads it) × 7,999 levels of the corner square ≈
-  **16,000 syncs ≈ 32 ms** — most of that scene's runtime is the ritual.
-- **Bare twin** — the same kernel with every measurement counter deleted;
+  **16,000 syncs ≈ 32 ms** - most of that scene's runtime is the ritual.
+- **Bare twin** - the same kernel with every measurement counter deleted;
   exists so instrumentation cost is measured, not assumed. Fewer variables
-  → fewer registers → 768 threads/SM fit. **Register diet** — capping
+  → fewer registers → 768 threads/SM fit. **Register diet** - capping
   registers at compile time (`max_registers=N`); excess variables spill to
   slow memory. The bare twin proves the diet buys residency; the open
   question is whether the spills cost more than the residency pays.
-- **Hard architectural caps** — independent of registers, an Ada SM seats
+- **Hard architectural caps** - independent of registers, an Ada SM seats
   at most **24 blocks** and **1,536 threads**; 24 blocks × 24 SMs = 576 is
   a ceiling no kernel can pass.
-- **Equal-thread diagonal** — the sweep-table cells with blocks × tpb =
+- **Equal-thread diagonal** - the sweep-table cells with blocks × tpb =
   12,288 (24×512 … 384×32). Total threads identical, only the grouping
   differs, so comparing along it isolates the grouping effect.
-- **Plateau** — the flat part of the scaling curve: once the grid covers
+- **Plateau** - the flat part of the scaling curve: once the grid covers
   the typical frontier and every SM is fed, extra blocks add barrier
   arrivals and nothing else, so Mpx/s stops rising (and past ~128 blocks,
   falls).
-- **Manhattan vs Chebyshev distance** — 4-conn BFS depth is |Δx| + |Δy|
+- **Manhattan vs Chebyshev distance** - 4-conn BFS depth is |Δx| + |Δy|
   (waves are diamonds; a corner-seeded W×H image takes W+H−1 levels);
-  8-conn depth is max(|Δx|, |Δy|) (waves are squares; max(W, H) levels —
+  8-conn depth is max(|Δx|, |Δy|) (waves are squares; max(W, H) levels -
   about half). Half the levels = half the `grid.sync` ritual, and each
   level is roughly twice as wide.
 
 ## Open problems (Chapter 4 candidates)
 
-1. **`ncu` ground truth** — arbitrate the plateau: DRAM sector traffic,
+1. **`ncu` ground truth** - arbitrate the plateau: DRAM sector traffic,
    L2 hit rates, atomic contention on the rear. The derived model got the
    project this far; only a profiler can close the attribution gap.
-2. **Register dieting** — the bare twin proves 768 threads/SM fit at ~85
+2. **Register dieting** - the bare twin proves 768 threads/SM fit at ~85
    registers; slimming the instrumented kernel's window state would grow
    the grid ceiling and test whether more resident warps move the plateau.
-3. **The serpentine remains unbeaten** — and N blocks made it *worse*.
+3. **The serpentine remains unbeaten** - and N blocks made it *worse*.
    Tile-based BFS (iterate inside a block-local tile between global syncs)
    is still the standing candidate.
-4. **Multi-blob** — connected-component labeling, per the original
+4. **Multi-blob** - connected-component labeling, per the original
    roadmap's design analysis.
