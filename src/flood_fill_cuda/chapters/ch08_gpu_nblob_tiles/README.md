@@ -1052,7 +1052,8 @@ Tests (`test_correctness.py`, 2,567, 8 of them behind
   every instrumented run counts each touched tile once in `paint_tiles`
   and paints it by exactly one path
 
-ch07's 157 tests and ch06's 109 also pass.
+ch07's 247 tests (1,959 runs over its 9 switch modes) and ch06's 109
+also pass.
 
 ## Deviations from the design (and why)
 
