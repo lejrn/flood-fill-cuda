@@ -30,6 +30,10 @@ scene, and the clock sampler's window is kept per experiment.
 
 The decision rules are applied at the end and written to the JSON.
 
+Every engine here runs flood_fill.OLD_PATH (the comp-loop K2 and K4, the
+hybrid K3, full grids): the path these experiments chose for. The
+dense-tile path is timed by benchmark.py --session dense.
+
 Run:
   uv run python -m flood_fill_cuda.chapters.ch08_gpu_nblob_tiles.benchmarks.experiments --images DIR
 Writes experiments_<stamp>.json to results/ch08_gpu_nblob_tiles/
@@ -62,6 +66,13 @@ from ...ch06_gpu_nblob_runs.recolor import RunRecolor
 from ...ch06_gpu_nblob_runs.kernels import pack_kernel as ch06_pack
 from ...ch07_gpu_1blob_tiles.benchmarks import worst_cases as W7
 from . import benchmark as B
+
+OLD = dict(ff.OLD_PATH)
+
+
+def _tw(width, height, **kw):
+    """An engine on the old path (kw may override its fields)."""
+    return ff.TileWaves(width, height, **{**OLD, **kw})
 
 warnings.simplefilter("ignore", NumbaPerformanceWarning)
 
@@ -149,7 +160,7 @@ def _single(kernel_call):
 
 def _instrumented_counters(img, **kw):
     """One instrumented run off the clock: the counters of a config."""
-    eng = ff.TileWaves(img.shape[0], img.shape[1], instrumented=True, **kw)
+    eng = _tw(img.shape[0], img.shape[1], instrumented=True, **kw)
     d = cuda.to_device(img)
     eng.run(d, "rgb")
     cuda.synchronize()
@@ -186,7 +197,7 @@ def e1_pack(img, d_img, d_pr, sampler):
         "tiles_tilemajor_ref": (None, _single(lambda d: get_pack_kernel(
             "tilemajor")[grid, tpb](d, tm))),
     }
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     _respin(eng, d_img)
     res = interleave(arms, d_img, d_pr, sampler)
     for n in arms:
@@ -197,7 +208,7 @@ def e1_pack(img, d_img, d_pr, sampler):
 
 def e2_exits(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     arms = {f"exits_{e}": _ch08_arm(eng, "mask", attrs={
         "label_k": get_label_kernel(8, False, False, None, False, e)})
         for e in (0, 1, 2)}
@@ -211,7 +222,7 @@ def e2_exits(img, d_img, d_pr, sampler):
 
 def e3_label(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     arms = {}
     for regs in (None, 96, 80):
         for g in (384, 768, 1536):
@@ -221,14 +232,15 @@ def e3_label(img, d_img, d_pr, sampler):
     _respin(eng, d_img)
     res = interleave(arms, d_img, d_pr, sampler)
     res["_resources"] = {str(r): ff.kernel_resources(
-        8, label_max_registers=r)["label"] for r in (None, 96, 80)}
+        8, label_max_registers=r, lookup=OLD["lookup"], dense=False)["label"]
+        for r in (None, 96, 80)}
     return res
 
 
 def e4_lookup(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    engs = {"scan": ff.TileWaves(w, h),
-            "index": ff.TileWaves(w, h, lookup="index")}
+    engs = {"scan": _tw(w, h),
+            "index": _tw(w, h, lookup="index")}
     arms = {n: _ch08_arm(e) for n, e in engs.items()}
     _respin(engs["scan"], d_img)
     res = interleave(arms, d_img, d_pr, sampler)
@@ -239,7 +251,7 @@ def e4_lookup(img, d_img, d_pr, sampler):
 
 def e5_paint(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     arms = {}
     for fast in (True, False):
         for tpb in (128, 256):
@@ -252,7 +264,7 @@ def e5_paint(img, d_img, d_pr, sampler):
 
 def e6_dial(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     arms = {f"L{L}": _ch08_arm(eng, lattice=L)
             for L in (8, 0, 32, 16, 4, 2, 1)}
     _respin(eng, d_img)
@@ -264,7 +276,7 @@ def e6_dial(img, d_img, d_pr, sampler):
 
 def e7_union(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     cap = eng.coll_capacity
     arms = {"deferred": _ch08_arm(eng, attrs={"coll_capacity": cap}),
             "inline": _ch08_arm(eng, attrs={"coll_capacity": 0})}
@@ -276,8 +288,8 @@ def e7_union(img, d_img, d_pr, sampler):
 
 def e8_counters(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    engs = {"bare": ff.TileWaves(w, h),
-            "instrumented": ff.TileWaves(w, h, instrumented=True)}
+    engs = {"bare": _tw(w, h),
+            "instrumented": _tw(w, h, instrumented=True)}
     arms = {n: _ch08_arm(e, "mask") for n, e in engs.items()}
     _respin(engs["bare"], d_img)
     return interleave(arms, d_img, d_pr, sampler)
@@ -289,7 +301,7 @@ E9_VALVES = (128, 64, 32, 16, 0)
 def e9_valve(img, d_img, d_pr, sampler):
     """The valve at the default lattice and lookup (L8)."""
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
+    eng = _tw(w, h)
     arms = {f"valve{v or 'off'}": _ch08_arm(eng, valve_round=v)
             for v in E9_VALVES}
     _respin(eng, d_img)
@@ -323,8 +335,8 @@ def e13_lookup(img, d_img, d_pr, sampler):
     and hybrid share the scan K2; index writes its byte index), the K3
     twin, its cooperative block count and dense_min set per arm."""
     w, h = img.shape[:2]
-    engs = {"scan": ff.TileWaves(w, h, lookup="hybrid"),
-            "index": ff.TileWaves(w, h, lookup="index")}
+    engs = {"scan": _tw(w, h, lookup="hybrid"),
+            "index": _tw(w, h, lookup="index")}
     arms = {}
     meta = {}
     for name, (lk, dm, regs) in E13_ARMS.items():
@@ -336,7 +348,7 @@ def e13_lookup(img, d_img, d_pr, sampler):
                                            "waves_blocks": blocks,
                                            "dense_min": dm})
         meta[name] = {"blocks": blocks, "resources": ff.kernel_resources(
-            8, lookup=lk, waves_max_registers=regs)["waves"]}
+            8, lookup=lk, waves_max_registers=regs, dense=False)["waves"]}
     _respin(engs["scan"], d_img)
     res = interleave(arms, d_img, d_pr, sampler)
     for name, (lk, dm, regs) in E13_ARMS.items():
@@ -348,8 +360,9 @@ def e13_lookup(img, d_img, d_pr, sampler):
 
 def e10_waves(img, d_img, d_pr, sampler):
     w, h = img.shape[:2]
-    eng = ff.TileWaves(w, h)
-    blocks = {tpb: ff.max_blocks(tpb, 8, False, False) for tpb in (256, 128)}
+    eng = _tw(w, h)
+    blocks = {tpb: ff.max_blocks(tpb, 8, False, False, OLD["lookup"])
+              for tpb in (256, 128)}
     arms = {f"tpb{tpb}": _ch08_arm(eng, "mask", attrs={
         "waves_tpb": tpb, "waves_blocks": blocks[tpb]}) for tpb in (256, 128)}
     _respin(eng, d_img)
@@ -366,8 +379,8 @@ def e4b_lookup_k2(img, d_img, d_pr, sampler):
     bytes at that cap. Full rgb pipelines: scan at E3's pick against
     index at three K2 settings."""
     w, h = img.shape[:2]
-    es = ff.TileWaves(w, h, lookup="scan")
-    ei = ff.TileWaves(w, h, lookup="index")
+    es = _tw(w, h, lookup="scan")
+    ei = _tw(w, h, lookup="index")
     arms = {"scan_r80_g1536": _ch08_arm(es, attrs={
         "label_k": get_label_kernel(8, False, False, 80, False),
         "label_grid": (1536, 128)})}
@@ -580,9 +593,9 @@ def main():
     args = ap.parse_args()
     pngs = B._resolve_pngs(args.images)
     print(B._free_m())
-    for lk in ff.LOOKUPS:
-        ff._warmup(8, False, False, lookup=lk)
-        ff._warmup(8, True, False, lookup=lk)
+    for lk in ("scan", "index", "hybrid"):
+        ff._warmup(8, False, False, lookup=lk, dense=False)
+        ff._warmup(8, True, False, lookup=lk, dense=False)
     flush = cuda.to_device(np.zeros(B.L2_FLUSH_BYTES // 4, np.uint32))
     sink = cuda.device_array(1, np.uint32)
     B._SPIN["flush"], B._SPIN["sink"] = flush, sink
@@ -590,7 +603,7 @@ def main():
     spin = np.zeros((2048, 2048, 3), np.uint8)
     spin[..., 0] = 255
     d_spin = cuda.to_device(spin)
-    seng = ff.TileWaves(2048, 2048)
+    seng = _tw(2048, 2048)
     B._spin(seng, d_spin, B.SPIN_SECONDS)
     del seng, d_spin
     print(f"clocks: {B._clocks()}")

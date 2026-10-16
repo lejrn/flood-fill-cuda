@@ -2,7 +2,8 @@
 
 Public API (mirrors ch06's recolor.py):
     TileWaves(width, height, connectivity=8, lattice=8, valve_round=16,
-              lookup="hybrid", dense_min=4, coll_capacity=None,
+              lookup=DEFAULT_LOOKUP, dense=DEFAULT_DENSE, dense_min=4,
+              ccl_min=3, paint_ccl_min=3, coll_capacity=None,
               instrumented=False, debug=False, ...)   reusable buffers
         .pack(img_dev)                 RGB -> mask (mask contract, untimed)
         .run(img_dev, contract="rgb")  enqueue only -> (phases, events)
@@ -20,6 +21,9 @@ each (the mask contract drops K1):
     label   K2: close every tile comp in registers, write ring records
     waves   K3: cooperative rounds of claims, unions, flatten
     paint   K4: palette[label % 6] on red, word-coalesced
+
+With dense=True two more: label_ccl (K2b, the run CCL of the tiles K2
+left in the tile list) after label, and paint_ccl (K4b) after paint.
 
 `kernel_ms` is the first event to the last. No host copy is on the
 clock (ch06 lost 1.72 ms to one): init is a device kernel.
@@ -46,13 +50,18 @@ from numba import cuda
 from . import kernels as k
 from .kernels import (
     init_kernel, get_pack_kernel, get_label_kernel, get_waves_kernel,
-    get_paint_kernel, gpu_sleep_kernel, fill_i32, pack_shape,
+    get_paint_kernel, get_label_dense_kernel, get_paint_dense_kernel,
+    get_waves_dense_kernel,
+    gpu_sleep_kernel, fill_i32, pack_shape, Q_DENSE, Q_PDENSE,
     MODE_RGB, MODE_LABEL, MODE_SEEDS, NUM_COUNTERS, COUNTER_NAMES,
     N_QSTATE, N_STAMPS, IDS_PER_TILE, REC, TILE, HDR_RING_MASK,
-    HDR_TOTAL_SHIFT, ST_TAIL, ST_UNION, ST_FLAT1, ST_FLAT2, INDEX_BYTES)
+    HDR_TOTAL_SHIFT, ST_TAIL, ST_UNION, ST_FLAT1, ST_FLAT2, INDEX_BYTES,
+    CCL_MAX_WARPS)
 
 CONTRACTS = ("rgb", "mask")
-LOOKUPS = ("scan", "index", "hybrid")
+# dindex (dense tiles): the index where K2's run CCL wrote one, the scan
+# elsewhere; it needs the dense K2
+LOOKUPS = ("scan", "index", "hybrid", "dindex")
 # row-major stores of the mask K2-K4 read; get_pack_kernel also builds
 # "tilemajor", experiment E1's reference store, which no engine may use
 PACK_VARIANTS = ("direct", "smem")
@@ -69,19 +78,23 @@ LABEL_ONLY_PHASES = ("init", "label", "waves")
 # K3 is cooperative at 256 threads per block and the cooperative maximum
 # of its compiled twin (E10: 128 threads tied).
 LABEL_GRID = (1536, 128)
-LABEL_MAX_REGISTERS = {"scan": 80, "index": None, "hybrid": 80}
+LABEL_MAX_REGISTERS = {"scan": 80, "index": None, "hybrid": 80,
+                       "dindex": 80}
 # K3's register cap per lookup (None: the compiler's choice); "auto" in
 # the API means this table. The hybrid twin takes 97 registers by
 # itself, which allows 2 cooperative blocks of 256 per SM; at 80 it
 # keeps 3 (72 blocks), with no more local memory than the scan twin
 # (experiment E13).
-WAVES_MAX_REGISTERS = {"scan": None, "index": None, "hybrid": 80}
-# K3's neighbour lookup (E13, session experiments_20261015T180817Z): the
-# hybrid at dense_min 4 and 80 registers; input_blobs 0.991 of the scan
-# (per-round median), 0.29 on the decoy staircase, 0.42 on zz_lattice_4k.
-# The index twin is faster on long shapes but costs 1.5-2.0% on
-# input_blobs (its K2 writes the byte index).
-DEFAULT_LOOKUP = "hybrid"
+WAVES_MAX_REGISTERS = {"scan": None, "index": None, "hybrid": 80,
+                       "dindex": 80}
+# K3's neighbour lookup. E13 (session experiments_20261015T180817Z) chose
+# the hybrid at dense_min 4 and 80 registers: input_blobs 0.991 of the
+# scan (per-round median), 0.29 on the decoy staircase, 0.42 on
+# zz_lattice_4k. The index twin is faster on long shapes but cost 1.5-2.0%
+# on input_blobs (its K2 wrote the byte index for every tile). The dense
+# path's dindex indexes only the tiles K2b labels, and falls back to the
+# hybrid elsewhere.
+DEFAULT_LOOKUP = "dindex"
 PAINT_GRID = (768, 128)
 WAVES_TPB = 256
 DEFAULT_LATTICE = 8
@@ -96,6 +109,29 @@ DEFAULT_VALVE_ROUND = 16
 DEFAULT_DENSE_MIN = 4
 # collision list soft cap per tile; entries past it become inline unions
 COLL_PER_TILE = 16
+# Dense tiles (the run CCL in K2 and K4). A tile goes to K2's run CCL
+# when its estimated comp count (runs touching no red pixel of the row
+# above, an upper bound) reaches ccl_min, and to K4's when its header's
+# comp count reaches paint_ccl_min. Both are runtime arguments.
+DEFAULT_DENSE = True
+DEFAULT_CCL_MIN = 12
+DEFAULT_PAINT_CCL_MIN = 10
+# ... and at most this many runs per (estimated) comp
+DEFAULT_CCL_RPC = 12
+DEFAULT_PAINT_RPC = 24
+# The dindex K3 (its own twin; the other lookups keep the chapter's K3):
+# flat_opt, lone seeds skip the find and the rmin is read before the
+# atomicMin; compact, a warp runs only the (entry, direction) tasks that
+# exist, 32 at a time. Both compile-time flags, dindex only.
+DEFAULT_FLAT_OPT = True
+DEFAULT_COMPACT = True
+DEFAULT_COOP = True
+# fit K2's and K4's grids to the tile count (small images)
+DEFAULT_FIT_GRIDS = True
+# K2b's register cap (None: the compiler's choice)
+LABEL_DENSE_MAX_REGISTERS = None
+# The chapter's path before the dense-tile work: the ablation baseline.
+OLD_PATH = dict(dense=False, lookup="hybrid", fit_grids=False)
 
 _warmed = set()
 _coop = {}
@@ -107,6 +143,13 @@ def _overload(kern):
 
 def _one(v):
     return int(next(iter(v.values()))) if isinstance(v, dict) else int(v)
+
+
+def _fit(grid, n_tiles):
+    """A one-warp-per-tile grid cut to the tile count."""
+    blocks, tpb = (int(v) for v in grid)
+    wpb = tpb // 32
+    return (max(1, min(blocks, (n_tiles + wpb - 1) // wpb)), tpb)
 
 
 def _check_grid(name, grid):
@@ -152,6 +195,12 @@ class TileWaves:
                  label_max_registers="auto", paint_fast=True,
                  pack_variant="direct", label_exits=2,
                  dense_min=DEFAULT_DENSE_MIN, waves_max_registers="auto",
+                 dense=DEFAULT_DENSE, ccl_min=DEFAULT_CCL_MIN,
+                 paint_ccl_min=DEFAULT_PAINT_CCL_MIN,
+                 ccl_rpc=DEFAULT_CCL_RPC, paint_rpc=DEFAULT_PAINT_RPC,
+                 flat_opt=DEFAULT_FLAT_OPT, fit_grids=DEFAULT_FIT_GRIDS,
+                 label_dense_max_registers=LABEL_DENSE_MAX_REGISTERS,
+                 waves_compact=DEFAULT_COMPACT, waves_coop=DEFAULT_COOP,
                  _skip_warmup=False):
         width, height = int(width), int(height)
         if width < 1 or height < 1:
@@ -175,6 +224,26 @@ class TileWaves:
         if pack_variant not in PACK_VARIANTS:
             raise ValueError(f"pack_variant must be one of {PACK_VARIANTS}, "
                              f"got {pack_variant!r}")
+        self.dense = bool(dense)
+        if lookup == "dindex" and not self.dense:
+            raise ValueError("the dindex lookup reads the index that the "
+                             "dense K2 writes: it needs dense=True")
+        if self.dense:
+            for name, grid in (("label_grid", label_grid),
+                               ("paint_grid", paint_grid)):
+                if int(grid[1]) > 32 * CCL_MAX_WARPS:
+                    raise ValueError(
+                        f"{name}: the dense twins take at most "
+                        f"{32 * CCL_MAX_WARPS} threads per block, got "
+                        f"{tuple(grid)}")
+        self.ccl_min = int(ccl_min)
+        self.paint_ccl_min = int(paint_ccl_min)
+        self.ccl_rpc = int(ccl_rpc)
+        self.paint_rpc = int(paint_rpc)
+        self.flat_opt = bool(flat_opt) and lookup == "dindex"
+        self.waves_compact = bool(waves_compact) and lookup == "dindex"
+        self.waves_coop = bool(waves_coop) or lookup != "dindex"
+        self.fit_grids = bool(fit_grids)
         self.width = width
         self.height = height
         self.connectivity = connectivity
@@ -191,6 +260,9 @@ class TileWaves:
         self.lookup = lookup
         self.index = lookup == "index"
         self.hybrid = lookup == "hybrid"
+        self.dindex = lookup == "dindex"
+        # the dense K2 writes the index for the lookups that read it
+        self.pindex = self.dense and (self.index or self.dindex)
         self.dense_min = int(dense_min)
         if self.dense_min < 0:
             raise ValueError("dense_min must be >= 0")
@@ -206,6 +278,12 @@ class TileWaves:
         self.pack_variant = pack_variant
         self.label_grid = tuple(label_grid)
         self.paint_grid = tuple(paint_grid)
+        if self.fit_grids:
+            # one warp per tile at most: blocks past that only exit
+            self.label_grid = _fit(self.label_grid, self.n_tiles)
+            self.paint_grid = _fit(self.paint_grid, self.n_tiles)
+        self.label_wpb = self.label_grid[1] // 32
+        self.paint_wpb = self.paint_grid[1] // 32
         self.waves_tpb = int(waves_tpb)
         self.label_max_registers = label_max_registers
         self.coll_capacity = int(COLL_PER_TILE * self.n_tiles
@@ -216,17 +294,32 @@ class TileWaves:
         self.pack_k = get_pack_kernel(pack_variant)
         self.label_k = get_label_kernel(connectivity, self.instrumented,
                                         self.debug, label_max_registers,
-                                        self.index, self.label_exits)
-        self.waves_k = get_waves_kernel(connectivity, self.instrumented,
-                                        self.debug, self.index, self.hybrid,
-                                        waves_max_registers)
+                                        self.index, self.label_exits,
+                                        self.dense)
+        self.waves_k = _waves_twin(connectivity, self.instrumented,
+                                   self.debug, lookup, waves_max_registers,
+                                   self.waves_compact, self.flat_opt,
+                                   self.waves_tpb, self.waves_coop)
         self.paint_k = get_paint_kernel(connectivity, MODE_RGB,
                                         self.paint_fast, self.instrumented,
-                                        self.debug)
+                                        self.debug, self.dense)
         self.lmap_k = get_paint_kernel(connectivity, MODE_LABEL, False,
-                                       False, False)
+                                       False, False, self.dense)
         self.seeds_k = get_paint_kernel(connectivity, MODE_SEEDS, False,
-                                        False, False)
+                                        False, False, self.dense)
+        if self.dense:
+            self.label_dense_k = get_label_dense_kernel(
+                connectivity, self.instrumented, self.debug,
+                label_dense_max_registers, self.label_wpb, self.pindex)
+            self.paint_dense_k = get_paint_dense_kernel(
+                connectivity, MODE_RGB, self.paint_fast, self.instrumented,
+                self.debug, self.paint_wpb)
+            self.lmap_dense_k = get_paint_dense_kernel(
+                connectivity, MODE_LABEL, False, False, False,
+                self.paint_wpb)
+            self.seeds_dense_k = get_paint_dense_kernel(
+                connectivity, MODE_SEEDS, False, False, False,
+                self.paint_wpb)
 
         self.mask = cuda.device_array((width, self.words_per_row), np.uint32)
         self._mask_flat = self.mask.reshape(width * self.words_per_row)
@@ -242,6 +335,13 @@ class TileWaves:
         self.ca = cuda.device_array(cc, np.int32)
         self.cb = cuda.device_array(cc, np.int32)
         self.q_state = cuda.device_array(N_QSTATE, np.int32)
+        # dense: K2 -> K2b and K4 -> K4b tile lists (one buffer: K2b is
+        # done before K4 appends), the K4 count in q_state[Q_PDENSE]; the
+        # off-clock twins count in their own zeroed slot
+        self.tlist = cuda.device_array(self.n_tiles if self.dense else 1,
+                                       np.int32)
+        self._pcount = self.q_state[Q_PDENSE:Q_PDENSE + 1]
+        self._pcount_off = cuda.device_array(1, np.int32)
         self.counters = cuda.device_array(NUM_COUNTERS, np.int64)
         # per-round rears (instrumented): rounds <= crossing comps + 1,
         # and <= valve_round + 2 with the valve on; a run may switch the
@@ -250,7 +350,7 @@ class TileWaves:
         self.bounds = cuda.device_array(nb, np.int32)
         self.stamps = cuda.device_array(N_STAMPS if self.instrumented else 1,
                                         np.int64)
-        if self.index:
+        if self.index or self.dindex:
             self.idx = cuda.device_array(INDEX_BYTES * self.n_tiles, np.uint8)
             self.frame = cuda.device_array(4 * self.n_tiles, np.uint32)
         else:
@@ -262,15 +362,30 @@ class TileWaves:
         self._seed_n = cuda.device_array(1, np.int32)
         self.pack_grid, self.pack_tpb = pack_shape(width, self.words_per_row)
 
+        # K2b and K4b grid-stride over a tile list whose length only the
+        # device knows: launched at most at their resident capacity
+        # (with fit_grids), so an empty list costs one wave of blocks
+        self.label_dense_grid = self.label_grid
+        self.paint_dense_grid = self.paint_grid
         if _skip_warmup:
             self.waves_blocks = 1 if waves_blocks is None else int(waves_blocks)
             self.coop_max_blocks = -1
             return
         _warmup(connectivity, self.instrumented, self.debug,
                 label_max_registers, self.paint_fast, pack_variant,
-                lookup, self.label_exits, waves_max_registers)
+                lookup, self.label_exits, waves_max_registers, self.dense,
+                self.flat_opt, self.label_wpb, self.paint_wpb,
+                self.waves_compact)
+        if self.dense and self.fit_grids:
+            for name, grid in (("label_dense_grid", self.label_grid),
+                               ("paint_dense_grid", self.paint_grid)):
+                kern = (self.label_dense_k if name == "label_dense_grid"
+                        else self.paint_dense_k)
+                res = _overload(kern).max_cooperative_grid_blocks(grid[1])
+                setattr(self, name, (max(1, min(grid[0], res)), grid[1]))
         cap = max_blocks(self.waves_tpb, connectivity, self.instrumented,
-                         self.debug, lookup, waves_max_registers)
+                         self.debug, lookup, waves_max_registers,
+                         self.flat_opt, self.waves_compact, self.waves_coop)
         if cap < 1:
             raise RuntimeError("this GPU cannot host one cooperative block "
                                f"of the waves kernel at {waves_tpb} threads")
@@ -294,12 +409,54 @@ class TileWaves:
         before any wave touches them). No sync."""
         lat = self.lattice if lattice is None else int(lattice)
         init_kernel[1, 64](self.q_state, self.counters)
-        self.label_k[self.label_grid[0], self.label_grid[1]](
-            self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-            self.ql, self.qd, self.q_state, self.counters, self.idx,
-            self.frame, np.int32(self.width), np.int32(self.height),
-            np.int32(self.words_per_row), np.int32(self.n_tiles),
-            np.int32(lat))
+        for _, launch in self._label_launches(np.int32(lat)):
+            launch()
+
+    def _label_launches(self, lat):
+        """K2 (and K2b when dense) as (phase name, launch) pairs."""
+        w, h = np.int32(self.width), np.int32(self.height)
+        wpr, nt = np.int32(self.words_per_row), np.int32(self.n_tiles)
+
+        def label():
+            self.label_k[self.label_grid[0], self.label_grid[1]](
+                self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
+                self.ql, self.qd, self.q_state, self.counters, self.idx,
+                self.frame, self.tlist, w, h, wpr, nt, lat,
+                np.int32(self.ccl_min), np.int32(self.ccl_rpc))
+
+        def label_ccl():
+            self.label_dense_k[self.label_dense_grid[0],
+                               self.label_dense_grid[1]](
+                self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
+                self.ql, self.qd, self.q_state, self.counters, self.idx,
+                self.frame, self.tlist, w, h, wpr, nt, lat)
+
+        out = [("label", label)]
+        if self.dense:
+            out.append(("label_ccl", label_ccl))
+        return out
+
+    def _paint_launches(self, kern, kern_dense, img, lmap, seeds, seed_n,
+                        pcount):
+        """K4 (and K4b when dense) of one mode as (name, launch) pairs."""
+        w, h = np.int32(self.width), np.int32(self.height)
+        wpr, nt = np.int32(self.words_per_row), np.int32(self.n_tiles)
+
+        def paint():
+            kern[self.paint_grid[0], self.paint_grid[1]](
+                self._mask_flat, self.hdr, self.rec, img, lmap, seeds,
+                seed_n, self.counters, self.tlist, pcount, w, h, wpr, nt,
+                np.int32(self.paint_ccl_min), np.int32(self.paint_rpc))
+
+        def paint_ccl():
+            kern_dense[self.paint_dense_grid[0], self.paint_dense_grid[1]](
+                self._mask_flat, self.hdr, self.rec, img, lmap, seeds,
+                seed_n, self.counters, self.tlist, pcount, w, h, wpr, nt)
+
+        out = [("paint", paint)]
+        if self.dense:
+            out.append(("paint_ccl", paint_ccl))
+        return out
 
     def stages(self, img_dev, contract="rgb", lattice=None,
                valve_round=None, paint=True):
@@ -325,12 +482,6 @@ class TileWaves:
         def init():
             init_kernel[1, 64](self.q_state, self.counters)
 
-        def label():
-            self.label_k[self.label_grid[0], self.label_grid[1]](
-                self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-                self.ql, self.qd, self.q_state, self.counters, self.idx,
-                self.frame, w, h, wpr, nt, lat)
-
         def waves():
             self.waves_k[self.waves_blocks, self.waves_tpb](
                 self.hdr, self.rec, self.parent, self.qc, self.ql, self.qd,
@@ -338,16 +489,14 @@ class TileWaves:
                 self.stamps, self.idx, self.frame, wpr, nt, valve,
                 np.int32(self.coll_capacity), np.int32(self.dense_min))
 
-        def paint_():
-            self.paint_k[self.paint_grid[0], self.paint_grid[1]](
-                self._mask_flat, self.hdr, self.rec, img_dev,
-                self._dummy_lmap, self._dummy_seeds, self._seed_n,
-                self.counters, w, h, wpr, nt)
-
         out = [("pack", pack)] if contract == "rgb" else []
-        out += [("init", init), ("label", label), ("waves", waves)]
+        out += [("init", init)] + self._label_launches(lat)
+        out.append(("waves", waves))
         if paint:
-            out.append(("paint", paint_))
+            out += self._paint_launches(
+                self.paint_k, getattr(self, "paint_dense_k", None), img_dev,
+                self._dummy_lmap, self._dummy_seeds, self._seed_n,
+                self._pcount)
         return out
 
     def run(self, img_dev, contract="rgb", lattice=None, valve_round=None):
@@ -366,11 +515,12 @@ class TileWaves:
         """int32 (W, H) canonical label map, -1 off-blob (off the clock)."""
         flat = label_dev.reshape(self.width * self.height)
         fill_i32[256, 256](flat, np.int32(-1))
-        self.lmap_k[self.paint_grid[0], self.paint_grid[1]](
-            self._mask_flat, self.hdr, self.rec, self._dummy_img, label_dev,
-            self._dummy_seeds, self._seed_n, self.counters,
-            np.int32(self.width), np.int32(self.height),
-            np.int32(self.words_per_row), np.int32(self.n_tiles))
+        fill_i32[1, 32](self._pcount_off, np.int32(0))
+        for _, launch in self._paint_launches(
+                self.lmap_k, getattr(self, "lmap_dense_k", None),
+                self._dummy_img, label_dev, self._dummy_seeds, self._seed_n,
+                self._pcount_off):
+            launch()
 
     def emit_seeds(self, capacity=None):
         """Canonical seeds (x, y), sorted by label: the anchor of every
@@ -379,11 +529,12 @@ class TileWaves:
             capacity = max(1, self.n_blobs())
         buf = cuda.device_array(capacity, np.int32)
         n_dev = cuda.to_device(np.zeros(1, np.int32))
-        self.seeds_k[self.paint_grid[0], self.paint_grid[1]](
-            self._mask_flat, self.hdr, self.rec, self._dummy_img,
-            self._dummy_lmap, buf, n_dev, self.counters,
-            np.int32(self.width), np.int32(self.height),
-            np.int32(self.words_per_row), np.int32(self.n_tiles))
+        fill_i32[1, 32](self._pcount_off, np.int32(0))
+        for _, launch in self._paint_launches(
+                self.seeds_k, getattr(self, "seeds_dense_k", None),
+                self._dummy_img, self._dummy_lmap, buf, n_dev,
+                self._pcount_off):
+            launch()
         n = int(n_dev.copy_to_host()[0])
         if n > capacity:
             raise RuntimeError(f"{n} seeds found, more than the {capacity} "
@@ -458,7 +609,7 @@ class TileWaves:
         for a in (self.hdr, self.rec, self.parent, self.qc, self.ql,
                   self.qd, self.ca, self.cb):
             fill_i32[256, 256](a, v)
-        if self.index:
+        if self.index or self.dindex:
             fill_i32[256, 256](self.idx, np.int32(0x5A))
             fill_i32[256, 256](self.frame, v)
 
@@ -470,21 +621,51 @@ def phase_times(names, events):
     return ms, cuda.event_elapsed_time(events[0], events[-1])
 
 
+def _waves_twin(connectivity, instrumented, debug, lookup,
+                waves_max_registers, compact, flat_opt, tpb=WAVES_TPB,
+                coop=DEFAULT_COOP):
+    if lookup == "dindex":
+        return get_waves_dense_kernel(connectivity, instrumented, debug,
+                                      waves_max_registers, compact, flat_opt,
+                                      tpb // 32, coop)
+    return get_waves_kernel(connectivity, instrumented, debug,
+                            lookup == "index", lookup == "hybrid",
+                            waves_max_registers)
+
+
 def max_blocks(threads_per_block=WAVES_TPB, connectivity=8,
                instrumented=False, debug=False, lookup=DEFAULT_LOOKUP,
-               waves_max_registers="auto"):
+               waves_max_registers="auto", flat_opt=DEFAULT_FLAT_OPT,
+               compact=DEFAULT_COMPACT, coop=DEFAULT_COOP):
     """Cooperative capacity of the waves kernel twin, queried after its
     first compile (an uncompiled dispatcher has no overload)."""
     if waves_max_registers == "auto":
         waves_max_registers = WAVES_MAX_REGISTERS[lookup]
+    if lookup != "dindex":
+        flat_opt = compact = False
+        coop = True
     key = (threads_per_block, connectivity, bool(instrumented), bool(debug),
-           lookup, waves_max_registers)
+           lookup, waves_max_registers, bool(flat_opt), bool(compact),
+           bool(coop))
     if key not in _coop:
         _warmup(connectivity, instrumented, debug, lookup=lookup,
-                waves_max_registers=waves_max_registers)
-        kern = get_waves_kernel(connectivity, instrumented, debug,
-                                lookup == "index", lookup == "hybrid",
-                                waves_max_registers)
+                waves_max_registers=waves_max_registers,
+                dense=lookup == "dindex" or DEFAULT_DENSE,
+                flat_opt=flat_opt, compact=compact)
+        kern = _waves_twin(connectivity, instrumented, debug, lookup,
+                           waves_max_registers, compact, flat_opt,
+                           threads_per_block, coop)
+        if not kern.overloads:
+            # the dindex twin of this block size: compile it on a tiny run
+            eng = TileWaves(40, 40, connectivity=connectivity,
+                            instrumented=instrumented, debug=debug,
+                            lookup=lookup, dense=lookup == "dindex",
+                            waves_max_registers=waves_max_registers,
+                            waves_tpb=threads_per_block, waves_blocks=1,
+                            flat_opt=flat_opt, waves_compact=compact,
+                            waves_coop=coop, _skip_warmup=True)
+            eng.run(cuda.to_device(np.zeros((40, 40, 3), np.uint8)))
+            cuda.synchronize()
         _coop[key] = _overload(kern).max_cooperative_grid_blocks(
             threads_per_block)
     return _coop[key]
@@ -493,26 +674,44 @@ def max_blocks(threads_per_block=WAVES_TPB, connectivity=8,
 def kernel_resources(connectivity=8, instrumented=False, debug=False,
                      label_max_registers="auto", paint_fast=True,
                      lookup=DEFAULT_LOOKUP, label_exits=2,
-                     waves_max_registers="auto"):
-    """Registers and local (spill) bytes per thread of each kernel."""
+                     waves_max_registers="auto", dense=DEFAULT_DENSE,
+                     flat_opt=DEFAULT_FLAT_OPT, compact=DEFAULT_COMPACT):
+    """Registers and local (spill) bytes per thread of each kernel (the
+    default grids' block sizes)."""
+    if lookup != "dindex":
+        flat_opt = compact = False
     if label_max_registers == "auto":
         label_max_registers = LABEL_MAX_REGISTERS[lookup]
     if waves_max_registers == "auto":
         waves_max_registers = WAVES_MAX_REGISTERS[lookup]
+    lw, pw = LABEL_GRID[1] // 32, PAINT_GRID[1] // 32
     _warmup(connectivity, instrumented, debug, label_max_registers,
             paint_fast, lookup=lookup, label_exits=label_exits,
-            waves_max_registers=waves_max_registers)
+            waves_max_registers=waves_max_registers, dense=dense,
+            flat_opt=flat_opt, label_wpb=lw, paint_wpb=pw, compact=compact)
+    max_blocks(WAVES_TPB, connectivity, instrumented, debug, lookup,
+               waves_max_registers, flat_opt, compact)
     index = lookup == "index"
+    pindex = dense and lookup in ("index", "dindex")
     out = {}
-    for name, kern in (
-            ("label", get_label_kernel(connectivity, instrumented, debug,
-                                       label_max_registers, index,
-                                       label_exits)),
-            ("waves", get_waves_kernel(connectivity, instrumented, debug,
-                                       index, lookup == "hybrid",
-                                       waves_max_registers)),
-            ("paint", get_paint_kernel(connectivity, MODE_RGB, paint_fast,
-                                       instrumented, debug))):
+    kerns = [
+        ("label", get_label_kernel(connectivity, instrumented, debug,
+                                   label_max_registers, index, label_exits,
+                                   dense)),
+        ("waves", _waves_twin(connectivity, instrumented, debug, lookup,
+                              waves_max_registers, compact, flat_opt,
+                              WAVES_TPB)),
+        ("paint", get_paint_kernel(connectivity, MODE_RGB, paint_fast,
+                                   instrumented, debug, dense))]
+    if dense:
+        kerns += [
+            ("label_ccl", get_label_dense_kernel(
+                connectivity, instrumented, debug, LABEL_DENSE_MAX_REGISTERS,
+                lw, pindex)),
+            ("paint_ccl", get_paint_dense_kernel(
+                connectivity, MODE_RGB, paint_fast, instrumented, debug,
+                pw))]
+    for name, kern in kerns:
         out[name] = {"regs": _one(kern.get_regs_per_thread()),
                      "local_bytes": _one(kern.get_local_mem_per_thread())}
     return out
@@ -521,15 +720,24 @@ def kernel_resources(connectivity=8, instrumented=False, debug=False,
 def _warmup(connectivity=8, instrumented=False, debug=False,
             label_max_registers="auto", paint_fast=True,
             pack_variant="direct", lookup=DEFAULT_LOOKUP, label_exits=2,
-            waves_max_registers="auto"):
-    """JIT-compile every kernel of a configuration once, on a tiny image."""
+            waves_max_registers="auto", dense=DEFAULT_DENSE,
+            flat_opt=DEFAULT_FLAT_OPT, label_wpb=None, paint_wpb=None,
+            compact=DEFAULT_COMPACT):
+    """JIT-compile every kernel of a configuration once, on a tiny image
+    (with the given block sizes: the dense twins are compiled per warps
+    per block)."""
     if label_max_registers == "auto":
         label_max_registers = LABEL_MAX_REGISTERS[lookup]
     if waves_max_registers == "auto":
         waves_max_registers = WAVES_MAX_REGISTERS[lookup]
+    lw = LABEL_GRID[1] // 32 if label_wpb is None else int(label_wpb)
+    pw = PAINT_GRID[1] // 32 if paint_wpb is None else int(paint_wpb)
     key = (connectivity, bool(instrumented), bool(debug),
            label_max_registers, bool(paint_fast), pack_variant, lookup,
-           int(label_exits), waves_max_registers)
+           int(label_exits), waves_max_registers, bool(dense),
+           bool(flat_opt) and lookup == "dindex",
+           bool(compact) and lookup == "dindex", lw if dense else 0,
+           pw if dense else 0)
     if key in _warmed:
         return
     tiny = np.full((40, 40, 3), 255, dtype=np.uint8)
@@ -542,8 +750,10 @@ def _warmup(connectivity=8, instrumented=False, debug=False,
                     paint_fast=paint_fast, pack_variant=pack_variant,
                     lookup=lookup, label_exits=label_exits,
                     waves_max_registers=waves_max_registers,
-                    waves_tpb=32, waves_blocks=1, label_grid=(1, 32),
-                    paint_grid=(1, 32), _skip_warmup=True)
+                    waves_tpb=32, waves_blocks=1, label_grid=(1, 32 * lw),
+                    paint_grid=(1, 32 * pw), dense=dense, flat_opt=flat_opt,
+                    waves_compact=compact, fit_grids=False,
+                    _skip_warmup=True)
     dev = cuda.to_device(tiny)
     eng.run(dev, "rgb")
     lab = cuda.device_array((40, 40), np.int32)

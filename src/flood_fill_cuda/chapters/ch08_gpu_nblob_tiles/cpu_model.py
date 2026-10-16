@@ -12,6 +12,11 @@ exactly (test invariants 11.2).
 Everything is computed from pixels, a different way than the GPU does
 it (no side-word algebra): two comps are adjacent iff two of their
 pixels are adjacent across a tile border.
+
+For the dense-tile path it also predicts K2's choice per tile (the run
+estimate, from per-pixel neighbour tests rather than word arithmetic),
+which tiles K2b indexes, and how many K3 tasks the dindex lookup serves
+by the index or by the whole warp.
 """
 
 from dataclasses import dataclass
@@ -247,6 +252,52 @@ def _waves(off, adj, ring, seed, dirs, valve_round):
     return r - 1, claims, valve_seeds, valve_at, front[:r - 1].copy()
 
 
+def tile_runs_estimate(red, connectivity=8):
+    """Per tile (t = tx*wpr + ty): (estimate, runs) as K2's _dense_tile
+    computes them, from pixels. A run is a maximal red stretch of one
+    row (x) inside the tile's 32 columns (y); it is "untouched from
+    above" if no pixel of it has a red neighbour in row x-1 of the same
+    tile (8-conn: y-1, y, y+1; 4-conn: y), likewise from below. The
+    estimate is the smaller of the two untouched counts."""
+    red = np.asarray(red, bool)
+    width, height = red.shape
+    tiles_x = (width + TILE - 1) // TILE
+    wpr = (height + TILE - 1) // TILE
+    pad = np.zeros((tiles_x * TILE, wpr * TILE), bool)
+    pad[:width, :height] = red
+    t = pad.reshape(tiles_x, TILE, wpr, TILE).transpose(0, 2, 1, 3)
+    # t[tx, ty, row, col]
+    start = t.copy()
+    start[..., 1:] &= ~t[..., :-1]
+    runs = start.sum(axis=(2, 3))
+    run_id = np.cumsum(start, axis=3, dtype=np.int8)   # run index in a row
+
+    def contact(other):
+        if connectivity == 8:
+            nb = other.copy()
+            nb[..., 1:] |= other[..., :-1]
+            nb[..., :-1] |= other[..., 1:]
+        else:
+            nb = other
+        return t & nb
+
+    above = np.zeros_like(t)
+    above[:, :, 1:, :] = t[:, :, :-1, :]
+    below = np.zeros_like(t)
+    below[:, :, :-1, :] = t[:, :, 1:, :]
+
+    def untouched(con):
+        # runs (per row) with no contact pixel: runs - distinct run ids hit
+        hit = np.where(con, run_id, np.int8(0))
+        touched = np.zeros(t.shape[:3], np.int16)
+        for k in range(1, TILE // 2 + 1):
+            touched += (hit == k).any(axis=3)
+        return runs - touched.sum(axis=2, dtype=np.int64)
+
+    est = np.minimum(untouched(contact(above)), untouched(contact(below)))
+    return est.reshape(-1).astype(np.int64), runs.reshape(-1).astype(np.int64)
+
+
 @dataclass
 class TileModel:
     width: int
@@ -269,6 +320,7 @@ class TileModel:
     edge_b: np.ndarray
     off: np.ndarray          # CSR adjacency
     adj: np.ndarray
+    run_est: tuple = None    # per tile (estimate, runs), tile_runs_estimate
 
     @property
     def words_per_row(self):
@@ -305,6 +357,33 @@ class TileModel:
             has = ring[(self.dirs[ring] >> d) & 1 == 1]
             t2 = self.tile[has].astype(np.int64) + dx * wpr + dy
             n += int(np.count_nonzero(self.n_ring_tile[t2] > dense_min))
+        return n
+
+    def ccl_tiles(self, ccl_min, ccl_rpc):
+        """Tiles K2 leaves to K2b's run CCL (bool per tile)."""
+        est, runs = self.run_est
+        return (est >= ccl_min) & (runs <= ccl_rpc * est) & (est > 0)
+
+    def indexed_tiles(self, ccl_min, ccl_rpc):
+        """Tiles K2b indexes for the dindex and index lookups."""
+        return self.ccl_tiles(ccl_min, ccl_rpc) & (self.n_ring_tile >= 2)
+
+    def dindex_dense_tasks(self, ccl_min, ccl_rpc, dense_min, coop=True):
+        """dindex: tasks served by the index (indexed neighbour tile) or,
+        with coop, by the whole warp (unindexed, more than dense_min ring
+        comps)."""
+        wpr = self.words_per_row
+        ix = self.indexed_tiles(ccl_min, ccl_rpc)
+        ring = np.flatnonzero(self.ordinal >= 0)
+        n = 0
+        for d, (dx, dy) in enumerate(((-1, 0), (1, 0), (0, -1), (0, 1),
+                                      (-1, -1), (-1, 1), (1, -1), (1, 1))):
+            has = ring[(self.dirs[ring] >> d) & 1 == 1]
+            t2 = self.tile[has].astype(np.int64) + dx * wpr + dy
+            dense = ix[t2]
+            if coop:
+                dense = dense | (~ix[t2] & (self.n_ring_tile[t2] > dense_min))
+            n += int(np.count_nonzero(dense))
         return n
 
     def seeds(self, lattice):
@@ -352,4 +431,5 @@ def tile_model(img_or_red, connectivity=8):
     off = np.cumsum(off)
     return TileModel(red.shape[0], red.shape[1], connectivity, loc, int(nc),
                      tile, ordinal, anchor, sn, ss, sw, se, size, dirs,
-                     n_ring, n_total, ea, eb, off, adj)
+                     n_ring, n_total, ea, eb, off, adj,
+                     tile_runs_estimate(red, connectivity))

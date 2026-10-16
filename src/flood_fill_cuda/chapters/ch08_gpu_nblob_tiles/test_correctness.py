@@ -21,6 +21,13 @@ the waves (cpu_model.py, built from pixels, not from side words):
     seeds == the model's seeds for the same rule
     debug twin: ordinal overflow, anchor mismatch, unlabelled all 0
 
+and, for the dense-tile path (K2b's run CCL, K4b, the dindex K3),
+against the model's per-tile run estimate:
+
+    ccl tiles == the tiles the model sends to the CCL
+    indexed tiles == those with 2+ ring comps (index and dindex lookups)
+    dense tasks (dindex) == tasks served by the index or the whole warp
+
 The unit tests come first (closure, records, pack), so a failure further
 down can be localised.
 
@@ -47,7 +54,8 @@ from . import kernels as k
 from . import scenes as S8
 from .flood_fill import (TileWaves, recolor, max_blocks, DEFAULT_LOOKUP,
                          DEFAULT_DENSE_MIN, DEFAULT_LATTICE,
-                         DEFAULT_VALVE_ROUND)
+                         DEFAULT_VALVE_ROUND, DEFAULT_DENSE, DEFAULT_CCL_MIN,
+                         DEFAULT_CCL_RPC, DEFAULT_COOP, OLD_PATH)
 from .cpu_oracle import cpu_label, cpu_label_components, red_mask
 from .cpu_model import tile_model
 from ..ch05_gpu_nblob_nblock import scenes as S5
@@ -62,6 +70,9 @@ pytestmark = [pytest.mark.filterwarnings("ignore::UserWarning"),
                   "ignore::numba.core.errors.NumbaPerformanceWarning")]
 
 SLOW = os.environ.get("FLOOD_FILL_SLOW") == "1"
+# the dense path on every touched tile: no comp floor, and up to 512 runs
+# (the most a tile can hold) per estimated comp
+ALL_CCL = dict(ccl_min=0, ccl_rpc=512, paint_ccl_min=0, paint_rpc=512)
 IMAGES = os.environ.get("FLOOD_FILL_IMAGES")
 SCRATCH = os.environ.get("FLOOD_FILL_SCRATCH", tempfile.gettempdir())
 
@@ -190,6 +201,41 @@ CONFIGS = {
     "bare_index": dict(lookup="index", instrumented=False, debug=False),
     "bare_index_c4_L0": dict(lookup="index", connectivity=4, lattice=0,
                              instrumented=False, debug=False),
+    # the chapter's path before the dense-tile work (the ablation)
+    "old": dict(OLD_PATH),
+    "old_c4_one_block": dict(OLD_PATH, connectivity=4, waves_tpb=32,
+                             waves_blocks=1),
+    "old_bare": dict(OLD_PATH, instrumented=False, debug=False),
+    # the dense-tile path forced on every touched tile (ccl_min 0): K2b's
+    # run CCL, K4b, the dindex K3, at both connectivities, every lookup
+    "dense_all": dict(ALL_CCL),
+    "dense_all_c4": dict(ALL_CCL, connectivity=4),
+    "dense_all_one_block_L0": dict(ALL_CCL, lattice=0,
+                                   waves_tpb=32, waves_blocks=1),
+    "dense_all_valve1_coll0": dict(ALL_CCL, valve_round=1,
+                                   coll_capacity=0),
+    "dense_all_L1_mask": dict(ALL_CCL, lattice=1,
+                              _contract="mask"),
+    "dense_all_no_compact_no_flat": dict(ALL_CCL,
+                                         waves_compact=False, flat_opt=False),
+    "dense_all_no_coop_c4": dict(ALL_CCL,
+                                 waves_coop=False, connectivity=4),
+    "dense_all_hybrid": dict(ALL_CCL, lookup="hybrid"),
+    "dense_all_index_c4": dict(ALL_CCL, lookup="index",
+                               connectivity=4),
+    "dense_all_scan": dict(ALL_CCL, lookup="scan"),
+    "dense_all_slow_paint": dict(ALL_CCL,
+                                 paint_fast=False),
+    "dense_all_odd_grids": dict(ALL_CCL,
+                                label_grid=(3, 96), paint_grid=(5, 64),
+                                fit_grids=False, waves_tpb=96),
+    "dense_rpc1": dict(ccl_min=2, ccl_rpc=1, paint_ccl_min=2, paint_rpc=1),
+    "dense_all_bare": dict(ALL_CCL, instrumented=False,
+                           debug=False),
+    "dense_all_bare_c4_one_block": dict(ALL_CCL,
+                                        connectivity=4, instrumented=False,
+                                        debug=False, waves_tpb=32,
+                                        waves_blocks=1),
 }
 
 
@@ -248,11 +294,25 @@ def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
     assert c["roots"] + c["interior_comps"] == n_blobs
     assert c["rounds"] == wm["rounds"]
     assert c["tasks"] == model.tasks
-    if kw.get("lookup", DEFAULT_LOOKUP) == "hybrid":
-        assert c["dense_tasks"] == model.dense_tasks(
-            kw.get("dense_min", DEFAULT_DENSE_MIN))
+    lookup = kw.get("lookup", DEFAULT_LOOKUP)
+    dense_min = kw.get("dense_min", DEFAULT_DENSE_MIN)
+    ccl_min = kw.get("ccl_min", DEFAULT_CCL_MIN)
+    ccl_rpc = kw.get("ccl_rpc", DEFAULT_CCL_RPC)
+    if lookup == "hybrid":
+        assert c["dense_tasks"] == model.dense_tasks(dense_min)
+    elif lookup == "dindex":
+        assert c["dense_tasks"] == model.dindex_dense_tasks(
+            ccl_min, ccl_rpc, dense_min, kw.get("waves_coop", DEFAULT_COOP))
     else:
         assert c["dense_tasks"] == 0
+    if kw.get("dense", DEFAULT_DENSE):
+        assert c["ccl_tiles"] == int(model.ccl_tiles(ccl_min, ccl_rpc).sum())
+        n_ix = int(model.indexed_tiles(ccl_min, ccl_rpc).sum())
+        assert c["indexed_tiles"] == (n_ix if lookup in ("index", "dindex")
+                                      else 0)
+    else:
+        assert c["ccl_tiles"] == c["indexed_tiles"] == 0
+        assert c["paint_ccl_tiles"] == 0
     assert c["seeds"] == wm["seeds"]
     assert c["seeds_lattice"] == wm["seeds_lattice"]
     assert c["seeds_queued"] == wm["seeds_queued"]
@@ -412,6 +472,105 @@ def test_closure_exits_save_trips():
     assert trips[False].sum() < trips[True].sum()
 
 
+# ----------------------------------------- unit: the run CCL (K2b)
+
+def _make_ccl_probe(conn8):
+    @cuda.jit
+    def probe(masks, root_out, nroot, nring, sides, anc):
+        """One warp per 32x32 mask: K2b's run CCL, its ring bitmap and
+        ordinals, and the side words and root slot of each ring comp."""
+        P = cuda.shared.array(512, int32)
+        t = cuda.blockIdx.x
+        lane = cuda.threadIdx.x
+        m = masks[t, lane]
+        st, nr, nu = k._ccl(m, lane, P, 0, conn8)
+        n_total = k._wsum32(nr)
+        for j in range(32):
+            if (m >> uint32(j)) & k.U1:
+                root_out[t, lane, j] = P[lane * 16
+                                         + (k._start_le(st, j) >> 1)]
+        cuda.syncwarp()
+        rn, rs, rw, re, n0, n31 = k._frame_roots(m, st, lane, P, 0)
+        cuda.syncwarp()
+        R, base, b = k._ring_bitmap(rn, rs, rw, re, n0, n31, lane, P, 0)
+        on, _ = k._ordinal(rn, R, base)
+        os_, _ = k._ordinal(rs, R, base)
+        ow, _ = k._ordinal(rw, R, base)
+        oe, _ = k._ordinal(re, R, base)
+        for h in range(2):
+            o = lane + 32 * h
+            if o < b:
+                for q in range(4):
+                    P[k.CCL_SIDES + 4 * o + q] = 0
+        cuda.syncwarp()
+        k._group_store(rn, on, lane, P, k.CCL_SIDES, 0, k.CCL_ANC)
+        k._group_store(rs, os_, lane, P, k.CCL_SIDES, 1, k.CCL_ANC)
+        k._group_store(rw, ow, lane, P, k.CCL_SIDES, 2, k.CCL_ANC)
+        k._group_store(re, oe, lane, P, k.CCL_SIDES, 3, k.CCL_ANC)
+        cuda.syncwarp()
+        for h in range(2):
+            o = lane + 32 * h
+            if o < b:
+                for q in range(4):
+                    sides[t, o, q] = uint32(P[k.CCL_SIDES + 4 * o + q])
+                anc[t, o] = P[k.CCL_ANC + o]
+        if lane == 0:
+            nroot[t] = n_total
+            nring[t] = b
+
+    return probe
+
+
+@pytest.mark.parametrize("connectivity", [8, 4])
+def test_run_ccl_matches_cpu(connectivity):
+    """K2b's union-find over run starts: every pixel's root slot is its
+    comp's anchor (the min (row, bit) pixel, slot 16*row + bit//2), the
+    comp count matches, and the ring comps come out in anchor order with
+    the CPU's side words. Masks: the closure set plus a frame comb and
+    every-other-row stripes (many runs, no unions)."""
+    conn8 = connectivity == 8
+    masks = _closure_masks()
+    xx, yy = np.meshgrid(np.arange(32), np.arange(32), indexing="ij")
+    comb = np.zeros((32, 32), bool)
+    comb[0, ::2] = comb[31, ::2] = comb[::2, 0] = comb[::2, 31] = True
+    masks += [comb, xx % 2 == 0, yy % 2 == 0, (xx + 2 * yy) % 3 == 0]
+    n = len(masks)
+    words = cuda.to_device(np.stack([_pack_rows(m) for m in masks]))
+    root = cuda.to_device(np.full((n, 32, 32), -1, np.int32))
+    nroot = cuda.device_array(n, np.int32)
+    nring = cuda.device_array(n, np.int32)
+    sides = cuda.to_device(np.zeros((n, 64, 4), np.uint32))
+    anc = cuda.to_device(np.full((n, 64), -1, np.int32))
+    _make_ccl_probe(conn8)[n, 32](words, root, nroot, nring, sides, anc)
+    root = root.copy_to_host()
+    nroot = nroot.copy_to_host()
+    nring = nring.copy_to_host()
+    sides = sides.copy_to_host()
+    anc = anc.copy_to_host()
+    for i, m in enumerate(masks):
+        comp = _cpu_tile_comps(m, conn8)
+        n_c = int(comp.max()) + 1
+        exp = np.full((32, 32), -1, np.int32)
+        ring = []
+        for c in range(n_c):
+            xs, ys = np.nonzero(comp == c)
+            a = min(zip(xs.tolist(), ys.tolist()))
+            exp[comp == c] = 16 * a[0] + (a[1] >> 1)
+            on = lambda sel: int(sum(1 << int(v) for v in sel))
+            sn = on(ys[xs == 0])
+            ss = on(ys[xs == 31])
+            sw = on(xs[ys == 0])
+            se = on(xs[ys == 31])
+            if sn or ss or sw or se:
+                ring.append((16 * a[0] + (a[1] >> 1), sn, ss, sw, se))
+        np.testing.assert_array_equal(root[i], exp, err_msg=f"mask {i}")
+        assert nroot[i] == n_c
+        assert nring[i] == len(ring)
+        for o, (slot, sn, ss, sw, se) in enumerate(sorted(ring)):
+            assert anc[i, o] == slot
+            assert tuple(int(v) for v in sides[i, o]) == (sn, ss, sw, se)
+
+
 # ------------------------------------------- unit: records after K2
 
 RECORD_SCENES = ["noise_030", "noise_045", "size_31x97", "u_shape",
@@ -423,15 +582,21 @@ RECORD_SCENES = ["noise_030", "noise_045", "size_31x97", "u_shape",
 @pytest.mark.parametrize("name", RECORD_SCENES)
 @pytest.mark.parametrize("connectivity", [8, 4])
 @pytest.mark.parametrize("lattice", [0, 8, 1])
-def test_records_match_model(name, connectivity, lattice):
-    """After K0 + K2 alone: every tile header, and every ring record's
-    side words, anchor, direction bits, seed label and parent, equal the
-    CPU model's (computed from pixels). The index twin's frame words and
-    frame-pixel ordinals too."""
+@pytest.mark.parametrize("path", ["loop", "ccl"])
+def test_records_match_model(name, connectivity, lattice, path):
+    """After K0 + K2 (+ K2b) alone: every tile header, and every ring
+    record's side words, anchor, direction bits, seed label and parent,
+    equal the CPU model's (computed from pixels). The frame words and
+    frame-pixel ordinals too. path "loop": K2's comp loop on every tile
+    (the old path, its index twin); "ccl": K2b's run CCL on every
+    touched tile, which writes the index for 2+ ring comps and flags the
+    header."""
     img = _scene(name)
     tm = _model(name, connectivity)
+    kw = (dict(OLD_PATH, lookup="index") if path == "loop" else
+          dict(ALL_CCL, lookup="dindex"))
     eng = TileWaves(img.shape[0], img.shape[1], connectivity=connectivity,
-                    instrumented=True, debug=True, lookup="index")
+                    instrumented=True, debug=True, **kw)
     dev = cuda.to_device(img)
     eng.pack(dev)
     eng.label_pass(lattice)
@@ -439,6 +604,9 @@ def test_records_match_model(name, connectivity, lattice):
     hdr = eng.hdr.copy_to_host()
     np.testing.assert_array_equal(hdr & 63, tm.n_ring_tile)
     np.testing.assert_array_equal(hdr >> 8, tm.n_total_tile)
+    np.testing.assert_array_equal(
+        (hdr & k.HDR_INDEXED) != 0,
+        (path == "ccl") & (tm.n_ring_tile >= 2))
     rec = eng.rec.copy_to_host().reshape(-1, 8)
     parent = eng.parent.copy_to_host()
     seed, _ = tm.seeds(lattice)
@@ -684,32 +852,46 @@ def test_fuzz(family, blocks):
         conn = 4 if seed % 4 == 3 else 8
         lat = (0, 8, 1, 4)[seed % 4] if seed % 5 else 8
         valve = 2 if seed % 7 == 6 else 128
-        lookup = ("scan", "index", "hybrid")[seed % 3]
+        lookup = ("scan", "index", "hybrid", "dindex")[seed % 4]
         twin = ({} if seed % 6 != 5 else
                 dict(instrumented=False, debug=False))     # the bare twin
+        # the dense path: forced on every tile, at small thresholds, at
+        # the defaults, or off (the old path) - dindex needs it on
+        dense = [dict(ALL_CCL),
+                 dict(ccl_min=seed % 7, paint_ccl_min=seed % 5,
+                      ccl_rpc=1 + seed % 13, paint_rpc=1 + seed % 11),
+                 {}, dict(dense=False)][(seed // 4) % 4]
+        if lookup == "dindex" and dense.get("dense") is False:
+            dense = dict(ALL_CCL, waves_compact=False)
         try:
             label, n = cpu_label(img, conn)
             run_and_check(img, label, n, tile_model(img, conn),
                           connectivity=conn, lattice=lat, valve_round=valve,
-                          lookup=lookup, dense_min=seed % 5, **twin, **kw)
+                          lookup=lookup, dense_min=seed % 5, **dense, **twin,
+                          **kw)
         except AssertionError as exc:
             path = os.path.join(SCRATCH, f"ch08_fuzz_{family}_{seed}.npy")
             np.save(path, img)
             raise AssertionError(
                 f"{family} seed {seed} (conn {conn}, L {lat}, valve "
-                f"{valve}, {lookup}, dense_min {seed % 5}) failed; image "
-                f"saved to {path}") from exc
+                f"{valve}, {lookup}, dense_min {seed % 5}, {dense}) failed; "
+                f"image saved to {path}") from exc
 
 
 # ------------------------------------------- structural / robustness
 
-def test_engine_reuse_with_poisoned_buffers():
+@pytest.mark.parametrize("kw", [dict(lookup="index"),
+                                dict(ALL_CCL, lookup="dindex"),
+                                dict(lookup="dindex", ccl_min=4,
+                                     paint_ccl_min=4)])
+def test_engine_reuse_with_poisoned_buffers(kw):
     """A, B, A on one engine, every reusable buffer filled with
     0x5A5A5A5A between runs: the outputs must not change. Nothing is
-    read before it is written in the same run (design 9.4)."""
+    read before it is written in the same run (design 9.4), the dense
+    path's tile list and index included."""
     a = S5.random_blobs_scene(120, 120, 0.35, 21)[0]
     b = S5.random_blobs_scene(120, 120, 0.50, 22)[0]
-    eng = TileWaves(120, 120, instrumented=True, debug=True, lookup="index")
+    eng = TileWaves(120, 120, instrumented=True, debug=True, **kw)
     outs = []
     for img in (a, b, a):
         eng.poison()
@@ -756,7 +938,12 @@ def test_twins_agree(name):
                dict(lookup="index", instrumented=True, debug=True),
                dict(lookup="hybrid", dense_min=0),
                dict(lookup="hybrid", dense_min=0, instrumented=True,
-                    debug=True)):
+                    debug=True),
+               dict(OLD_PATH), dict(OLD_PATH, instrumented=True),
+               dict(ALL_CCL),
+               dict(ALL_CCL, instrumented=True,
+                    debug=True),
+               dict(ALL_CCL, waves_compact=False)):
         res = recolor(img, emit_label=True, **kw)
         assert res.n_blobs == n
         np.testing.assert_array_equal(res.label, label)
@@ -827,6 +1014,39 @@ def test_paint_grid_is_validated(grid):
     blobs). The engine must refuse such a grid."""
     with pytest.raises(ValueError, match="paint_grid"):
         TileWaves(64, 64, paint_grid=grid, _skip_warmup=True)
+
+
+@pytest.mark.parametrize("grid_arg", ["label_grid", "paint_grid"])
+def test_dense_twins_limit_the_block(grid_arg):
+    """The dense twins hold 2 KiB of shared slots per warp in a static
+    array: at most 512 threads per block. The old path keeps its range,
+    and the dindex lookup needs the dense K2 (only K2b writes its
+    index)."""
+    with pytest.raises(ValueError, match="dense twins"):
+        TileWaves(64, 64, _skip_warmup=True, **{grid_arg: (2, 1024)})
+    TileWaves(64, 64, _skip_warmup=True, **{grid_arg: (2, 1024)},
+              **OLD_PATH)
+    with pytest.raises(ValueError, match="dindex"):
+        TileWaves(64, 64, dense=False, lookup="dindex", _skip_warmup=True)
+
+
+def test_dense_path_takes_the_dense_tiles():
+    """On a dot lattice (256 one-pixel comps per tile) every tile goes to
+    K2b and K4b, and every tile with 2+ ring comps is indexed; on a solid
+    square none does. The old path never uses them."""
+    dots = S8.dot_lattice_scene((4, 3))
+    square = S5.full_red_scene(96, 96)[0]
+    for img, all_dense in ((dots, True), (square, False)):
+        res = recolor(img, emit_label=True, instrumented=True)
+        c = res.counters
+        n_tiles = ((img.shape[0] + 31) // 32) * ((img.shape[1] + 31) // 32)
+        assert c["ccl_tiles"] == (n_tiles if all_dense else 0)
+        assert c["paint_ccl_tiles"] == (n_tiles if all_dense else 0)
+        label, n = cpu_label_components(img)
+        np.testing.assert_array_equal(res.label, label)
+        old = recolor(img, instrumented=True, **OLD_PATH).counters
+        assert old["ccl_tiles"] == old["paint_ccl_tiles"] == 0
+        assert old["comps"] == c["comps"]
 
 
 def test_pack_variant_is_validated():
@@ -900,6 +1120,9 @@ def test_benchmark_scenes(name):
                          ("rgb", dict(lookup="index")),
                          ("rgb", dict(lookup="hybrid", dense_min=0)),
                          ("rgb", dict(lookup="scan")),
+                         ("rgb", dict(OLD_PATH)),
+                         ("rgb", dict(ALL_CCL)),
+                         ("rgb", dict(waves_compact=False)),
                          ("mask", {})):
         run_and_check(img, label, n, tm, contract=contract, **kw)
 
