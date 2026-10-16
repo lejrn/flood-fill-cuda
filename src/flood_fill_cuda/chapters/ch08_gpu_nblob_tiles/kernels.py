@@ -2409,12 +2409,13 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
     """K4b and its off-clock twins: the tiles K4 left in plist, one warp
     per tile (wpb warps per block, 2112 bytes of shared memory each).
 
-    Mode 0 first tries K4's colour-uniform fast path (all comps ring, one
-    colour: zz_lattice_4k's tiles). Otherwise the tile is rebuilt by K2b's
-    run CCL. Each run start then gets its comp's label (a ring comp: the
-    record of its ordinal, from the ring bitmap; an interior comp: the
-    root's anchor), or its colour in mode 0, and the rows are painted
-    from the slots: no closure and no per-comp loop."""
+    Each tile is rebuilt by K2b's run CCL. Each run start then gets its
+    comp's label (a ring comp: the record of its ordinal, from the ring
+    bitmap; an interior comp: the root's anchor), or its colour in mode
+    0, and the rows are painted from the slots: no closure and no
+    per-comp loop. K4 owns the fast paths: it hands over only tiles that
+    none of them took (a colour-uniform test here could never fire), so
+    `fast` only keys the twin alongside K4's."""
     sh_words = wpb * CCL_K4_WORDS
 
     @cuda.jit
@@ -2423,19 +2424,16 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
                            n_tiles):
         P = cuda.shared.array(sh_words, int32)
         pb = (cuda.threadIdx.x >> 5) * CCL_K4_WORDS
-        palette = cuda.const.array_like(PALETTE_HOST)
         lane = cuda.laneid
         warp = cuda.grid(1) >> 5
         n_warps = cuda.gridsize(1) >> 5
         c_pccl = 0
-        c_uni = 0
         c_rows = 0
         n_list = pcount[0]
         for i in range(warp, n_list, n_warps):
             t = plist[uint32(i)]
             h = hdr[uint32(t)]
             nr = h & HDR_RING_MASK
-            nt = h >> HDR_TOTAL_SHIFT
             tx = int32(uint32(t) // uint32(wpr))
             ty = t - tx * wpr
             x0 = tx * 32
@@ -2451,26 +2449,6 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
                 lab0 = rec[uint32(REC * (id_base + lane) + R_LABEL)]
             if lane + 32 < nr:
                 lab1 = rec[uint32(REC * (id_base + 32 + lane) + R_LABEL)]
-            if mode == MODE_RGB and fast:
-                if nt == nr:
-                    bits = int32(0)
-                    if lane < nr:
-                        bits = int32(1) << (lab0 % N_PALETTE)
-                    if lane + 32 < nr:
-                        bits |= int32(1) << (lab1 % N_PALETTE)
-                    bits |= cuda.shfl_xor_sync(FULL, bits, 16)
-                    bits |= cuda.shfl_xor_sync(FULL, bits, 8)
-                    bits |= cuda.shfl_xor_sync(FULL, bits, 4)
-                    bits |= cuda.shfl_xor_sync(FULL, bits, 2)
-                    bits |= cuda.shfl_xor_sync(FULL, bits, 1)
-                    if (bits & (bits - 1)) == 0:
-                        col = int32(cuda.ffs(bits) - 1)
-                        n = _paint_rgb(m, x0, y, lane, img, palette[col, 0],
-                                       palette[col, 1], palette[col, 2])
-                        if instrumented:
-                            c_uni += 1
-                            c_rows += n
-                        continue
             # ---- the run CCL, then one label per run start
             st, nrl, nul = _ccl(m, lane, P, pb, conn8)
             rn, rs, rw, re, n0, n31 = _frame_roots(m, st, lane, P,
@@ -2534,9 +2512,8 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
             cuda.syncwarp()       # the next tile reuses the slots
 
         if instrumented and lane == 0:
-            # PAINT_TILES is K4's: it counts every touched tile once,
-            # the ones it hands to K4b included
-            cuda.atomic.add(counters, PAINT_UNIFORM, c_uni)
+            # PAINT_TILES and the fast paths are K4's: it counts every
+            # touched tile once, the ones it hands to K4b included
             cuda.atomic.add(counters, ROWS_PAINTED, c_rows)
             cuda.atomic.add(counters, PAINT_CCL_TILES, c_pccl)
 
