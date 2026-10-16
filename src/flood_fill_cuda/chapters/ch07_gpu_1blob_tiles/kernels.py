@@ -1208,15 +1208,24 @@ def paint_kernel(reached, img):
 
 
 @cuda.jit
-def paint_tiles_kernel(reached, mask, tinfo, img8, img32, aligned, width,
-                       height, wpr, n_tiles):
-    """The fused-pack paint: (reached & mask) -> (0, 0, 255), one warp per
-    TILE, grid-stride. With the pack fused, `reached` may hold candidate
-    bits that are not red, so the AND with the mask is what makes the
-    paint exact; mask words exist only for packed tiles, and a tile that
-    was never packed (tinfo NOT_PACKED) has no reached bit at all (every
-    bit that lands in a tile enqueues it, and its visit packs it), so it
-    is skipped after one load - the thin strip touches 2 of 16,384 tiles.
+def paint_tiles_kernel(reached, mask, gate, untouched, masked, img8, img32,
+                       aligned, width, height, wpr, n_tiles):
+    """reached -> (0, 0, 255), one warp per TILE, grid-stride. A tile the
+    wave never touched (gate[t] == untouched) is skipped after one load:
+    the thin strip touches 2 of 16,384 tiles. Two callers:
+
+    fused pack   gate = tinfo, untouched = NOT_PACKED, masked. `reached`
+                 may hold candidate bits that are not red, so the AND
+                 with the mask is what makes the paint exact; mask words
+                 exist only for packed tiles, and a tile that was never
+                 packed has no reached bit at all (every bit that lands
+                 in a tile enqueues it, and its visit packs it).
+    tile paint   gate = the stamp, untouched = -1, not masked (the
+                 separate pack's exports are filtered, so reached is a
+                 subset of the mask). Every atomic that adds a bit to a
+                 tile raises the tile's stamp (it enqueues the tile), and
+                 the seed tile starts at 0, so a tile whose stamp is still
+                 -1 holds no reached bit.
 
     Lane i loads row x0+i's two words once, before any store, so no load
     waits behind a store it might alias (the plain paint_kernel loads one
@@ -1235,7 +1244,7 @@ def paint_tiles_kernel(reached, mask, tinfo, img8, img32, aligned, width,
     elif lane % 3 == 2:
         blue = BLUE_W2
     for t in range(warp, n_tiles, n_warps):            # warp-uniform
-        if tinfo[t] == NOT_PACKED:
+        if gate[t] == untouched:
             continue
         tx = t // wpr
         ty = t - tx * wpr
@@ -1245,7 +1254,7 @@ def paint_tiles_kernel(reached, mask, tinfo, img8, img32, aligned, width,
         if x < width:
             li = x * wpr + ty
             bits = reached[li]
-            if bits != U0:
+            if masked and bits != U0:
                 bits = uint32(bits & mask[li])
         _paint_rows(img8, img32, aligned, x0, ty, height, h34, bits, lane,
                     blue)

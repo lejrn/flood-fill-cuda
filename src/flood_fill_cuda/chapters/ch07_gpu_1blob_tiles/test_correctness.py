@@ -8,9 +8,9 @@ closure is built from are tested on their own against plain-Python
 references first, so a failure further down can be localised.
 
 Every test runs once per switch mode (MODES: the rounds kernel's
-one_sync / fused_pack / skip_full / fused_paint switches, set through
-flood_fill.DEFAULT_SWITCHES), so the whole suite checks each path; the
-tests at the end target the switches themselves.
+one_sync / fused_pack / skip_full / fused_paint switches and the host's
+tile_paint, set through flood_fill.DEFAULT_SWITCHES), so the whole suite
+checks each path; the tests at the end target the switches themselves.
 
 Run:
 
@@ -48,6 +48,9 @@ MODES = {
     "one_sync": {"one_sync": True},
     "fused_pack": {"fused_pack": True},
     "skip_full": {"skip_full": True},
+    "one_sync+tile_paint": {"one_sync": True, "tile_paint": True},
+    "one_sync+skip_full+tile_paint": {"one_sync": True, "skip_full": True,
+                                      "tile_paint": True},
     "one_sync+fused_pack": {"one_sync": True, "fused_pack": True},
     "one_sync+fused_pack+skip_full": {"one_sync": True, "fused_pack": True,
                                       "skip_full": True},
@@ -843,6 +846,34 @@ def test_skip_full_vote_survives_schedule_jitter(scene, one_sync,
     assert r.returncode == 0, r.stderr[-2000:]
     assert "COMPLETED" in r.stdout
     assert r.stdout.count(" ok") == JITTER_RUNS, r.stdout
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", ["full_red_300", "random", "maze"])
+def test_stamp_marks_exactly_the_reached_tiles(name, connectivity):
+    """The tile paint skips a tile whose stamp is still -1. That is exact
+    because every atomic that adds a bit to a tile raises its stamp, and
+    nothing else does: after a run, the tiles holding a reached bit (raw
+    `reached`, candidates included) are exactly the tiles with stamp >= 0.
+    Checked at the default grid and at one block, where races differ."""
+    img, sx, sy = {
+        "full_red_300": lambda: scenes.full_red_scene(300, 300),
+        "random": lambda: scenes.random_scene(256, 230, 0.62, rng_seed=3),
+        "maze": lambda: worst_cases.maze_scene(cells=40),
+    }[name]()
+    w, h = img.shape[0], img.shape[1]
+    d0 = cuda.to_device(img)
+    for blocks in (None, 1):
+        eng = TileFill(w, h, connectivity=connectivity, blocks=blocks)
+        d = cuda.device_array_like(img)
+        d.copy_to_device(d0)
+        eng.run(d, sx, sy)
+        words = eng.reached.copy_to_host()
+        pad = eng.tiles_x * 32 - w
+        words = np.concatenate([words, np.zeros((pad, eng.words_per_row),
+                                                words.dtype)])
+        touched = words.reshape(eng.tiles_x, 32, eng.words_per_row).any(axis=1)
+        np.testing.assert_array_equal(touched, eng.stamp.copy_to_host() >= 0)
 
 
 def test_counters_of_the_switches(switch_mode):

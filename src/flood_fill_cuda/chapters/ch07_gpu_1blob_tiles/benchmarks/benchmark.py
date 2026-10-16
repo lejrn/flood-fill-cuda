@@ -208,9 +208,9 @@ CH03_WC_GRIDS = ["ch03_wc", "ch03_wc_120x128", "ch03_wc_240x64",
 # flood_fill.DEFAULT_SWITCHES cannot move it); the switch ablation is the
 # _1s / _fp / _sk / _1s_fp / _new / _new_pt family (module docstring).
 OLD_SW = {"one_sync": False, "fused_pack": False, "skip_full": False,
-          "fused_paint": False}
+          "fused_paint": False, "tile_paint": False}
 NEW_SW = {"one_sync": True, "fused_pack": True, "skip_full": True,
-          "fused_paint": False}
+          "fused_paint": False, "tile_paint": False}
 SW_SETS = {
     "": OLD_SW,
     "_1s": {**OLD_SW, "one_sync": True},

@@ -98,9 +98,16 @@ PHASES = ("pack", "init", "rounds", "paint")
 # but loses 1% on the maze in all 9 rounds (0.99x [0.89-1.00]), so by the
 # chapter's adoption rule it stays off; fused_paint loses on every scene
 # but the two sparse ones (0.69-0.94x), so it stays off.
-SWITCHES = ("one_sync", "fused_pack", "skip_full", "fused_paint")
+#
+# tile_paint is a host switch, not a rounds-kernel one: paint with
+# paint_tiles_kernel (one warp per tile, tiles the wave never touched
+# skipped by their stamp) after the separate pack. The fused pack always
+# paints that way (gated by tinfo, masked), so it implies tile_paint.
+ROUNDS_SWITCHES = ("one_sync", "fused_pack", "skip_full", "fused_paint")
+SWITCHES = ROUNDS_SWITCHES + ("tile_paint",)
 DEFAULT_SWITCHES = {"one_sync": True, "fused_pack": True,
-                    "skip_full": False, "fused_paint": False}
+                    "skip_full": False, "fused_paint": False,
+                    "tile_paint": False}
 
 # Plain (non-cooperative) launch shapes for the three streaming kernels.
 # pack/paint use ch06's 2D grid: word along x (one warp per word), rows
@@ -145,6 +152,11 @@ def resolve_switches(**switches):
                     else switches[k]) for k in SWITCHES}
 
 
+def rounds_switches(sw):
+    """The switches the rounds-kernel factory takes (not tile_paint)."""
+    return {k: sw[k] for k in ROUNDS_SWITCHES}
+
+
 def _sw_key(sw):
     return tuple(sw[k] for k in SWITCHES)
 
@@ -177,7 +189,8 @@ def max_blocks(threads_per_block=DEFAULT_TPB, connectivity=4, bare=False,
     _warmup(connectivity, bare, max_registers, **sw)
     key = (connectivity, bare, max_registers, threads_per_block) + _sw_key(sw)
     if key not in _coop_cache:
-        kern = get_rounds_kernel(connectivity, bare, max_registers, **sw)
+        kern = get_rounds_kernel(connectivity, bare, max_registers,
+                                 **rounds_switches(sw))
         _coop_cache[key] = _overload(kern).max_cooperative_grid_blocks(
             threads_per_block)
     return _coop_cache[key]
@@ -189,7 +202,7 @@ def regs_per_thread(connectivity=4, bare=False,
     sw = resolve_switches(**switches)
     _warmup(connectivity, bare, max_registers, **sw)
     regs = get_rounds_kernel(connectivity, bare, max_registers,
-                             **sw).get_regs_per_thread()
+                             **rounds_switches(sw)).get_regs_per_thread()
     return int(next(iter(regs.values()))) if isinstance(regs, dict) \
         else int(regs)
 
@@ -200,7 +213,7 @@ def local_bytes_per_thread(connectivity=4, bare=False,
     sw = resolve_switches(**switches)
     _warmup(connectivity, bare, max_registers, **sw)
     lm = get_rounds_kernel(connectivity, bare, max_registers,
-                           **sw).get_local_mem_per_thread()
+                           **rounds_switches(sw)).get_local_mem_per_thread()
     return int(next(iter(lm.values()))) if isinstance(lm, dict) else int(lm)
 
 
@@ -278,8 +291,11 @@ class TileFill:
         self.fused_paint = self.switches["fused_paint"]
         if self.fused_paint and not self.fused_pack:
             raise ValueError("fused_paint needs fused_pack")
-        self.kernel_fn = get_rounds_kernel(connectivity, self.bare,
-                                           max_registers, **self.switches)
+        # the fused pack always paints tile by tile (gated by tinfo)
+        self.tile_paint = self.switches["tile_paint"] or self.fused_pack
+        self.kernel_fn = get_rounds_kernel(
+            connectivity, self.bare, max_registers,
+            **rounds_switches(self.switches))
         if not _skip_warmup:
             _warmup(connectivity, self.bare, max_registers, **self.switches)
             coop_max = max_blocks(self.threads_per_block, connectivity,
@@ -360,17 +376,17 @@ class TileFill:
                 int(tx * self.words_per_row + ty),
                 int((tx << TY_BITS) | ty))
 
-    def rgb_views(self, img_dev):
-        """(flat bytes, uint32 words, word count) of the device image, for
-        the kernels that address the RGB buffer themselves (the fused pack
-        and its paint compute (x * height + y) * 3 + c).
+    def rgb_problem(self, img_dev):
+        """Why the kernels that address the RGB buffer themselves (the
+        fused pack and paint_tiles_kernel compute (x * height + y) * 3 + c)
+        cannot take this device image, or None if they can.
 
         That offset is the array's layout only when it is C-contiguous.
         Numba's reshape of an F-contiguous array reinterprets the buffer
         instead of copying it, so an F-ordered image would be read and
-        painted at the wrong pixels: it is refused. The words are loaded
-        and stored as uint32, so the image must also start 4-byte aligned
-        (a view such as d_big[1:] may not: the kernel would die with
+        painted at the wrong pixels. The words are loaded and stored as
+        uint32, so the image must also start 4-byte aligned (a view such
+        as d_big[1:] may not: the kernel would die with
         CUDA_ERROR_MISALIGNED_ADDRESS). pack_kernel and paint_kernel
         index img[x, y, c] through the strides and take any layout and
         offset."""
@@ -380,17 +396,24 @@ class TileFill:
                 f"img_dev must be a ({self.width}, {self.height}, 3) uint8 "
                 f"device array, got {img_dev.shape} {img_dev.dtype}")
         if not img_dev.is_c_contiguous():
-            raise ValueError(
-                "fused_pack reads the image as C-contiguous (x, y, c) bytes, "
-                "and this device array is not C-contiguous (upload "
-                "np.ascontiguousarray(img), or pass fused_pack=False)")
+            return ("fused_pack reads the image as C-contiguous (x, y, c) "
+                    "bytes, and this device array is not C-contiguous "
+                    "(upload np.ascontiguousarray(img), or pass "
+                    "fused_pack=False)")
         # binding-agnostic: device_ctypes_pointer has no .value under the
         # NVIDIA binding
         if img_dev.__cuda_array_interface__["data"][0] % 4:
-            raise ValueError(
-                "fused_pack loads the image as uint32 words, and this device "
-                "array does not start 4-byte aligned (copy it into its own "
-                "allocation, or pass fused_pack=False)")
+            return ("fused_pack loads the image as uint32 words, and this "
+                    "device array does not start 4-byte aligned (copy it "
+                    "into its own allocation, or pass fused_pack=False)")
+        return None
+
+    def rgb_views(self, img_dev):
+        """(flat bytes, uint32 words, word count) of the device image;
+        ValueError if rgb_problem() names a reason."""
+        why = self.rgb_problem(img_dev)
+        if why:
+            raise ValueError(why)
         img8 = img_dev.reshape(self.width * self.height * 3)
         n32 = img8.shape[0] // 4
         img32 = img8[:4 * n32].view(np.uint32) if n32 else self._dummy_u32
@@ -401,16 +424,25 @@ class TileFill:
 
         With fused_pack there is no pack launch (its interval is empty:
         the RGB is read inside `rounds`), and `paint` is
-        paint_tiles_kernel. The fused pack needs a C-contiguous image
-        (rgb_views); the separate pack and paint take any layout."""
+        paint_tiles_kernel gated by tinfo. With tile_paint alone the pack
+        is ch06's and `paint` is paint_tiles_kernel gated by the stamp.
+        Both need a C-contiguous, 4-byte-aligned image (rgb_problem): the
+        fused pack refuses any other (ValueError), and the tile paint
+        falls back to paint_kernel, which takes any layout (the separate
+        pack leaves no bit outside the mask, so the plain paint is
+        exact)."""
         seed_word, seed_bits, seed_tile, seed_entry = self.seed_args(
             seed_x, seed_y)
         if self.fused_pack or self.skip_full:
             seed_entry |= FIRST_ENTRY     # the seed tile's first visit
-        if self.fused_pack:
+        by_tile = self.fused_pack or (self.tile_paint
+                                      and self.rgb_problem(img_dev) is None)
+        if by_tile:
             img8, img32, n32 = self.rgb_views(img_dev)
         else:
             img8, img32, n32 = self._dummy_u8, self._dummy_u32, 0
+        if not self.fused_pack:
+            n32 = 0                       # the rounds kernel reads no RGB
         events = [cuda.event(timing=True) for _ in range(len(PHASES) + 1)]
         events[0].record()
         if not self.fused_pack:
@@ -432,10 +464,16 @@ class TileFill:
             pass                          # painted inside the rounds
         elif self.fused_pack:
             paint_tiles_kernel[self.paint_tile_blocks, PAINT_TILE_TPB](
-                self._reached_flat, self._mask_flat, self.tinfo, img8,
-                img32, self.aligned, np.int32(self.width),
-                np.int32(self.height), np.int32(self.words_per_row),
-                np.int32(self.n_tiles))
+                self._reached_flat, self._mask_flat, self.tinfo,
+                np.int32(NOT_PACKED), True, img8, img32, self.aligned,
+                np.int32(self.width), np.int32(self.height),
+                np.int32(self.words_per_row), np.int32(self.n_tiles))
+        elif by_tile:
+            paint_tiles_kernel[self.paint_tile_blocks, PAINT_TILE_TPB](
+                self._reached_flat, self._mask_flat, self._stamp_flat,
+                np.int32(-1), False, img8, img32, self.aligned,
+                np.int32(self.width), np.int32(self.height),
+                np.int32(self.words_per_row), np.int32(self.n_tiles))
         else:
             paint_kernel[self.plain_grid, self.plain_tpb](self.reached,
                                                           img_dev)
@@ -515,6 +553,8 @@ class TileFloodFillResult:
     fused_pack: bool       # RGB read on a tile's first visit
     skip_full: bool        # exports into queued full tiles dropped
     fused_paint: bool      # each visit paints what it added
+    tile_paint: bool       # paint tile by tile, untouched tiles skipped
+                           # (the fused pack always does)
     packed_tiles: int      # fused pack: tiles whose RGB was read
     skipped_exports: int   # skip-full: export words dropped
     regs_per_thread: int
@@ -529,7 +569,8 @@ class TileFloodFillResult:
 def flood_fill(img_host, seed_x, seed_y, connectivity=4,
                threads_per_block=DEFAULT_TPB, blocks=None, bare=False,
                max_registers=DEFAULT_MAX_REGISTERS, one_sync=None,
-               fused_pack=None, skip_full=None, fused_paint=None):
+               fused_pack=None, skip_full=None, fused_paint=None,
+               tile_paint=None):
     """Flood-fill the red blob containing (seed_x, seed_y) by tile BFS.
 
     img_host: (width, height, 3) uint8, in any memory layout (an
@@ -554,7 +595,8 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
                    threads_per_block=threads_per_block, blocks=blocks,
                    bare=bare, max_registers=max_registers,
                    one_sync=one_sync, fused_pack=fused_pack,
-                   skip_full=skip_full, fused_paint=fused_paint)
+                   skip_full=skip_full, fused_paint=fused_paint,
+                   tile_paint=tile_paint)
     d_img = cuda.device_array_like(img_host)
     cuda.synchronize()
     t1 = time.perf_counter()
@@ -585,6 +627,7 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
         fused_pack=eng.fused_pack,
         skip_full=eng.skip_full,
         fused_paint=eng.fused_paint,
+        tile_paint=eng.tile_paint,
         regs_per_thread=regs_per_thread(connectivity, eng.bare,
                                         max_registers, **eng.switches),
         phase_ms=phase_ms,
