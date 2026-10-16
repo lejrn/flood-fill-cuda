@@ -778,8 +778,13 @@ and the thin strip (11.7x, where ch06's launch shapes starve).
 **At 4-connectivity**, `flood_fill()`'s default, the instrumented new
 default beats the first kernel 1.14-1.31x on all 12 scenes. Against
 ch03's `conn4` it wins 26-45x on the blobs, the serpentine and the
-maze. On the zigzags and the two sparse scenes the 4-conn fill is a few
-pixels, and ch03 wins (0.06-0.41x).
+maze. On the zigzags the 4-conn fill is one pixel, the seed, and ch03
+wins (0.34x on `zz_serp_1k`, 0.06x on `zz_lattice_4k`).
+
+On the two sparse scenes the fill is the same at both connectivities
+(1,024 and 5,025 px), and ch03 wins at both: 0.41x and 0.28x at
+4-conn, 0.16x and 0.13x at 8-conn (table above). There ch07's time is
+mostly the whole-image `pack`.
 
 ### The price of a round, again
 
