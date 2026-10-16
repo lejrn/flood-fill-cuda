@@ -3,8 +3,11 @@
 Public API (mirrors ch06's recolor.py):
     TileWaves(width, height, connectivity=8, lattice=8, valve_round=16,
               lookup=DEFAULT_LOOKUP, dense=DEFAULT_DENSE, dense_min=4,
-              ccl_min=3, paint_ccl_min=3, coll_capacity=None,
-              instrumented=False, debug=False, ...)   reusable buffers
+              ccl_min=12, ccl_rpc=12, paint_ccl_min=10, paint_rpc=24,
+              coll_capacity=None, instrumented=False, debug=False, ...)
+                                       reusable buffers; refuses a label
+                                       or paint block that a twin it
+                                       launches cannot launch
         .pack(img_dev)                 RGB -> mask (mask contract, untimed)
         .run(img_dev, contract="rgb")  enqueue only -> (phases, events)
         .emit_label_map(label_dev)     int32 (W, H), -1 off-blob (off clock)
