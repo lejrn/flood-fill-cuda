@@ -18,6 +18,8 @@ Run:
 """
 
 import os
+import subprocess
+import sys
 
 # Before numba is imported: ch03's host code reads device attributes that
 # only the NVIDIA binding provides (and ctypes + CUDA 12.9 segfaults).
@@ -777,6 +779,70 @@ def test_skip_full_visits_each_full_tile_once(shape, connectivity,
         assert r.tile_visits == r.n_tiles == r.packed_tiles
         if r.n_tiles > 4 and connectivity == 8:
             assert r.skipped_exports > 0
+
+
+# A child process: the jittered build can deadlock, and a hung cooperative
+# kernel would hang the test session with it. argv: width, height, radius,
+# connectivity, one_sync, runs.
+_JITTER_CHILD = r"""
+import os, sys, warnings
+os.environ.setdefault("NUMBA_CUDA_USE_NVIDIA_BINDING", "1")
+warnings.filterwarnings("ignore")
+from numba import cuda
+from flood_fill_cuda.chapters.ch07_gpu_1blob_tiles import flood_fill as ff
+from flood_fill_cuda.chapters.ch07_gpu_1blob_tiles import kernels as k7
+from flood_fill_cuda.chapters.ch03_gpu_1blob_nblock import scenes
+from flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.cpu_oracle import (
+    cpu_flood_fill, cpu_flood_fill_8)
+w, h, rad, conn, one_sync, runs = (int(v) for v in sys.argv[1:7])
+img, sx, sy = scenes.disk_scene(w, h, rad)
+vis = (cpu_flood_fill_8 if conn == 8 else cpu_flood_fill)(img, sx, sy)[0]
+want = img.copy()
+want[vis == 1] = (0, 0, 255)
+eng = ff.TileFill(w, h, connectivity=conn, one_sync=bool(one_sync),
+                  fused_pack=False, skip_full=True, fused_paint=False)
+eng.kernel_fn = k7._make_rounds_kernel(conn == 8, True, None,
+                                       one_sync=bool(one_sync),
+                                       skip_full=True, jitter=True)
+d0 = cuda.to_device(img)
+d = cuda.device_array_like(img)
+for k in range(runs):
+    d.copy_to_device(d0)
+    eng.run(d, sx, sy)
+    cuda.synchronize()
+    print("run", k, "ok" if (d.copy_to_host() == want).all() else "WRONG",
+          flush=True)
+print("COMPLETED", flush=True)
+"""
+JITTER_RUNS = 20
+JITTER_TIMEOUT_S = 120     # a passing child takes about 10 s
+
+
+@pytest.mark.parametrize("one_sync", [False, True])
+@pytest.mark.parametrize("scene", [(301, 301, 140, 8), (559, 232, 100, 4)])
+def test_skip_full_vote_survives_schedule_jitter(scene, one_sync,
+                                                 switch_mode):
+    """Regression: skip_full without the fused pack voted
+    `st >= rnd and all_sync(FULL, ...)`. The stamp st is a plain load that
+    other warps raise in the same round, so the lanes of one warp may
+    disagree on it, and then only some of them reach a FULL-mask vote.
+    That is undefined behaviour; it held only while the warp happened to
+    run in lockstep. The jittered build (thread 0 sleeps 1.5-2.7 us at the
+    top of two rounds in three, a delay the CUDA model allows) deadlocked
+    on both scenes, with one and with two grid.sync per round."""
+    only_in(switch_mode, "old")
+    args = [sys.executable, "-c", _JITTER_CHILD,
+            *(str(v) for v in (*scene, int(one_sync), JITTER_RUNS))]
+    try:
+        r = subprocess.run(args, capture_output=True, text=True,
+                           timeout=JITTER_TIMEOUT_S)
+    except subprocess.TimeoutExpired as e:
+        out = e.stdout.decode() if isinstance(e.stdout, bytes) else e.stdout
+        pytest.fail(f"deadlock: no completion within {JITTER_TIMEOUT_S} s "
+                    f"(last output: {(out or '').splitlines()[-1:]})")
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert "COMPLETED" in r.stdout
+    assert r.stdout.count(" ok") == JITTER_RUNS, r.stdout
 
 
 def test_counters_of_the_switches(switch_mode):

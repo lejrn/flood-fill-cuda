@@ -596,7 +596,7 @@ def _paint_rows(img8, img32, aligned, x0, ty, height, h34, bits, lane,
 
 def _make_rounds_kernel(conn8, instrumented, max_registers=None,
                         one_sync=False, fused_pack=False, skip_full=False,
-                        fused_paint=False):
+                        fused_paint=False, jitter=False):
     """Build the cooperative rounds kernel for one connectivity.
 
     Every flag is a compile-time constant (a closure variable), so the
@@ -729,7 +729,17 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None,
       needs T's stamp >= r as well (T queued for round r or r+1, where
       the first argument applies to that visit).
     A stale read of tinfo or of a stamp is an older value: no full bit,
-    or a smaller stamp. It can only cancel a skip, never cause one.
+    or a smaller stamp. It can only cancel a skip, never cause one. So
+    each lane may decide with its own stamp read, but only after a vote
+    that every lane runs: lanes may read a stamp at different moments,
+    and a FULL-mask collective must never sit behind a racy load.
+
+    SCHEDULE JITTER (jitter, tests only). Thread 0 sleeps 1.5-2.7 us at
+    the top of two rounds in three. The CUDA model lets any thread run
+    late, so a correct kernel survives it; the tests run this build to
+    expose code that is correct only while a warp happens to run in
+    lockstep. (The skip-full vote above was such code: guarded by the
+    stamp test, it deadlocked under this jitter.)
     """
 
     jit_kw = {} if max_registers is None else {"max_registers": max_registers}
@@ -785,6 +795,10 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None,
         c_skip = U0
 
         while n_cur > 0:
+            if jitter:
+                # tests only: a legal delay of one thread (docstring)
+                if tid == 0 and rnd % 3 != 0:
+                    cuda.nanosleep(uint32(1500 + 300 * (rnd % 5)))
             if one_sync:
                 nxt = cur + 1
                 if nxt == 3:
@@ -970,12 +984,17 @@ def _make_rounds_kernel(conn8, instrumented, max_registers=None,
                         # the warp holds all 32 words of the up / down
                         # target (one per row); rows past the image vote
                         # yes. Fullness from the mask says nothing about
-                        # a visit, so these also need stamp >= r.
+                        # a visit, so these also need stamp >= r. Every
+                        # lane votes, THEN applies its own stamp test: the
+                        # stamps are plain loads that other warps raise in
+                        # this round, so lanes may disagree on them, and a
+                        # FULL-mask vote that only some lanes reach is
+                        # undefined (it deadlocked under schedule jitter).
                         exp_dn = last_full if ty + 2 == wpr else FULL
-                        skip_up = (st_up >= rnd and cuda.all_sync(
-                            FULL, (not inb) or mu == FULL))
-                        skip_dn = (st_dn >= rnd and cuda.all_sync(
-                            FULL, (not inb) or md == exp_dn))
+                        v_up = cuda.all_sync(FULL, (not inb) or mu == FULL)
+                        v_dn = cuda.all_sync(FULL, (not inb) or md == exp_dn)
+                        skip_up = st_up >= rnd and v_up
+                        skip_dn = st_dn >= rnd and v_dn
                     if skip_up and c_up != U0:
                         c_up = U0
                         if instrumented:
