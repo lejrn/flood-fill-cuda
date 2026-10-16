@@ -14,7 +14,7 @@ because the stage hypothesis says bandwidth is what the scaling will hit.
 |---|---|---|
 | 0 | The frontier queue's hot window fits L2 even at huge blob sizes (a 10000² blob's frontier ≈ 40K px × 4 B ≈ 160 KB ≪ 32 MB), so queue traffic stays cheap | **confirmed by `ncu`** - L2 hits 88-96% of reads, and DRAM sees 1.3× the compulsory bytes (see *Under `ncu`*) |
 | 1 | `grid.sync` costs more across 24 SMs than across 2 | **mildly** - ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 (serpentine-derived); mostly fixed, but the growth is real and turns the capacity ends into losses |
-| 2 | The single global rear becomes an atomic hotspot at 48+ blocks | **hot, not saturated** (`ncu`, warp-coop bare at 72 blocks) - on sq_8000 96% of the atomic adds land on the rear's L2 slice, whose atomic unit is only 18% busy; the cost is the ~360 ns each 4-pixel chunk waits for its add, 19.5% of warp time |
+| 2 | The single global rear becomes an atomic hotspot at 48+ blocks | **hot, not saturated** (`ncu`, warp-coop bare at 72 blocks) - on sq_8000 96% of the atomic adds land on the rear's L2 slice, whose atomic unit is only 18% busy; the cost is the ~360 ns each 4-pixel chunk waits for its add, 13.4% of warp time; the whole enqueue (add, shuffle, store) is 19.5% |
 | 3 | The serpentine still loses | **confirmed, emphatically** - it got *worse* (145 ms vs the single-block kernel's 71 ms) |
 | 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** - flat from 48 → 96 → 192 blocks; but **bandwidth is not the constraint** - `ncu` puts DRAM at 13% of the copy peak for the warp-coop kernel on sq_8000 (conn8: 9.7%); the warp-coop kernel is latency-bound (see *Under `ncu`*) |
 
@@ -458,7 +458,8 @@ in the same session.
 ### What it suggests (inferred, not measured)
 
 1. **Reserve queue space once per warp per level**, not one dependent
-   `atomicAdd` per chunk (19.5% of sq_8000).
+   `atomicAdd` per chunk. Waiting for that add is 13.4% of sq_8000's
+   warp time, and the whole enqueue 19.5%.
 2. **`max_registers=64`** for a fourth block per SM (occupancy 50% →
    67%). Probe the barrier at 96 × 256 too, since a bigger grid makes
    it dearer.

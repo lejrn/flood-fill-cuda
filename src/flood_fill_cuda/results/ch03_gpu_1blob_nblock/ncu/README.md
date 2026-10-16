@@ -162,8 +162,9 @@ the narrowest level pays.
   88-96% of reads; DRAM sees 1.3x the compulsory bytes.
 - **Prediction 2** (the single rear counter becomes an atomic hotspot):
   hot but not saturated. On sq_8000, 96% of the atomic adds land on the
-  rear counter's L2 slice, whose atomic unit is 18% busy. The cost is the 360 ns every chunk
-  waits for it, 19.5% of warp time on sq_8000.
+  rear counter's L2 slice, whose atomic unit is 18% busy. The cost is
+  the 360 ns every chunk waits for it: 13.4% of warp time on sq_8000
+  (line 722 above), inside an enqueue (add, shuffle, store) of 19.5%.
 - **The plateau and "sector inflation ~8x could mean ~90% of peak"**:
   refuted. Real DRAM traffic (27-29 B/px) is far below the logical
   model (61-105 B/px), because L2 absorbs the repeated probes. At the
@@ -178,9 +179,10 @@ Ranked by expected gain on sq_8000:
 1. **Stop waiting on the rear counter per chunk.** Each warp could
    buffer its discoveries for the whole level in shared memory and
    reserve global space once per level (or once per block). Today that
-   is 0.25 dependent atomics per pixel at ~360 ns each: 19.5% of warp
-   time (13.6 ms). It would also coalesce the queue stores (2.8 sectors
-   per request today).
+   is 0.25 dependent atomics per pixel at ~360 ns each. Waiting for them
+   is 13.4% of warp time, and the whole enqueue 19.5% (13.6 ms). It
+   would also coalesce the queue stores (2.8 sectors per request
+   today).
 2. **Raise occupancy from 50% to 67%.** wc uses 65 registers, one above
    the 64 that fit 4 blocks per SM (a 96 x 256 grid). Nothing is
    saturated, so the per-pixel term (~54 ms) could shrink toward 24/32
