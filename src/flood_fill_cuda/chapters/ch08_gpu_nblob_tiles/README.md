@@ -480,8 +480,13 @@ top of this page).
 
 The first session of this path, `dense_20261016T021919Z`, timed ch05
 by its host clock and recorded an inflated `paint_tiles` counter (the
-review's fixes are below). Its ch08 ratios agree with this session's
-within 0.025.
+review's fixes are below). Its new / old ratios agree with this
+session's within 0.025 in the rgb and mask contracts, and within 0.038
+in the labelling tier.
+
+Its other ratios moved more: the ablations by up to 0.059, rgb against
+ch06 by up to 0.061, and labelling against ch06 by up to 0.44
+(`zz_serp_4k`).
 
 ### The final session
 
