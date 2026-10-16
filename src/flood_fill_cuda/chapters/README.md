@@ -177,7 +177,8 @@ it down?" into a measured 0-3% (global/dirsplit) and 1.4-8.7% (split).
 3. **Register dieting** for the dual kernels: fewer live window variables
    → higher tpb ceilings without spills.
 4. **Measured (not derived) hardware truth:** an `ncu` profiling pass -
-   real occupancy, DRAM/L2 hit rates, atomic contention.
+   real occupancy, DRAM/L2 hit rates, atomic contention. *→ done for
+   Chapter 3's kernels (its README, "Under `ncu`").*
 5. **Multi-blob** (the original roadmap's Stage 5): per the design
    analysis, connected-component labeling beats running BFS per blob.
 
@@ -220,7 +221,7 @@ the serpentine.
 | best configuration | the rule: **smallest tpb whose grid covers the peak frontier in one pass, blocks maxed for SM-spreading** - 128×32 on the square (4,096 ≥ 4,000-px peak), 128×64 on the disk (8,192 ≥ ~7,600); tpb=512 anti-scales past ~8 blocks |
 | `grid.sync` re-priced | ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 - mostly fixed, but the growth is what sinks the capacity-end configs |
 | serpentine | **worse than ever**: 145 ms vs the single-block kernel's 71 ms - 65,792 barriers × ~2 µs *is* the runtime |
-| bandwidth verdict | plateau at ~11% of measured peak *by the lower-bound model*; ×8 sector inflation puts it ≈ 90% - **consistent with saturation, not yet proof** |
+| bandwidth verdict | plateau at ~11% of measured peak *by the lower-bound model*; ×8 sector inflation puts it ≈ 90% - **consistent with saturation, not yet proof**. *Since refuted by `ncu` on the 8-conn kernels: DRAM sees 27-29 B/px (13% of peak on sq_8000); the plateau is latency* |
 | the stretch scene | 64M px (8000²) completes at 132 ms; **10000² cannot even be attempted** - ~3 GB of host arrays exceed this laptop's free RAM |
 | instrumentation overhead | below run-to-run clock noise (−36%…+11% swings); serpentine's +1.9% is the cleanest signal |
 
@@ -232,7 +233,10 @@ the serpentine.
 - **The plateau is real but unattributed.** The derived model can show a
   plateau exists; it cannot say whether DRAM sectors, L2 behavior, or the
   rear atomic causes it. The model earned its keep - and hit its limit.
-  Only `ncu` closes the gap.
+  Only `ncu` closes the gap. *It since has: the warp-coop kernel is
+  latency-bound, with four dependent memory round trips per 4-pixel
+  chunk; DRAM runs at 13% of peak, and the rear atomic is hot but not
+  saturated.*
 - **Small blocks spread the frontier across SMs.** The observed %smid map
   shows consecutive block ids placed on *different* SMs, and grid-stride
   work goes to the first ⌈level/tpb⌉ blocks - so the same 2,000-px level
@@ -273,7 +277,10 @@ structure, sharpening what `ncu` must arbitrate.
 1. **`ncu` profiling** - arbitrate the plateau (DRAM sector traffic, L2
    hit rates, rear-atomic contention); the 8-direction result proved the
    4-conn plateau was not DRAM-bound, making the attribution question
-   sharper, not moot.
+   sharper, not moot. *→ done (`results/ch03_gpu_1blob_nblock/ncu/`): on
+   sq_8000 the barrier and three dependent memory waits (the RGB loads,
+   the rear `atomicAdd`, the visited CAS) each take 17-21% of warp time;
+   no unit is near its throughput limit.*
 2. **Register dieting** - the bare twin proves 768 threads/SM fit; a
    slimmer instrumented kernel tests whether residency moves the plateau.
 3. **Tile-based BFS** for the serpentine - N blocks made the worst case

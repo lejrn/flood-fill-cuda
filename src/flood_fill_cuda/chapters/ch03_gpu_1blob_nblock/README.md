@@ -12,11 +12,11 @@ because the stage hypothesis says bandwidth is what the scaling will hit.
 
 | # | prediction | verdict |
 |---|---|---|
-| 0 | The frontier queue's hot window fits L2 even at huge blob sizes (a 10000² blob's frontier ≈ 40K px × 4 B ≈ 160 KB ≪ 32 MB), so queue traffic stays cheap | consistent with everything measured; direct proof needs `ncu` |
+| 0 | The frontier queue's hot window fits L2 even at huge blob sizes (a 10000² blob's frontier ≈ 40K px × 4 B ≈ 160 KB ≪ 32 MB), so queue traffic stays cheap | **confirmed by `ncu`** - L2 hits 88-96% of reads, and DRAM sees 1.3× the compulsory bytes (see *Under `ncu`*) |
 | 1 | `grid.sync` costs more across 24 SMs than across 2 | **mildly** - ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 (serpentine-derived); mostly fixed, but the growth is real and turns the capacity ends into losses |
-| 2 | The single global rear becomes an atomic hotspot at 48+ blocks | unproven - a plateau exists but cannot be attributed without `ncu` |
+| 2 | The single global rear becomes an atomic hotspot at 48+ blocks | **hot, not saturated** (`ncu`, warp-coop bare at 72 blocks) - on sq_8000 96% of the atomic adds land on the rear's L2 slice, whose atomic unit is only 18% busy; the cost is the ~360 ns each 4-pixel chunk waits for its add, 19.5% of warp time |
 | 3 | The serpentine still loses | **confirmed, emphatically** - it got *worse* (145 ms vs the single-block kernel's 71 ms) |
-| 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** - flat from 48 → 96 → 192 blocks; attribution open (see below) |
+| 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** - flat from 48 → 96 → 192 blocks; but **bandwidth is not the constraint** - `ncu` on the 8-conn kernels puts DRAM at 13% of the copy peak; they are latency-bound (see *Under `ncu`*) |
 
 ## What changed from `dual_block` (and what didn't)
 
@@ -175,6 +175,9 @@ block between barriers - more blocks only make the barrier costlier.
   inflate real DRAM traffic ~8×, and 11% × 8 ≈ 90% of peak - *consistent
   with* bandwidth saturation, but consistency is not proof. Candidate
   culprits (DRAM sectors, L2 thrash, the single rear atomic) need `ncu`.
+  **Since settled** (section *Under `ncu`*, on the 8-conn kernels): the
+  ~8× inflation never reaches DRAM. L2 absorbs it, real traffic is 27-29 B/px, and DRAM
+  runs at 13% of the copy peak. The plateau is latency, not bandwidth.
 - **Balance is structural, not a defect:** grid-stride ownership follows
   thread id, so any level smaller than the grid feeds low block ids first.
   The per-block CV falls from 686% (tiny scenes - most blocks idle) to 42%
@@ -286,7 +289,9 @@ cannot see:
 Consequence for the standing plateau question: **the 4-conn plateau was
 not a hard DRAM wall** - the same machine just sustained 2× the modeled
 traffic. The plateau's cause shifts toward level-width/latency/barrier
-structure. `ncu` remains the arbiter, but the evidence moved.
+structure. `ncu` remains the arbiter, but the evidence moved. (It has
+since ruled: latency-bound, with four dependent memory round trips per
+4-pixel chunk. See *Under `ncu`*.)
 
 ## The per-barrier work experiments (`radius=2`, `probe_layout="warp"`)
 
@@ -375,6 +380,106 @@ One more free observation: the bare twins compile leaner (72-block
 capacity vs 48 instrumented at tpb=256) - instrumentation, not the BFS,
 sets this stage's register wall.
 
+## Under `ncu`: the long-owed answer
+
+This stage left its plateau unattributed until a profiler could run.
+The GPU counters now work on this machine, so the stage's best kernel
+has its profile.
+
+**What was profiled.** The warp-coop bare twin
+(`multi_block_global8wc_bare_kernel`, "wc") and the 8-conn bare twin
+("conn8"). Both ran at their default grid, 72 × 256, through ch03's own
+`flood_fill()`. Scenes: `sq_2000_center`, `sq_4000_corner`,
+`sq_8000_center`.
+
+**Where the ms come from.** A separate timing session follows the
+chapter policy, with ch07's helpers: clock ramp, L2 flush, sleep kernel,
+CUDA events, 9 interleaved rounds. It ran at 2,070 MHz SM and 8,001 MHz
+memory.
+
+wc took **69.57 ms** on sq_8000. That is the bare twin on its own
+72-block grid, not the 48 × 256 pin of the table above (88.5 ms, an
+older session).
+
+### Where wc's warp time goes on sq_8000
+
+PC sampling (דגימת מונה התוכנית) looks at one resident warp per SM
+every 1,024 cycles and records why it waits. All 576 warps stay
+resident, so a code location's share of the samples is its share of
+warp time.
+
+| where the warps are | share | ms of 69.57 | main stall |
+|---|---:|---:|---|
+| `grid.sync`, total | 21.2% | 14.7 | barrier |
+| of which: the two-sync ritual (3.10 µs × 4,001 levels) | 17.8% | 12.4 | |
+| of which: waiting for slower warps | 3.4% | 2.3 | |
+| bounds + 3-byte is-red loads | 20.5% | 14.3 | long scoreboard |
+| enqueue: the rear `atomicAdd`, shuffle, store | 19.5% | 13.6 | long scoreboard |
+| visited CAS | 17.4% | 12.1 | long scoreboard |
+| loop, x/y decode, dx/dy table | 9.9% | 6.9 | short scoreboard, branch |
+| queue entry load | 8.9% | 6.2 | long scoreboard |
+| paint + depth stores | 2.7% | 1.9 | issue |
+
+The ritual's cost comes from ch07's barrier probe at 72 × 256, timed
+in the same session.
+
+### The answers
+
+- **Bandwidth is not the limit.** DRAM sees 27-29 B per filled pixel,
+  1.3× the compulsory (הכרחי) footprint. The logical model said 61-105
+  B/px; L2 absorbs the difference.
+- At the timed speed that is 25 GB/s, **13% of the copy peak**. The
+  "8× sector inflation could mean ~90% of peak" scenario is refuted
+  (הופרך).
+- **The queue fits L2 (prediction 0): confirmed.** L2 hits 88-96% of
+  reads and 95-96% of atomics.
+- **The rear atomic (prediction 2): hot, not saturated.** 96% of the
+  atomic adds land on one L2 slice (פרוסה), whose atomic unit is 18%
+  busy. The cost is the wait: ~360 ns per 4-pixel chunk.
+- **The visited CAS is latency, not throughput.** The L2 atomic units
+  are 7.7% busy on average. Yet a warp waits 838 cycles (407 ns) for its
+  CAS, 2.5× an atomic on an idle GPU.
+- **So the kernel is latency-bound** (מוגבל השהיה). Each 4-pixel chunk
+  makes four dependent round trips (הלוך-חזור): queue entry 100 ns, R
+  byte 307 ns, CAS 407 ns, rear add 360 ns.
+- Long-scoreboard waits are 52% of all samples. No unit is near its
+  limit: L2 throughput 41%, issue 36%.
+- **Occupancy (תפוסה) is 50%, set by registers.** wc uses 65 per
+  thread, one above the 64 that would seat a fourth block per SM.
+- **The barrier rules the smaller scenes.** `grid.sync` is 50% of wc's
+  warp time on sq_4000_corner and 65% on sq_2000. The bare ritual alone
+  is 43% and 54%.
+- **conn8 starves the grid.** It is 1.39-1.77× slower than wc on the
+  same grid. One thread per entry leaves most threads idle, so 33-61% of
+  its warp time is waiting at the barrier.
+
+### What it suggests (inferred, not measured)
+
+1. **Reserve queue space once per warp per level**, not one dependent
+   `atomicAdd` per chunk (19.5% of sq_8000).
+2. **`max_registers=64`** for a fourth block per SM (occupancy 50% →
+   67%). Probe the barrier at 96 × 256 too, since a bigger grid makes
+   it dearer.
+3. **One `grid.sync` per level**, as ch07 now does. If one sync costs
+   half the pair, that saves ~9% of sq_8000 and 21-27% of the smaller
+   squares.
+4. **Test red-ness with `&`** instead of a short-circuit `and`, so the G
+   and B loads go out with R (4.6% of samples). Or read ch06/ch07's
+   packed bit mask instead of RGB.
+
+Not worth chasing: DRAM bandwidth, L2 atomic throughput, LSU/L1
+throughput.
+
+**Caveat.** `--clock-control base` did not hold the base clock on this
+laptop: those runs read 0.83-1.18 GHz under power and thermal caps.
+
+The shares were cross-checked at ~1.5 and 2.06 GHz and agree within 4
+points. Every ms here comes from the timing session, not from ncu
+durations.
+
+Full tables, the method, the commands and the scripts are in
+`results/ch03_gpu_1blob_nblock/ncu/`.
+
 ## Wavefront renders (`wavefront.py` → `wavefront/`)
 
 The kernel records `depth[x,y]` (when) and `owner[x,y]` (which block), so
@@ -398,7 +503,9 @@ order, which spatially scrambles within a few levels - ownership becomes
 fine-grained noise (with visible horizontal streaks: individual warp
 slabs). That scatter is the picture behind the bandwidth section's
 sector-inflation argument: adjacent pixels are touched by unrelated warps,
-so small scattered accesses drag whole 32 B sectors. Compare the dual
+so small scattered accesses drag whole 32 B sectors. (`ncu` later
+showed that L2 absorbs most of that drag: DRAM sees 27-29 B/px, see
+*Under `ncu`*.) Compare the dual
 stage's `split` render (two solid territories) - spatial coherence was the
 one thing its losing kernel had that the winner doesn't.
 
@@ -486,6 +593,8 @@ uv run python -m flood_fill_cuda.chapters.ch03_gpu_1blob_nblock.benchmarks.wavef
 1. **`ncu` ground truth** - arbitrate the plateau: DRAM sector traffic,
    L2 hit rates, atomic contention on the rear. The derived model got the
    project this far; only a profiler can close the attribution gap.
+   *Done* (section *Under `ncu`*): latency-bound, not bandwidth-bound;
+   the rear is hot but not saturated.
 2. **Register dieting** - the bare twin proves 768 threads/SM fit at ~85
    registers; slimming the instrumented kernel's window state would grow
    the grid ceiling and test whether more resident warps move the plateau.
