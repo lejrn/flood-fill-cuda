@@ -42,6 +42,7 @@ nothing painted):
                   (flood_fill.OLD_PATH: comp loop K2 and K4, hybrid K3,
                   full grids): the ablation; ch08_old_mask, ch08_old_label
   ch08_new_nocomp the dense path without K3's task compaction
+  ch08_new_auto   both K3 twins launched, the first round's size picks one
   ch08_new_k3only the dense path's K3 alone (no tile reaches the CCL)
   ch08_new_hybk3  the dense path's K2b and K4b with the old hybrid K3
   ch08_new_nofit  the dense path with K2's and K4's full grids (crops)
@@ -164,6 +165,8 @@ CONFIGS = {
     "ch08_old_label": ("ch08", "label", 8, VALVE, OLD["lookup"], OLD),
     "ch08_new_nocomp": ("ch08", "rgb", 8, VALVE, LOOKUP,
                         {"waves_compact": False}),
+    "ch08_new_auto": ("ch08", "rgb", 8, VALVE, LOOKUP,
+                      {"waves_compact": "auto"}),
     "ch08_new_k3only": ("ch08", "rgb", 8, VALVE, LOOKUP,
                         {"ccl_min": NEVER, "paint_ccl_min": NEVER}),
     "ch08_new_hybk3": ("ch08", "rgb", 8, VALVE, "hybrid", {}),
@@ -186,8 +189,8 @@ WORST_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old", "ch08_L8_voff",
 # ch06 in every contract (and with ch08's pack)
 DENSE_CONFIGS = ["ch08_L8", "ch08_L8_mask", "ch08_L8_label", "ch08_old",
                  "ch08_old_mask", "ch08_old_label", "ch08_new_nocomp",
-                 "ch08_new_k3only", "ch08_new_hybk3", "ch06", "ch06_mask",
-                 "ch06_label", "ch06_tp"]
+                 "ch08_new_auto", "ch08_new_k3only", "ch08_new_hybk3",
+                 "ch06", "ch06_mask", "ch06_label", "ch06_tp"]
 DENSE_CROP_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old",
                       "ch08_old_label", "ch08_new_nofit", "ch06",
                       "ch06_label"]
@@ -202,6 +205,7 @@ PAIRS = {
     "old_label_over_ch06_label": ("ch08_old_label", "ch06_label"),
     "old_mask_over_ch06_mask": ("ch08_old_mask", "ch06_mask"),
     "nocomp_over_new": ("ch08_new_nocomp", "ch08_L8"),
+    "auto_over_new": ("ch08_new_auto", "ch08_L8"),
     "k3only_over_old": ("ch08_new_k3only", "ch08_old"),
     "hybk3_over_new": ("ch08_new_hybk3", "ch08_L8"),
     "nofit_over_new": ("ch08_new_nofit", "ch08_L8"),

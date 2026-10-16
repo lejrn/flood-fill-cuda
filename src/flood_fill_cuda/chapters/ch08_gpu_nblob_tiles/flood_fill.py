@@ -24,6 +24,8 @@ each (the mask contract drops K1):
 
 With dense=True two more: label_ccl (K2b, the run CCL of the tiles K2
 left in the tile list) after label, and paint_ccl (K4b) after paint.
+The dindex lookup with waves_compact="auto" launches two K3 twins in
+the waves stage; one returns at once.
 
 `kernel_ms` is the first event to the last. No host copy is on the
 clock (ch06 lost 1.72 ms to one): init is a device kernel.
@@ -124,7 +126,13 @@ DEFAULT_PAINT_RPC = 24
 # atomicMin; compact, a warp runs only the (entry, direction) tasks that
 # exist, 32 at a time. Both compile-time flags, dindex only.
 DEFAULT_FLAT_OPT = True
+# compact: True, False, or "auto": both twins are launched and the first
+# round's size picks one (compact iff it holds >= compact_min entries).
+# auto picks the better twin on almost every scene, but the cooperative
+# launch that returns at once costs 6-10 us (crop_1000 1.152 of the old
+# path vs 1.086 for the plain twin alone), so the default is True.
 DEFAULT_COMPACT = True
+DEFAULT_COMPACT_MIN = 16384
 DEFAULT_COOP = True
 # fit K2's and K4's grids to the tile count (small images)
 DEFAULT_FIT_GRIDS = True
@@ -201,7 +209,7 @@ class TileWaves:
                  flat_opt=DEFAULT_FLAT_OPT, fit_grids=DEFAULT_FIT_GRIDS,
                  label_dense_max_registers=LABEL_DENSE_MAX_REGISTERS,
                  waves_compact=DEFAULT_COMPACT, waves_coop=DEFAULT_COOP,
-                 _skip_warmup=False):
+                 compact_min=DEFAULT_COMPACT_MIN, _skip_warmup=False):
         width, height = int(width), int(height)
         if width < 1 or height < 1:
             raise ValueError(f"bad shape {width}x{height}")
@@ -241,7 +249,11 @@ class TileWaves:
         self.ccl_rpc = int(ccl_rpc)
         self.paint_rpc = int(paint_rpc)
         self.flat_opt = bool(flat_opt) and lookup == "dindex"
-        self.waves_compact = bool(waves_compact) and lookup == "dindex"
+        if waves_compact not in (True, False, "auto"):
+            raise ValueError("waves_compact must be True, False or 'auto'")
+        self.waves_compact = (waves_compact if lookup == "dindex"
+                              else False)
+        self.compact_min = int(compact_min)
         self.waves_coop = bool(waves_coop) or lookup != "dindex"
         self.fit_grids = bool(fit_grids)
         self.width = width
@@ -296,10 +308,23 @@ class TileWaves:
                                         self.debug, label_max_registers,
                                         self.index, self.label_exits,
                                         self.dense)
-        self.waves_k = _waves_twin(connectivity, self.instrumented,
-                                   self.debug, lookup, waves_max_registers,
-                                   self.waves_compact, self.flat_opt,
-                                   self.waves_tpb, self.waves_coop)
+        # the dindex K3: one twin, or (auto) the compact and the plain
+        # twin, each launched with its own compact_min guard
+        self.waves_ks = []
+        if self.waves_compact in (True, "auto"):
+            self.waves_ks.append(
+                (_waves_twin(connectivity, self.instrumented, self.debug,
+                             lookup, waves_max_registers, True,
+                             self.flat_opt, self.waves_tpb, self.waves_coop),
+                 self.compact_min if self.waves_compact == "auto" else 0))
+        if self.waves_compact in (False, "auto"):
+            self.waves_ks.append(
+                (_waves_twin(connectivity, self.instrumented, self.debug,
+                             lookup, waves_max_registers, False,
+                             self.flat_opt, self.waves_tpb, self.waves_coop),
+                 self.compact_min if self.waves_compact == "auto"
+                 else 1 << 30))
+        self.waves_k = self.waves_ks[0][0]
         self.paint_k = get_paint_kernel(connectivity, MODE_RGB,
                                         self.paint_fast, self.instrumented,
                                         self.debug, self.dense)
@@ -383,9 +408,11 @@ class TileWaves:
                         else self.paint_dense_k)
                 res = _overload(kern).max_cooperative_grid_blocks(grid[1])
                 setattr(self, name, (max(1, min(grid[0], res)), grid[1]))
-        cap = max_blocks(self.waves_tpb, connectivity, self.instrumented,
-                         self.debug, lookup, waves_max_registers,
-                         self.flat_opt, self.waves_compact, self.waves_coop)
+        cap = min(max_blocks(self.waves_tpb, connectivity, self.instrumented,
+                             self.debug, lookup, waves_max_registers,
+                             self.flat_opt, cm, self.waves_coop)
+                  for cm in ((True, False) if self.waves_compact == "auto"
+                             else (bool(self.waves_compact),)))
         if cap < 1:
             raise RuntimeError("this GPU cannot host one cooperative block "
                                f"of the waves kernel at {waves_tpb} threads")
@@ -483,11 +510,17 @@ class TileWaves:
             init_kernel[1, 64](self.q_state, self.counters)
 
         def waves():
-            self.waves_k[self.waves_blocks, self.waves_tpb](
-                self.hdr, self.rec, self.parent, self.qc, self.ql, self.qd,
-                self.ca, self.cb, self.q_state, self.counters, self.bounds,
-                self.stamps, self.idx, self.frame, wpr, nt, valve,
-                np.int32(self.coll_capacity), np.int32(self.dense_min))
+            args = (self.hdr, self.rec, self.parent, self.qc, self.ql,
+                    self.qd, self.ca, self.cb, self.q_state, self.counters,
+                    self.bounds, self.stamps, self.idx, self.frame, wpr, nt,
+                    valve, np.int32(self.coll_capacity),
+                    np.int32(self.dense_min))
+            if self.dindex:
+                for kern, cmin in self.waves_ks:
+                    kern[self.waves_blocks, self.waves_tpb](*args,
+                                                            np.int32(cmin))
+            else:
+                self.waves_k[self.waves_blocks, self.waves_tpb](*args)
 
         out = [("pack", pack)] if contract == "rgb" else []
         out += [("init", init)] + self._label_launches(lat)

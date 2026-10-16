@@ -1741,6 +1741,15 @@ def _make_waves_dense_kernel(conn8, instrumented, debug, max_registers=None,
     warp-wide path for an unindexed neighbour tile above dense_min ring
     comps (without it, a scan).
 
+    compact_min (runtime): the compact twin runs only if the first
+    round holds at least compact_min entries (the crossing seeds K2 and
+    K2b queued), the plain twin only if it holds fewer; the other
+    returns before its first barrier. The engine launches both, so one
+    image takes one of them. Compaction pays where rounds are huge
+    (zz_lattice_4k 0.73 of the plain twin) and its spills (56 bytes at
+    the 80-register cap, 16 without) cost where they are small
+    (input_blocks 1.03, input_blobs 1.01).
+
     flat_opt: a ring comp with no direction bit is a lone seed, its own
     root and class, so flatten 1 writes its anchor as the final label and
     flatten 2 skips it (no find, no rmin read). Elsewhere the root's rmin
@@ -1756,7 +1765,8 @@ def _make_waves_dense_kernel(conn8, instrumented, debug, max_registers=None,
     @cuda.jit(link=link, **jit_kw)
     def waves_dense_kernel(hdr, rec, parent, qc, ql, qd, ca, cb, q_state,
                            counters, bounds, stamps, idx, frame, wpr,
-                           n_tiles, valve_round, coll_cap, dense_min):
+                           n_tiles, valve_round, coll_cap, dense_min,
+                           compact_min):
         TS = cuda.shared.array(task_bytes, np.uint8)
         tb = (cuda.threadIdx.x >> 5) * 256
         grid = cuda.cg.this_grid()
@@ -1783,6 +1793,12 @@ def _make_waves_dense_kernel(conn8, instrumented, debug, max_registers=None,
 
         front = 0
         rear = q_state[Q_SEEDS]         # final: written by K2's launch
+        if compact:
+            if rear < compact_min:      # the plain twin takes this image
+                return
+        else:
+            if rear >= compact_min:
+                return
         r = 1
         peak = rear
         if instrumented and tid == 0:

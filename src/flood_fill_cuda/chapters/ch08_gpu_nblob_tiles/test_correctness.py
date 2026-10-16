@@ -230,6 +230,8 @@ CONFIGS = {
                                 label_grid=(3, 96), paint_grid=(5, 64),
                                 fit_grids=False, waves_tpb=96),
     "dense_rpc1": dict(ccl_min=2, ccl_rpc=1, paint_ccl_min=2, paint_rpc=1),
+    "dense_all_compact_auto": dict(ALL_CCL, waves_compact="auto",
+                                   compact_min=64),
     "dense_all_bare": dict(ALL_CCL, instrumented=False,
                            debug=False),
     "dense_all_bare_c4_one_block": dict(ALL_CCL,
