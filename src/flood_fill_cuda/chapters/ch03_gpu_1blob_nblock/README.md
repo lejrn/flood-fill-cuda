@@ -16,7 +16,7 @@ because the stage hypothesis says bandwidth is what the scaling will hit.
 | 1 | `grid.sync` costs more across 24 SMs than across 2 | **mildly** - ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 (serpentine-derived); mostly fixed, but the growth is real and turns the capacity ends into losses |
 | 2 | The single global rear becomes an atomic hotspot at 48+ blocks | **hot, not saturated** (`ncu`, warp-coop bare at 72 blocks) - on sq_8000 96% of the atomic adds land on the rear's L2 slice, whose atomic unit is only 18% busy; the cost is the ~360 ns each 4-pixel chunk waits for its add, 19.5% of warp time |
 | 3 | The serpentine still loses | **confirmed, emphatically** - it got *worse* (145 ms vs the single-block kernel's 71 ms) |
-| 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** - flat from 48 → 96 → 192 blocks; but **bandwidth is not the constraint** - `ncu` on the 8-conn kernels puts DRAM at 13% of the copy peak; they are latency-bound (see *Under `ncu`*) |
+| 4 | If bandwidth is the real constraint, Mpx/s plateaus while blocks grow | **the plateau is real** - flat from 48 → 96 → 192 blocks; but **bandwidth is not the constraint** - `ncu` puts DRAM at 13% of the copy peak for the warp-coop kernel on sq_8000 (conn8: 9.7%); the warp-coop kernel is latency-bound (see *Under `ncu`*) |
 
 ## What changed from `dual_block` (and what didn't)
 
@@ -175,9 +175,11 @@ block between barriers - more blocks only make the barrier costlier.
   inflate real DRAM traffic ~8×, and 11% × 8 ≈ 90% of peak - *consistent
   with* bandwidth saturation, but consistency is not proof. Candidate
   culprits (DRAM sectors, L2 thrash, the single rear atomic) need `ncu`.
-  **Since settled** (section *Under `ncu`*, on the 8-conn kernels): the
-  ~8× inflation never reaches DRAM. L2 absorbs it, real traffic is 27-29 B/px, and DRAM
-  runs at 13% of the copy peak. The plateau is latency, not bandwidth.
+  **Since settled** (section *Under `ncu`*): the ~8× inflation never
+  reaches DRAM, because L2 absorbs it. On the warp-coop kernel real
+  traffic is 27-29 B/px, and DRAM runs at 13% of the copy peak on
+  sq_8000 (conn8: 31-34 B/px, under 10%). The plateau is latency, not
+  bandwidth.
 - **Balance is structural, not a defect:** grid-stride ownership follows
   thread id, so any level smaller than the grid feeds low block ids first.
   The per-block CV falls from 686% (tiny scenes - most blocks idle) to 42%

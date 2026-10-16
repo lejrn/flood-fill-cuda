@@ -221,7 +221,7 @@ the serpentine.
 | best configuration | the rule: **smallest tpb whose grid covers the peak frontier in one pass, blocks maxed for SM-spreading** - 128×32 on the square (4,096 ≥ 4,000-px peak), 128×64 on the disk (8,192 ≥ ~7,600); tpb=512 anti-scales past ~8 blocks |
 | `grid.sync` re-priced | ~1.7 µs at 1 block → ~2.2 µs at 192 → ~2.6 µs at 384 - mostly fixed, but the growth is what sinks the capacity-end configs |
 | serpentine | **worse than ever**: 145 ms vs the single-block kernel's 71 ms - 65,792 barriers × ~2 µs *is* the runtime |
-| bandwidth verdict | plateau at ~11% of measured peak *by the lower-bound model*; ×8 sector inflation puts it ≈ 90% - **consistent with saturation, not yet proof**. *Since refuted by `ncu` on the 8-conn kernels: DRAM sees 27-29 B/px (13% of peak on sq_8000); the plateau is latency* |
+| bandwidth verdict | plateau at ~11% of measured peak *by the lower-bound model*; ×8 sector inflation puts it ≈ 90% - **consistent with saturation, not yet proof**. *Since refuted by `ncu`: on the warp-coop kernel DRAM sees 27-29 B/px (13% of peak on sq_8000; conn8 31-34 B/px, under 10%); the plateau is latency* |
 | the stretch scene | 64M px (8000²) completes at 132 ms; **10000² cannot even be attempted** - ~3 GB of host arrays exceed this laptop's free RAM |
 | instrumentation overhead | below run-to-run clock noise (−36%…+11% swings); serpentine's +1.9% is the cleanest signal |
 
