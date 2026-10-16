@@ -7,43 +7,56 @@ On `input_blobs.png` the tile waves beat ch06's run-based labelling in
 all three contracts. They stay BFS-like: labels travel as frontier
 (חזית) waves, one barrier per round.
 
-| `input_blobs.png` (81 Mpx, 2,522 blobs) | ch05 `split_L8` | ch06 runs | ch06 + ch08's pack | **ch08** | ch08 / ch06 |
-|---|---:|---:|---:|---:|---:|
-| rgb contract (RGB in, recoloured RGB out) | 47.45 (host clock) | 2.617 | 2.291 | **2.214** | **0.862** [0.784, 0.960] |
-| mask contract (packed mask in, RGB painted) | | 1.103 | | **1.018** | **0.923** [0.661, 0.930] |
-| labelling only (no pack, no paint) | | 0.500 | | **0.381** | **0.760** [0.759, 0.772] |
+| `input_blobs.png` (81 Mpx, 2,522 blobs) | ch05 `split_L8` | ch06 runs | ch06 + ch08's pack | ch08, first version | **ch08** | ch08 / ch06 |
+|---|---:|---:|---:|---:|---:|---:|
+| rgb contract (RGB in, recoloured RGB out) | 47.06 | 2.567 | 2.402 | 2.378 | **2.403** | **0.890** [0.874, 0.937] |
+| mask contract (packed mask in, RGB painted) | | 1.107 | | 1.086 | **1.122** | **0.954** [0.876, 1.014] |
+| labelling only (no pack, no paint) | | 0.505 | | 0.380 | **0.408** | **0.807** [0.800, 0.817] |
 
-All times are medians in ms from one session,
-`waves_20261015T183401Z.json`, unless a line names another session.
+All times are medians in ms from the final session,
+`dense_20261016T054922Z.json`, unless a line names another session.
 Ratios are medians of the 9 per-round ratios, with their range.
 
-ch06 runs at its fastest merge grid for this image (4096 blocks, swept
-in the same session). At its shipped 512 blocks it takes 2.675 ms.
-ch05 is timed by its own host clock, so "21x" is only indicative.
+"ch08" is the default engine, the dense-tile path. "First version" is
+the chapter's path before it (`flood_fill.OLD_PATH`), timed in the
+same rounds.
 
-**The short version.** ch08 is 0.40 ms faster than ch06 in the rgb
-contract (2.214 vs 2.617 ms). Most of that is the faster pack read,
+ch06 runs at its fastest merge grid for this image (4096 blocks, swept
+in the same session). ch05 is timed by CUDA events, like the GPU
+sides; before this session it was its own host clock.
+
+**A memory-clock dip.** In this scene's window the memory clock's
+median was 7,501 MHz (minimum 5,501, P3), not 8,001. The totals that
+start with ch08's pack, a 243 MB stream, read 0.11-0.17 ms more than in
+the first dense session (`dense_20261016T021919Z`: ch08 2.255, first
+version 2.209); ch06 with its own pack, 0.02 ms more.
+
+The phase pass ran at 8,001 MHz, and its sums match that session's
+within 0.02 ms. The ratios are per round, so both sides share the dip.
+
+**The short version.** ch08 is 0.16 ms faster than ch06 in the rgb
+contract (2.403 vs 2.567 ms). Most of that is the faster pack read,
 which ch06 can take too.
 
-With ch08's pack, ch06 takes 2.291 ms: the pack is worth 0.33 ms end to
-end. Against that ch06, ch08 is 0.962 [0.898, 1.071], 0.08 ms faster.
+With ch08's pack, ch06 takes 2.402 ms (0.906 of itself). Against that
+ch06, ch08 is 0.982 [0.960, 1.001]: 2% faster.
 
-Those 0.08 ms are roughly the labelling, 0.12 ms faster (0.381 vs 0.500
-ms), less ch08's paint, 0.045 ms slower. ch08 labels 36,863 tile comps,
-ch06 539,207 runs.
+The labelling is 0.10 ms faster (0.408 vs 0.505 ms). ch08's paint gives
+back 0.04 ms (phase pass: K4 and K4b 0.649 ms, ch06's paint 0.606).
+ch08 labels 36,863 tile comps, ch06 539,207 runs.
 
-Tiles still lose where a tile holds many comps (noise, dot lattices),
-on long thin shapes along tile borders, and on small images: below
-about 1500 x 1500 px ch06 is faster.
+**Since the dense-tile path, tiles also win on noise and dot
+lattices:** `dots_4k` 1.484 ms (first version 15.405, ch06 5.934) and
+`random_4000` 2.287 (6.652, ch06 5.618). Section "Dense tiles" below
+has the whole story.
 
-**Dense tiles since then.** The default path now labels and paints a
-tile of many comps by a union-find over its runs (section "Dense
-tiles" below). `dots_4k` takes 1.483 ms instead of 15.405 (ch06 5.929)
-and `random_4000` 2.262 instead of 6.652 (ch06 5.618). `input_blobs`
-stays within 2% (1.019 in the rgb contract).
+**Tiles still lose** on long thin shapes along tile borders
+(`zz_lattice_4k` 1.546 x ch06, `serpentine_2048` 1.466), on
+`input_blocks` (1.459) and on small images: up to about 2000 x 2000
+px ch06 is faster or ties.
 
 The tables from here to the worst cases are the first version's
-session; that path is `flood_fill.OLD_PATH` now.
+session, `waves_20261015T183401Z`.
 
 ## Inherited problems
 
@@ -253,6 +266,11 @@ a canonical label per run, which maps straight to pixels. ch08's ends
 with a label per comp; its paint still re-closes the 674 tiles that hold
 two or more colours.
 
+On the dense-tile path the gap is wider: K4b rebuilds the run CCL of
+every dense tile to paint it, outside the labelling tier. So on dense
+scenes the labelling ratio flatters ch08, and the rgb contract is the
+fair one (see "The final session" below).
+
 **Memory per tile, not per pixel.** Every tile reserves 64 record ids,
 whatever it holds: about 3.2 KB of buffers plus its mask words. That is
 253 MiB at 81 Mpx, but 416 MiB (104 B/px) for a 4 Mpx 1-px strip, with
@@ -277,7 +295,9 @@ blocks, bare, the merge phase alone). `ch06_m512` keeps its shipped
 grid as a reference row.
 
 ch05 runs after the GPU rounds, with a 0.5 s GPU-bound respin before
-each call. The `@njit` oracle runs after every GPU scene.
+each call, timed by its own host clock in this session (the final
+dense session times it by events). The `@njit` oracle runs after every
+GPU scene.
 
 Clocks: the SM clock's median was 2,070 MHz in every timed window but
 `crop_7000` (2,047.5). Its minimum was 2,025 MHz or more everywhere but
@@ -337,9 +357,10 @@ ch08's pack, and the labelling tiers:
 | ch08 / ch06 + ch08's pack | 1.107 | 1.052 | 1.012 | 0.905 | 0.865 | 0.862 | 0.907 | 0.938 | 0.941 | 0.962 |
 | labelling, ch08 / ch06 | 1.556 | 1.348 | 1.400 | 1.143 | 1.008 | 0.900 | 0.852 | 0.820 | 0.785 | 0.762 |
 
-**There is a crossover**, as the design predicted. ch08 ties ch06 at
-1500 (2.25 Mpx) and wins from 2000 on. Against the same pack it wins
-from 3000 on.
+**There is a crossover**, as the design predicted. This first version
+ties ch06 at 1500 (2.25 Mpx) and wins from 2000 on. Against the same
+pack it wins from 3000 on. The dense-tile default moved it: a tie at
+2000 and a win from 3000 (the final session, below).
 
 The labelling itself crosses much later: a tie at 4000 x 4000 (1.008)
 and a win from 5000 on. Below that the waves' fixed cost shows: 0.043
@@ -391,10 +412,15 @@ The last four come from the perf review of this chapter.
 - **`strip_1px_x`** (4194304 x 1): a tile holds 32 px, so 131,072
   tiles for 4 Mpx. ch06 suffers more (its pack takes 24.8 ms).
 
-**ch08 loses to ch05 on two of them**: `dots_4k` (16.08 vs 4.95 ms) and
-`strip_1px_x` (8.01 vs 5.36). ch05's `dots_4k` samples ran at a 510
-MHz median SM clock (its host work idles the GPU), so the true gap is
-larger. The hybrid lookup turned the other ch05 losses into wins.
+**ch08 lost to ch05 on two of them**: `dots_4k` (16.08 vs 4.95 ms) and
+`strip_1px_x` (8.01 vs 5.36). These ch05 numbers are its host clock.
+The hybrid lookup turned the other ch05 losses into wins.
+
+An earlier draft of this page said that the true `dots_4k` gap was
+larger, because ch05's clock window read a 510 MHz median. That was
+wrong: the window mostly covered ch05's host work. Timed by events at
+2,070 MHz (final session), ch05 takes 4.48 ms on `dots_4k`, and the
+dense-tile path 1.484.
 
 The `dots_4k` GPU window also logged one sample at 210 MHz SM and 405
 MHz memory (P3), with a 2,070 MHz SM median, so its ch08 and ch06 times
@@ -406,7 +432,8 @@ may carry a small dip.
 16.08 ms on `dots_4k` (ch06 6.24), 6.89 on `random_4000` (5.89), 6.89
 on `zz_lattice_4k` (1.73) and 0.254 on `input_blocks` (0.137).
 
-An `ncu` profile of that version found two causes:
+An `ncu` profile of that version
+(`results/ch08_gpu_nblob_tiles/ncu/before/`) found two causes:
 
 - **K2 and K4 are issue-bound (חסומות בהנפקה) on dense tiles.** The
   comp loop pays one whole-warp closure per comp: about 145 warp
@@ -419,78 +446,119 @@ An `ncu` profile of that version found two causes:
 (`TileWaves(dense=True, lookup="dindex")`). `flood_fill.OLD_PATH`
 (`dense=False, lookup="hybrid", fit_grids=False`) is the first version,
 unchanged, and is timed as the ablation (אבלציה, the old path beside
-the new). The experiments of the next section run on it.
+the new). The experiments E1-E13 (section "Experiments") ran on it.
 
-### The session
+### The protocol, in plain words
 
-All times are medians in ms of session `dense_20261016T021919Z.json`:
-9 interleaved rounds with the policy of the method above (two events,
-L2 flush, sleep kernel, clock ramp, ch06 at its swept best merge grid,
-ch05 after the GPU rounds). Ratios are medians of the per-round ratios,
-with their range.
+Every time in this section comes from one session,
+`dense_20261016T054922Z.json` (the final session), unless a line names
+another.
 
-Every painted image equals ch06's own `RunRecolor.run`, in every config
-and scene. The SM clock's median was 2,070 MHz in every window. Its
-minimum was 2,070 everywhere but `input_blobs` (one sample at 1,950)
-and `input_blocks` (one sample at 510 MHz, memory 810).
+- **Same rounds.** Each scene is timed in 9 rounds. Every config runs
+  once per round, and odd rounds run the configs in reverse order. So a
+  slow moment of the GPU hits every config alike.
+- **Same start for every run.** The image is restored from a clean
+  device copy, a 96 MB read flushes the L2 cache (מטמון), and a short
+  GPU sleep kernel is queued, so all launches are in the queue before
+  the clock starts.
+- **Two events.** One CUDA event before the first launch and one after
+  the last. A separate pass times each phase on its own (5 rounds).
+- **Fair baselines.** ch06 runs at its fastest merge grid, swept per
+  scene in the same session, and also with ch08's pack (`ch06_tp`).
+  ch05 now gets the same treatment: fresh buffers, a GPU-bound respin,
+  the flush, the sleep kernel, two events, 9 samples.
+- **Checks.** Every painted image equals ch06's own `RunRecolor.run`,
+  in every config and scene, ch05's too. An instrumented engine reruns
+  each ch08 config for the counters.
+- **Ratios** are medians of the per-round ratios, with their range.
 
-| scene | ch08 new | ch08 old | new / old | ch06 rgb | new / ch06 | ch05 (host) |
+**Clocks.** The SM clock read 2,070 MHz (minimum and median) in every
+timed window, every phase pass and every ch05 window but one
+(`input_blobs`' ch05 window: minimum 1,875). The memory clock dipped
+on `input_blobs` and `input_blocks` (P3, minimum 5,501 MHz; see the
+top of this page).
+
+The first session of this path, `dense_20261016T021919Z`, timed ch05
+by its host clock and recorded an inflated `paint_tiles` counter (the
+review's fixes are below). Its ch08 ratios agree with this session's
+within 0.025.
+
+### The final session
+
+| scene | ch08 new | ch08 old | new / old | ch06 rgb | new / ch06 | ch05 (events) |
 |---|---:|---:|---:|---:|---:|---:|
-| **dots_4k** | **1.483** | 15.405 | **0.096** [0.096, 0.099] | 5.929 | **0.250** | 4.61 |
-| **random_4000** | **2.262** | 6.652 | **0.340** [0.337, 0.348] | 5.618 | **0.403** | 20.71 |
-| **zz_lattice_4k** | 2.592 | 6.696 | **0.387** [0.382, 0.400] | 1.725 | 1.504 | 7.32 |
-| **input_blocks** | 0.201 | 0.255 | **0.789** [0.770, 0.802] | 0.137 | 1.463 | 1.26 |
-| input_blobs | 2.255 | 2.209 | 1.019 [0.963, 1.072] | 2.549 | 0.879 | 42.98 |
-| blob_grid_100 | 0.572 | 0.551 | 1.041 [0.945, 1.127] | 0.653 | 0.879 | 23.87 |
-| disk_r2000 | 0.560 | 0.544 | 1.030 [1.009, 1.113] | 1.001 | 0.557 | 23.50 |
-| serpentine_2048 | 0.356 | 0.556 | 0.639 [0.633, 0.663] | 0.242 | 1.475 | 17.51 |
-| crop_1000 | 0.106 | 0.095 | 1.129 [1.096, 1.152] | 0.088 | 1.221 | |
-| crop_1500 | 0.133 | 0.120 | 1.111 [1.084, 1.147] | 0.122 | 1.101 | |
-| crop_2000 | 0.183 | 0.168 | 1.085 [1.000, 1.177] | 0.180 | 1.011 | |
-| zz_serp_1k | 0.291 | 0.358 | 0.814 [0.777, 0.939] | 0.196 | 1.472 | 0.93 |
-| maze_1k | 0.274 | 0.296 | 0.934 [0.920, 0.941] | 0.459 | 0.601 | 1.78 |
-| diag_snake_159 | 0.544 | 0.524 | 1.033 [1.015, 1.045] | 0.563 | 0.965 | 32.56 |
-| stair_decoy_19 | 0.225 | 0.308 | 0.730 [0.683, 0.745] | 0.126 | 1.810 | 0.83 |
-| zz_serp_4k | 1.451 | 3.035 | 0.479 [0.458, 0.503] | 1.348 | 1.081 | 4.13 |
-| strip_1px_x | 7.496 | 7.786 | 0.963 [0.954, 0.978] | 46.594 | 0.161 | 4.82 |
+| **dots_4k** | **1.484** | 15.405 | **0.096** [0.096, 0.098] | 5.934 | **0.250** | 4.481 |
+| **random_4000** | **2.287** | 6.652 | **0.344** [0.341, 0.346] | 5.618 | **0.407** | 21.905 |
+| **zz_lattice_4k** | 2.663 | 6.642 | **0.401** [0.390, 0.421] | 1.721 | 1.546 | 7.328 |
+| **input_blocks** | 0.201 | 0.255 | **0.785** [0.773, 0.800] | 0.137 | 1.459 | 0.951 |
+| input_blobs | 2.403 | 2.378 | 1.008 [0.981, 1.016] | 2.567 | 0.890 | 47.064 |
+| blob_grid_100 | 0.570 | 0.552 | 1.034 [0.986, 1.157] | 0.666 | 0.859 | 25.315 |
+| disk_r2000 | 0.560 | 0.543 | 1.028 [0.984, 1.107] | 1.002 | 0.554 | 24.980 |
+| serpentine_2048 | 0.354 | 0.558 | 0.635 [0.630, 0.647] | 0.242 | 1.466 | 18.518 |
+| crop_1000 | 0.105 | 0.094 | 1.119 [1.085, 1.143] | 0.088 | 1.198 | |
+| crop_1500 | 0.132 | 0.120 | 1.111 [1.085, 1.138] | 0.121 | 1.093 | |
+| crop_2000 | 0.182 | 0.169 | 1.074 [1.072, 1.123] | 0.179 | 1.017 | |
+| crop_3000 | 0.288 | 0.272 | 1.056 [0.959, 1.064] | 0.329 | 0.875 | |
+| crop_4000 | 0.451 | 0.433 | 1.040 [0.983, 1.048] | 0.551 | 0.818 | |
+| zz_serp_1k | 0.290 | 0.359 | 0.796 [0.741, 0.865] | 0.186 | 1.533 | 0.574 |
+| maze_1k | 0.276 | 0.296 | 0.934 [0.924, 0.945] | 0.459 | 0.602 | 1.486 |
+| diag_snake_159 | 0.544 | 0.540 | 1.009 [0.980, 1.100] | 0.561 | 0.967 | 34.687 |
+| stair_decoy_19 | 0.224 | 0.311 | 0.722 [0.709, 0.747] | 0.127 | 1.766 | 0.329 |
+| zz_serp_4k | 1.424 | 3.067 | 0.462 [0.451, 0.490] | 1.294 | 1.079 | 3.994 |
+| strip_1px_x | 7.499 | 7.762 | 0.965 [0.959, 0.972] | 46.634 | 0.161 | 4.767 |
 
-**The four targets.** `dots_4k` is 10.4x faster and now beats ch06 4x.
-`random_4000` is 2.9x faster and beats ch06 2.5x. `zz_lattice_4k` is
-2.6x faster but still 1.50x ch06. `input_blocks` is 1.27x faster but
-still 1.46x ch06.
+**The four targets.** `dots_4k` is 10.4x faster than the first
+version and beats ch06 4x. `random_4000` is 2.9x faster and beats ch06
+2.5x. `zz_lattice_4k` is 2.5x faster but still 1.55x ch06.
+`input_blocks` is 1.27x faster but still 1.46x ch06.
 
-**ch05 on `dots_4k` is not settled.** Its 4.61 ms are three host-clock
-samples at a 390 MHz median SM clock (its host work idles the GPU).
-Scaled to 2,070 MHz they would be about 0.9 ms, ahead of ch08's 1.48.
-Elsewhere ch05's windows ran at 2,070 MHz (`input_blobs`: minimum 810).
+**ch05, timed by events.** ch08 now beats ch05 on every scene where
+ch05 ran but `strip_1px_x` (7.499 vs 4.767 ms). On `dots_4k` it takes
+0.33 of ch05 (1.484 vs 4.481 ms).
 
-**`input_blobs` holds the 2% bound in the rgb contract, with no
-margin:** 1.019 [0.963, 1.072]. The mask contract (1.036) and the
-labelling tier (1.073: 0.408 vs 0.379 ms) are above it. The dense path
-takes no tile of `input_blobs`, so what it pays there is overhead
-(phase pass): K2's estimate 0.012 ms, K3's compacting twin 0.013, and
-the two empty launches.
+ch05's host clock had added 0.3-0.5 ms per call. In the first
+dense session it read 0.83 ms on `stair_decoy_19`, 0.93 on
+`zz_serp_1k` and 1.26 on `input_blocks`; events give 0.329, 0.574 and
+0.951. On the 4 ms scenes the two clocks agree (`dots_4k` 4.61 vs
+4.481, `zz_lattice_4k` 7.32 vs 7.328).
 
-The other contracts, new / old and new / ch06:
+**`input_blobs` is within the 2% bound in the rgb contract:** 1.008
+[0.981, 1.016]. The mask contract (1.031) and the labelling tier
+(1.073: 0.408 vs 0.380 ms) are above it. No tile of `input_blobs`
+takes the dense path, so this is fixed overhead (phase pass): K2's
+estimate 0.012 ms, K3's compacting twin 0.011, and two empty launches
+of 0.005 each.
 
-| scene | mask: new, old, ch06 | new / old | labelling: new, old, ch06 | new / old | new / ch06 |
-|---|---:|---:|---:|---:|---:|
-| dots_4k | 1.232, 15.154, 5.639 | 0.081 | 0.635, 6.675, 1.527 | 0.095 | 0.416 |
-| random_4000 | 2.021, 6.408, 5.333 | 0.316 | 1.183, 3.109, 2.041 | 0.380 | 0.580 |
-| zz_lattice_4k | 2.333, 6.442, 1.432 | 0.363 | 1.983, 6.093, 0.440 | 0.326 | 4.507 |
-| input_blocks | 0.177, 0.231, 0.113 | 0.767 | 0.121, 0.139, 0.043 | 0.861 | 2.786 |
-| input_blobs | 1.057, 1.021, 1.104 | 1.036 | 0.408, 0.379, 0.499 | 1.073 | 0.811 |
+**The other contracts**, new / old and new / ch06:
+
+| scene | mask: new, old, ch06 | new / old | new / ch06 | labelling: new, old, ch06 | new / old | new / ch06 |
+|---|---:|---:|---:|---:|---:|---:|
+| dots_4k | 1.231, 15.156, 5.636 | 0.081 | 0.218 | 0.636, 6.678, 1.527 | 0.095 | 0.416 |
+| random_4000 | 2.037, 6.413, 5.333 | 0.318 | 0.382 | 1.183, 3.107, 2.039 | 0.380 | 0.580 |
+| zz_lattice_4k | 2.397, 6.383, 1.428 | 0.376 | 1.678 | 2.050, 6.013, 0.443 | 0.341 | 4.619 |
+| input_blocks | 0.174, 0.229, 0.111 | 0.766 | 1.574 | 0.121, 0.138, 0.043 | 0.874 | 2.857 |
+| input_blobs | 1.122, 1.086, 1.107 | 1.031 | 0.954 | 0.408, 0.380, 0.505 | 1.073 | 0.807 |
+| blob_grid_100 | 0.337, 0.314, 0.372 | 1.075 | 0.911 | 0.151, 0.133, 0.094 | 1.131 | 1.587 |
+| disk_r2000 | 0.298, 0.282, 0.686 | 1.058 | 0.433 | 0.139, 0.129, 0.073 | 1.087 | 1.915 |
+| diag_snake_159 | 0.158, 0.140, 0.105 | 1.132 | 1.495 | 0.138, 0.124, 0.082 | 1.116 | 1.687 |
+
+**The labelling tier flatters the dense path.** It ends at K3, and K4b
+then rebuilds each dense tile's run CCL to paint it. On `dots_4k` that
+rebuild is 0.569 ms (phase pass): charged to the labelling, the ratio
+to ch06 would be (0.636 + 0.569) / 1.527 = 0.79, not 0.416. On
+`random_4000` it is 0.831 ms: (1.183 + 0.831) / 2.039 = 0.99, not
+0.580. The rgb contract carries no such gap: 0.250 and 0.407.
 
 **Where the time went (phase pass, ms).** K2 + K2b, K3, and K4 + K4b,
 new against old:
 
 | scene | labelling | waves | paint |
 |---|---:|---:|---:|
-| dots_4k | 0.527 vs 6.512 | 0.111 vs 0.163 | 0.600 vs 8.481 |
-| random_4000 | 0.919 vs 2.484 | 0.263 vs 0.627 | 0.841 vs 3.304 |
-| zz_lattice_4k | 0.481 vs 1.739 | 1.505 vs 4.344 | 0.371 vs 0.354 |
-| input_blocks | 0.057 vs 0.067 | 0.066 vs 0.073 | 0.060 vs 0.092 |
-| input_blobs | 0.273 vs 0.257 | 0.134 vs 0.121 | 0.662 vs 0.646 |
+| dots_4k | 0.526 vs 6.512 | 0.110 vs 0.163 | 0.600 vs 8.482 |
+| random_4000 | 0.922 vs 2.482 | 0.264 vs 0.625 | 0.857 vs 3.299 |
+| zz_lattice_4k | 0.481 vs 1.739 | 1.567 vs 4.277 | 0.358 vs 0.359 |
+| input_blocks | 0.056 vs 0.068 | 0.065 vs 0.073 | 0.057 vs 0.093 |
+| input_blobs | 0.273 vs 0.256 | 0.133 vs 0.122 | 0.649 vs 0.640 |
 
 ### What changed
 
@@ -506,6 +574,8 @@ new against old:
    first version's K3 is untouched.
 4. **Grids.** K2 and K4 are cut to one warp per tile. K2b and K4b run at
    their resident capacity, so an empty list costs one wave of blocks.
+   The engine refuses a block that one of its twins cannot launch (the
+   review's F1, below).
 
 ### The run CCL (K2b)
 
@@ -558,8 +628,12 @@ steps on a disk 24 rows tall.
 
 **The cost model (measured, per tile at full occupancy).** The CCL
 costs about 12 ns plus 0.19 ns per run. The comp loop costs about 2 ns
-per comp and closure trip. On density-0.5 noise (9 comps, 264 runs per
-tile) the comp loop still wins; hence the runs-per-comp cap.
+per comp and closure trip. So on density-0.5 noise (9 comps, 264 runs
+per tile) the comp loop should win.
+
+The runs-per-comp cap was meant to keep such tiles on it, but it does
+not: the estimate below counts far more comps than there are on noise.
+See "Noise around the hand-off" below.
 
 **The estimate.** It counts the runs that touch no red pixel of the row
 above. Every comp has one in its first row, so this bounds the comp
@@ -577,12 +651,15 @@ registers. Capped at 80 it spilled, and the comp loop got 22% slower on
 
 ### K4b
 
-K4b first tries K4's colour-uniform fast path; K4 already did for its
-own tiles, so one-blob tiles (`zz_lattice_4k`, `maze_1k`) never reach
-it. Otherwise K4b rebuilds the CCL, and each run start gets its comp's
-colour. A ring comp reads its record through the ring bitmap; an
-interior comp's label is its root's anchor. The rows are painted from
-the slots.
+K4 keeps every fast path. It hands a tile to K4b only when none of
+them took it, so one-colour tiles (`zz_lattice_4k`, `maze_1k`) never
+reach K4b. K4b used to repeat K4's colour-uniform test; with the same
+header and labels that test could never fire, and the review removed
+it.
+
+K4b rebuilds the CCL, and each run start gets its comp's colour. A ring
+comp reads its record through the ring bitmap; an interior comp's label
+is its root's anchor. The rows are painted from the slots.
 
 The palette is packed into three 48-bit constants. A lookup with a
 per-lane index in constant memory serialises; it was a third of K4b's
@@ -614,57 +691,223 @@ is issued.
 
 **The price of compaction: spills.** It takes the twin from 16 to 56
 bytes of local memory at the 80-register cap (88 or 96 registers cost
-cooperative blocks). On `input_blobs` the twin executes fewer
-instructions than the old K3 (5.9M vs 6.8M, `ncu`), but its spill
-traffic is 2-3x higher, and it is about 9% slower.
+cooperative blocks). On `input_blobs` the twin issues fewer
+instructions than the old K3 (6.10M vs 6.82M warp instructions,
+`ncu`), but it is 9% slower in the phase pass (0.133 vs 0.122 ms). The
+spills are the likely cause (inferred).
 
 ### The ablations (rgb, per-round ratio medians)
 
-| scene | no compaction / new | auto / new | new K3 alone / old | CCL with old K3 / new |
-|---|---:|---:|---:|---:|
-| dots_4k | 0.999 | 1.001 | 1.002 | 1.021 |
-| random_4000 | 1.068 | 1.004 | 1.007 | 1.086 |
-| zz_lattice_4k | 1.394 | 1.022 | 0.923 | 2.039 |
-| input_blocks | 0.964 | 1.005 | 1.056 | 1.010 |
-| input_blobs | 0.994 | 0.999 | 1.014 | 0.992 |
-| zz_serp_4k | 1.262 | 1.009 | 0.920 | 1.684 |
-| serpentine_2048 | 0.971 | 0.988 | 1.033 | 1.405 |
-| maze_1k | 1.022 | 1.049 | 1.049 | 1.071 |
+| scene | no compaction / new | no compaction / old | auto / new | new K3 alone / old | CCL with old K3 / new |
+|---|---:|---:|---:|---:|---:|
+| dots_4k | 0.993 | 0.096 | 0.999 | 1.002 | 1.018 |
+| random_4000 | 1.062 | 0.365 | 1.000 | 1.007 | 1.078 |
+| zz_lattice_4k | 1.343 | 0.535 | 0.994 | 0.940 | 1.997 |
+| input_blocks | 0.969 | 0.759 | 0.995 | 1.056 | 1.005 |
+| input_blobs | 0.997 | 1.006 | 0.999 | 1.014 | 0.995 |
+| zz_serp_4k | 1.318 | 0.615 | 1.019 | 0.903 | 1.722 |
+| serpentine_2048 | 0.977 | 0.619 | 0.994 | 1.024 | 1.411 |
+| maze_1k | 1.022 | 0.955 | 1.044 | 1.048 | 1.060 |
+| blob_grid_100 | 0.987 | 1.019 | 0.996 | 1.039 | 0.982 |
+| disk_r2000 | 0.983 | 1.009 | 1.002 | 1.028 | 0.998 |
+| diag_snake_159 | 0.979 | 0.985 | 0.992 | 1.008 | 0.977 |
 
-- **Compaction** wins where rounds are huge (`zz_lattice_4k` 1.39,
-  `zz_serp_4k` 1.26 without it) and loses 0.6-5.9% where they are
-  small. It stays on.
+- **Compaction** wins where rounds are huge (`zz_lattice_4k` 1.34,
+  `zz_serp_4k` 1.32 without it, `random_4000` 1.06). It costs 0.3-3.1%
+  where they are small. It stays on.
+- **Compaction is only part of the sparse cost.** Without it the path
+  is still 1.006-1.019 of the first version on `input_blobs`, the blob
+  grid and the disk. The rest is K2's estimate and the two extra
+  launches.
 - **auto** launches the compact and the plain twin; each returns before
   its first barrier unless the first round's size (16,384 queued seeds)
-  is on its side. It would pick the better twin on most scenes, but the
-  cooperative launch that returns at once costs 6-10 us: auto is 0.99
-  to 1.05 of the default. Off by default.
+  is on its side. A cooperative launch that returns at once still
+  costs its launch: auto is 0.99 to 1.04 of the default. Off by
+  default.
 - **The new K3 alone** (no tile reaches the CCL) gains only on the
-  zigzags (0.92) and costs up to 7% elsewhere. The index needs K2b.
-- **The CCL with the old K3** loses the index and the compaction: 2.04x
-  on `zz_lattice_4k`.
-- **Grid fitting** is worth 3-5% on the crops (full grids: 1.048,
-  1.038, 1.028 of the new path).
+  zigzags (0.940, 0.903) and costs up to 5.6% elsewhere. The index
+  needs K2b.
+- **The CCL with the old K3** loses the index and the compaction: 2.00x
+  on `zz_lattice_4k`, 1.72x on `zz_serp_4k`.
+- **Grid fitting** is worth 2-6% on the crops (full grids: 1.058,
+  1.054, 1.034, 1.021, 1.016 of the new path, crops 1000 to 4000).
+
+### Noise around the hand-off
+
+The final session adds 4000 x 4000 noise of density 0.40 to 0.60
+(seed 0) with one more arm: the default with K2's hand-off off
+(`ccl_min` never reached; K4b unchanged).
+
+| density | comps per tile | K2b tiles (of 15,625) | new | first version | hand-off off | ch06 | new / first | off / new |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.40 | 27.5 | 15,625 | 2.719 | 4.679 | 3.649 | 6.908 | 0.581 | 1.344 |
+| 0.45 | 16.1 | 15,624 | 2.842 | 3.329 | 3.138 | 7.231 | 0.853 | 1.107 |
+| 0.50 | 9.1 | 15,283 | 2.609 | 2.271 | 2.405 | 7.304 | 1.148 | 0.921 |
+| 0.55 | 5.2 | 9,591 | 1.998 | 1.562 | 1.606 | 7.213 | 1.282 | 0.804 |
+| 0.60 | 3.2 | 1,427 | 1.358 | 1.209 | 1.267 | 6.939 | 1.125 | 0.932 |
+
+**The runs-per-comp cap does not keep these tiles on the comp loop.**
+At density 0.50 a tile holds 9.1 comps and 264 runs, yet K2 sends
+15,283 of 15,625 tiles to K2b. The estimate counts the runs that touch
+nothing above (or below), and a noise comp near the percolation
+(חלחול) threshold has many of them.
+
+In the phase pass at 0.50, K2 and K2b take 1.245 ms; K2 alone, with
+the hand-off off, 0.703.
+
+**The crossover lies between 0.45 and 0.50.** Below it the hand-off
+pays (1.344 and 1.107 without it); above it, turning it off saves
+7-20%.
+
+A lower cap cannot find it. The runs per tile are almost equal at
+0.45 and 0.50 (260 and 264), while the comps per tile halve (16.1 and
+9.1). A fix needs a tighter comp estimate (inferred, not built).
+
+Even with the hand-off off, the path is 1.032-1.060 of the first
+version at 0.50-0.60: the compacting K3 and K4's hand-off to K4b cost
+the rest. Every noise scene still beats ch06 2.5-5.1x.
+
+### `ncu`, before and after
+
+Both profiles are in `results/ch08_gpu_nblob_tiles/ncu/`: the first
+version's (`before/`) and the dense-tile default's (`after/`), on the
+same four scenes, each one rgb pipeline in a profiling window, with
+the same sections and clock control.
+
+**Instructions, not cycles.** Under `--clock-control base` the first
+profile's SM clock wandered from 0.40 to 1.14 GHz; the second held
+1.10-1.14. Instruction counts do not depend on the clock, so they carry
+the comparison. Cycles divided by 2.07 GHz match the final session's
+phase times within 0.96-1.01 for K2b, K4b and K3 on `random_4000`.
+
+| warp instructions (M) | before | after | after / before |
+|---|---:|---:|---:|
+| `dots_4k`, labelling (K2 + K2b) | 895.4 | 30.0 | 0.034 |
+| `dots_4k`, paint (K4 + K4b) | 1,224.0 | 60.9 | 0.050 |
+| `random_4000`, labelling | 331.8 | 70.6 | 0.213 |
+| `random_4000`, paint | 469.5 | 103.0 | 0.219 |
+| `zz_lattice_4k`, waves (K3) | 319.3 | 46.6 | 0.146 |
+| `input_blobs`, labelling | 30.5 | 31.9 | 1.046 |
+| `input_blobs`, waves | 6.82 | 6.10 | 0.894 |
+
+**Before: issue-bound comp loops.** K2 and K4 ran at 81-87% of the
+ALU pipe, about 145 warp instructions per closure trip: 213.5 per comp
+in K2 on `dots_4k`, where every comp is one pixel. K3 on
+`zz_lattice_4k` was latency-bound: 2.15M serial warp steps and 64.0M
+signature tests.
+
+**After: the work went where the profile pointed.** The labelling
+costs 7.2 warp instructions per comp on `dots_4k` (ch06: 8.1 per run).
+On `zz_lattice_4k` the index makes every signature test a hit: 2.05M
+tests, all of them CAS, in 115k warp steps; no rmin atomic is left (it
+was 975,867).
+
+**After: the new limits.**
+
+- **K2b and K4b wait on shared memory.** On `dots_4k`, 85.6% and 84.3%
+  of their shared-memory wavefronts are bank conflicts (התנגשויות
+  בנקים), and short-scoreboard stalls lead. A likely cause (inferred):
+  slot rows of 16 words put even rows in one half of the banks and odd
+  rows in the other, so the 32 lanes share 2 banks per slot column. A
+  stride of 17 would spread them.
+- **K2b runs at 25% occupancy:** 130 registers.
+- **K3 on `zz_lattice_4k` still waits on global memory:**
+  long-scoreboard stalls of 17.5 cycles per issue, and 78.5% of its
+  2.05M CAS lose.
+
+**Against ch06 (cycles at the ncu clock).** The labelling went from
+4.94x ch06 to 0.46x on `dots_4k`, and from 1.58x to 0.59x on
+`random_4000`. The paint went from 2.07x to 0.14x and from 0.99x to
+0.25x.
+
+
+### The review and its fixes
+
+A review of this path (correctness, fuzzing, and the fairness of the
+numbers) found three bugs, and five issues of performance or
+fairness. Each bug got a failing test first, then the fix.
+
+- **A block a twin could not launch (F1).** The dense twins' block
+  bound, 512 threads, counted only shared memory. K2b holds 130
+  registers (dindex, bare) or 178 (instrumented), so blocks of 416 or
+  288 threads and more passed validation. The constructor's warm-up
+  then died with `CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES`, before any image.
+  Now the engine compiles every label and paint twin it launches for
+  its own arguments, and refuses such a block with a `ValueError` that
+  names the largest block that fits. The first version's K2 failed the
+  same way at 1024 threads, and is refused too.
+- **K2b's register cap crashed the engine (F2).** The warm-up ignored
+  `label_dense_max_registers`, so the constructor asked an uncompiled
+  twin for its capacity: `StopIteration` for any cap. The cap now
+  reaches the warm-up.
+- **`paint_tiles` counted K4b's tiles twice (F2).** K4 counted every
+  touched tile and K4b its own again. The tests now assert that every
+  touched tile is counted once and painted by exactly one path. The
+  earlier sessions' `paint_tiles` values are inflated by
+  `paint_ccl_tiles`.
+- **ch05's clock (fairness F1, F2).** See "ch05, timed by events"
+  above: the host clock added 0.3-0.5 ms per call, and its clock window
+  was mostly host work.
+- **Sparse scenes and small crops (P1, P3).** The first dense session
+  timed crops only up to 2000 and named only `input_blobs` and
+  `crop_1000`. This session adds crops of 3000 and 4000, and the limits
+  below list every scene over 2%.
+- **The noise crossover (F3)**: the section above.
+- **Smaller fixes.** K4b's colour-uniform branch could never fire and
+  is gone. The fuzz test drew the lookup and the connectivity from one
+  `seed % 4`, so the default lookup never ran at 8-connectivity there;
+  now each config is drawn on its own stream, and every pair runs.
+
+### What did not work
+
+- **The runs-per-comp cap as a guard for noise**, above.
+- **Task compaction for every image.** It is worth 1.34x on
+  `zz_lattice_4k`, but costs up to 3.1% on small rounds, and choosing
+  the twin per image (auto) costs a launch of its own.
+- **Grid fitting** recovered 2-6% on the crops, not the 4-12% the dense
+  path costs there.
+- **A size-only switch back to the first version** would not fix small
+  images. `input_blocks` has the tile count of `crop_1000` (1,024), and
+  the default runs it at 0.785 of the first version.
+- **The CCL inside K2.** It needed 146 registers; capped at 80 it
+  spilled, and the comp loop got 22% slower on `input_blobs`.
 
 ### Limits and deviations
 
-1. **`input_blobs` is at the 2% bound, not under it.** rgb 1.019 [0.963,
-   1.072] (draft session 1.017); mask 1.036 and labelling 1.073 exceed
-   it. The cost is fixed overhead: no tile of it takes the dense path.
-2. **Small sparse images got slower:** `crop_1000` 1.129, 1.22x ch06.
-   The two extra launches cost about 5 us, the estimate and the
-   compacting K3 the rest. Grid fitting (3-5%) did not offset them.
-3. **`zz_lattice_4k` and `input_blocks` still lose to ch06** (1.50x,
-   1.46x). zz_lattice's K3 is 1.5 ms of its 2.6: 2 rounds of 976k
-   entries and a flatten of 976k comps by 18k threads.
-4. **One CCL tile costs about 10-15 us of latency** on a lone warp
+1. **`input_blobs` holds the 2% bound in the rgb contract only:** 1.008
+   [0.981, 1.016] (the first dense session 1.019, its draft 1.017).
+   The mask contract (1.031) and the labelling tier (1.073) exceed it.
+   The cost is fixed overhead: no tile of it takes the dense path.
+2. **Every sparse scene pays that overhead, in one contract or more.**
+   `blob_grid_100`: rgb 1.034, mask 1.075, labelling 1.131.
+   `disk_r2000`: 1.028, 1.058, 1.087. `diag_snake_159`: 1.009, 1.132,
+   1.116. The crops: rgb 1.119 at 1000 down to 1.040 at 4000,
+   labelling 1.143 to 1.102.
+3. **On `blob_grid_100` the phase pass shows where:** K3 0.0645 vs
+   0.0553 ms, K2 0.0809 vs 0.0768, and the two empty launches 0.005
+   each.
+4. **The crossover with ch06 moved.** On the crops the default is
+   1.198, 1.093, 1.017, 0.875 and 0.818 of ch06 (1000 to 4000); the
+   first version 1.071, 0.991, 0.938, 0.829 and 0.786. So the default
+   ties at 2000 and wins from 3000; the first version tied at 1500 and
+   won from 2000.
+5. **Noise of density 0.50-0.60 is slower than the first version**
+   (1.148, 1.282, 1.125), though 2.8-5.1x faster than ch06.
+6. **`zz_lattice_4k` and `input_blocks` still lose to ch06** (1.55x,
+   1.46x), and so do `serpentine_2048`, `zz_serp_1k` and the decoy
+   staircase (1.47-1.77x). zz_lattice's K3 is 1.57 ms of its 2.66: 2
+   rounds of 976k entries and a flatten of 976k comps by 18k threads.
+7. **One CCL tile costs about 10-15 us of latency** on a lone warp
    (thousands of dependent shared-memory steps). A sparse image with a
    few dense tiles pays that once per K2b and K4b.
-5. **Not built:** a bulk path for isolated pixels alone (the run CCL
+8. **Not built:** a bulk path for isolated pixels alone (the run CCL
    handles them, a run with no union), a per-warp shared-memory
-   flatten for K3, a CCL inside K3's cooperative launch.
-6. **The draft session** `dense_20261016T013317Z` ran the code before
-   the auto option (commit `bf82518`). Its ratios agree within 0.02.
+   flatten for K3, a CCL inside K3's cooperative launch, a tighter comp
+   estimate.
+9. **Earlier sessions of this path:** the draft
+   `dense_20261016T013317Z` (code at `bf82518`) and
+   `dense_20261016T021919Z`. Both precede the review: host-clock ch05,
+   inflated `paint_tiles`, crops only to 2000.
 
 ## Experiments
 
@@ -740,6 +983,18 @@ page now handle each one.
 The headline moved from 0.827 to 0.862 against ch06, and from 0.927 to
 0.962 against ch06 with the same pack.
 
+The review of the dense-tile path added two more lessons:
+
+- **A host clock is not a GPU clock.** ch05's `kernel_ms` wraps its
+  launches and a synchronize in `perf_counter`, with no sleep kernel
+  ahead. On scenes under a millisecond that more than doubled its time
+  (`stair_decoy_19`: 0.83 ms host, 0.329 events). ch05 is now timed
+  like every other side.
+- **A clock window can watch the wrong thing.** ch05's `dots_4k` window
+  read a 390-510 MHz median because it mostly covered ch05's host work,
+  not its kernels. This page once "scaled" ch05 to 2,070 MHz on that
+  basis (about 0.9 ms); events at 2,070 MHz give 4.48 ms.
+
 ## Correctness
 
 The proof (design section 7) in five lines:
@@ -761,7 +1016,7 @@ The dense path changes none of the five steps. K2b writes the same
 records, headers and seeds as the comp loop (its union events cover
 every adjacent run pair; the argument is in the dense-tile section).
 
-Tests (`test_correctness.py`, 2,556, 8 of them behind
+Tests (`test_correctness.py`, 2,567, 8 of them behind
 `FLOOD_FILL_SLOW=1`):
 
 - the closure against a CPU flood (both exits and ch07's loop)
@@ -771,7 +1026,8 @@ Tests (`test_correctness.py`, 2,556, 8 of them behind
   including the bare (timed) twins of every lookup at both connectivities
 - paint equal to ch06 and ch05; every seed rule giving identical labels
 - the valve, rounds past the 252 stamp slots, five fuzz families at 1
-  block and at max blocks (every lookup, every sixth case bare)
+  block and at max blocks (every lookup at both connectivities, about
+  one case in six bare)
 - poisoned engine reuse, repeatability, twins, limits, launch grids
   that are not whole warps, the E1-only pack store
 - the dense path: K2b's run CCL against a CPU flood on 511 masks,
@@ -780,6 +1036,11 @@ Tests (`test_correctness.py`, 2,556, 8 of them behind
   touched tile: every lookup, both connectivities, odd grids, auto;
   3 of the old path), and the model's prediction of the CCL tiles,
   indexed tiles and dense tasks checked on every instrumented run
+- the review's fixes: blocks of 512, 384 and 256 threads for every
+  lookup, bare and instrumented, run exactly or are refused; the first
+  version refuses 1024; K2b's register cap builds and stays exact; and
+  every instrumented run counts each touched tile once in `paint_tiles`
+  and paints it by exactly one path
 
 ch07's 157 tests and ch06's 109 also pass.
 
@@ -813,7 +1074,8 @@ ch07's 157 tests and ch06's 109 also pass.
 11. **The valve scenes are an anti-diagonal snake and two staircases.**
     A lin-monotone zigzag on tile borders is full of S2 seeds.
 12. **ch05 got 3 samples on input_blobs and dots_4k**: their first calls
-    took over 2 s (the design's rule).
+    took over 2 s (the design's rule). The final dense session times
+    ch05 by events, 9 samples on every scene.
 
 ## New problems and lessons
 
@@ -838,26 +1100,39 @@ ch07's 157 tests and ch06's 109 also pass.
 ## Open problems (next steps)
 
 1. **Dense tiles: done, with what remains.** K2b and K4b took
-   `dots_4k` from 16 to 1.5 ms. `zz_lattice_4k` (K3: two rounds of
+   `dots_4k` from 15.4 to 1.5 ms. `zz_lattice_4k` (K3: two rounds of
    976k entries, a flatten of 976k comps) and `input_blocks` still
    lose to ch06. One CCL tile costs 10-15 us of latency on a lone warp.
 2. **An index for dense tiles only: done** (the dindex lookup). Its
-   compacting twin spills at 80 registers and costs 1% on
-   `input_blobs`; fewer live registers in its task loop would free that.
+   compacting twin spills at 80 registers, and on `input_blobs` it is
+   0.011 ms slower than the first version's K3 (phase pass); fewer live
+   registers in its task loop could free that (inferred).
 3. **Degenerate shapes.** A 1-px strip puts 32 px in a tile: 131,072
    tiles and about 416 MiB of buffers for 4 Mpx. A 1-D tiling, or
    routing thin images to another method, would fix both.
 4. **Port `pack_tiles` to ch06.** It is worth 0.33 ms there (2.617 to
    2.291 ms on input_blobs).
-5. **Small images.** The waves' fixed cost (about 0.04 ms) loses below
-   1500 x 1500 px, and the dense path added two launches and the
-   estimate (`crop_1000` 1.13 of the old path). CUDA graphs, a
-   narrow-front mode without `grid.sync`, or a host-side choice of the
-   old path for small images are candidates.
-6. **The paint floor and `ncu`.** Why scattered bytes cap near 63 GB/s
-   is unproven. `ncu` needs the NVIDIA Control Panel's "Allow access to
-   the GPU performance counters to all users" and a full Windows
-   restart (`ERR_NVGPUCTRPERM` until then).
+5. **Small images and sparse ones.** The default ties ch06 at 2000 x
+   2000 px and loses below (`crop_1000` 1.198). The dense path added
+   two launches, the estimate and the compacting K3 (`crop_1000` 1.119
+   of the first version; `blob_grid_100` 1.131 in the labelling tier).
+   CUDA graphs or a narrow-front mode without `grid.sync` are
+   candidates. A host-side switch by size is not: `input_blocks` has
+   `crop_1000`'s tile count and gains 1.27x from the dense path.
+6. **The paint floor.** `ncu` runs now (the GPU counters were enabled
+   on 2026-10-16; profiles in `results/ch08_gpu_nblob_tiles/ncu/`). On
+   `input_blobs` K4 uses 31% of the ALU pipe and 33% of DRAM's peak,
+   with long-scoreboard stalls first. Its time does not follow the SM
+   clock (ncu cycles at 2.07 GHz give 0.70 of the phase time), and its
+   stores are 1.93M requests of 2.86 sectors each. Why scattered bytes
+   cap near 63 GB/s is still unproven.
+7. **K2b's and K4b's bank conflicts.** 84-86% of their shared-memory
+   wavefronts on `dots_4k` (ncu). A padded slot row is the first thing
+   to try.
+8. **K2's comp estimate on noise.** At density 0.50-0.60 it sends
+   tiles to K2b that the comp loop labels faster (1.148-1.282 of the
+   first version). The cap cannot separate them; a tighter estimate
+   could.
 
 ## Glossary
 
@@ -888,6 +1163,8 @@ ch07's 157 tests and ch06's 109 also pass.
 - **Dense-tile path** - K2b, K4b and the dindex K3; the default.
 - **Task compaction** (דחיסת משימות) - a warp running only the
   (entry, direction) tasks that exist, 32 at a time.
+- **Bank conflict** (התנגשות בנקים) - lanes of one warp touching
+  different words of one shared-memory bank; the access is replayed.
 
 ## Files
 
@@ -901,19 +1178,25 @@ cpu_model.py         per-tile comps from pixels, the wave model with the valve,
                      the run estimate and the dense path's predictions
 scenes.py            adversarial scenes (staircase, snake, frame combs, ...)
                      and five fuzz families
-test_correctness.py  2,556 tests (8 behind FLOOD_FILL_SLOW=1)
+test_correctness.py  2,567 tests (8 behind FLOOD_FILL_SLOW=1)
 benchmarks/
   benchmark.py       the interleaved session vs ch06 and ch05;
-                     --session dense: old vs new ch08, the ablations
+                     --session dense: old vs new ch08, the ablations,
+                     crops to 4000, noise around K2's hand-off
   experiments.py     E1-E10, E4b, E13, R8 and E9, with the decision rules
 ```
 
 Result files are in `results/ch08_gpu_nblob_tiles/benchmark_results/`.
-`waves_20261015T183401Z` is the first version's session,
-`dense_20261016T021919Z` the dense-tile path's
-(`dense_20261016T013317Z` its draft).
+`waves_20261015T183401Z` is the first version's session.
+`dense_20261016T054922Z` is the final session of the dense-tile path;
+`dense_20261016T021919Z` and its draft `dense_20261016T013317Z` came
+before the review.
 `waves_20261015T160144Z` is the draft's, from the benchmark before the
 fairness review. The experiment sessions are named above.
+
+The `ncu` profiles before and after the dense-tile path are in
+`results/ch08_gpu_nblob_tiles/ncu/`: a summary, curated CSV tables
+and the driver (no `.ncu-rep` file and no raw export).
 
 ## Run
 

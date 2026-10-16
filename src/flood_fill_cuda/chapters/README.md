@@ -649,9 +649,11 @@ as BFS waves, and union-find only joins waves that meet.)*
 | still BFS | 11,609 seeds, **6 rounds**, frontier 11,586 / 14,744 / 7,834 / 2,306 / 289 / 6 comps; every comp claimed once; 30,979 collision pairs unioned. Pure waves (S2 seeds, no valve): 8 rounds, 0.998 of the default |
 | where tiles win | disk 0.544, blob grid 0.838: one paint word per row where ch06's runs are long |
 | where tiles lose | many comps per tile: `input_blocks` 1.85x, `random_4000` 1.18x, a dot lattice with 256 comps per tile 2.6x (and 3.2x ch05). Long border shapes: serpentine 2.3x, `zz_lattice_4k` 4.0x |
-| small images | a crossover at a 1500 x 1500 crop (1.000); the labelling alone only wins from 5000 x 5000 |
+| small images | a crossover at a 1500 x 1500 crop (1.000); the labelling alone only wins from 5000 x 5000. The dense-tile default moved the crossover to 2000 x 2000 (1.017) |
 | the hybrid lookup | `zz_lattice_4k` 16.33 → 6.89 ms, the decoy staircase 0.584 → 0.310 ms against the scan, input_blobs a tie with the scan (1.005 here; E13 had 0.991) |
 | fairness | phase events stalled ch06 on small scenes (`input_blocks` 1.21 became 1.85), and ch06's merge grid had been tuned for its instrumented twin; both fixed before the headline |
+| **dense tiles** (final session `dense_20261016T054922Z`) | the default now labels and paints a tile of many comps by a run CCL (K2b, K4b) and indexes it for K3: `dots_4k` 15.405 → **1.484 ms** (0.250 of ch06), `random_4000` 6.652 → **2.287** (0.407), `zz_lattice_4k` 6.642 → 2.663 (still 1.546), `input_blocks` 0.255 → 0.201 (still 1.459). `input_blobs`: 1.008 of the first version, 0.890 of ch06 |
+| ch05, timed by events | its host clock had added 0.3-0.5 ms per call; with events ch08 beats it everywhere but the 1-px strip (`dots_4k` 1.484 vs 4.481 ms) |
 
 ### New problems and lessons
 - **The node decides the work.** A tile node is opened again whenever
@@ -669,16 +671,19 @@ as BFS waves, and union-find only joins waves that meet.)*
   right for the twin it was tuned on, and wrong for the one timed here.
 
 ### Open problems → Chapter 9 candidates
-1. **Dense tiles.** One closure per comp, in K2 and again in K4, makes
-   noise and dot lattices lose. A bulk path for isolated pixels or a
-   shared-memory union-find per dense tile.
-2. **An index for dense tiles only**, to take the index lookup's wins on
-   long shapes without its K2 cost on `input_blobs`.
+1. **Dense tiles: done** for dot lattices and noise up to density 0.45
+   (a shared-memory run CCL per dense tile). Left: `zz_lattice_4k`'s
+   K3, `input_blocks`, and noise of density 0.5-0.6, where K2's comp
+   estimate sends tiles to the CCL that the comp loop labels faster.
+2. **An index for dense tiles only: done** (the dindex lookup).
 3. **Thin images.** A 1-px strip puts 32 px in a tile and ~100 B/px of
    buffers in memory.
 4. **Port `pack_tiles` to ch06** (0.33 ms there), and CUDA graphs for
    the small-image floor.
-5. **`ncu`** on the paint floor, still owed.
+5. **`ncu`: done for this chapter**
+   (`results/ch08_gpu_nblob_tiles/ncu/`, before and after the dense
+   path). The dense twins now wait on shared-memory bank conflicts; the
+   paint floor is still unexplained.
 
 ---
 
