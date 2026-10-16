@@ -11,7 +11,9 @@ Each probe isolates one cost the README argues from:
   barrier      the per-round ritual alone (grid.sync, read the queue
                count, grid.sync) at every grid the benchmark launches -
                what a level costs ch03 and a round costs ch07 before any
-               work is done
+               work is done; and the one_sync ritual (thread 0 resets a
+               counter, grid.sync, read the next one: three rotating
+               counters)
   registers    the rounds kernels' PTX compiled by ptxas alone (nothing
                linked) against the linked kernel's count, to show where
                the registers come from
@@ -69,6 +71,32 @@ def _barrier_rounds(q_state, n_rounds, out):
         out[0] = acc
 
 
+@cuda.jit
+def _barrier_rounds_1(q_state, n_rounds, out):
+    """The one_sync ritual: reset counter (r+2) % 3, one grid.sync, read
+    counter (r+1) % 3 (kernels._make_rounds_kernel, one_sync)."""
+    grid = cuda.cg.this_grid()
+    tid = cuda.grid(1)
+    r = 0
+    cur = 0
+    acc = 0
+    while r < n_rounds:
+        nxt = cur + 1
+        if nxt == 3:
+            nxt = 0
+        if tid == 0:
+            zap = nxt + 1
+            if zap == 3:
+                zap = 0
+            q_state[zap] = 0
+        grid.sync()
+        acc += q_state[nxt]
+        cur = nxt
+        r += 1
+    if tid == 0:
+        out[0] = acc
+
+
 def _per_iter_us(launch, n0, n1):
     """Event time per loop iteration, differenced between two lengths."""
     launch(10)
@@ -86,19 +114,21 @@ def _per_iter_us(launch, n0, n1):
     return (ts[1] - ts[0]) / (n1 - n0) * 1000.0
 
 
-def barrier_us(grids):
-    """{'BxT': {'median': us per round, 'runs': [...]}} per (blocks, tpb)."""
-    q = cuda.to_device(np.zeros(2, np.int32))
+def barrier_us(grids, kernel=None):
+    """{'BxT': {'median': us per round, 'runs': [...]}} per (blocks, tpb),
+    for the two-sync ritual (default) or `kernel`."""
+    kernel = _barrier_rounds if kernel is None else kernel
+    q = cuda.to_device(np.zeros(3, np.int32))
     out = cuda.to_device(np.zeros(1, np.int64))
-    _barrier_rounds[1, 32](q, 1, out)
+    kernel[1, 32](q, 1, out)
     cuda.synchronize()
-    ov = next(iter(_barrier_rounds.overloads.values()))
+    ov = next(iter(kernel.overloads.values()))
     res = {}
     for blocks, tpb in grids:
         if blocks > ov.max_cooperative_grid_blocks(tpb):
             continue
         runs = [_per_iter_us(
-            lambda n: _barrier_rounds[blocks, tpb](q, n, out), 1000, 4000)
+            lambda n: kernel[blocks, tpb](q, n, out), 1000, 4000)
             for _ in range(BARRIER_REPEATS)]
         res[f"{blocks}x{tpb}"] = {"median": statistics.median(runs),
                                   "runs": runs}
@@ -298,15 +328,27 @@ def _ptxas():
     return None
 
 
+# the switch sets the register probe compiles (flood_fill.SWITCHES)
+OLD_SWITCHES = {"one_sync": False, "fused_pack": False, "skip_full": False,
+                "fused_paint": False}
+NEW_SWITCHES = {"one_sync": True, "fused_pack": True, "skip_full": True,
+                "fused_paint": False}
+
+
 def registers(configs):
-    """Linked registers (Numba) vs ptxas -c on the same PTX, per kernel."""
+    """Linked registers (Numba) vs ptxas -c on the same PTX, per kernel.
+    configs: (connectivity, bare[, switches]); switches default to all
+    off (the original kernel)."""
     ptxas = _ptxas()
     res = {}
-    for conn, bare in configs:
-        kern = k7.get_rounds_kernel(conn, bare, None)
-        ff.regs_per_thread(conn, bare, None)   # compiles it
+    for conn, bare, *rest in configs:
+        sw = rest[0] if rest else OLD_SWITCHES
+        kern = k7.get_rounds_kernel(conn, bare, None, **sw)
+        ff.regs_per_thread(conn, bare, None, **sw)   # compiles it
         name = f"conn{conn}{'_bare' if bare else ''}"
-        entry = {"linked": ff.regs_per_thread(conn, bare, None)}
+        if any(sw.values()):
+            name += "_" + "_".join(k for k, v in sw.items() if v)
+        entry = {"linked": ff.regs_per_thread(conn, bare, None, **sw)}
         if ptxas:
             ptx = next(iter(kern.inspect_asm().values()))
             cmd = [ptxas, "-arch=sm_89", "-v", "-c", "/dev/stdin",
@@ -335,9 +377,10 @@ def warm():
         kern[1, 32](ms, fs, 1, out, cyc)
     _chase_load[1, 32](d, 1, out, cyc)
     _chase_atomic_or[1, 32](d, 1, out, cyc)
-    q = cuda.to_device(np.zeros(2, np.int32))
+    q = cuda.to_device(np.zeros(3, np.int32))
     acc = cuda.to_device(np.zeros(1, np.int64))
     _barrier_rounds[1, 32](q, 1, acc)
+    _barrier_rounds_1[1, 32](q, 1, acc)
     cuda.synchronize()
 
 
@@ -350,5 +393,7 @@ def run_all(grids):
         "latency": lat,
         "column_fill": col,
         "barrier_us_per_round": barrier_us(grids),
-        "registers": registers([(8, False), (8, True), (4, False)]),
+        "barrier_1sync_us_per_round": barrier_us(grids, _barrier_rounds_1),
+        "registers": registers([(8, False), (8, True), (4, False),
+                                (8, True, NEW_SWITCHES)]),
     }

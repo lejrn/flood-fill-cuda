@@ -56,7 +56,24 @@ Scenes: ch03's six (the README's), then four worst cases from the
 chapter's perf-adversary review (worst_cases.py): a serpentine of
 zigzags on the tile borders (one tile per round), a zigzag lattice on
 every border (rounds == levels with a wide front), a 1-px maze, and a
-524288 x 32 strip with a 32x32 blob (pack/paint dominated).
+524288 x 32 strip with a 32x32 blob (pack/paint dominated); and a
+5,000-px disk in a 64 Mpx image (pack/paint dominated, square).
+
+The rounds kernel's switches (flood_fill.SWITCHES) are timed as an
+ablation in the same rounds, every config pinning every switch:
+  ch07_w4_bare          the old default's bare twin (all switches off)
+  ch07_w4_bare_1s       one_sync alone: one grid.sync per round
+  ch07_w4_bare_fp       fused_pack alone: the RGB read inside the rounds
+  ch07_w4_bare_sk       skip_full alone: no exports into full tiles
+  ch07_w4_bare_1s_fp    the two approved switches
+  ch07_w4_bare_new      the combination: one_sync + fused_pack + skip_full
+  ch07_w4_bare_new_pt   the combination + fused_paint (paint inside the
+                        rounds; needs fused_pack)
+  ch07_1x32_new         the combination at one block (narrow scenes)
+Each has an instrumented twin (ch07_w4_1s, ..., ch07_w4_new_pt) whose
+untimed pass gives the counters (visits, packed tiles, skipped exports).
+The paired per-round ratios set each against the old default's bare
+twin, and the combination against ch03_wc_bare and ch06_runs.
 
 What each ch07 number covers: `pack` (ch06's RGB -> 1 bit/px), `init`
 (the per-run state, on the device), `rounds` (the cooperative tile
@@ -162,6 +179,9 @@ SCENES = [
      "perfect maze, 1-px corridors, 1023x1023", False),
     ("thin_h32_blob", worst_cases.thin_h32_blob_scene,
      "524288x32 strip (16.8M px), 32x32 blob: pack/paint dominated", False),
+    ("tiny_blob_8k", worst_cases.tiny_blob_scene,
+     "5,025 px disk (r=40) in an 8000x8000 image (64M px): pack/paint "
+     "dominated", False),
 ]
 
 # ch03 configs: name -> (layout, connectivity, bare, tpb, blocks, narrow
@@ -184,23 +204,50 @@ CH03_WC_GRIDS = ["ch03_wc", "ch03_wc_120x128", "ch03_wc_240x64",
 # 288 and 192 warps). w4_cap96 buys a bigger grid (480 warps) with a
 # link-time register cap and pays in spills; w4_bare drops the counters;
 # c4_w4 is the 4-connectivity twin; 1x32 / 1x64 are one-block grids for
-# the narrow scenes.
-CH07 = {
-    "ch07_w2": dict(connectivity=8, threads_per_block=64, max_registers=None),
-    "ch07_w4": dict(connectivity=8, threads_per_block=128, max_registers=None),
-    "ch07_w8": dict(connectivity=8, threads_per_block=256, max_registers=None),
-    "ch07_w4_cap96": dict(connectivity=8, threads_per_block=128,
-                          max_registers=96),
-    "ch07_w4_bare": dict(connectivity=8, threads_per_block=128,
-                         max_registers=None, bare=True),
-    "ch07_c4_w4": dict(connectivity=4, threads_per_block=128,
-                       max_registers=None),
-    "ch07_1x32": dict(connectivity=8, threads_per_block=32, blocks=1,
-                      max_registers=None),
-    "ch07_1x64": dict(connectivity=8, threads_per_block=64, blocks=1,
-                      max_registers=None),
+# the narrow scenes. Every config pins every switch (so a change of
+# flood_fill.DEFAULT_SWITCHES cannot move it); the switch ablation is the
+# _1s / _fp / _sk / _1s_fp / _new / _new_pt family (module docstring).
+OLD_SW = {"one_sync": False, "fused_pack": False, "skip_full": False,
+          "fused_paint": False}
+NEW_SW = {"one_sync": True, "fused_pack": True, "skip_full": True,
+          "fused_paint": False}
+SW_SETS = {
+    "": OLD_SW,
+    "_1s": {**OLD_SW, "one_sync": True},
+    "_fp": {**OLD_SW, "fused_pack": True},
+    "_sk": {**OLD_SW, "skip_full": True},
+    "_1s_fp": {**OLD_SW, "one_sync": True, "fused_pack": True},
+    "_new": NEW_SW,
+    "_new_pt": {**NEW_SW, "fused_paint": True},
 }
-CH07_NARROW_ONLY = {"ch07_1x32", "ch07_1x64"}
+
+
+def _cfg(tpb, blocks=None, cap=None, conn=8, bare=False, sw=OLD_SW):
+    kw = dict(connectivity=conn, threads_per_block=tpb, max_registers=cap,
+              bare=bare, **sw)
+    if blocks is not None:
+        kw["blocks"] = blocks
+    return kw
+
+
+CH07 = {
+    "ch07_w2": _cfg(64),
+    "ch07_w4": _cfg(128),
+    "ch07_w8": _cfg(256),
+    "ch07_w4_cap96": _cfg(128, cap=96),
+    "ch07_w4_bare": _cfg(128, bare=True),
+    "ch07_c4_w4": _cfg(128, conn=4),
+    "ch07_1x32": _cfg(32, blocks=1),
+    "ch07_1x64": _cfg(64, blocks=1),
+    **{f"ch07_w4_bare{k}": _cfg(128, bare=True, sw=v)
+       for k, v in SW_SETS.items() if k},
+    **{f"ch07_w4{k}": _cfg(128, sw=v) for k, v in SW_SETS.items() if k},
+    "ch07_1x32_new": _cfg(32, blocks=1, bare=True, sw=NEW_SW),
+}
+CH07_NARROW_ONLY = {"ch07_1x32", "ch07_1x64", "ch07_1x32_new"}
+OLD_BARE = "ch07_w4_bare"     # the old default's bare twin
+NEW = "ch07_w4_bare_new"      # the combination, bare
+NEW_I = "ch07_w4_new"         # its instrumented twin (counters)
 CH07_GRIDS = ["ch07_w2", "ch07_w4", "ch07_w8", "ch07_w4_cap96",
               "ch07_1x32", "ch07_1x64"]
 # ch06's run-table CCL, rgb contract, its own launch shapes.
@@ -210,13 +257,24 @@ CH06_CORE = ("count", "scan", "emit", "merge", "flatten")
 CONN = {**{n: spec[1] for n, spec in CH03.items()},
         **{n: kw["connectivity"] for n, kw in CH07.items()},
         CH06: 8}
-HEADLINE = "ch07_w4"      # the default flood_fill() configuration
-# per-round ratios (numerator / denominator: > 1 = ch07 faster)
+HEADLINE = "ch07_w4"      # the old default flood_fill() configuration
+# per-round ratios (numerator / denominator: > 1 = the denominator,
+# the second config, is faster)
 PAIRS = {
     "w4_vs_wc": ("ch03_wc", "ch07_w4"),
     "w4_bare_vs_wc_bare": ("ch03_wc_bare", "ch07_w4_bare"),
     "c4_w4_vs_conn4": ("ch03_conn4", "ch07_c4_w4"),
     "w4_vs_ch06": (CH06, "ch07_w4"),
+    # the switch ablation, bare twins against the old default's
+    "1s_vs_old": (OLD_BARE, "ch07_w4_bare_1s"),
+    "fp_vs_old": (OLD_BARE, "ch07_w4_bare_fp"),
+    "sk_vs_old": (OLD_BARE, "ch07_w4_bare_sk"),
+    "1s_fp_vs_old": (OLD_BARE, "ch07_w4_bare_1s_fp"),
+    "new_vs_old": (OLD_BARE, NEW),
+    "new_vs_1s_fp": ("ch07_w4_bare_1s_fp", NEW),      # skip_full's share
+    "new_pt_vs_new": (NEW, "ch07_w4_bare_new_pt"),     # fused paint
+    "new_vs_wc_bare": ("ch03_wc_bare", NEW),
+    "new_vs_ch06": (CH06, NEW),
 }
 
 
@@ -523,6 +581,15 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
         d_img.copy_to_host(host_out)
         e2e.append((time.perf_counter() - t0) * 1000)
     e2e_ok = bool(np.array_equal(host_out, ref8))
+    e2e_new = []
+    for _ in range(E2E_REPEATS):
+        cuda.synchronize()
+        t0 = time.perf_counter()
+        d_img.copy_to_device(img)
+        engines[NEW].run(d_img, sx, sy)
+        d_img.copy_to_host(host_out)
+        e2e_new.append((time.perf_counter() - t0) * 1000)
+    e2e_new_ok = bool(np.array_equal(host_out, ref8))
     del host_out, ref8
 
     row = {"scene": name, "note": note, "width": width, "height": height,
@@ -607,6 +674,27 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
     row[f"{HEADLINE}_e2e_ms"] = statistics.median(e2e)
     row[f"{HEADLINE}_e2e_ms_min"] = min(e2e)
     row[f"{HEADLINE}_e2e_matches_ch03"] = e2e_ok
+    row[f"{NEW}_e2e_ms"] = statistics.median(e2e_new)
+    row[f"{NEW}_e2e_ms_min"] = min(e2e_new)
+    row[f"{NEW}_e2e_matches_ch03"] = e2e_new_ok
+
+    # the switch ablation: medians of the bare twins against the old
+    # default's (> 1: faster), and the work from the instrumented twins
+    for k in SW_SETS:
+        if not k:
+            continue
+        b = f"ch07_w4_bare{k}"
+        row[f"{b}_speedup_vs_old"] = row[f"{OLD_BARE}_ms"] / row[f"{b}_ms"]
+        i = meta[f"ch07_w4{k}"]
+        row[f"ch07_w4{k}_visits_per_tile_touched"] = (
+            i["tile_visits"] / i["tiles_touched"])
+    row[f"{NEW}_speedup_vs_wc_bare"] = (row["ch03_wc_bare_ms"]
+                                        / row[f"{NEW}_ms"])
+    row[f"{NEW}_speedup_vs_ch06"] = row[f"{CH06}_ms"] / row[f"{NEW}_ms"]
+    if narrow:
+        row["ch07_new_best_config"] = min(
+            (NEW, "ch07_1x32_new"), key=lambda n: row[f"{n}_ms"])
+        row["ch07_new_best_ms"] = row[f"{row['ch07_new_best_config']}_ms"]
 
     lv8 = meta["ch03_wc"]["levels"]
     row["levels8_per_round"] = lv8 / meta[HEADLINE]["rounds"]
@@ -634,6 +722,8 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
           f"x{row['ch07_w4_bare_speedup_vs_wc_bare']:6.1f} | "
           f"best {b3}/{b7} x{row['best_vs_best_speedup']:6.1f} | "
           f"ch06 {row[f'{CH06}_ms']:7.3f} | "
+          f"new {row[f'{NEW}_ms']:7.3f} "
+          f"x{row[f'paired_new_vs_old_median']:5.2f} vs old | "
           f"lv {lv8:>6,d} -> rounds {h['rounds']:>5d} "
           f"sm {row.get('clk_sm_min', '?')}-{row.get('clk_sm_median', '?')} "
           f"mem {row.get('clk_mem_min', '?')} "
@@ -724,6 +814,7 @@ def main():
     for n, kw in CH07.items():
         eng = ff.TileFill(64, 64, **kw)
         bare = kw.get("bare", False)
+        sw = {k: kw[k] for k in ff.SWITCHES}
         config_meta[n] = {
             "connectivity": kw["connectivity"],
             "tpb": kw["threads_per_block"],
@@ -731,12 +822,13 @@ def main():
             "warps": eng.blocks * kw["threads_per_block"] // 32,
             "max_registers": kw["max_registers"],
             "bare": bare,
+            **sw,
             "coop_max_blocks": eng.coop_max_blocks,
             "narrow_scenes_only": n in CH07_NARROW_ONLY,
             "regs_per_thread": ff.regs_per_thread(
-                kw["connectivity"], bare, kw["max_registers"]),
+                kw["connectivity"], bare, kw["max_registers"], **sw),
             "local_bytes_per_thread": ff.local_bytes_per_thread(
-                kw["connectivity"], bare, kw["max_registers"]),
+                kw["connectivity"], bare, kw["max_registers"], **sw),
         }
         del eng
     for n, m in config_meta.items():
@@ -789,10 +881,15 @@ def main():
         "sm_count": sm_count,
         "experiment": (
             "tile BFS (ch07: 32x32 tiles closed in registers, rounds of "
-            "tiles, two grid.sync per round) vs ch03's conn4 / conn8 / "
+            "tiles) with its rounds-kernel switches (one_sync, fused_pack, "
+            "skip_full, fused_paint) timed as an ablation against the old "
+            "default (two grid.sync per round, separate pack and paint), "
+            "vs ch03's conn4 / conn8 / "
             "warp-coop BFS kernels (instrumented and bare, several grids) "
             "and ch06's run-table CCL, one interleaved round-robin per "
             "scene, CUDA-event timings on every side"),
+        "new_config": NEW,
+        "old_config_bare": OLD_BARE,
         "headline_config": HEADLINE,
         "configs": config_meta,
         "config": {"gpu_repeats": GPU_REPEATS, "njit_repeats": NJIT_REPEATS,
@@ -805,7 +902,9 @@ def main():
                    "smi_period_ms": SMI_PERIOD_MS},
         "timing_note": (
             "ch07 *_ms = pack + init + rounds + paint (first event to "
-            "last). ch03 *_ms = its one kernel launch; its device reset "
+            "last; with fused_pack the pack interval is empty and the RGB "
+            "is read inside rounds, with fused_paint so is paint). "
+            "ch03 *_ms = its one kernel launch; its device reset "
             "is off the clock and timed separately (ch03_reset_ms). "
             "ch06_runs *_ms = pack + count + scan + emit + merge + flatten "
             "+ paint, rgb contract. Every "

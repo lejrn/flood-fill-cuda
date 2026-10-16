@@ -18,6 +18,9 @@ seeded blob (so ch06's all-blob CCL changes exactly the fill set).
                   closure iterations per tile (tortuous but realistic)
   thin_h32_blob   W = 524288, H = 32: one mask word per row, the shape
                   that starved ch06's pack/paint launch
+  tiny_blob       a 5,000-px disk in a 64 Mpx image: the separate pack
+                  reads and paint scans the whole image for it (the
+                  fused pack reads the ~16 tiles the disk covers)
 """
 
 import numpy as np
@@ -143,3 +146,17 @@ def thin_h32_blob_scene(width=1 << 19, side=32):
     c = width // 2
     img[c - side // 2: c + side // 2, :] = RED
     return img, c, 16
+
+
+def tiny_blob_scene(width=8000, height=8000, radius=40, cx=3010, cy=5003):
+    """A red disk of `radius` (5,025 px at 40) centred at (cx, cy) in a
+    white width x height image (64 Mpx by default), off the tile grid.
+    Seed: the centre."""
+    img = _white(width, height)
+    xs = np.arange(cx - radius, cx + radius + 1)
+    ys = np.arange(cy - radius, cy + radius + 1)
+    inside = ((xs[:, None] - cx) ** 2 + (ys[None, :] - cy) ** 2
+              <= radius * radius)
+    sub = img[cx - radius: cx + radius + 1, cy - radius: cy + radius + 1]
+    sub[inside] = RED
+    return img, cx, cy
