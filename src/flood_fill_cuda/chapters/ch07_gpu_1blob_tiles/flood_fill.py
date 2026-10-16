@@ -22,6 +22,8 @@ pack launch: the rounds read each reached tile's RGB, and paint is
 paint_tiles_kernel), skip_full (no exports into full tiles already
 queued) and fused_paint (no paint launch; needs fused_pack). With a
 fused phase its events are recorded back to back (an empty interval).
+one_sync and fused_pack are on by default (DEFAULT_SWITCHES, with the
+measurements behind the choice); pass a switch to override it.
 
 `kernel_ms` is the first event to the last: all four phases, no
 allocation and no host copies. ch03's `kernel_ms` covers its one launch
@@ -62,12 +64,16 @@ from .kernels import (
 # the rest), which seats 288 warps. A cap of 80 doubled that to 576 warps
 # and won while every closure shuffle took a slow path (see
 # kernels._col_fill); with the shuffles fixed, its spills cost more than
-# the extra warps buy, so the default is no cap.
+# the extra warps buy, so the default is no cap. The fused-pack kernels
+# (the default since session 20261016T002856Z) link at 242-249 registers
+# and seat 192 warps; caps of 168 and 128 were measured too and lost
+# (kernels._make_rounds_kernel).
 DEFAULT_MAX_REGISTERS = None
 
-# 4 warps per block: 72 blocks x 128 seat all 288 warps the registers
-# allow. At 256 threads the same registers seat only 24 blocks (192
-# warps), so ch03's tpb=256 default is not carried over.
+# 4 warps per block: 72 blocks x 128 seat all 288 warps the registers of
+# the switch-free kernel allow (48 x 128 = 192 warps for the fused-pack
+# kernels). At 256 threads the switch-free registers seat only 24 blocks
+# (192 warps), so ch03's tpb=256 default is not carried over.
 DEFAULT_TPB = 128
 
 PHASES = ("pack", "init", "rounds", "paint")
@@ -75,14 +81,25 @@ PHASES = ("pack", "init", "rounds", "paint")
 # The rounds kernel's switches (kernels._make_rounds_kernel), each one an
 # ablation the benchmark times against the original kernel:
 #   one_sync     one grid.sync per round: three rotating queue counters
-#   fused_pack   no pack launch: a tile's first visit reads its own RGB
-#   skip_full    drop exports into full tiles already queued this round
+#   fused_pack   no pack launch: a tile's RGB is read the round it is
+#                first enqueued
+#   skip_full    drop exports into full tiles already visited or queued
 #   fused_paint  no paint launch: each visit paints what it added
 #                (needs fused_pack)
 # flood_fill() and TileFill take None for "this module's default", so the
 # tests can run the whole suite under every combination.
+#
+# Defaults, from session tiles_20261016T002856Z (paired medians against
+# the old default, all switches off, bare twins): one_sync + fused_pack
+# take 1.04-1.35x on 10 of 11 scenes, 11.3x on the thin strip and 13.5x
+# on a 5,000 px blob in 64 Mpx, and lose 4% on sq_4000_corner (a corner
+# front narrower than the grid, where each pack's memory trip is on the
+# round's critical path). skip_full adds 1.03-1.09x on the solid blobs
+# but loses 1% on the maze in all 9 rounds (0.99x [0.89-1.00]), so by the
+# chapter's adoption rule it stays off; fused_paint loses on every scene
+# but the two sparse ones (0.69-0.94x), so it stays off.
 SWITCHES = ("one_sync", "fused_pack", "skip_full", "fused_paint")
-DEFAULT_SWITCHES = {"one_sync": False, "fused_pack": False,
+DEFAULT_SWITCHES = {"one_sync": True, "fused_pack": True,
                     "skip_full": False, "fused_paint": False}
 
 # Plain (non-cooperative) launch shapes for the three streaming kernels.

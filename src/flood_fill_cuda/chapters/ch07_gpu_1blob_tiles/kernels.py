@@ -56,7 +56,8 @@ tile out of a round's queue after its first enqueue, so ping-pong queues
 of n_tiles entries can never overflow.
 
 SWITCHES (each off by default in get_rounds_kernel, each an ablation;
-the correctness arguments are in _make_rounds_kernel's docstring)
+flood_fill.DEFAULT_SWITCHES turns on one_sync and fused_pack; the
+correctness arguments are in _make_rounds_kernel's docstring)
     one_sync     one grid.sync per round: three rotating queue counters
     fused_pack   no pack launch: a tile's RGB is read the round it is
                  first enqueued, so tiles the wave never reaches are never
