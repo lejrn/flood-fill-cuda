@@ -22,58 +22,76 @@ sleep kernel is queued so every timed launch is already in the stream
 when the first event fires.
 
 Which ch03 grid is fair? None is ch03's best everywhere, so several are
-timed and the README says which one it quotes:
+timed, and "ch03's best" is per scene the fastest of ALL its warp-coop
+grids, bare and instrumented (the fairness audit: the bare kernel at
+48 x 256 or 1 x 128 beat every instrumented grid on the narrow scenes,
+and the bare one at its own 72 x 256 won the blobs):
   ch03_wc            the instrumented warp-coop kernel at ch03's own
                      default and twin-comparison pin, 48 x 256 (the
                      cooperative maximum at tpb 256). Its counters pair
                      with ch07's.
   ch03_wc_bare       the uninstrumented twin at ITS default grid, 72 x 256
-                     (it fits more blocks). The bare-vs-bare headline is
-                     ch07_w4_bare against this.
-  ch03_wc_120x128 /  other grids of the instrumented kernel; with
-  ch03_wc_240x64 /   ch03_wc they make the per-scene best-grid column.
+                     (it fits more blocks).
+  ch03_wc_bare_48x256, ch03_wc_bare_1x128 (narrow scenes only)
+                     the bare twin at the instrumented kernel's grids.
+  ch03_wc_120x128 /  other grids of the instrumented kernel.
+  ch03_wc_240x64 /
   ch03_wc_1x128      (1 x 128 only on the narrow scenes, where ch03's own
                      sweep found one block fastest; it would take seconds
                      on the big blobs.)
   ch03_conn4         4-conn, re-pinned to 48 x 128, which beat 48 x 256
                      on every scene of the fairness audit.
   ch03_conn8         the thread-layout 8-conn kernel at its default.
-ch07's best-grid column takes the best of w2/w4/w8/cap96 and, on the
-narrow scenes, the one-block grids 1 x 32 and 1 x 64.
+Every ch03 kernel pays two grid.sync per level; ch03 has no one-sync
+twin, so on the barrier-bound scenes part of the gap to ch07's default
+is that ritual (the README prices it from the probes).
 
-`ch06_runs` is the CCL reference: ch06's run-table pipeline (pack,
+`ch06_runs_bare` is the CCL reference: ch06's run-table pipeline (pack,
 count, scan, emit, merge, flatten, paint: union-find over horizontal
 runs, 8-connected, no seed, no BFS) on its own reusable buffers, in
-ch06's rgb contract (RGB on the device in, painted RGB out), timed with
-the same restore, flush, sleep, events and interleaving. It labels every
-red blob; on these one-blob scenes that is the same job. It paints
-palette[label % 6], not blue, so its check is the set of pixels it
-CHANGED, which must equal the set ch03's 8-conn fill changed. Its run
-table is sized to the scene's run count when ch06's n/16 heuristic is
-too small (the maze): ch06's recolor() would resize and rerun.
+ch06's rgb contract (RGB on the device in, painted RGB out), with its
+counters off (instrumented=False), timed with the same restore, flush,
+sleep, events and interleaving. `ch06_runs` is the instrumented twin
+(its counters: runs, blobs, union attempts), timed too: the audit found
+it 4-18% slower than the bare one, which is the twin the bare ch07
+configs pair with. It labels every red blob; on these one-blob scenes
+that is the same job. It paints palette[label % 6], not blue, so its
+check is the set of pixels it CHANGED, which must equal the set ch03's
+8-conn fill changed. Its run table is sized to the scene's run count
+when ch06's n/16 heuristic is too small (the maze): ch06's recolor()
+would resize and rerun.
 
-Scenes: ch03's six (the README's), then four worst cases from the
-chapter's perf-adversary review (worst_cases.py): a serpentine of
-zigzags on the tile borders (one tile per round), a zigzag lattice on
-every border (rounds == levels with a wide front), a 1-px maze, and a
-524288 x 32 strip with a 32x32 blob (pack/paint dominated); and a
-5,000-px disk in a 64 Mpx image (pack/paint dominated, square).
+Scenes: ch03's six (the README's), four worst cases from the chapter's
+perf-adversary review (worst_cases.py): a serpentine of zigzags on the
+tile borders (one tile per round), a zigzag lattice on every border
+(rounds == levels with a wide front), a 1-px maze, and a 524288 x 32
+strip with a 32x32 blob (pack/paint dominated); a 5,000-px disk in a
+64 Mpx image (pack/paint dominated, square); and a 2000 x 2000 square
+seeded in its corner (a front narrower than the grid for most rounds,
+where the fused pack lost most).
 
-The rounds kernel's switches (flood_fill.SWITCHES) are timed as an
-ablation in the same rounds, every config pinning every switch:
+The switches (flood_fill.SWITCHES) are timed as an ablation in the same
+rounds, every config pinning every switch. Each switch is judged by its
+own increment on top of the ones adopted before it (the adoption rule:
+adopt only if it loses nothing measurable):
   ch07_w4_bare          the old default's bare twin (all switches off)
-  ch07_w4_bare_1s       one_sync alone: one grid.sync per round
-  ch07_w4_bare_fp       fused_pack alone: the RGB read inside the rounds
-  ch07_w4_bare_sk       skip_full alone: no exports into full tiles
-  ch07_w4_bare_1s_fp    the two approved switches
-  ch07_w4_bare_new      the combination: one_sync + fused_pack + skip_full
-  ch07_w4_bare_new_pt   the combination + fused_paint (paint inside the
-                        rounds; needs fused_pack)
-  ch07_1x32_new         the combination at one block (narrow scenes)
-Each has an instrumented twin (ch07_w4_1s, ..., ch07_w4_new_pt) whose
-untimed pass gives the counters (visits, packed tiles, skipped exports).
-The paired per-round ratios set each against the old default's bare
-twin, and the combination against ch03_wc_bare and ch06_runs.
+  ch07_w4_bare_1s       one_sync: one grid.sync per round
+  ch07_w4_bare_1s_tp    + tile_paint: paint_tiles_kernel after the
+                        separate pack, untouched tiles skipped
+  ch07_w4_bare_1s_fp    one_sync + fused_pack (the RGB read inside the
+                        rounds; implies the tile paint)
+  ch07_w4_bare_1s_tp_sk one_sync + tile_paint + skip_full
+NEW is the bare twin whose switches are flood_fill.DEFAULT_SWITCHES (the
+adopted default) and HEADLINE its instrumented twin: what flood_fill()
+runs. Instrumented twins (ch07_w4, ch07_w4_1s_tp, ...) give the counters
+(visits, packed tiles, skipped exports). ch07_c4_w4 / ch07_c4_w4_1s_tp
+are the 4-conn twins of the old and the new default (flood_fill()'s
+default connectivity is 4). On the narrow scenes, the old and the new
+default also run at one block (ch07_1x32_bare, ch07_1x32_bare_1s_tp).
+Paired per-round ratios (PAIRS) set every increment against the config
+below it, NEW against the old default, ch03's best, ch03_wc_bare and
+ch06's bare twin, and the fused pack against the same references. The
+per-round samples of every config are saved in the JSON.
 
 What each ch07 number covers: `pack` (ch06's RGB -> 1 bit/px), `init`
 (the per-run state, on the device), `rounds` (the cooperative tile
@@ -82,7 +100,9 @@ last. ch03's kernel_ms covers its one launch: its device reset is off
 its clock, and is timed separately (ch03_reset_ms; the part its painted
 image needs, visited + seed, is ch03_reset_visited_ms). The ch07
 end-to-end time (pageable H2D of the image + pipeline + D2H of the
-painted image, reused buffers) is measured after the timed rounds.
+painted image, reused buffers) of the old and the new default
+(instrumented, as flood_fill() runs them) is measured after the timed
+rounds.
 
 Clocks. The GPU clock is spun up first (ch06's lesson: this GPU idles
 low and does not boost for short kernels), and again for 1 s right
@@ -182,6 +202,8 @@ SCENES = [
     ("tiny_blob_8k", worst_cases.tiny_blob_scene,
      "5,025 px disk (r=40) in an 8000x8000 image (64M px): pack/paint "
      "dominated", False),
+    ("sq_2000_corner", lambda: scenes.full_red_scene(2000, 2000),
+     "4M px, corner seed: a front narrower than the grid", False),
 ]
 
 # ch03 configs: name -> (layout, connectivity, bare, tpb, blocks, narrow
@@ -195,31 +217,37 @@ CH03 = {
     "ch03_wc_240x64": ("warp", 8, False, 64, 240, False),
     "ch03_wc_1x128": ("warp", 8, False, 128, 1, True),
     "ch03_wc_bare": ("warp", 8, True, 256, None, False),
+    "ch03_wc_bare_48x256": ("warp", 8, True, 256, 48, False),
+    "ch03_wc_bare_1x128": ("warp", 8, True, 128, 1, True),
 }
+# ch03's best, per scene: the fastest of all its warp-coop grids
 CH03_WC_GRIDS = ["ch03_wc", "ch03_wc_120x128", "ch03_wc_240x64",
-                 "ch03_wc_1x128"]
+                 "ch03_wc_1x128", "ch03_wc_bare", "ch03_wc_bare_48x256",
+                 "ch03_wc_bare_1x128"]
 
-# ch07 configs: name -> TileFill kwargs. w2/w4/w8 are warps per block,
-# uncapped: 144 x 64, 72 x 128 and 24 x 256 (the registers seat 288,
-# 288 and 192 warps). w4_cap96 buys a bigger grid (480 warps) with a
-# link-time register cap and pays in spills; w4_bare drops the counters;
-# c4_w4 is the 4-connectivity twin; 1x32 / 1x64 are one-block grids for
-# the narrow scenes. Every config pins every switch (so a change of
-# flood_fill.DEFAULT_SWITCHES cannot move it); the switch ablation is the
-# _1s / _fp / _sk / _1s_fp / _new / _new_pt family (module docstring).
+# ch07 configs: name -> TileFill kwargs, every switch pinned (so a change
+# of flood_fill.DEFAULT_SWITCHES cannot move a config). 4 warps per block
+# (72 x 128 for the separate-pack kernels, 48 x 128 for the fused pack's
+# 242-249 registers); the grids w2/w8 and a register cap were timed in
+# session 20261015T114440Z and lost to w4.
 OLD_SW = {"one_sync": False, "fused_pack": False, "skip_full": False,
-          "fused_paint": False, "tile_paint": False}
-NEW_SW = {"one_sync": True, "fused_pack": True, "skip_full": True,
           "fused_paint": False, "tile_paint": False}
 SW_SETS = {
     "": OLD_SW,
     "_1s": {**OLD_SW, "one_sync": True},
-    "_fp": {**OLD_SW, "fused_pack": True},
-    "_sk": {**OLD_SW, "skip_full": True},
+    "_1s_tp": {**OLD_SW, "one_sync": True, "tile_paint": True},
     "_1s_fp": {**OLD_SW, "one_sync": True, "fused_pack": True},
-    "_new": NEW_SW,
-    "_new_pt": {**NEW_SW, "fused_paint": True},
+    "_1s_tp_sk": {**OLD_SW, "one_sync": True, "tile_paint": True,
+                  "skip_full": True},
 }
+# the adopted default's suffix: the set equal to flood_fill's defaults
+# (its own set if no listed one is: ch08's benchmark imports this module)
+_DEFAULT_SW = {k: ff.DEFAULT_SWITCHES[k] for k in ff.SWITCHES}
+DEFAULT_KEY = next((k for k, v in SW_SETS.items() if v == _DEFAULT_SW),
+                   None)
+if DEFAULT_KEY is None:
+    DEFAULT_KEY = "_default"
+    SW_SETS[DEFAULT_KEY] = _DEFAULT_SW
 
 
 def _cfg(tpb, blocks=None, cap=None, conn=8, bare=False, sw=OLD_SW):
@@ -231,50 +259,62 @@ def _cfg(tpb, blocks=None, cap=None, conn=8, bare=False, sw=OLD_SW):
 
 
 CH07 = {
-    "ch07_w2": _cfg(64),
     "ch07_w4": _cfg(128),
-    "ch07_w8": _cfg(256),
-    "ch07_w4_cap96": _cfg(128, cap=96),
     "ch07_w4_bare": _cfg(128, bare=True),
-    "ch07_c4_w4": _cfg(128, conn=4),
-    "ch07_1x32": _cfg(32, blocks=1),
-    "ch07_1x64": _cfg(64, blocks=1),
     **{f"ch07_w4_bare{k}": _cfg(128, bare=True, sw=v)
        for k, v in SW_SETS.items() if k},
-    **{f"ch07_w4{k}": _cfg(128, sw=v) for k, v in SW_SETS.items() if k},
-    "ch07_1x32_new": _cfg(32, blocks=1, bare=True, sw=NEW_SW),
+    # instrumented twins: the counters of each family (and timed)
+    **{f"ch07_w4{k}": _cfg(128, sw=v)
+       for k, v in SW_SETS.items() if k and k != "_1s"},
+    "ch07_c4_w4": _cfg(128, conn=4),
+    f"ch07_c4_w4{DEFAULT_KEY}": _cfg(128, conn=4, sw=SW_SETS[DEFAULT_KEY]),
+    "ch07_1x32_bare": _cfg(32, blocks=1, bare=True),
+    f"ch07_1x32_bare{DEFAULT_KEY}": _cfg(32, blocks=1, bare=True,
+                                         sw=SW_SETS[DEFAULT_KEY]),
 }
-CH07_NARROW_ONLY = {"ch07_1x32", "ch07_1x64", "ch07_1x32_new"}
+CH07_NARROW_ONLY = {"ch07_1x32_bare", f"ch07_1x32_bare{DEFAULT_KEY}"}
 OLD_BARE = "ch07_w4_bare"     # the old default's bare twin
-NEW = "ch07_w4_bare_new"      # the combination, bare
-NEW_I = "ch07_w4_new"         # its instrumented twin (counters)
-CH07_GRIDS = ["ch07_w2", "ch07_w4", "ch07_w8", "ch07_w4_cap96",
-              "ch07_1x32", "ch07_1x64"]
+OLD_I = "ch07_w4"             # the old default, instrumented
+NEW = f"ch07_w4_bare{DEFAULT_KEY}"    # the adopted default, bare
+HEADLINE = f"ch07_w4{DEFAULT_KEY}"    # ... instrumented: flood_fill()
+NEW_1X32 = f"ch07_1x32_bare{DEFAULT_KEY}"
+FP = "ch07_w4_bare_1s_fp"     # the fused pack, opt-in
 # ch06's run-table CCL, rgb contract, its own launch shapes.
-CH06 = "ch06_runs"
+CH06 = "ch06_runs_bare"       # counters off: pairs with the bare twins
+CH06_I = "ch06_runs"          # instrumented: the counters
+CH06_NAMES = (CH06_I, CH06)
 CH06_PHASES = ("pack", "count", "scan", "emit", "merge", "flatten", "paint")
 CH06_CORE = ("count", "scan", "emit", "merge", "flatten")
 CONN = {**{n: spec[1] for n, spec in CH03.items()},
         **{n: kw["connectivity"] for n, kw in CH07.items()},
-        CH06: 8}
-HEADLINE = "ch07_w4"      # the old default flood_fill() configuration
+        CH06: 8, CH06_I: 8}
 # per-round ratios (numerator / denominator: > 1 = the denominator,
-# the second config, is faster)
+# the second config, is faster). "ch03_best" is resolved per scene.
 PAIRS = {
-    "w4_vs_wc": ("ch03_wc", "ch07_w4"),
-    "w4_bare_vs_wc_bare": ("ch03_wc_bare", "ch07_w4_bare"),
-    "c4_w4_vs_conn4": ("ch03_conn4", "ch07_c4_w4"),
-    "w4_vs_ch06": (CH06, "ch07_w4"),
-    # the switch ablation, bare twins against the old default's
+    # the switch ablation: each increment on top of the one before
     "1s_vs_old": (OLD_BARE, "ch07_w4_bare_1s"),
-    "fp_vs_old": (OLD_BARE, "ch07_w4_bare_fp"),
-    "sk_vs_old": (OLD_BARE, "ch07_w4_bare_sk"),
-    "1s_fp_vs_old": (OLD_BARE, "ch07_w4_bare_1s_fp"),
-    "new_vs_old": (OLD_BARE, NEW),
-    "new_vs_1s_fp": ("ch07_w4_bare_1s_fp", NEW),      # skip_full's share
-    "new_pt_vs_new": (NEW, "ch07_w4_bare_new_pt"),     # fused paint
-    "new_vs_wc_bare": ("ch03_wc_bare", NEW),
-    "new_vs_ch06": (CH06, NEW),
+    "tp_on_1s": ("ch07_w4_bare_1s", "ch07_w4_bare_1s_tp"),
+    "fp_on_1s_tp": ("ch07_w4_bare_1s_tp", FP),
+    "fp_on_1s": ("ch07_w4_bare_1s", FP),
+    "sk_on_1s_tp": ("ch07_w4_bare_1s_tp", "ch07_w4_bare_1s_tp_sk"),
+    "default_vs_old": (OLD_BARE, NEW),
+    "default_i_vs_old_i": (OLD_I, HEADLINE),
+    "fp_vs_old": (OLD_BARE, FP),
+    # against the other chapters
+    "old_vs_wc_bare": ("ch03_wc_bare", OLD_BARE),
+    "default_vs_wc_bare": ("ch03_wc_bare", NEW),
+    "default_vs_ch03_best": ("ch03_best", NEW),
+    "fp_vs_ch03_best": ("ch03_best", FP),
+    "default_vs_ch06": (CH06, NEW),
+    "fp_vs_ch06": (CH06, FP),
+    "old_vs_ch06": (CH06, OLD_BARE),
+    "ch06_bare_vs_instrumented": (CH06_I, CH06),
+    "c4_default_vs_conn4": ("ch03_conn4", f"ch07_c4_w4{DEFAULT_KEY}"),
+    "c4_default_vs_c4_old": ("ch07_c4_w4", f"ch07_c4_w4{DEFAULT_KEY}"),
+}
+NARROW_PAIRS = {
+    "default_1x32_vs_default": (NEW, NEW_1X32),
+    "default_1x32_vs_ch03_best": ("ch03_best", NEW_1X32),
 }
 
 
@@ -474,6 +514,22 @@ def _ratio_stats(num, den):
 
 # ------------------------------------------------------------- scenes
 
+def _work(meta, row, name, filled, lv8):
+    """Per-pixel and per-round work of one instrumented ch07 config."""
+    h = meta[name]
+    return {
+        f"{name}_levels8_per_round": lv8 / h["rounds"],
+        f"{name}_visits_per_tile_touched": (h["tile_visits"]
+                                            / h["tiles_touched"]),
+        f"{name}_or_atomics_per_px": h["or_atomics"] / filled,
+        f"{name}_stamp_atomics_per_px": h["stamp_atomics"] / filled,
+        f"{name}_closure_iters_per_visit": (h["closure_iters"]
+                                            / h["tile_visits"]),
+        f"{name}_rounds_us_per_round": (1000 * row[f"{name}_rounds_ms"]
+                                        / h["rounds"]),
+    }
+
+
 def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
     img, sx, sy = builder()
     width, height = img.shape[0], img.shape[1]
@@ -488,7 +544,7 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
     run_cap = max(MIN_RUN_CAPACITY, width * height // PIXELS_PER_RUN_SLOT,
                   n_runs_host)
     r6 = RunRecolor(width, height, run_capacity=run_cap)
-    names = ch03_names + ch07_names + [CH06]
+    names = ch03_names + ch07_names + list(CH06_NAMES)
     sink = cuda.device_array(1, np.uint32)
 
     def run_once(n):
@@ -507,8 +563,9 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
             return {"total": cuda.event_elapsed_time(e0, e1),
                     "reset": cuda.event_elapsed_time(rev[0], rev[2]),
                     "reset_visited": cuda.event_elapsed_time(rev[0], rev[1])}
-        if n == CH06:
-            ph, events = r6.run(d_img, contract="rgb")
+        if n in CH06_NAMES:
+            ph, events = r6.run(d_img, contract="rgb",
+                                instrumented=(n == CH06_I))
             events[-1].synchronize()
             out = {p: cuda.event_elapsed_time(events[i], events[i + 1])
                    for i, p in enumerate(ph)}
@@ -531,7 +588,7 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
             meta[n] = r3.read()
             if conn not in refs:
                 refs[conn] = out
-        elif n == CH06:
+        elif n in CH06_NAMES:
             c6 = r6.counters.copy_to_host()
             if c6[k6.RUN_OVERFLOW]:
                 raise RuntimeError(f"ch06 run table overflowed on {name}")
@@ -540,10 +597,11 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
             changed = np.any(out != img, axis=2)
             ref_changed = np.any(refs[8] != img, axis=2)
             meta[n] = {"runs": int(c6[k6.N_RUNS]),
-                       "blobs": int(c6[k6.N_BLOBS]),
-                       "union_attempts": int(c6[k6.UNION_ATTEMPTS]),
                        "run_capacity": run_cap,
                        "filled": int(np.count_nonzero(changed))}
+            if n == CH06_I:       # counted only by the instrumented twin
+                meta[n]["blobs"] = int(c6[k6.N_BLOBS])
+                meta[n]["union_attempts"] = int(c6[k6.UNION_ATTEMPTS])
             check[n] = bool(np.array_equal(changed, ref_changed)
                             and meta[n]["runs"] == n_runs_host)
             del out, changed, ref_changed
@@ -570,26 +628,21 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
             samples[n].append(run_once(n))
     t_timed1 = time.time()
 
-    # -- ch07 end to end: pageable H2D + pipeline + D2H, reused buffers
+    # -- ch07 end to end: pageable H2D + pipeline + D2H, reused buffers,
+    #    the old and the new default as flood_fill() runs them
     host_out = np.empty_like(img)
-    e2e = []
-    for _ in range(E2E_REPEATS):
-        cuda.synchronize()
-        t0 = time.perf_counter()
-        d_img.copy_to_device(img)
-        engines[HEADLINE].run(d_img, sx, sy)
-        d_img.copy_to_host(host_out)
-        e2e.append((time.perf_counter() - t0) * 1000)
-    e2e_ok = bool(np.array_equal(host_out, ref8))
-    e2e_new = []
-    for _ in range(E2E_REPEATS):
-        cuda.synchronize()
-        t0 = time.perf_counter()
-        d_img.copy_to_device(img)
-        engines[NEW].run(d_img, sx, sy)
-        d_img.copy_to_host(host_out)
-        e2e_new.append((time.perf_counter() - t0) * 1000)
-    e2e_new_ok = bool(np.array_equal(host_out, ref8))
+    e2e = {}
+    e2e_ok = {}
+    for n in (OLD_I, HEADLINE):
+        e2e[n] = []
+        for _ in range(E2E_REPEATS):
+            cuda.synchronize()
+            t0 = time.perf_counter()
+            d_img.copy_to_device(img)
+            engines[n].run(d_img, sx, sy)
+            d_img.copy_to_host(host_out)
+            e2e[n].append((time.perf_counter() - t0) * 1000)
+        e2e_ok[n] = bool(np.array_equal(host_out, ref8))
     del host_out, ref8
 
     row = {"scene": name, "note": note, "width": width, "height": height,
@@ -606,14 +659,14 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
         row[f"{n}_ms_min"] = min(tot)
         row[f"{n}_ms_max"] = max(tot)
         row[f"{n}_ms_stdev"] = statistics.stdev(tot)
-        phases = ff.PHASES if n in CH07 else (CH06_PHASES if n == CH06
+        phases = ff.PHASES if n in CH07 else (CH06_PHASES if n in CH06_NAMES
                                               else ())
         for ph in phases:
             row[f"{n}_{ph}_ms"] = statistics.median(
                 s[ph] for s in samples[n])
         for k, v in meta[n].items():
             row[f"{n}_{k}"] = v
-        if n == CH06:
+        if n in CH06_NAMES:
             row[f"{n}_fillset_matches_ch03"] = check[n]
         else:
             row[f"{n}_paint_matches_ch03"] = check[n]
@@ -622,109 +675,98 @@ def bench_scene(name, builder, note, narrow, ch03_launch, flush, sampler):
     row["ch03_reset_visited_ms"] = statistics.median(
         s["reset_visited"] for s in samples["ch03_wc"])
 
+    # ch03's best: the fastest of all its warp-coop grids (bare and
+    # instrumented); the default's best: w4, or one block on the narrow
+    # scenes
+    b3 = min((n for n in CH03_WC_GRIDS if n in names),
+             key=lambda n: row[f"{n}_ms"])
+    row["ch03_best_config"] = b3
+    row["ch03_best_ms"] = row[f"{b3}_ms"]
+    b7 = (min((NEW, NEW_1X32), key=lambda n: row[f"{n}_ms"]) if narrow
+          else NEW)
+    row["default_best_config"] = b7
+    row["default_best_ms"] = row[f"{b7}_ms"]
+    row["default_best_vs_ch03_best"] = row["ch03_best_ms"] / row[f"{b7}_ms"]
+
+    def resolve(n):
+        return b3 if n == "ch03_best" else n
+
+    pairs = dict(PAIRS)
+    if narrow:
+        pairs.update(NARROW_PAIRS)
+    pairs["default_best_vs_ch03_best"] = ("ch03_best", b7)
+    for key, (num, den) in pairs.items():
+        med, lo, hi = _ratio_stats(
+            [s["total"] for s in samples[resolve(num)]],
+            [s["total"] for s in samples[resolve(den)]])
+        row[f"paired_{key}_median"] = med
+        row[f"paired_{key}_min"] = lo
+        row[f"paired_{key}_max"] = hi
+        # rounds in which the denominator lost (ratio below 1)
+        row[f"paired_{key}_rounds_below_1"] = sum(
+            a < b for a, b in zip(
+                [s["total"] for s in samples[resolve(num)]],
+                [s["total"] for s in samples[resolve(den)]]))
+
+    # medians against medians (> 1: the ch07 config is faster)
     wc = "ch03_wc"
     for n in ch07_names:
         if CONN[n] == 8:
             row[f"{n}_speedup_vs_wc"] = row[f"{wc}_ms"] / row[f"{n}_ms"]
-            row[f"{n}_speedup_vs_wc_min"] = (row[f"{wc}_ms_min"]
-                                             / row[f"{n}_ms_min"])
-            row[f"{n}_rounds_speedup_vs_wc"] = (row[f"{wc}_ms"]
-                                                / row[f"{n}_rounds_ms"])
-    row["ch07_w4_bare_speedup_vs_wc_bare"] = (row["ch03_wc_bare_ms"]
-                                              / row["ch07_w4_bare_ms"])
-    row["ch07_w4_bare_speedup_vs_wc_bare_min"] = (
-        row["ch03_wc_bare_ms_min"] / row["ch07_w4_bare_ms_min"])
-    row["ch07_c4_w4_speedup_vs_conn4"] = (row["ch03_conn4_ms"]
-                                          / row["ch07_c4_w4_ms"])
-    row["ch07_c4_w4_speedup_vs_conn4_min"] = (row["ch03_conn4_ms_min"]
-                                              / row["ch07_c4_w4_ms_min"])
-    row[f"{CH06}_speedup_vs_wc"] = row[f"{wc}_ms"] / row[f"{CH06}_ms"]
-    row[f"{CH06}_speedup_vs_wc_min"] = (row[f"{wc}_ms_min"]
-                                        / row[f"{CH06}_ms_min"])
-    # > 1: the tile BFS beats the CCL reference
-    row[f"{HEADLINE}_speedup_vs_ch06"] = (row[f"{CH06}_ms"]
-                                          / row[f"{HEADLINE}_ms"])
-    row[f"{HEADLINE}_speedup_vs_ch06_min"] = (row[f"{CH06}_ms_min"]
-                                              / row[f"{HEADLINE}_ms_min"])
+            row[f"{n}_speedup_vs_ch03_best"] = (row["ch03_best_ms"]
+                                                / row[f"{n}_ms"])
+            row[f"{n}_speedup_vs_wc_bare"] = (row["ch03_wc_bare_ms"]
+                                              / row[f"{n}_ms"])
+            row[f"{n}_speedup_vs_ch06"] = row[f"{CH06}_ms"] / row[f"{n}_ms"]
+            row[f"{n}_speedup_vs_old"] = (row[f"{OLD_BARE}_ms"]
+                                          / row[f"{n}_ms"])
+        else:
+            row[f"{n}_speedup_vs_conn4"] = (row["ch03_conn4_ms"]
+                                            / row[f"{n}_ms"])
+    for n in CH06_NAMES:
+        row[f"{n}_speedup_vs_wc"] = row[f"{wc}_ms"] / row[f"{n}_ms"]
     # the connectivity work alone, without the shared ends: ch06's
     # count..flatten vs ch07's init + rounds (both start from the same
-    # packed mask, made by the same pack kernel)
+    # packed mask, made by the same pack kernel); bare twins
     row[f"{CH06}_core_ms"] = sum(row[f"{CH06}_{p}_ms"] for p in CH06_CORE)
-    row[f"{HEADLINE}_core_ms"] = (row[f"{HEADLINE}_init_ms"]
-                                  + row[f"{HEADLINE}_rounds_ms"])
-    row[f"{HEADLINE}_core_speedup_vs_ch06"] = (row[f"{CH06}_core_ms"]
-                                               / row[f"{HEADLINE}_core_ms"])
-    for key, (num, den) in PAIRS.items():
-        med, lo, hi = _ratio_stats([s["total"] for s in samples[num]],
-                                   [s["total"] for s in samples[den]])
-        row[f"paired_{key}_median"] = med
-        row[f"paired_{key}_min"] = lo
-        row[f"paired_{key}_max"] = hi
-    # per-scene best grid, each side over its own grids (medians)
-    b3 = min((n for n in CH03_WC_GRIDS if n in names),
-             key=lambda n: row[f"{n}_ms"])
-    b7 = min((n for n in CH07_GRIDS if n in names),
-             key=lambda n: row[f"{n}_ms"])
-    row["ch03_wc_best_config"] = b3
-    row["ch03_wc_best_ms"] = row[f"{b3}_ms"]
-    row["ch07_best_config"] = b7
-    row["ch07_best_ms"] = row[f"{b7}_ms"]
-    row["best_vs_best_speedup"] = row["ch03_wc_best_ms"] / row["ch07_best_ms"]
+    for n in (OLD_BARE, NEW):
+        row[f"{n}_core_ms"] = row[f"{n}_init_ms"] + row[f"{n}_rounds_ms"]
+        row[f"{n}_core_speedup_vs_ch06"] = (row[f"{CH06}_core_ms"]
+                                            / row[f"{n}_core_ms"])
 
-    row[f"{HEADLINE}_e2e_ms"] = statistics.median(e2e)
-    row[f"{HEADLINE}_e2e_ms_min"] = min(e2e)
-    row[f"{HEADLINE}_e2e_matches_ch03"] = e2e_ok
-    row[f"{NEW}_e2e_ms"] = statistics.median(e2e_new)
-    row[f"{NEW}_e2e_ms_min"] = min(e2e_new)
-    row[f"{NEW}_e2e_matches_ch03"] = e2e_new_ok
-
-    # the switch ablation: medians of the bare twins against the old
-    # default's (> 1: faster), and the work from the instrumented twins
-    for k in SW_SETS:
-        if not k:
-            continue
-        b = f"ch07_w4_bare{k}"
-        row[f"{b}_speedup_vs_old"] = row[f"{OLD_BARE}_ms"] / row[f"{b}_ms"]
-        i = meta[f"ch07_w4{k}"]
-        row[f"ch07_w4{k}_visits_per_tile_touched"] = (
-            i["tile_visits"] / i["tiles_touched"])
-    row[f"{NEW}_speedup_vs_wc_bare"] = (row["ch03_wc_bare_ms"]
-                                        / row[f"{NEW}_ms"])
-    row[f"{NEW}_speedup_vs_ch06"] = row[f"{CH06}_ms"] / row[f"{NEW}_ms"]
-    if narrow:
-        row["ch07_new_best_config"] = min(
-            (NEW, "ch07_1x32_new"), key=lambda n: row[f"{n}_ms"])
-        row["ch07_new_best_ms"] = row[f"{row['ch07_new_best_config']}_ms"]
+    for n in (OLD_I, HEADLINE):
+        row[f"{n}_e2e_ms"] = statistics.median(e2e[n])
+        row[f"{n}_e2e_ms_min"] = min(e2e[n])
+        row[f"{n}_e2e_matches_ch03"] = e2e_ok[n]
 
     lv8 = meta["ch03_wc"]["levels"]
-    row["levels8_per_round"] = lv8 / meta[HEADLINE]["rounds"]
-    row["levels4_per_round"] = (meta["ch03_conn4"]["levels"]
-                                / meta["ch07_c4_w4"]["rounds"])
-    h = meta[HEADLINE]
-    row["visits_per_tile_touched"] = h["tile_visits"] / h["tiles_touched"]
-    row["or_atomics_per_px"] = h["or_atomics"] / row["filled"]
-    row["stamp_atomics_per_px"] = h["stamp_atomics"] / row["filled"]
+    row["levels8"] = lv8
+    row["levels4"] = meta["ch03_conn4"]["levels"]
+    for n in ch07_names:
+        if n in meta and not CH07[n]["bare"] and CONN[n] == 8:
+            row.update(_work(meta, row, n, row["filled"], lv8))
     row["ch03_cas_per_px"] = meta["ch03_wc"]["cas_attempts"] / row["filled"]
-    row["closure_iters_per_visit"] = h["closure_iters"] / h["tile_visits"]
-    row["rounds_us_per_round"] = (1000 * row[f"{HEADLINE}_rounds_ms"]
-                                  / h["rounds"])
     row["ch03_wc_us_per_level"] = 1000 * row["ch03_wc_ms"] / lv8
-    hp = row[f"{HEADLINE}_pack_ms"]
-    hpaint = row[f"{HEADLINE}_paint_ms"]
-    row["pack_gb_s"] = 3 * width * height / hp / 1e6
-    row["paint_gb_s"] = 3 * row["filled"] / hpaint / 1e6
-    row["all_paint_match"] = all(check.values()) and e2e_ok
+    for n in (OLD_BARE, NEW):
+        row[f"{n}_pack_gb_s"] = (3 * width * height / row[f"{n}_pack_ms"]
+                                 / 1e6)
+        row[f"{n}_paint_gb_s"] = 3 * row["filled"] / row[f"{n}_paint_ms"] / 1e6
+    row["all_paint_match"] = all(check.values()) and all(e2e_ok.values())
+    # every per-round sample, for ratios the row does not carry (JSON only)
+    row["samples"] = {n: {k: [s[k] for s in samples[n]]
+                          for k in samples[n][0]} for n in names}
+
+    def pr(key):
+        return f"x{row[f'paired_{key}_median']:5.2f}"
 
     print(f"{name:16s} {row['filled']:>11,d} "
-          f"wc {row['ch03_wc_ms']:8.2f} w4 {row['ch07_w4_ms']:7.3f} "
-          f"x{row['ch07_w4_speedup_vs_wc']:6.1f} | "
-          f"bare {row['ch03_wc_bare_ms']:8.2f} / {row['ch07_w4_bare_ms']:7.3f} "
-          f"x{row['ch07_w4_bare_speedup_vs_wc_bare']:6.1f} | "
-          f"best {b3}/{b7} x{row['best_vs_best_speedup']:6.1f} | "
-          f"ch06 {row[f'{CH06}_ms']:7.3f} | "
-          f"new {row[f'{NEW}_ms']:7.3f} "
-          f"x{row[f'paired_new_vs_old_median']:5.2f} vs old | "
-          f"lv {lv8:>6,d} -> rounds {h['rounds']:>5d} "
+          f"old {row[f'{OLD_BARE}_ms']:8.3f} new {row[f'{NEW}_ms']:8.3f} "
+          f"{pr('default_vs_old')} | 1s {pr('1s_vs_old')} "
+          f"tp {pr('tp_on_1s')} fp {pr('fp_on_1s_tp')} "
+          f"sk {pr('sk_on_1s_tp')} | ch03 best {b3} "
+          f"{row['ch03_best_ms']:8.2f} {pr('default_vs_ch03_best')} | "
+          f"ch06 {row[f'{CH06}_ms']:7.3f} {pr('default_vs_ch06')} | "
+          f"lv {lv8:>6,d} -> rounds {meta[HEADLINE]['rounds']:>5d} "
           f"sm {row.get('clk_sm_min', '?')}-{row.get('clk_sm_median', '?')} "
           f"mem {row.get('clk_mem_min', '?')} "
           f"{'OK' if row['all_paint_match'] else 'MISMATCH'}", flush=True)
@@ -758,8 +800,9 @@ def njit_pass(scene_list, rows):
             oracle_filled == row["filled"] == row[f"{HEADLINE}_filled"])
         row[f"{HEADLINE}_speedup_vs_njit8"] = (row["njit8_ms"]
                                                / row[f"{HEADLINE}_ms"])
-        row[f"{HEADLINE}_e2e_speedup_vs_njit8"] = (
-            row["njit8_ms"] / row[f"{HEADLINE}_e2e_ms"])
+        for n in (OLD_I, HEADLINE):
+            row[f"{n}_e2e_speedup_vs_njit8"] = (row["njit8_ms"]
+                                                / row[f"{n}_e2e_ms"])
         row["ch03_wc_speedup_vs_njit8"] = row["njit8_ms"] / row["ch03_wc_ms"]
         row["all_paint_match"] = (row["all_paint_match"]
                                   and row["njit8_filled_matches"])
@@ -834,11 +877,14 @@ def main():
     for n, m in config_meta.items():
         print(f"  {n:16s} " + " ".join(f"{k}={v}" for k, v in m.items()))
     ch06_warmup()       # JIT ch06's kernels off the clock
-    config_meta[CH06] = {"connectivity": 8, "contract": "rgb",
-                         "tpb": CH06_GRID[1],
-                         "phase_blocks": dict(CH06_PHASE_BLOCKS),
-                         "pack_row_blocks": CH06_PACK_ROW_BLOCKS,
-                         "run_capacity": "max(8192, n/16, runs in the scene)"}
+    for n in CH06_NAMES:
+        config_meta[n] = {"connectivity": 8, "contract": "rgb",
+                          "instrumented": n == CH06_I,
+                          "tpb": CH06_GRID[1],
+                          "phase_blocks": dict(CH06_PHASE_BLOCKS),
+                          "pack_row_blocks": CH06_PACK_ROW_BLOCKS,
+                          "run_capacity": "max(8192, n/16, runs in the "
+                                          "scene)"}
     flush = cuda.to_device(np.zeros(L2_FLUSH_BYTES // 4, np.uint32))
     _l2_flush[512, 256](flush, cuda.device_array(1, np.uint32))
     probes.warm()
@@ -881,16 +927,23 @@ def main():
         "sm_count": sm_count,
         "experiment": (
             "tile BFS (ch07: 32x32 tiles closed in registers, rounds of "
-            "tiles) with its rounds-kernel switches (one_sync, fused_pack, "
-            "skip_full, fused_paint) timed as an ablation against the old "
-            "default (two grid.sync per round, separate pack and paint), "
-            "vs ch03's conn4 / conn8 / "
-            "warp-coop BFS kernels (instrumented and bare, several grids) "
-            "and ch06's run-table CCL, one interleaved round-robin per "
-            "scene, CUDA-event timings on every side"),
+            "tiles): its switches (one_sync, tile_paint, fused_pack, "
+            "skip_full) timed as an ablation, each increment on top of "
+            "the one before, against the old default (two grid.sync per "
+            "round, separate pack, plain paint), vs ch03's conn4 / conn8 / "
+            "warp-coop BFS kernels (instrumented and bare, several grids; "
+            "ch03's best = the fastest of all its warp-coop grids) and "
+            "ch06's run-table CCL (bare, and instrumented for its "
+            "counters), one interleaved round-robin per scene, CUDA-event "
+            "timings on every side, per-round samples saved"),
+        "default_switches": dict(ff.DEFAULT_SWITCHES),
         "new_config": NEW,
-        "old_config_bare": OLD_BARE,
         "headline_config": HEADLINE,
+        "old_config_bare": OLD_BARE,
+        "old_config": OLD_I,
+        "fused_pack_config": FP,
+        "ch06_config": CH06,
+        "pairs": {k: list(v) for k, v in {**PAIRS, **NARROW_PAIRS}.items()},
         "configs": config_meta,
         "config": {"gpu_repeats": GPU_REPEATS, "njit_repeats": NJIT_REPEATS,
                    "e2e_repeats": E2E_REPEATS,
@@ -907,11 +960,14 @@ def main():
             "ch03 *_ms = its one kernel launch; its device reset "
             "is off the clock and timed separately (ch03_reset_ms). "
             "ch06_runs *_ms = pack + count + scan + emit + merge + flatten "
-            "+ paint, rgb contract. Every "
+            "+ paint, rgb contract (ch06_runs_bare: counters off). Every "
             "run: image restored from a device copy, 96 MB L2 flush read, "
             "GPU sleep kernel queued ahead so host launch overhead is "
-            "excluded. ch07_w4_e2e_ms = pageable H2D + pipeline + D2H of "
-            "the painted image (perf_counter, reused buffers). njit8_ms = "
+            "excluded. <config>_e2e_ms = pageable H2D + pipeline + D2H of "
+            "the painted image (perf_counter, reused buffers), for the old "
+            "and the new default, instrumented. paired_<key>_* = median, "
+            "min and max of the per-round ratio num/den (> 1: den is "
+            "faster) and the rounds below 1. njit8_ms = "
             "the @njit oracle end to end (allocations, depth map, no "
             "paint), timed after all GPU scenes."),
         "probes": probe_res,
@@ -929,14 +985,14 @@ def main():
     fieldnames = []
     for row in rows:
         for k in row:
-            if k not in fieldnames:
+            if k not in fieldnames and k != "samples":   # JSON only
                 fieldnames.append(k)
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
             writer.writerow({k: (json.dumps(v) if isinstance(v, list) else v)
-                             for k, v in row.items()})
+                             for k, v in row.items() if k != "samples"})
 
     print(f"\nResults written to:\n  {json_path}\n  {csv_path}")
 

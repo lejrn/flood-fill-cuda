@@ -29,7 +29,9 @@ them. Every single-warp probe reports both:
 The single-warp probes run first, right after the clock spin-up, and
 warm() compiles them before it, so no JIT gap sits between the two.
 The barrier probe keeps the whole grid busy; it is repeated
-BARRIER_REPEATS times per grid and the median is reported.
+BARRIER_REPEATS times per grid and the median and the range are
+reported. (Three repeats were not stable enough between sessions, the
+fairness audit found.)
 """
 
 import os
@@ -48,7 +50,7 @@ from .. import kernels as k7
 from .. import flood_fill as ff
 from ...ch05_gpu_nblob_nblock.kernels import SMID_CU, get_clock64
 
-BARRIER_REPEATS = 3
+BARRIER_REPEATS = 7
 SHORT, LONG = 2000, 10000      # single-warp loop lengths (differenced)
 
 
@@ -131,6 +133,7 @@ def barrier_us(grids, kernel=None):
             lambda n: kernel[blocks, tpb](q, n, out), 1000, 4000)
             for _ in range(BARRIER_REPEATS)]
         res[f"{blocks}x{tpb}"] = {"median": statistics.median(runs),
+                                  "min": min(runs), "max": max(runs),
                                   "runs": runs}
     return res
 
@@ -328,11 +331,13 @@ def _ptxas():
     return None
 
 
-# the switch sets the register probe compiles (flood_fill.SWITCHES)
+# the rounds-kernel switch sets the register probe compiles
+# (flood_fill.ROUNDS_SWITCHES): the original kernel, the default's and
+# the fused pack's
 OLD_SWITCHES = {"one_sync": False, "fused_pack": False, "skip_full": False,
                 "fused_paint": False}
-NEW_SWITCHES = {"one_sync": True, "fused_pack": True, "skip_full": True,
-                "fused_paint": False}
+DEFAULT_SWITCHES = ff.rounds_switches(ff.DEFAULT_SWITCHES)
+FUSED_SWITCHES = {**OLD_SWITCHES, "one_sync": True, "fused_pack": True}
 
 
 def registers(configs):
@@ -395,5 +400,8 @@ def run_all(grids):
         "barrier_us_per_round": barrier_us(grids),
         "barrier_1sync_us_per_round": barrier_us(grids, _barrier_rounds_1),
         "registers": registers([(8, False), (8, True), (4, False),
-                                (8, True, NEW_SWITCHES)]),
+                                (8, False, DEFAULT_SWITCHES),
+                                (8, True, DEFAULT_SWITCHES),
+                                (4, False, DEFAULT_SWITCHES),
+                                (8, True, FUSED_SWITCHES)]),
     }
