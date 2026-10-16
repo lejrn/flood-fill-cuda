@@ -48,21 +48,23 @@ plain store: a neighbour may be OR-ing into the same word in the same
 round, and a store would erase those bits.
 
 ROUNDS
-The ch03 skeleton, unchanged: a global queue (of tiles now), the
-warp-aggregated enqueue copied from ch03, a cooperative launch, a
-grid-stride over the round's entries (one warp per entry), and two
-grid.sync() per round. A per-tile stamp, raised with atomic.max, keeps a
-tile out of a round's queue after its first enqueue, so ping-pong queues
-of n_tiles entries can never overflow.
+The ch03 skeleton: a global queue (of tiles now), the warp-aggregated
+enqueue copied from ch03, a cooperative launch, a grid-stride over the
+round's entries (one warp per entry), and two grid.sync() per round (one
+with the one_sync switch, the default). A per-tile stamp, raised with
+atomic.max, keeps a tile out of a round's queue after its first enqueue,
+so queues of n_tiles entries can never overflow.
 
 SWITCHES (each off by default in get_rounds_kernel, each an ablation;
-flood_fill.DEFAULT_SWITCHES turns on one_sync and fused_pack; the
-correctness arguments are in _make_rounds_kernel's docstring)
+flood_fill.DEFAULT_SWITCHES turns on one_sync, and the host's tile_paint
+switch picks paint_tiles_kernel; the correctness arguments are in
+_make_rounds_kernel's docstring)
     one_sync     one grid.sync per round: three rotating queue counters
     fused_pack   no pack launch: a tile's RGB is read the round it is
                  first enqueued, so tiles the wave never reaches are never
                  read; paint is then paint_tiles_kernel
     skip_full    exports into a full tile already queued are dropped
+    fused_paint  no paint launch: each visit paints what it added
 
 WHAT IS GIVEN UP
 There is no per-pixel depth: a round is a step of the TILE graph, and a

@@ -13,17 +13,19 @@ events so the phases are attributable individually:
 
     pack     RGB -> 1 bit/px mask         (ch06's pack_kernel, imported)
     init     reached = seed bit, stamps, queue, counters (device-side)
-    rounds   the cooperative tile BFS     (two grid.sync per round)
-    paint    reached -> (0, 0, 255)       (one coalesced pass)
+    rounds   the cooperative tile BFS     (one grid.sync per round)
+    paint    reached -> (0, 0, 255)       (one warp per touched tile)
 
-The rounds kernel's switches (SWITCHES, kernels._make_rounds_kernel)
-change the middle: one_sync (one grid.sync per round), fused_pack (no
-pack launch: the rounds read each reached tile's RGB, and paint is
-paint_tiles_kernel), skip_full (no exports into full tiles already
-queued) and fused_paint (no paint launch; needs fused_pack). With a
-fused phase its events are recorded back to back (an empty interval).
-one_sync and fused_pack are on by default (DEFAULT_SWITCHES, with the
-measurements behind the choice); pass a switch to override it.
+The switches (SWITCHES) change the middle and the end: one_sync (one
+grid.sync per round instead of two), tile_paint (paint_tiles_kernel,
+untouched tiles skipped, instead of one coalesced pass over every
+word), fused_pack (no pack launch: the rounds read each reached tile's
+RGB; implies the tile paint), skip_full (no exports into full tiles
+already queued) and fused_paint (no paint launch; needs fused_pack).
+With a fused phase its events are recorded back to back (an empty
+interval). one_sync and tile_paint are on by default (DEFAULT_SWITCHES,
+with the measurements behind the choice); pass a switch to override it.
+fused_pack=True pays off when the blob is a small part of a large image.
 
 `kernel_ms` is the first event to the last: all four phases, no
 allocation and no host copies. ch03's `kernel_ms` covers its one launch
@@ -65,9 +67,8 @@ from .kernels import (
 # and won while every closure shuffle took a slow path (see
 # kernels._col_fill); with the shuffles fixed, its spills cost more than
 # the extra warps buy, so the default is no cap. The fused-pack kernels
-# (the default since session 20261016T002856Z) link at 242-249 registers
-# and seat 192 warps; caps of 168 and 128 were measured too and lost
-# (kernels._make_rounds_kernel).
+# link at 242-249 registers and seat 192 warps; caps of 168 and 128 were
+# measured too and lost (kernels._make_rounds_kernel).
 DEFAULT_MAX_REGISTERS = None
 
 # 4 warps per block: 72 blocks x 128 seat all 288 warps the registers of
@@ -89,25 +90,29 @@ PHASES = ("pack", "init", "rounds", "paint")
 # flood_fill() and TileFill take None for "this module's default", so the
 # tests can run the whole suite under every combination.
 #
-# Defaults, from session tiles_20261016T002856Z (paired medians against
-# the old default, all switches off, bare twins): one_sync + fused_pack
-# take 1.04-1.35x on 10 of 11 scenes, 11.3x on the thin strip and 13.5x
-# on a 5,000 px blob in 64 Mpx, and lose 4% on sq_4000_corner (a corner
-# front narrower than the grid, where each pack's memory trip is on the
-# round's critical path). skip_full adds 1.03-1.09x on the solid blobs
-# but loses 1% on the maze in all 9 rounds (0.99x [0.89-1.00]), so by the
-# chapter's adoption rule it stays off; fused_paint loses on every scene
-# but the two sparse ones (0.69-0.94x), so it stays off.
-#
 # tile_paint is a host switch, not a rounds-kernel one: paint with
 # paint_tiles_kernel (one warp per tile, tiles the wave never touched
 # skipped by their stamp) after the separate pack. The fused pack always
 # paints that way (gated by tinfo, masked), so it implies tile_paint.
+#
+# Defaults. The chapter's adoption rule, applied to each switch's own
+# increment (paired per round, bare twins, on top of the switches
+# already adopted): adopt a switch only if it loses nothing measurable.
+#   one_sync     wins or ties on every scene (most on the one-tile fronts)
+#   tile_paint   on top of one_sync: its paint phase is never slower, and
+#                it skips the untouched tiles' words
+#   fused_pack   on top of those two: 9-13x on a small blob in a large
+#                image, but 2-23% slower on every dense blob (a 48-block
+#                grid instead of 72, and the packs on narrow fronts sit on
+#                the round's critical path), so it stays an opt-in switch
+#   skip_full    loses on the narrow scenes (the serpentines, the maze)
+#   fused_paint  loses on every scene but the sparse ones
+# The numbers are in the chapter README's section on these switches.
 ROUNDS_SWITCHES = ("one_sync", "fused_pack", "skip_full", "fused_paint")
 SWITCHES = ROUNDS_SWITCHES + ("tile_paint",)
-DEFAULT_SWITCHES = {"one_sync": True, "fused_pack": True,
+DEFAULT_SWITCHES = {"one_sync": True, "fused_pack": False,
                     "skip_full": False, "fused_paint": False,
-                    "tile_paint": False}
+                    "tile_paint": True}
 
 # Plain (non-cooperative) launch shapes for the three streaming kernels.
 # pack/paint use ch06's 2D grid: word along x (one warp per word), rows
@@ -550,7 +555,8 @@ class TileFloodFillResult:
     coop_max_blocks: int
     bare: bool             # uninstrumented twin: work counters read 0
     one_sync: bool         # one grid.sync per round (three queues)
-    fused_pack: bool       # RGB read on a tile's first visit
+    fused_pack: bool       # RGB read in the rounds, the round a tile is
+                           # first enqueued
     skip_full: bool        # exports into queued full tiles dropped
     fused_paint: bool      # each visit paints what it added
     tile_paint: bool       # paint tile by tile, untouched tiles skipped
