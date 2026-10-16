@@ -1,0 +1,7 @@
+# ncu reports and raw exports carry host and process details: never commit them.
+# The scripts write them next to themselves (scripts/reps, scripts/raw).
+*.ncu-rep
+scripts/reps/
+scripts/raw/
+scripts/curated/
+__pycache__/

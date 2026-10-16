@@ -1,0 +1,121 @@
+kernel,scene,run,sm_clock_ghz,rank,line,sass,pct_of_samples,warp_executions,wait_cycles_per_exec,wait_ns_per_exec,top_reasons
+wc_bare,sq_2000_center,base,1.1757,1,720,"ISETP.NE.AND P0, PT, R4, 0xff, PT",5.9493,250001,778.9578,662.5569,long_scoreboard 100%
+wc_bare,sq_2000_center,base,1.1757,2,721,"ISETP.NE.AND P0, PT, R6, RZ, PT",5.4793,249378,719.212,611.739,long_scoreboard 100%
+wc_bare,sq_2000_center,base,1.1757,3,722,"SHF.R.S32.HI R27, RZ, 0x1f, R26",2.5144,232121,354.5781,301.5929,long_scoreboard 98%
+wc_bare,sq_2000_center,base,1.1757,4,710,"SHF.R.S32.HI R33, RZ, 0x1f, R32",1.6435,250001,215.1866,183.0309,long_scoreboard 97%
+wc_bare,sq_2000_center,base,1.1757,5,719,"IADD3 R24, P0, R0, R13, RZ",1.6037,250001,209.9765,178.5994,short_scoreboard 96%
+wc_bare,sq_2000_center,base,1.1757,6,720,"ISETP.NE.AND P0, PT, R4, RZ, PT",1.4363,250001,188.0548,159.9535,long_scoreboard 99%
+wc_bare,sq_2000_center,base,1.1757,7,725,"SHF.R.S32.HI R39, RZ, 0x1f, R45",1.0706,288576,121.4424,103.2951,long_scoreboard 95%
+wc_bare,sq_2000_center,base,1.1757,8,720,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.6224,249382,81.696,69.488,long_scoreboard 97%
+wc_bare,sq_2000_center,base,1.1757,9,707,"ISETP.GT.U32.AND P0, PT, R52, RZ, PT",0.5361,250001,70.1888,59.7004,branch_resolving 76%; wait 12%; selected 5%
+wc_bare,sq_2000_center,base,1.1757,10,709,"ISETP.GE.U32.AND P0, PT, R5, R45, PT",0.3912,250001,51.2162,43.5629,branch_resolving 85%
+wc_bare,sq_2000_center,hot,1.47,1,721,"ISETP.NE.AND P0, PT, R6, RZ, PT",7.6596,249384,1068.2475,726.7074,long_scoreboard 100%
+wc_bare,sq_2000_center,hot,1.47,2,720,"ISETP.NE.AND P0, PT, R4, 0xff, PT",6.7771,250001,942.8299,641.3883,long_scoreboard 100%
+wc_bare,sq_2000_center,hot,1.47,3,722,"SHF.R.S32.HI R27, RZ, 0x1f, R26",2.8031,231969,420.2846,285.9112,long_scoreboard 98%
+wc_bare,sq_2000_center,hot,1.47,4,710,"SHF.R.S32.HI R33, RZ, 0x1f, R32",1.6471,250001,229.1457,155.8832,long_scoreboard 98%
+wc_bare,sq_2000_center,hot,1.47,5,719,"IADD3 R24, P0, R0, R13, RZ",1.4966,250001,208.207,141.6391,short_scoreboard 97%
+wc_bare,sq_2000_center,hot,1.47,6,720,"ISETP.NE.AND P0, PT, R4, RZ, PT",1.4217,250001,197.7869,134.5504,long_scoreboard 99%
+wc_bare,sq_2000_center,hot,1.47,7,725,"SHF.R.S32.HI R39, RZ, 0x1f, R45",0.9885,288576,119.143,81.0506,long_scoreboard 96%
+wc_bare,sq_2000_center,hot,1.47,8,720,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.566,249388,78.9347,53.6977,long_scoreboard 98%
+wc_bare,sq_2000_center,hot,1.47,9,707,"ISETP.GT.U32.AND P0, PT, R52, RZ, PT",0.4607,250001,64.094,43.6018,branch_resolving 74%; wait 14%; selected 6%
+wc_bare,sq_2000_center,hot,1.47,10,709,"ISETP.GE.U32.AND P0, PT, R5, R45, PT",0.3335,250001,46.3993,31.5645,branch_resolving 85%; selected 6%; misc 5%
+wc_bare,sq_4000_corner,base,0.8303,1,721,"ISETP.NE.AND P0, PT, R6, RZ, PT",8.0711,4000703,671.4581,808.7239,long_scoreboard 99%
+wc_bare,sq_4000_corner,base,0.8303,2,720,"ISETP.NE.AND P0, PT, R4, 0xff, PT",7.6466,4002000,635.9424,765.9478,long_scoreboard 99%
+wc_bare,sq_4000_corner,base,0.8303,3,722,"SHF.R.S32.HI R27, RZ, 0x1f, R26",4.3598,3724494,389.6007,469.2466,long_scoreboard 98%
+wc_bare,sq_4000_corner,base,0.8303,4,710,"SHF.R.S32.HI R33, RZ, 0x1f, R32",2.351,4002000,195.5272,235.4987,long_scoreboard 96%
+wc_bare,sq_4000_corner,base,0.8303,5,719,"IADD3 R24, P0, R0, R13, RZ",2.2285,4002000,185.3333,223.2208,short_scoreboard 96%
+wc_bare,sq_4000_corner,base,0.8303,6,720,"ISETP.NE.AND P0, PT, R4, RZ, PT",2.1401,4000749,178.0382,214.4345,long_scoreboard 98%
+wc_bare,sq_4000_corner,base,0.8303,7,720,"ISETP.NE.AND P0, PT, R6, RZ, PT",1.1127,4000749,92.5666,111.49,long_scoreboard 97%
+wc_bare,sq_4000_corner,base,0.8303,8,707,"ISETP.GT.U32.AND P0, PT, R52, RZ, PT",0.8522,4002000,70.8725,85.3609,branch_resolving 76%; wait 13%; selected 5%
+wc_bare,sq_4000_corner,base,0.8303,9,725,"SHF.R.S32.HI R39, RZ, 0x1f, R45",0.837,2304000,120.9067,145.6236,long_scoreboard 96%
+wc_bare,sq_4000_corner,base,0.8303,10,709,"ISETP.GE.U32.AND P0, PT, R5, R45, PT",0.544,4002000,45.2402,54.4887,branch_resolving 86%; selected 6%
+wc_bare,sq_4000_corner,hot,2.0584,1,721,"ISETP.NE.AND P0, PT, R6, RZ, PT",10.2001,4000685,877.4464,426.2807,long_scoreboard 100%
+wc_bare,sq_4000_corner,hot,2.0584,2,720,"ISETP.NE.AND P0, PT, R4, 0xff, PT",8.4606,4002000,727.5712,353.4683,long_scoreboard 100%
+wc_bare,sq_4000_corner,hot,2.0584,3,722,"SHF.R.S32.HI R27, RZ, 0x1f, R26",5.0322,3723600,465.0999,225.9547,long_scoreboard 98%
+wc_bare,sq_4000_corner,hot,2.0584,4,710,"SHF.R.S32.HI R33, RZ, 0x1f, R32",2.4025,4002000,206.6054,100.373,long_scoreboard 97%
+wc_bare,sq_4000_corner,hot,2.0584,5,720,"ISETP.NE.AND P0, PT, R4, RZ, PT",2.2031,4000722,189.5205,92.0728,long_scoreboard 99%
+wc_bare,sq_4000_corner,hot,2.0584,6,719,"IADD3 R24, P0, R0, R13, RZ",2.1331,4002000,183.4357,89.1167,short_scoreboard 96%
+wc_bare,sq_4000_corner,hot,2.0584,7,720,"ISETP.NE.AND P0, PT, R6, RZ, PT",1.0683,4000722,91.8977,44.6457,long_scoreboard 97%
+wc_bare,sq_4000_corner,hot,2.0584,8,707,"ISETP.GT.U32.AND P0, PT, R52, RZ, PT",0.8327,4002000,71.6094,34.7892,branch_resolving 75%; wait 15%
+wc_bare,sq_4000_corner,hot,2.0584,9,725,"SHF.R.S32.HI R39, RZ, 0x1f, R45",0.8007,2304000,119.6053,58.1066,long_scoreboard 95%
+wc_bare,sq_4000_corner,hot,2.0584,10,709,"ISETP.GE.U32.AND P0, PT, R5, R45, PT",0.5149,4002000,44.2822,21.5132,branch_resolving 86%; selected 6%
+wc_bare,sq_8000_center,base,0.8379,1,721,"ISETP.NE.AND P0, PT, R6, RZ, PT",13.1596,15996526,616.9117,736.249,long_scoreboard 99%
+wc_bare,sq_8000_center,base,0.8379,2,720,"ISETP.NE.AND P0, PT, R4, 0xff, PT",10.7877,16000001,505.6112,603.4182,long_scoreboard 99%
+wc_bare,sq_8000_center,base,0.8379,3,722,"SHF.R.S32.HI R27, RZ, 0x1f, R26",9.486,15039605,472.9926,564.4897,long_scoreboard 98%
+wc_bare,sq_8000_center,base,0.8379,4,710,"SHF.R.S32.HI R33, RZ, 0x1f, R32",4.238,16000001,198.6294,237.0528,long_scoreboard 97%
+wc_bare,sq_8000_center,base,0.8379,5,720,"ISETP.NE.AND P0, PT, R4, RZ, PT",2.9965,15996673,140.4718,167.6451,long_scoreboard 97%
+wc_bare,sq_8000_center,base,0.8379,6,719,"IADD3 R24, P0, R0, R13, RZ",2.9935,16000001,140.3028,167.4434,short_scoreboard 96%
+wc_bare,sq_8000_center,base,0.8379,7,720,"ISETP.NE.AND P0, PT, R6, RZ, PT",1.8711,15996673,87.7146,104.6824,long_scoreboard 96%
+wc_bare,sq_8000_center,base,0.8379,8,707,"ISETP.GT.U32.AND P0, PT, R52, RZ, PT",1.5504,16000001,72.6682,86.7253,branch_resolving 76%; wait 13%
+wc_bare,sq_8000_center,base,0.8379,9,709,"ISETP.GE.U32.AND P0, PT, R5, R45, PT",0.9485,16000001,44.4549,53.0544,branch_resolving 87%; selected 6%
+wc_bare,sq_8000_center,base,0.8379,10,722,"BRA.DIV UR4, 0x600ebbc60",0.8839,15039605,44.0746,52.6005,short_scoreboard 94%
+wc_bare,sq_8000_center,hot,2.0603,1,721,"ISETP.NE.AND P0, PT, R6, RZ, PT",16.0939,15996610,838.0103,406.7457,long_scoreboard 100%
+wc_bare,sq_8000_center,hot,2.0603,2,722,"SHF.R.S32.HI R27, RZ, 0x1f, R26",13.3858,15032160,741.7174,360.008,long_scoreboard 99%
+wc_bare,sq_8000_center,hot,2.0603,3,720,"ISETP.NE.AND P0, PT, R4, 0xff, PT",12.1492,16000001,632.4771,306.986,long_scoreboard 99%
+wc_bare,sq_8000_center,hot,2.0603,4,710,"SHF.R.S32.HI R33, RZ, 0x1f, R32",3.9484,16000001,205.5521,99.769,long_scoreboard 97%
+wc_bare,sq_8000_center,hot,2.0603,5,720,"ISETP.NE.AND P0, PT, R4, RZ, PT",2.8714,15996761,149.5107,72.5681,long_scoreboard 98%
+wc_bare,sq_8000_center,hot,2.0603,6,719,"IADD3 R24, P0, R0, R13, RZ",2.6572,16000001,138.3306,67.1416,short_scoreboard 96%
+wc_bare,sq_8000_center,hot,2.0603,7,720,"ISETP.NE.AND P0, PT, R6, RZ, PT",1.7492,15996761,91.0802,44.2077,long_scoreboard 96%
+wc_bare,sq_8000_center,hot,2.0603,8,707,"ISETP.GT.U32.AND P0, PT, R52, RZ, PT",1.3648,16000001,71.0507,34.486,branch_resolving 75%; wait 14%
+wc_bare,sq_8000_center,hot,2.0603,9,709,"ISETP.GE.U32.AND P0, PT, R5, R45, PT",0.8459,16000001,44.0371,21.3743,branch_resolving 87%; selected 7%
+wc_bare,sq_8000_center,hot,2.0603,10,722,"BRA.DIV UR4, 0x600ebbc60",0.7683,15032160,42.5727,20.6635,short_scoreboard 94%
+conn8_bare,sq_2000_center,base,0.8922,1,375,"ISETP.NE.AND P0, PT, R3, 0xff, PT",1.0827,125756,511.0392,572.8157,long_scoreboard 99%
+conn8_bare,sq_2000_center,base,0.8922,2,380,"SHF.R.S32.HI R24, RZ, 0x1f, R25",0.66,288576,135.7498,152.1598,long_scoreboard 97%
+conn8_bare,sq_2000_center,base,0.8922,3,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.5374,69417,459.5365,515.0872,long_scoreboard 99%
+conn8_bare,sq_2000_center,base,0.8922,4,375,"ISETP.NE.AND P0, PT, R8, 0xff, PT",0.4857,125756,229.2348,256.9456,long_scoreboard 98%
+conn8_bare,sq_2000_center,base,0.8922,5,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.3515,37748,552.7452,619.5633,long_scoreboard 99%
+conn8_bare,sq_2000_center,base,0.8922,6,375,"ISETP.NE.AND P0, PT, R3, RZ, PT",0.2691,37960,420.8219,471.6926,long_scoreboard 99%
+conn8_bare,sq_2000_center,base,0.8922,7,374,"IMAD.IADD R4, R70, 0x1, R3",0.2625,125756,123.9001,138.8777,long_scoreboard 96%
+conn8_bare,sq_2000_center,base,0.8922,8,365,"SHF.R.S32.HI R33, RZ, 0x1f, R32",0.2414,31439,455.7336,510.8246,long_scoreboard 99%
+conn8_bare,sq_2000_center,base,0.8922,9,377,"SHF.R.S32.HI R47, RZ, 0x1f, R46",0.1909,29640,382.2381,428.4446,long_scoreboard 95%
+conn8_bare,sq_2000_center,base,0.8922,10,375,"ISETP.NE.AND P0, PT, R8, RZ, PT",0.147,69679,125.2096,140.3455,long_scoreboard 97%
+conn8_bare,sq_2000_center,hot,2.0606,1,375,"ISETP.NE.AND P0, PT, R3, 0xff, PT",1.0773,125756,520.615,252.6468,long_scoreboard 99%
+conn8_bare,sq_2000_center,hot,2.0606,2,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.6632,69385,580.8841,281.8945,long_scoreboard 99%
+conn8_bare,sq_2000_center,hot,2.0606,3,380,"SHF.R.S32.HI R24, RZ, 0x1f, R25",0.6106,288576,128.5961,62.4058,long_scoreboard 96%
+conn8_bare,sq_2000_center,hot,2.0606,4,375,"ISETP.NE.AND P0, PT, R8, 0xff, PT",0.5273,125756,254.8356,123.668,long_scoreboard 99%
+conn8_bare,sq_2000_center,hot,2.0606,5,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.408,37702,657.7153,319.1796,long_scoreboard 99%
+conn8_bare,sq_2000_center,hot,2.0606,6,374,"IMAD.IADD R4, R70, 0x1, R3",0.2738,125756,132.3034,64.2049,long_scoreboard 95%
+conn8_bare,sq_2000_center,hot,2.0606,7,375,"ISETP.NE.AND P0, PT, R3, RZ, PT",0.2616,37974,418.7252,203.2012,long_scoreboard 99%
+conn8_bare,sq_2000_center,hot,2.0606,8,365,"SHF.R.S32.HI R33, RZ, 0x1f, R32",0.239,31439,461.9872,224.1956,long_scoreboard 99%
+conn8_bare,sq_2000_center,hot,2.0606,9,377,"SHF.R.S32.HI R47, RZ, 0x1f, R46",0.2147,29636,440.338,213.6896,long_scoreboard 96%
+conn8_bare,sq_2000_center,hot,2.0606,10,350,"SHF.R.S32.HI R3, RZ, 0x1f, R2",0.1432,288576,30.1477,14.6302,short_scoreboard 69%; not_selected 13%; math_pipe_throttle 10%
+conn8_bare,sq_4000_corner,base,0.8467,1,375,"ISETP.NE.AND P0, PT, R3, 0xff, PT",2.6289,2007612,648.7702,766.2563,long_scoreboard 99%
+conn8_bare,sq_4000_corner,base,0.8467,2,375,"ISETP.NE.AND P0, PT, R8, 0xff, PT",1.0528,2007168,259.8814,306.9434,long_scoreboard 99%
+conn8_bare,sq_4000_corner,base,0.8467,3,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",1.0285,1064989,478.4639,565.1091,long_scoreboard 99%
+conn8_bare,sq_4000_corner,base,0.8467,4,375,"ISETP.NE.AND P0, PT, R3, RZ, PT",0.7652,566403,669.328,790.5369,long_scoreboard 100%
+conn8_bare,sq_4000_corner,base,0.8467,5,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.7203,563726,633.096,747.7436,long_scoreboard 99%
+conn8_bare,sq_4000_corner,base,0.8467,6,374,"IMAD.IADD R4, R70, 0x1, R3",0.7085,2008000,174.8225,206.4812,long_scoreboard 97%
+conn8_bare,sq_4000_corner,base,0.8467,7,380,"SHF.R.S32.HI R24, RZ, 0x1f, R25",0.6238,2304000,134.144,158.4362,long_scoreboard 97%
+conn8_bare,sq_4000_corner,base,0.8467,8,365,"SHF.R.S32.HI R33, RZ, 0x1f, R32",0.4437,502000,437.864,517.157,long_scoreboard 99%
+conn8_bare,sq_4000_corner,base,0.8467,9,375,"ISETP.NE.AND P0, PT, R8, RZ, PT",0.3947,1064994,183.6403,216.8958,long_scoreboard 98%
+conn8_bare,sq_4000_corner,base,0.8467,10,375,"ISETP.NE.AND P0, PT, R4, RZ, PT",0.3797,1064994,176.6251,208.6103,long_scoreboard 98%
+conn8_bare,sq_4000_corner,hot,2.0623,1,375,"ISETP.NE.AND P0, PT, R3, 0xff, PT",2.8167,2007654,699.4595,339.1656,long_scoreboard 99%
+conn8_bare,sq_4000_corner,hot,2.0623,2,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",1.1512,1069717,536.5188,260.1563,long_scoreboard 99%
+conn8_bare,sq_4000_corner,hot,2.0623,3,375,"ISETP.NE.AND P0, PT, R8, 0xff, PT",1.0886,2007226,270.379,131.1059,long_scoreboard 99%
+conn8_bare,sq_4000_corner,hot,2.0623,4,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",0.8616,568773,755.2467,366.2167,long_scoreboard 100%
+conn8_bare,sq_4000_corner,hot,2.0623,5,375,"ISETP.NE.AND P0, PT, R3, RZ, PT",0.7441,573092,647.3643,313.9048,long_scoreboard 100%
+conn8_bare,sq_4000_corner,hot,2.0623,6,374,"IMAD.IADD R4, R70, 0x1, R3",0.7223,2008000,179.3265,86.9548,long_scoreboard 97%
+conn8_bare,sq_4000_corner,hot,2.0623,7,380,"SHF.R.S32.HI R24, RZ, 0x1f, R25",0.5944,2304000,128.6293,62.3719,long_scoreboard 96%
+conn8_bare,sq_4000_corner,hot,2.0623,8,365,"SHF.R.S32.HI R33, RZ, 0x1f, R32",0.4423,502000,439.2348,212.9835,long_scoreboard 99%
+conn8_bare,sq_4000_corner,hot,2.0623,9,375,"ISETP.NE.AND P0, PT, R8, RZ, PT",0.4116,1069719,191.8121,93.0091,long_scoreboard 98%
+conn8_bare,sq_4000_corner,hot,2.0623,10,375,"ISETP.NE.AND P0, PT, R4, RZ, PT",0.3826,1069719,178.3262,86.4698,long_scoreboard 98%
+conn8_bare,sq_8000_center,base,0.8357,1,375,"ISETP.NE.AND P0, PT, R3, 0xff, PT",9.5168,8005056,1072.2767,1283.1559,long_scoreboard 100%
+conn8_bare,sq_8000_center,base,0.8357,2,375,"ISETP.NE.AND P0, PT, R8, 0xff, PT",5.464,8004077,615.7113,736.8001,long_scoreboard 100%
+conn8_bare,sq_8000_center,base,0.8357,3,375,"ISETP.NE.AND P0, PT, R3, RZ, PT",3.9304,2777884,1276.1475,1527.1209,long_scoreboard 100%
+conn8_bare,sq_8000_center,base,0.8357,4,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",3.7658,4380749,775.3244,927.8035,long_scoreboard 100%
+conn8_bare,sq_8000_center,base,0.8357,5,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",2.9188,2717766,968.6744,1159.1786,long_scoreboard 100%
+conn8_bare,sq_8000_center,base,0.8357,6,375,"ISETP.NE.AND P0, PT, R4, RZ, PT",2.633,2777884,854.9142,1023.0459,long_scoreboard 100%
+conn8_bare,sq_8000_center,base,0.8357,7,370,"STG.E.U8 [R4.64+0x2], R0",2.6181,2001501,1179.807,1411.8337,lg_throttle 97%
+conn8_bare,sq_8000_center,base,0.8357,8,375,"ISETP.NE.AND P0, PT, R8, RZ, PT",2.3333,4380849,480.3957,574.8727,long_scoreboard 99%
+conn8_bare,sq_8000_center,base,0.8357,9,374,"IMAD.IADD R4, R70, 0x1, R3",2.2961,8006004,258.671,309.5425,long_scoreboard 99%
+conn8_bare,sq_8000_center,base,0.8357,10,375,"ISETP.NE.AND P0, PT, R4, RZ, PT",1.9438,4380849,400.197,478.9017,long_scoreboard 99%
+conn8_bare,sq_8000_center,hot,2.0608,1,375,"ISETP.NE.AND P0, PT, R3, 0xff, PT",9.7858,8005054,1102.5754,535.0238,long_scoreboard 100%
+conn8_bare,sq_8000_center,hot,2.0608,2,375,"ISETP.NE.AND P0, PT, R8, 0xff, PT",5.574,8004072,628.1132,304.7914,long_scoreboard 100%
+conn8_bare,sq_8000_center,hot,2.0608,3,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",4.2185,4404064,863.9309,419.2217,long_scoreboard 100%
+conn8_bare,sq_8000_center,hot,2.0608,4,375,"ISETP.NE.AND P0, PT, R3, RZ, PT",3.9201,2812444,1257.1628,610.0372,long_scoreboard 100%
+conn8_bare,sq_8000_center,hot,2.0608,5,376,"ISETP.NE.AND P0, PT, R6, RZ, PT",3.1982,2748222,1049.627,509.3306,long_scoreboard 100%
+conn8_bare,sq_8000_center,hot,2.0608,6,370,"STG.E.U8 [R4.64+0x2], R0",2.6406,2001501,1189.9493,577.4219,lg_throttle 97%
+conn8_bare,sq_8000_center,hot,2.0608,7,375,"ISETP.NE.AND P0, PT, R4, RZ, PT",2.5468,2812444,816.7521,396.3283,long_scoreboard 100%
+conn8_bare,sq_8000_center,hot,2.0608,8,374,"IMAD.IADD R4, R70, 0x1, R3",2.2951,8006004,258.5574,125.4648,long_scoreboard 99%
+conn8_bare,sq_8000_center,hot,2.0608,9,375,"ISETP.NE.AND P0, PT, R8, RZ, PT",2.2933,4404119,469.649,227.8967,long_scoreboard 99%
+conn8_bare,sq_8000_center,hot,2.0608,10,375,"ISETP.NE.AND P0, PT, R4, RZ, PT",1.9189,4404119,392.971,190.6888,long_scoreboard 99%

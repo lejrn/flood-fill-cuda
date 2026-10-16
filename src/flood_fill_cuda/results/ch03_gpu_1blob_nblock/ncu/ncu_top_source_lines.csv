@@ -1,0 +1,97 @@
+kernel,scene,run,rank,line,source,bucket,pct_of_samples,top_reasons
+wc_bare,sq_2000_center,base,1,720,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,9.4427,long_scoreboard 85%; wait 8%
+wc_bare,sq_2000_center,base,2,721,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,5.977,long_scoreboard 91%; wait 5%
+wc_bare,sq_2000_center,base,3,722,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,4.7615,long_scoreboard 52%; wait 17%; short_scoreboard 13%; selected 8%
+wc_bare,sq_2000_center,base,4,707,"for base in range(front + warp_gid * 4, rear, n_warps * 4):",loop_decode,4.305,wait 33%; branch_resolving 15%; not_selected 15%; selected 14%
+wc_bare,sq_2000_center,base,5,710,pixel = queue[idx],queue_read,3.7524,long_scoreboard 43%; wait 25%; not_selected 9%; short_scoreboard 8%
+wc_bare,sq_2000_center,base,6,719,ny = y + dy[d],loop_decode,1.7035,short_scoreboard 90%
+wc_bare,sq_2000_center,base,7,725,new_rear = q_state[Q_REAR],grid_sync,1.2636,long_scoreboard 80%; wait 6%
+wc_bare,sq_2000_center,base,8,709,if idx < rear:,loop_decode,0.735,branch_resolving 47%; wait 21%; not_selected 10%; selected 9%
+wc_bare,sq_2000_center,hot,1,720,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,10.1109,long_scoreboard 87%; wait 7%
+wc_bare,sq_2000_center,hot,2,721,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,8.0878,long_scoreboard 94%
+wc_bare,sq_2000_center,hot,3,722,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,4.9145,long_scoreboard 56%; wait 17%; short_scoreboard 11%; selected 7%
+wc_bare,sq_2000_center,hot,4,707,"for base in range(front + warp_gid * 4, rear, n_warps * 4):",loop_decode,4.0503,wait 34%; not_selected 15%; branch_resolving 14%; selected 14%
+wc_bare,sq_2000_center,hot,5,710,pixel = queue[idx],queue_read,3.5973,long_scoreboard 45%; wait 24%; selected 8%; short_scoreboard 8%
+wc_bare,sq_2000_center,hot,6,719,ny = y + dy[d],loop_decode,1.5913,short_scoreboard 91%
+wc_bare,sq_2000_center,hot,7,725,new_rear = q_state[Q_REAR],grid_sync,1.1956,long_scoreboard 79%; wait 6%
+wc_bare,sq_2000_center,hot,8,709,if idx < rear:,loop_decode,0.6374,branch_resolving 46%; wait 18%; not_selected 13%; selected 11%
+wc_bare,sq_4000_corner,base,1,720,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,13.2484,long_scoreboard 82%; wait 9%
+wc_bare,sq_4000_corner,base,2,721,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,8.8625,long_scoreboard 91%; wait 5%
+wc_bare,sq_4000_corner,base,3,722,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,8.0618,long_scoreboard 53%; wait 17%; short_scoreboard 12%; selected 7%
+wc_bare,sq_4000_corner,base,4,710,pixel = queue[idx],queue_read,5.7488,long_scoreboard 39%; wait 25%; not_selected 10%; selected 8%
+wc_bare,sq_4000_corner,base,5,707,"for base in range(front + warp_gid * 4, rear, n_warps * 4):",loop_decode,4.5436,wait 31%; branch_resolving 19%; not_selected 15%; selected 13%
+wc_bare,sq_4000_corner,base,6,719,ny = y + dy[d],loop_decode,2.3908,short_scoreboard 90%
+wc_bare,sq_4000_corner,base,7,709,if idx < rear:,loop_decode,1.0976,branch_resolving 46%; wait 22%; selected 11%; not_selected 10%
+wc_bare,sq_4000_corner,base,8,725,new_rear = q_state[Q_REAR],grid_sync,0.995,long_scoreboard 80%; wait 6%
+wc_bare,sq_4000_corner,hot,1,720,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,13.9422,long_scoreboard 84%; wait 9%
+wc_bare,sq_4000_corner,hot,2,721,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,10.9434,long_scoreboard 93%
+wc_bare,sq_4000_corner,hot,3,722,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,8.5706,long_scoreboard 58%; wait 15%; short_scoreboard 11%; selected 6%
+wc_bare,sq_4000_corner,hot,4,710,pixel = queue[idx],queue_read,5.6273,long_scoreboard 41%; wait 25%; not_selected 9%; selected 8%
+wc_bare,sq_4000_corner,hot,5,707,"for base in range(front + warp_gid * 4, rear, n_warps * 4):",loop_decode,4.3651,wait 32%; branch_resolving 19%; not_selected 14%; selected 13%
+wc_bare,sq_4000_corner,hot,6,719,ny = y + dy[d],loop_decode,2.2859,short_scoreboard 90%
+wc_bare,sq_4000_corner,hot,7,709,if idx < rear:,loop_decode,1.0338,branch_resolving 46%; wait 22%; selected 11%; not_selected 10%
+wc_bare,sq_4000_corner,hot,8,725,new_rear = q_state[Q_REAR],grid_sync,0.9641,long_scoreboard 79%; wait 6%
+wc_bare,sq_8000_center,base,1,720,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,19.8824,long_scoreboard 79%; wait 11%
+wc_bare,sq_8000_center,base,2,722,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,16.4738,long_scoreboard 57%; wait 15%; short_scoreboard 11%; selected 6%
+wc_bare,sq_8000_center,base,3,721,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,14.643,long_scoreboard 89%; wait 6%
+wc_bare,sq_8000_center,base,4,710,pixel = queue[idx],queue_read,9.8262,long_scoreboard 42%; wait 25%; selected 8%; short_scoreboard 8%
+wc_bare,sq_8000_center,base,5,707,"for base in range(front + warp_gid * 4, rear, n_warps * 4):",loop_decode,4.1144,branch_resolving 32%; wait 27%; selected 13%; not_selected 11%
+wc_bare,sq_8000_center,base,6,719,ny = y + dy[d],loop_decode,3.2371,short_scoreboard 89%
+wc_bare,sq_8000_center,base,7,709,if idx < rear:,loop_decode,1.8845,branch_resolving 48%; wait 23%; selected 11%; not_selected 8%
+wc_bare,sq_8000_center,base,8,714,"img[x, y, 0] = 0",paint_store,1.6179,wait 37%; selected 32%; not_selected 12%; math_pipe_throttle 10%
+wc_bare,sq_8000_center,hot,1,720,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,20.5279,long_scoreboard 82%; wait 10%
+wc_bare,sq_8000_center,hot,2,722,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,19.4773,long_scoreboard 68%; wait 11%; short_scoreboard 8%
+wc_bare,sq_8000_center,hot,3,721,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,17.3876,long_scoreboard 92%
+wc_bare,sq_8000_center,hot,4,710,pixel = queue[idx],queue_read,8.8663,long_scoreboard 43%; wait 25%; selected 8%; short_scoreboard 8%
+wc_bare,sq_8000_center,hot,5,707,"for base in range(front + warp_gid * 4, rear, n_warps * 4):",loop_decode,3.6138,branch_resolving 32%; wait 28%; selected 14%; not_selected 10%
+wc_bare,sq_8000_center,hot,6,719,ny = y + dy[d],loop_decode,2.8738,short_scoreboard 89%
+wc_bare,sq_8000_center,hot,7,709,if idx < rear:,loop_decode,1.655,branch_resolving 49%; wait 23%; selected 11%; not_selected 7%
+wc_bare,sq_8000_center,hot,8,714,"img[x, y, 0] = 0",paint_store,1.4187,wait 38%; selected 33%; not_selected 11%; math_pipe_throttle 9%
+conn8_bare,sq_2000_center,base,1,375,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,2.777,long_scoreboard 79%; wait 11%
+conn8_bare,sq_2000_center,base,2,376,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,1.0521,long_scoreboard 84%; wait 10%
+conn8_bare,sq_2000_center,base,3,364,"for i in range(front + tid, rear, stride):",loop_decode,0.9714,wait 36%; not_selected 16%; selected 13%; no_instructions 10%
+conn8_bare,sq_2000_center,base,4,380,new_rear = q_state[Q_REAR],grid_sync,0.7739,long_scoreboard 82%; wait 6%
+conn8_bare,sq_2000_center,base,5,377,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,0.6455,long_scoreboard 44%; wait 20%; short_scoreboard 11%; selected 9%
+conn8_bare,sq_2000_center,base,6,374,ny = y + dy[d],loop_decode,0.4625,long_scoreboard 54%; short_scoreboard 27%; wait 8%
+conn8_bare,sq_2000_center,base,7,365,pixel = queue[i],queue_read,0.383,long_scoreboard 62%; wait 17%
+conn8_bare,sq_2000_center,base,8,373,nx = x + dx[d],loop_decode,0.2654,branch_resolving 50%; wait 24%; selected 15%
+conn8_bare,sq_2000_center,hot,1,375,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,2.8258,long_scoreboard 78%; wait 12%; selected 5%
+conn8_bare,sq_2000_center,hot,2,376,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,1.2014,long_scoreboard 89%; wait 7%
+conn8_bare,sq_2000_center,hot,3,364,"for i in range(front + tid, rear, stride):",loop_decode,0.9325,wait 37%; not_selected 14%; selected 12%; no_instructions 10%
+conn8_bare,sq_2000_center,hot,4,380,new_rear = q_state[Q_REAR],grid_sync,0.717,long_scoreboard 82%
+conn8_bare,sq_2000_center,hot,5,377,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,0.6567,long_scoreboard 47%; wait 20%; short_scoreboard 13%; selected 8%
+conn8_bare,sq_2000_center,hot,6,374,ny = y + dy[d],loop_decode,0.4873,long_scoreboard 53%; short_scoreboard 27%; wait 9%
+conn8_bare,sq_2000_center,hot,7,365,pixel = queue[i],queue_read,0.3728,long_scoreboard 64%; wait 16%
+conn8_bare,sq_2000_center,hot,8,373,nx = x + dx[d],loop_decode,0.2774,branch_resolving 46%; wait 25%; selected 16%
+conn8_bare,sq_4000_corner,base,1,375,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,6.7096,long_scoreboard 82%; wait 9%
+conn8_bare,sq_4000_corner,base,2,376,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,1.9671,long_scoreboard 88%; wait 7%
+conn8_bare,sq_4000_corner,base,3,374,ny = y + dy[d],loop_decode,1.1313,long_scoreboard 61%; short_scoreboard 24%; wait 6%
+conn8_bare,sq_4000_corner,base,4,364,"for i in range(front + tid, rear, stride):",loop_decode,1.1105,wait 37%; not_selected 15%; selected 13%; math_pipe_throttle 11%
+conn8_bare,sq_4000_corner,base,5,377,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,0.9505,long_scoreboard 48%; wait 18%; short_scoreboard 12%; selected 8%
+conn8_bare,sq_4000_corner,base,6,380,new_rear = q_state[Q_REAR],grid_sync,0.7518,long_scoreboard 80%; wait 5%
+conn8_bare,sq_4000_corner,base,7,365,pixel = queue[i],queue_read,0.7229,long_scoreboard 61%; wait 16%; selected 6%; short_scoreboard 5%
+conn8_bare,sq_4000_corner,base,8,373,nx = x + dx[d],loop_decode,0.5565,branch_resolving 48%; wait 25%; selected 15%
+conn8_bare,sq_4000_corner,hot,1,375,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,6.9258,long_scoreboard 83%; wait 9%
+conn8_bare,sq_4000_corner,hot,2,376,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,2.2328,long_scoreboard 90%; wait 6%
+conn8_bare,sq_4000_corner,hot,3,374,ny = y + dy[d],loop_decode,1.1538,long_scoreboard 61%; short_scoreboard 24%; wait 6%
+conn8_bare,sq_4000_corner,hot,4,364,"for i in range(front + tid, rear, stride):",loop_decode,1.0872,wait 38%; not_selected 15%; selected 14%; math_pipe_throttle 10%
+conn8_bare,sq_4000_corner,hot,5,377,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,0.9669,long_scoreboard 51%; wait 18%; short_scoreboard 11%; selected 7%
+conn8_bare,sq_4000_corner,hot,6,380,new_rear = q_state[Q_REAR],grid_sync,0.7251,long_scoreboard 79%; wait 6%
+conn8_bare,sq_4000_corner,hot,7,365,pixel = queue[i],queue_read,0.7145,long_scoreboard 61%; wait 16%; selected 5%; short_scoreboard 5%
+conn8_bare,sq_4000_corner,hot,8,373,nx = x + dx[d],loop_decode,0.5477,branch_resolving 49%; wait 25%; selected 15%
+conn8_bare,sq_8000_center,base,1,375,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,28.4336,long_scoreboard 90%
+conn8_bare,sq_8000_center,base,2,376,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,7.2113,long_scoreboard 92%
+conn8_bare,sq_8000_center,base,3,377,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,4.5788,long_scoreboard 58%; short_scoreboard 18%; wait 11%
+conn8_bare,sq_8000_center,base,4,374,ny = y + dy[d],loop_decode,3.2705,long_scoreboard 69%; short_scoreboard 23%
+conn8_bare,sq_8000_center,base,5,370,"img[x, y, 2] = 255",paint_store,2.6181,lg_throttle 97%
+conn8_bare,sq_8000_center,base,6,365,pixel = queue[i],queue_read,1.4332,long_scoreboard 59%; wait 14%; not_selected 6%; math_pipe_throttle 5%
+conn8_bare,sq_8000_center,base,7,373,nx = x + dx[d],loop_decode,1.125,branch_resolving 59%; wait 20%; selected 12%
+conn8_bare,sq_8000_center,base,8,364,"for i in range(front + tid, rear, stride):",loop_decode,0.9356,wait 39%; not_selected 15%; selected 13%; math_pipe_throttle 12%
+conn8_bare,sq_8000_center,hot,1,375,"if 0 <= nx < width and 0 <= ny < height and _is_red(img, nx, ny):",rgb_probe,28.6195,long_scoreboard 91%
+conn8_bare,sq_8000_center,hot,2,376,"if cuda.atomic.cas(visited, (nx, ny), 0, 1) == 0:",visited_cas,7.9351,long_scoreboard 93%
+conn8_bare,sq_8000_center,hot,3,377,"_warp_enqueue_global(queue, q_state, Q_REAR,",enqueue,4.632,long_scoreboard 61%; short_scoreboard 16%; wait 10%
+conn8_bare,sq_8000_center,hot,4,374,ny = y + dy[d],loop_decode,3.2691,long_scoreboard 69%; short_scoreboard 23%
+conn8_bare,sq_8000_center,hot,5,370,"img[x, y, 2] = 255",paint_store,2.6406,lg_throttle 97%
+conn8_bare,sq_8000_center,hot,6,365,pixel = queue[i],queue_read,1.4098,long_scoreboard 59%; wait 14%; not_selected 6%; math_pipe_throttle 5%
+conn8_bare,sq_8000_center,hot,7,373,nx = x + dx[d],loop_decode,1.1137,branch_resolving 59%; wait 20%; selected 12%
+conn8_bare,sq_8000_center,hot,8,364,"for i in range(front + tid, rear, stride):",loop_decode,0.9343,wait 39%; not_selected 15%; selected 14%; math_pipe_throttle 11%
