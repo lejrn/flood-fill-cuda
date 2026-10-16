@@ -368,9 +368,12 @@ class TileFill:
         That offset is the array's layout only when it is C-contiguous.
         Numba's reshape of an F-contiguous array reinterprets the buffer
         instead of copying it, so an F-ordered image would be read and
-        painted at the wrong pixels: it is refused. pack_kernel and
-        paint_kernel index img[x, y, c] through the strides and take any
-        layout."""
+        painted at the wrong pixels: it is refused. The words are loaded
+        and stored as uint32, so the image must also start 4-byte aligned
+        (a view such as d_big[1:] may not: the kernel would die with
+        CUDA_ERROR_MISALIGNED_ADDRESS). pack_kernel and paint_kernel
+        index img[x, y, c] through the strides and take any layout and
+        offset."""
         if (img_dev.shape != (self.width, self.height, 3)
                 or img_dev.dtype != np.uint8):
             raise ValueError(
@@ -381,6 +384,13 @@ class TileFill:
                 "fused_pack reads the image as C-contiguous (x, y, c) bytes, "
                 "and this device array is not C-contiguous (upload "
                 "np.ascontiguousarray(img), or pass fused_pack=False)")
+        # binding-agnostic: device_ctypes_pointer has no .value under the
+        # NVIDIA binding
+        if img_dev.__cuda_array_interface__["data"][0] % 4:
+            raise ValueError(
+                "fused_pack loads the image as uint32 words, and this device "
+                "array does not start 4-byte aligned (copy it into its own "
+                "allocation, or pass fused_pack=False)")
         img8 = img_dev.reshape(self.width * self.height * 3)
         n32 = img8.shape[0] // 4
         img32 = img8[:4 * n32].view(np.uint32) if n32 else self._dummy_u32

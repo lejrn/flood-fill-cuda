@@ -534,6 +534,32 @@ def test_run_on_a_fortran_ordered_device_array(switch_mode):
         np.testing.assert_array_equal(d.copy_to_host(), exp_img)
 
 
+@pytest.mark.parametrize("height", [128, 129, 130, 131])
+def test_run_on_an_offset_device_view(height, switch_mode):
+    """Regression: TileFill.run() on d_big[1:], a C-contiguous view that
+    starts 3 * height bytes into its allocation. The fused pack loads and
+    stores the image as uint32 words; with 3 * height % 4 != 0 every word
+    was misaligned and the kernel died with CUDA_ERROR_MISALIGNED_ADDRESS
+    (poisoning the context). Such a view is now refused; the separate
+    pack and paint fill it exactly, at every offset."""
+    w = 150
+    img, sx, sy = scenes.disk_scene(w, height, 50)
+    exp_img, _, _ = expected_image(img, sx, sy, 8)
+    big = np.zeros((w + 1, height, 3), dtype=np.uint8)
+    big[1:] = img
+    d = cuda.to_device(big)[1:]
+    assert d.is_c_contiguous()
+    offset = d.__cuda_array_interface__["data"][0] % 4
+    assert offset == 3 * height % 4
+    eng = TileFill(w, height, connectivity=8)
+    if eng.fused_pack and offset:
+        with pytest.raises(ValueError, match="4-byte aligned"):
+            eng.run(d, sx, sy)
+    else:
+        eng.run(d, sx, sy)
+        np.testing.assert_array_equal(d.copy_to_host(), exp_img)
+
+
 def test_counters_are_consistent():
     """Full-red 128x128 from a corner: 4x4 tiles, so the tile frontier
     needs at least 4 rounds (Chebyshev, 8-conn) or 7 (Manhattan, 4-conn);
