@@ -711,10 +711,14 @@ spills are the likely cause (inferred).
 | blob_grid_100 | 0.987 | 1.019 | 0.996 | 1.039 | 0.982 |
 | disk_r2000 | 0.983 | 1.009 | 1.002 | 1.028 | 0.998 |
 | diag_snake_159 | 0.979 | 0.985 | 0.992 | 1.008 | 0.977 |
+| zz_serp_1k | 1.032 | 0.840 | 0.996 | 1.074 | 1.170 |
+| stair_decoy_19 | 0.946 | 0.680 | 0.977 | 1.062 | 1.069 |
+| strip_1px_x | 0.990 | 0.956 | 1.001 | 0.989 | 1.021 |
 
 - **Compaction** wins where rounds are huge (`zz_lattice_4k` 1.34,
-  `zz_serp_4k` 1.32 without it, `random_4000` 1.06). It costs 0.3-3.1%
-  where they are small. It stays on.
+  `zz_serp_4k` 1.32 without it, `random_4000` 1.06). It costs 0.3-5.7%
+  where they are small (most on `stair_decoy_19`: 0.946 [0.924, 0.954]
+  without it). It stays on.
 - **Compaction is only part of the sparse cost.** Without it the path
   is still 1.006-1.019 of the first version on `input_blobs`, the blob
   grid and the disk. The rest is K2's estimate and the two extra
@@ -722,11 +726,12 @@ spills are the likely cause (inferred).
 - **auto** launches the compact and the plain twin; each returns before
   its first barrier unless the first round's size (16,384 queued seeds)
   is on its side. A cooperative launch that returns at once still
-  costs its launch: auto is 0.99 to 1.04 of the default. Off by
+  costs its launch: auto is 0.98 to 1.04 of the default. Off by
   default.
-- **The new K3 alone** (no tile reaches the CCL) gains only on the
-  zigzags (0.940, 0.903) and costs up to 5.6% elsewhere. The index
-  needs K2b.
+- **The new K3 alone** (no tile reaches the CCL) gains on
+  `zz_lattice_4k` and `zz_serp_4k` (0.940, 0.903), and 1% on
+  `strip_1px_x` (0.989). It costs up to 7.4% elsewhere: `zz_serp_1k`
+  1.074 [1.008, 1.209], slower in every round. The index needs K2b.
 - **The CCL with the old K3** loses the index and the compaction: 2.00x
   on `zz_lattice_4k`, 1.72x on `zz_serp_4k`.
 - **Grid fitting** is worth 2-6% on the crops (full grids: 1.058,
@@ -862,7 +867,7 @@ fairness. Each bug got a failing test first, then the fix.
 
 - **The runs-per-comp cap as a guard for noise**, above.
 - **Task compaction for every image.** It is worth 1.34x on
-  `zz_lattice_4k`, but costs up to 3.1% on small rounds, and choosing
+  `zz_lattice_4k`, but costs up to 5.7% on small rounds, and choosing
   the twin per image (auto) costs a launch of its own.
 - **Grid fitting** recovered 2-6% on the crops, not the 4-12% the dense
   path costs there.
