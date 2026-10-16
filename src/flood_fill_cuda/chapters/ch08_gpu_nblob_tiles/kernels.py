@@ -2428,7 +2428,6 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
         warp = cuda.grid(1) >> 5
         n_warps = cuda.gridsize(1) >> 5
         c_pccl = 0
-        c_tiles = 0
         c_uni = 0
         c_rows = 0
         n_list = pcount[0]
@@ -2452,8 +2451,6 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
                 lab0 = rec[uint32(REC * (id_base + lane) + R_LABEL)]
             if lane + 32 < nr:
                 lab1 = rec[uint32(REC * (id_base + 32 + lane) + R_LABEL)]
-            if instrumented:
-                c_tiles += 1
             if mode == MODE_RGB and fast:
                 if nt == nr:
                     bits = int32(0)
@@ -2537,7 +2534,8 @@ def _make_paint_dense_kernel(conn8, mode, fast, instrumented, debug, wpb=4):
             cuda.syncwarp()       # the next tile reuses the slots
 
         if instrumented and lane == 0:
-            cuda.atomic.add(counters, PAINT_TILES, c_tiles)
+            # PAINT_TILES is K4's: it counts every touched tile once,
+            # the ones it hands to K4b included
             cuda.atomic.add(counters, PAINT_UNIFORM, c_uni)
             cuda.atomic.add(counters, ROWS_PAINTED, c_rows)
             cuda.atomic.add(counters, PAINT_CCL_TILES, c_pccl)

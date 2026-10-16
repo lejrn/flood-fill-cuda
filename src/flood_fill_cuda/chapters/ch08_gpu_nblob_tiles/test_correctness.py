@@ -322,6 +322,13 @@ def run_and_check(img, label, n_blobs, model, contract="rgb", **kw):
     assert c["valve_seeds"] == wm["valve_seeds"]
     assert c["valve_round"] == wm["valve_round"]
     assert c["union_calls"] == c["collisions"]
+    # K4 and K4b: every touched tile is counted once and painted by
+    # exactly one path (K4 used to count the tiles it hands to K4b, and
+    # K4b counted them again)
+    assert c["paint_tiles"] == c["tiles_touched"]
+    assert (c["paint_uniform"] + c["paint_single_interior"]
+            + c["paint_reclosed_tiles"] + c["paint_ccl_tiles"]) \
+        == c["tiles_touched"]
     if kw.get("coll_capacity", None) == 0:
         assert c["coll_inline"] == c["collisions"]
     if kw.get("debug"):
@@ -1044,6 +1051,7 @@ def test_dense_path_takes_the_dense_tiles():
         n_tiles = ((img.shape[0] + 31) // 32) * ((img.shape[1] + 31) // 32)
         assert c["ccl_tiles"] == (n_tiles if all_dense else 0)
         assert c["paint_ccl_tiles"] == (n_tiles if all_dense else 0)
+        assert c["paint_tiles"] == c["tiles_touched"] == n_tiles
         label, n = cpu_label_components(img)
         np.testing.assert_array_equal(res.label, label)
         old = recolor(img, instrumented=True, **OLD_PATH).counters
