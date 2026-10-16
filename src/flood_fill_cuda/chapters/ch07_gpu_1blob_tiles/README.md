@@ -563,9 +563,15 @@ page's session reads 2,070 MHz in every timed window.
 
 ## One barrier per round, and a tile paint
 
-Session `tiles_20261016T064724Z`: 12 scenes (the eleven above plus
-`sq_2000_corner`), 9 interleaved rounds, the timing policy above.
-Every painted image equals ch03's.
+Session `tiles_20261016T064724Z`: 12 scenes, 9 interleaved rounds, the
+timing policy above. Every painted image equals ch03's.
+
+The scenes are the ten above plus two:
+
+- `tiny_blob_8k`: a 5,025 px disk (radius 40) in a white 8000 x 8000
+  image, so `pack` and the paint dominate;
+- `sq_2000_corner`: a full red 2000 x 2000 image seeded in a corner, a
+  front narrower than the grid.
 
 **What changed.** `flood_fill()` now runs two switches by default:
 
