@@ -4,7 +4,7 @@ Status: PROPOSAL for the user's approval, 2026-10-14, revised after review. Noth
 
 Base: v3 (`script_chain.md`, `chain_v3_plan.md`). The two acts stay: size, then count. Every v3 rule stays: at most three captions per beat, a caption sub of at most four words, amber only for waiting, every number from committed JSON through `numbers.py`, "~" on estimates, "kernel time" where it applies, no "chapter".
 
-The pacing request (25% more time between sentences and screen changes) is done. Commit f69fd78 set the sentence pause to 1.125 s, the colon pause to 0.56 s, BREATH to 0.75 s and MIN_DWELL to 1.75 s. Every length below is at that pace.
+The pacing request (25% more time between sentences and screen changes) is done. Commit 3f88900 set the sentence pause to 1.125 s, the colon pause to 0.56 s, BREATH to 0.75 s and MIN_DWELL to 1.75 s. Every length below is at that pace.
 
 ---
 
@@ -567,7 +567,7 @@ No set of cuts that keeps every request gets this cut under three minutes (Q6).
 
 ## Where v4 departs from the user's wording
 
-1. **"Assume later we can give each SM its own blob."** No era of the repo planned that. The June 2025 roadmap (git `00995f5:README.md`, lines 36-67) goes from one blob on one block to one blob on many blocks with a global queue. CUDA also cannot place a block on a chosen SM ("You cannot choose which SM a block runs on", ch02 README:74). v4 keeps the real next step: more blocks on the same blob ("one SM of twenty-four" -> "add a second block").
+1. **"Assume later we can give each SM its own blob."** No era of the repo planned that. The June 2025 roadmap (git `1f23c03:README.md`, lines 36-67) goes from one blob on one block to one blob on many blocks with a global queue. CUDA also cannot place a block on a chosen SM ("You cannot choose which SM a block runs on", ch02 README:74). v4 keeps the real next step: more blocks on the same blob ("one SM of twenty-four" -> "add a second block").
 2. **"At most 48 KB per block."** 48 KB is the default static limit. The opt-in limit is 99 KB, and an SM has 100 KB (device dump). The ring used 32 KB (8,192 slots, the largest power of two). v4 says "a block gets only forty-eight kilobytes", with the sub "per block, by default", and draws the queue as two thirds of the box. Even 99 KB would not hold the 64 Mpx square: its two-ring load peaks at 31,994 slots, 125 KB.
 3. **"It works."** The pure shared-memory kernel refuses centre-seeded squares wider than about 2,048 px. It never ran the 64 Mpx square. v3's "one block, 2.46x" was ch01's v2: shared ring plus global spill. v4 shows that order: overflow, spill, then 2.46x.
 4. **"Shared memory is very fast."** The repo never measured this. Its measured lesson is the opposite: "The shared-memory queue didn't pay" (chapters/README.md:144-149). v4 does not say "fast". r04 says "On big blobs, measured, that's no slower", pinned to the 16 Mpx square where the shared ring never spilled (270.95 vs 253.23 ms). On the thin snake the one-block global queue is 1.9x slower (119.50 vs 61.71 ms), because of its grid-wide barrier, not where the queue lives. So the line is scoped to big blobs, and r05b's one-block row says "shared queue".

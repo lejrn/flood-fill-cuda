@@ -12,7 +12,7 @@ Two kernels, both bare twins, both at ch03's default grid (72 x 256):
 Three scenes, built by ch03's own scene code and run through ch03's own
 `flood_fill()`: `sq_2000_center` (1 Mpx, 501 levels), `sq_4000_corner`
 (16 Mpx, 4,000 levels) and `sq_8000_center` (64 Mpx, 4,001 levels).
-Line numbers refer to ch03's `kernels.py` at commit 1ea2888.
+Line numbers refer to ch03's `kernels.py` at commit faac8af.
 
 ## The answer on sq_8000
 

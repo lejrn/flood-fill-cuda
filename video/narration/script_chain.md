@@ -24,7 +24,7 @@ The user's answers to the proposal's questions:
 - Q4: the owner-map lens in r05, if the owner crops exist.
 - Q5: no "sixty-four tags".
 - Q6: the cut may grow to five minutes. The pacing knobs were already
-  raised 25% (commit f69fd78).
+  raised 25% (commit 3f88900).
 - Q7: 48 KB and 8 GB are device-dump constants in `numbers.py`, with
   their source.
 - Q8: no separate r10_memory beat.

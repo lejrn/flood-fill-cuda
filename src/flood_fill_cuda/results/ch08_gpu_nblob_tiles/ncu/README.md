@@ -34,7 +34,7 @@ instrumented twin; **derived** = arithmetic on measured numbers;
   scene; `--set full` plus the same extra metrics, plus shared-memory
   wavefronts and bank conflicts; kernel replay with caches flushed per
   pass; `--clock-control base`.
-- **Before** (`before/`): the chapter at `1ea2888`, the path now called
+- **Before** (`before/`): the chapter at `faac8af`, the path now called
   `flood_fill.OLD_PATH` (unchanged since). Its own README has the full
   analysis.
 - **After** (`after/`): the default engine of the dense-tile path,

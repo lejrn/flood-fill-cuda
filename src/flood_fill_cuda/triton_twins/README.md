@@ -98,7 +98,7 @@ more within a row than the others' (see [Noise](#noise)).
 ## The story: two translation choices
 
 The first translation was faithful, and it lost on average: x0.91, with
-every unit below x1 except ch06. The first full run (commit `35a0f54`,
+every unit below x1 except ch06. The first full run (commit `a9d0000`,
 kept in `results/`) is the source.
 
 Analysis traced most of the losses to two spelling choices. Each one
@@ -508,7 +508,7 @@ inside one interleaved set of rounds.
   (`png_blobs` needed 3,138 MB of 3,474 MB available). It peaked at
   4,576 MB of host RSS.
 - The first run's ch03 overlapped another project's 2.9 GB job for its
-  last 11 minutes (commit `35a0f54`).
+  last 11 minutes (commit `a9d0000`).
 
 ### First-run data, kept
 

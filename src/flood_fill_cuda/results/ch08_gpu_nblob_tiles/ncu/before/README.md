@@ -25,7 +25,7 @@ instrumented twin; **derived** = arithmetic on measured numbers;
 
 - **Tool.** Nsight Compute 2025.2.1 (the profiler, פרופיילר) on the RTX
   4060 Laptop (AD107, 24 SMs, cc 8.9), driver 610.62, Numba 0.65.1,
-  WSL2. Code at HEAD `1ea2888` (v0.37.0), nothing changed.
+  WSL2. Code at HEAD `faac8af` (v0.37.0), nothing changed.
 - **Window.** `ncu_driver.py` builds the scene with ch08's own benchmark
   builders. It warms every kernel and runs the pipeline once, untimed,
   on the real scene. Then it restores the image and profiles ONE rgb
@@ -360,7 +360,7 @@ the ALU pipe (measured), and the ceiling for latency hiding is about
 | `k3_phase_split_instrumented.csv` | K3 rounds / union / flatten shares from the instrumented twin's `%globaltimer` stamps |
 | `ncu_driver.py` | the driver every ncu run used |
 
-Line numbers refer to `ch08_gpu_nblob_tiles/kernels.py` at `1ea2888`.
+Line numbers refer to `ch08_gpu_nblob_tiles/kernels.py` at `faac8af`.
 Numba inlines the device helpers, so ch07's closure helpers are
 counted on the ch08 line that calls them.
 

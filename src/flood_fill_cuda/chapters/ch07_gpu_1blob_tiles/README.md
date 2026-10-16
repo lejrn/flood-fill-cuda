@@ -377,7 +377,7 @@ is linked.
 
 ch03's `conn4` runs at 48 x 128. In the fairness audit it beat the
 48 x 256 pin on every scene; that run is not a committed session (commit
-33e2ffe records it).
+0a98d3f records it).
 
 | scene | ch03 `conn4` ms | ch07 `c4_w4` ms | speedup (min-vs-min) | levels -> rounds |
 |---|---:|---:|---|---|
@@ -511,7 +511,7 @@ shuffle; the three export atomics are now issued before any result is
 used.
 
 Those A/B runs are not committed sessions. Their numbers are in the
-bodies of commits 5dce49c and 9fe81ac.
+bodies of commits a5eb3e1 and c01c464.
 
 Across sessions (`094117Z` to this one), the rounds kernel on `sq_8000`
 went from 1.419 to 1.283 ms, and on the serpentine from 4.191 to 3.896.
@@ -554,7 +554,7 @@ page now handle each one.
   rounds kernel only. The row is gone.
 
 One more, found in the first full session after the audit (`114021Z`,
-not committed; commit 6b52ec5 records it). The untimed correctness pass
+not committed; commit dd46e25 records it). The untimed correctness pass
 is mostly host work at 36-64 Mpx (image copies and compares).
 
 The clock sampler showed the GPU relaxing during it, so the per-scene
