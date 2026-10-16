@@ -905,8 +905,10 @@ fairness. Each bug got a failing test first, then the fix.
    (1.148, 1.282, 1.125), though 2.8-5.1x faster than ch06.
 6. **`zz_lattice_4k` and `input_blocks` still lose to ch06** (1.55x,
    1.46x), and so do `serpentine_2048`, `zz_serp_1k` and the decoy
-   staircase (1.47-1.77x). zz_lattice's K3 is 1.57 ms of its 2.66: 2
-   rounds of 976k entries and a flatten of 976k comps by 18k threads.
+   staircase (1.47-1.77x). `zz_serp_4k` loses by less: 1.08x [0.91,
+   1.20] in rgb, 1.19x in mask, 1.97x in labelling.
+   zz_lattice's K3 is 1.57 ms of its 2.66: 2 rounds of 976k entries
+   and a flatten of 976k comps by 18k threads.
 7. **One CCL tile costs about 10-15 us of latency** on a lone warp
    (thousands of dependent shared-memory steps). A sparse image with a
    few dense tiles pays that once per K2b and K4b.
