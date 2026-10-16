@@ -696,9 +696,11 @@ it lost when it lost any:
 
 - **`one_sync`: adopted.** 1.04-1.34x, and a tie on the two sparse
   scenes, where 2-4 rounds leave little to save.
-- **`tile_paint`: adopted.** 1.02-1.29x where the paint matters. Where
-  it does not, a tie with rounds on both sides of 1. Its paint phase is
-  never slower, except by 0.001 ms on the serpentine.
+- **`tile_paint`: adopted.** 1.02-1.29x on the eight scenes where the
+  paint matters. On the serpentine and the lattice it gains a hair
+  (1.010x and 1.002x) and loses no round. On `zz_serp_1k` and the maze
+  it ties, with rounds on both sides of 1. Its paint phase is never
+  slower, except by 0.001 ms on the serpentine.
 - **`fused_pack`: opt-in.** 9.0x on the thin strip, 10.0x on
   `tiny_blob_8k` and 1.13x on `sq_2000_center`: a mostly untouched image
   is never read. But it loses 2-22% on the eight dense scenes, in 8 or 9
