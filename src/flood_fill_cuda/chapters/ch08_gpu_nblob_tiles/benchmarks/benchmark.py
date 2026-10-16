@@ -30,8 +30,18 @@ ch08 fairness review):
   clocks          8 s spin before the scenes, a 1 s GPU-bound respin
                   before each scene's rounds, a background nvidia-smi
                   sampler (100 ms) whose window over the GPU rounds is
-                  kept. ch05 runs AFTER the GPU rounds, 0.5 s respin
-                  before each call, with its own clock window
+                  kept. ch05 runs AFTER the GPU rounds, with its own
+                  clock window
+  ch05            timed like the GPU sides: fresh buffers per sample
+                  (its kernels mutate them), a 0.5 s GPU-bound respin,
+                  the L2 flush, sync, the sleep kernel, then two events
+                  around the launches its own kernel_ms clock brackets
+                  (cooperative core, compress, finish). Its host clock
+                  (perf_counter around launches plus a synchronize)
+                  added 0.2-0.35 ms per call and read 2.05x the event
+                  time on stair_decoy_19 (ch08 review, fairness F2); its
+                  nvidia-smi window, mostly host work, read 390 MHz on
+                  dots_4k while the kernel ran at 2,070 (fairness F1)
 
 Configs (contract: rgb = RGB in, recoloured RGB out; mask = packed mask
 in, RGB painted; label = packed mask in, every comp or run labelled,
@@ -60,9 +70,10 @@ nothing painted):
                   like-for-like pack, so the pack gain and the algorithmic
                   gain are reported apart
   ch06_m512       ch06 rgb at its shipped merge grid (512 blocks)
+  ch08_new_nok2b  the dense path with K2's hand-off off (ccl_min never
+                  reached; K4b unchanged): the noise scenes
   ch05 split_L8   ch05's best config on input_blobs (seed_merge, lattice
-                  8, split build), by its own host clock (launch plus
-                  synchronize), after the GPU rounds
+                  8, split build), event-timed after the GPU rounds
 
 Before the timed rounds, an untimed pass checks every config: each
 painted image must equal ch06's own RunRecolor.run (all three chapters
@@ -71,10 +82,11 @@ engine runs each ch08 config once more for the counters and the
 per-round frontier.
 
 --session dense (the dense-tile session) times old vs new ch08 in every
-contract, the three ablations, ch06 in every contract at its best merge
-grid (and with ch08's pack), and ch05, on the dense targets (dots_4k,
+contract, the ablations, ch06 in every contract at its best merge grid
+(and with ch08's pack), and ch05, on the dense targets (dots_4k,
 random_4000, input_blocks, zz_lattice_4k), input_blobs, the other main
-and worst scenes, and three small crops; files dense_<stamp>.*.
+and worst scenes, five crops (1000 to 4000) and noise of density 0.40
+to 0.60 (K2's hand-off on and off); files dense_<stamp>.*.
 
 Scenes: input_blobs and input_blocks (PNGs from --images DIR or
 FLOOD_FILL_IMAGES; a missing file is an error; md5 recorded), then
@@ -135,8 +147,7 @@ PHASE_REPEATS = 5
 SWEEP_REPEATS = 5
 MERGE_SWEEP = (512, 1024, 2048, 4096, 8192)
 CH06_SHIPPED_MERGE = CH06_PHASE_BLOCKS["merge"]
-CH05_SLOW_S = 2.0          # a first ch05 call slower than this: 3 samples
-CH05_FEW = 3
+CH05_TPB = 256             # ch05 flood_fill's default block
 E2E_REPEATS = 3
 ORACLE_REPEATS = 3
 SPIN_SECONDS = 8.0
@@ -171,6 +182,7 @@ CONFIGS = {
                         {"ccl_min": NEVER, "paint_ccl_min": NEVER}),
     "ch08_new_hybk3": ("ch08", "rgb", 8, VALVE, "hybrid", {}),
     "ch08_new_nofit": ("ch08", "rgb", 8, VALVE, LOOKUP, {"fit_grids": False}),
+    "ch08_new_nok2b": ("ch08", "rgb", 8, VALVE, LOOKUP, {"ccl_min": NEVER}),
     "ch06": ("ch06", "rgb", None, None, None, None),
     "ch06_mask": ("ch06", "mask", None, None, None, None),
     "ch06_label": ("ch06", "label", None, None, None, None),
@@ -194,7 +206,13 @@ DENSE_CONFIGS = ["ch08_L8", "ch08_L8_mask", "ch08_L8_label", "ch08_old",
 DENSE_CROP_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old",
                       "ch08_old_label", "ch08_new_nofit", "ch06",
                       "ch06_label"]
-PHASE_CONFIGS = ["ch08_L8", "ch08_old", "ch06"]     # the per-phase pass
+# noise around the K2 / K2b crossover: the hand-off on and off
+NOISE_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old", "ch08_old_label",
+                 "ch08_new_nok2b", "ch06", "ch06_label"]
+NOISE_DENSITIES = (0.40, 0.45, 0.50, 0.55, 0.60)
+NOISE_SIDE = 4000
+PHASE_CONFIGS = ["ch08_L8", "ch08_old", "ch08_new_nok2b", "ch06"]
+#                                                     the per-phase pass
 HEADLINE = "ch08_L8"
 # per-round ratios a / b (< 1: a is faster)
 PAIRS = {
@@ -205,6 +223,9 @@ PAIRS = {
     "old_label_over_ch06_label": ("ch08_old_label", "ch06_label"),
     "old_mask_over_ch06_mask": ("ch08_old_mask", "ch06_mask"),
     "nocomp_over_new": ("ch08_new_nocomp", "ch08_L8"),
+    "nocomp_over_old": ("ch08_new_nocomp", "ch08_old"),
+    "nok2b_over_new": ("ch08_new_nok2b", "ch08_L8"),
+    "nok2b_over_old": ("ch08_new_nok2b", "ch08_old"),
     "auto_over_new": ("ch08_new_auto", "ch08_L8"),
     "k3only_over_old": ("ch08_new_k3only", "ch08_old"),
     "hybk3_over_new": ("ch08_new_hybk3", "ch08_L8"),
@@ -223,7 +244,7 @@ PAIRS = {
     "voff_over_L8": ("ch08_L8_voff", "ch08_L8"),
 }
 CROP_SIDES = (1000, 1500, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000)
-DENSE_CROP_SIDES = (1000, 1500, 2000)
+DENSE_CROP_SIDES = (1000, 1500, 2000, 3000, 4000)
 
 
 # ------------------------------------------------------------ helpers
@@ -383,6 +404,57 @@ def _ch05_call(img):
     return res, wall
 
 
+_CH05 = {}
+
+
+def _ch05_kernel():
+    """ch05's cooperative core twin for CH05_CFG (warm) and its grid:
+    the cooperative maximum at CH05_TPB, as flood_fill launches it."""
+    if not _CH05:
+        from ...ch05_gpu_nblob_nblock import flood_fill as F5
+        key = F5._kernel_key(CH05_CFG["variant"], CH05_CFG["lattice"],
+                             CH05_CFG["build"])
+        F5._warmup(key, False)
+        kern = F5._KERNELS[(key, False)]
+        _CH05.update(F5=F5, key=key, kern=kern,
+                     blocks=F5._coop_max_blocks(kern, CH05_TPB))
+    return _CH05
+
+
+def _ch05_sample(img, eng, d_img, flush, sink, ref_md5=None):
+    """One ch05 split_L8 sample, timed like the GPU sides: fresh buffers
+    (its kernels mutate them), a GPU-bound respin, the L2 flush, sync,
+    the sleep kernel, then one event before and one after the launches
+    ch05's own kernel_ms brackets (core, compress, finish). Returns ms
+    and, given ref_md5, whether the painted image matches it."""
+    c = _ch05_kernel()
+    F5 = c["F5"]
+    n = img.shape[0] * img.shape[1]
+    bufs = F5._device_buffers(img, c["key"], True, c["blocks"],
+                              min(n, F5.LEVEL_TRACE_CAPACITY))
+    _spin(eng, d_img, CH05_RESPIN_SECONDS)
+    _l2_flush[512, 256](flush, sink)
+    cuda.synchronize()
+    gpu_sleep_kernel[1, 32](SLEEP_NAPS)
+    e0 = cuda.event(timing=True)
+    e1 = cuda.event(timing=True)
+    e0.record()
+    c["kern"][c["blocks"], CH05_TPB](*F5._kernel_args(
+        c["key"], False, bufs, CH05_CFG["lattice"], False))
+    F5.lat_compress_kernel[F5._PLAIN_GRID](bufs["parent"])
+    F5.lat_finish_kernel[F5._PLAIN_GRID](bufs["img"], bufs["parent"],
+                                         bufs["label"], bufs["prov"])
+    e1.record()
+    e1.synchronize()
+    ms = cuda.event_elapsed_time(e0, e1)
+    same = None
+    if ref_md5 is not None:
+        same = hashlib.md5(bufs["img"].copy_to_host().tobytes()
+                           ).hexdigest() == ref_md5
+    del bufs
+    return ms, same
+
+
 # ------------------------------------------------------------- scenes
 
 def _ekey(cfg):
@@ -482,14 +554,16 @@ def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
     del engis
     _release()
     ch05 = None
+    ref_md5 = hashlib.md5(ref.tobytes()).hexdigest()
     if run_ch05:
         try:
             res5, wall = _ch05_call(img)
             ch05 = {"config": CH05_LABEL, "first_call_s": wall,
+                    "host_clock_first_call_ms": res5.kernel_ms,
                     "n_blobs": int(res5.n_blobs),
                     "paint_matches_ch06": bool(np.array_equal(res5.img, ref)),
-                    "samples": [], "n_samples": (CH05_FEW if wall > CH05_SLOW_S
-                                                 else GPU_REPEATS)}
+                    "samples": [], "n_samples": GPU_REPEATS,
+                    "timing": "events"}
             del res5
         except Exception as exc:
             ch05 = {"config": CH05_LABEL,
@@ -535,14 +609,15 @@ def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
                     _time_stages(stages_of(cfg), phase=j))
     t2 = time.time()
 
-    # ---- ch05 after the GPU rounds, a respin before every call
+    # ---- ch05 after the GPU rounds, event-timed, a respin before each
     t5a = time.time()
     if ch05 and "error" not in ch05:
         while len(ch05["samples"]) < ch05["n_samples"]:
-            _spin(eng, d_img, CH05_RESPIN_SECONDS)
-            res5, _ = _ch05_call(img)
-            ch05["samples"].append(res5.kernel_ms)
-            del res5
+            ms, same = _ch05_sample(img, eng, d_img, flush, sink,
+                                    None if ch05["samples"] else ref_md5)
+            if same is not None:
+                ch05["event_paint_matches_ch06"] = same
+            ch05["samples"].append(ms)
             gc.collect()
     t5b = time.time()
 
@@ -604,7 +679,8 @@ def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
         row[f"{HEADLINE}_e2e_ms_min"] = min(e2)
         del host_out
     row["all_paint_match"] = all(check.values()) and (
-        not ch05 or ch05.get("paint_matches_ch06", True))
+        not ch05 or (ch05.get("paint_matches_ch06", True)
+                     and ch05.get("event_paint_matches_ch06", True)))
     row["scene_seconds"] = round(time.time() - t_scene0, 1)
 
     line = f"{name:16s} "
@@ -685,6 +761,17 @@ def worst_scenes():
     ]
 
 
+def noise_scenes():
+    """Noise around K2's hand-off crossover (ch08 review F3): at density
+    0.50 K2's comp estimate counts 31 comps per tile for 9 real ones, so
+    the runs-per-comp cap does not keep these tiles on the comp loop."""
+    return [(f"noise_d{int(round(d * 100))}",
+             lambda d=d: S5.random_blobs_scene(NOISE_SIDE, NOISE_SIDE, d,
+                                               0)[0],
+             f"{NOISE_SIDE}x{NOISE_SIDE} noise of density {d:.2f}, seed 0")
+            for d in NOISE_DENSITIES]
+
+
 def oracle_pass(rows, builders):
     """The @njit oracle (ch05's cpu_label_components) per main scene,
     after every GPU scene."""
@@ -722,6 +809,8 @@ def main():
     ap.add_argument("--worst", nargs="*", default=None,
                     help="worst-case scenes to run (default: all)")
     ap.add_argument("--no-ch05", action="store_true")
+    ap.add_argument("--no-noise", action="store_true",
+                    help="dense session: skip the noise scenes")
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--session", choices=("full", "dense"), default="full",
                     help="dense: old vs new ch08 (the dense-tile path), "
@@ -763,6 +852,7 @@ def main():
     del side, dw
     if not args.no_ch05:
         _ch05_call(warm)
+        _ch05_kernel()
     cpu_label_components(warm)
     flush = cuda.to_device(np.zeros(L2_FLUSH_BYTES // 4, np.uint32))
     sink = cuda.device_array(1, np.uint32)
@@ -810,10 +900,12 @@ def main():
         "experiment": (
             "ch08's dense-tile path (K2b run CCL, K4b, the dindex K3 with "
             "task compaction) vs the old path (OLD_PATH) in every "
-            "contract, three ablations, ch06 run CCL in every contract at "
-            "its best merge grid (and with ch08's pack) and ch05 split_L8, "
-            "one interleaved session; totals with two events, phases in a "
-            "separate pass, ch06's merge grid swept per scene"
+            "contract, the ablations, noise of density 0.40-0.60 with "
+            "K2's hand-off on and off, ch06 run CCL in every contract at "
+            "its best merge grid (and with ch08's pack) and ch05 split_L8 "
+            "(event-timed), one interleaved session; totals with two "
+            "events, phases in a separate pass, ch06's merge grid swept "
+            "per scene"
             if dense else
             "ch08 seeded waves over tile components vs ch06 run CCL (rgb, "
             "mask, labelling only, ch06 with ch08's pack, ch06 at its "
@@ -867,8 +959,8 @@ def main():
                    "ch05_respin_s": CH05_RESPIN_SECONDS,
                    "sleep_naps": SLEEP_NAPS,
                    "l2_flush_bytes": L2_FLUSH_BYTES,
-                   "ch05_samples": f"{GPU_REPEATS}, or {CH05_FEW} if the "
-                                   f"first call takes > {CH05_SLOW_S} s",
+                   "ch05_samples": GPU_REPEATS,
+                   "ch05_tpb": CH05_TPB,
                    "e2e_repeats": E2E_REPEATS},
         "timing_note": (
             "*_ms = one event before the config's first launch to one "
@@ -879,8 +971,11 @@ def main():
             "paint; label: count to flatten; ch06_tp: ch08's pack_tiles "
             "then ch06's mask pipeline. <cfg>_phase_<phase>_ms: the phase pass, "
             "each phase alone in its own run (events around it only). "
-            "ch05_ms = ch05's own host clock (launch + synchronize), "
-            "median of its samples, taken after the GPU rounds. Every "
+            "ch05_ms = two CUDA events around ch05's core, compress and "
+            "finish launches, after fresh buffers, a 0.5 s GPU-bound "
+            "respin, the L2 flush and the sleep kernel; median of its "
+            "samples, taken after the GPU rounds (ch05.host_clock_first_"
+            "call_ms is its own host clock, for reference). Every "
             "GPU run: restore, pack if mask/label, 96 MB L2 flush, sync, "
             "sleep kernel, events. e2e = pageable H2D + pipeline + D2H, "
             "perf_counter."),
@@ -934,6 +1029,16 @@ def main():
             rows.append(bench_scene(name, img, note, worst_cfgs, sampler,
                                     flush, sink, run_ch05=not args.no_ch05,
                                     e2e=False, group="worst"))
+            del img
+            gc.collect()
+            save()
+
+    if dense and not args.no_noise:
+        print("\nnoise around K2's hand-off crossover")
+        for name, build, note in noise_scenes():
+            img = build()
+            rows.append(bench_scene(name, img, note, NOISE_CONFIGS, sampler,
+                                    flush, sink, e2e=False, group="noise"))
             del img
             gc.collect()
             save()
