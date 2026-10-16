@@ -564,8 +564,8 @@ Chapters 2 and 3 both named.)*
 |---|---|
 | **32×32 tiles closed in registers** | Kogge-Stone fills along the 32-bit mask word and across the warp's 32 lanes close a tile with no memory traffic, so one BFS step moves the front a tile, not a pixel |
 | **filtered border exports** | plain loads keep the atomics to bits that are new and red in the neighbour tile |
-| **ch03's skeleton, for tiles** | the same global queue, warp-aggregated enqueue and two `grid.sync` per round; a per-tile stamp admits a tile to a round once |
-| **ch06's pack, a coalesced paint** | the 1-bit mask is the tiles' input; one pass paints the reached bits |
+| **ch03's skeleton, for tiles** | the same global queue, warp-aggregated enqueue and a grid barrier per round (two `grid.sync` in the first kernel, one today); a per-tile stamp admits a tile to a round once |
+| **ch06's pack, a tile paint** | the 1-bit mask is the tiles' input; the paint visits only the tiles the fill touched (the first kernel painted every word in one coalesced pass) |
 
 ### Results (RTX 4060 Laptop, session `tiles_20261015T114440Z`)
 | finding | number |
@@ -579,6 +579,9 @@ Chapters 2 and 3 both named.)*
 | a launch shape | on a 524288×32 strip ch06's pack grid left 7 of 8 warps idle; sizing the block by the row's words took the same kernel from 3.16 to 0.41 ms |
 | the `syncwarp` lesson | one reconverging `cuda.syncwarp()` before the closure's shuffles: column fill 6,520 → 429 cycles (15.2×), rounds kernel 2.1-3.0× faster |
 | fairness | an audit moved the headline from 23.8× (ch03's instrumented pin) to 20.2× (its bare twin at its own grid), and caught a CPU pass relaxing the GPU clock between scenes |
+| today's default (session `tiles_20261016T064724Z`) | one `grid.sync` per round and a paint that skips untouched tiles: 1.11-1.34× the first kernel on all 12 scenes; `sq_8000` 3.11 ms, 22.7× ch03's best grid. Each switch was adopted on its own increment |
+| the fused pack (opt-in) | the RGB read inside the rounds: 9-13× on mostly untouched images, 2-22% slower on dense ones (247 registers, 48 blocks instead of 72) |
+| `ncu`, before and after | one `grid.sync` cuts the barrier ritual from 4,517 to 2,387 cycles per round; a serpentine round falls from 9,015 to 6,578 cycles |
 
 ### New problems and lessons
 - **A frontier of tiles beats a frontier of pixels, not the absence of
@@ -601,8 +604,9 @@ Chapters 2 and 3 both named.)*
 2. **A narrow-front mode** without `grid.sync`, and a shifted tiling
    against border-aligned paths.
 3. **ch06's launch shapes on thin images**, and `pack` folded into the
-   rounds.
-4. **`ncu`**, still owed (`ERR_NVGPUCTRPERM` on this machine).
+   rounds (since done in ch07 as the opt-in fused pack).
+4. **`ncu`** (since done: ch07's profiles before and after its switch
+   change).
 
 *(Chapter 8 took up candidate 1, but kept the rounds: tile labels travel
 as BFS waves, and union-find only joins waves that meet.)*

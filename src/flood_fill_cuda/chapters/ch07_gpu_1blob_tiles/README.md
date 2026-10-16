@@ -14,14 +14,25 @@ step now closes a whole 32x32 tile in registers.
 | pipeline, bare twins at their own grids | 70.51 ms | **3.493 ms (20.2x)** | |
 | pipeline, instrumented, ch03 at its 48 x 256 pin | 83.29 ms | **3.495 ms (23.8x)** | 2.378 ms |
 
-All numbers on this page come from one session,
-`tiles_20261015T114440Z.json`, unless a line names another session.
+This table and the Results sections measure the chapter's first
+kernel, in session `tiles_20261015T114440Z.json`.
+
+Today's default has its own section, [One barrier per round, and a tile
+paint](#one-barrier-per-round-and-a-tile-paint), measured in session
+`tiles_20261016T064724Z`. Any other session is named where it is quoted.
+
 Numbers marked *derived* are arithmetic on measured values.
 
 **The short version.** Against a pixel BFS, tiles win 20-26x on the
 blobs from 11 Mpx up, and the reason is in the first two rows. Against
 ch06's run-based labelling (no BFS at all), they win only where ch06's
 launch shapes starve. Dropping the frontier is cheaper still.
+
+**Today's default** runs one `grid.sync` per round instead of two, and
+paints only the tiles the fill touched. It takes `sq_8000` in 3.107 ms
+against the first kernel's 3.457 (1.11x, same session), and wins on all
+12 scenes, 1.11-1.34x. Against ch03's best grid that is 22.7x on
+`sq_8000`.
 
 ## Inherited problems
 
@@ -49,18 +60,21 @@ y). One warp owns one tile per visit. Lane *i* holds row x0+*i* as two
 |---|---|
 | **closure in registers** | Kogge-Stone fills close a tile with no memory traffic: 5 doubling steps each way, as shifts along the word and as shuffles across the lanes (20 shuffles per column fill). A solid tile needs 2 passes: one fills, one proves it |
 | **border exports** | only border bits leave a tile. Plain loads filter them first (red in the target, not yet reached), so atomics touch only new bits |
-| **rounds of tiles** | ch03's skeleton: a global queue, the warp-aggregated enqueue (copied), a cooperative launch, two `grid.sync` per round. A round moves the frontier one tile, not one pixel |
+| **rounds of tiles** | ch03's skeleton: a global queue, the warp-aggregated enqueue (copied), a cooperative launch, one `grid.sync` per round (two in the first kernel). A round moves the frontier one tile, not one pixel |
 | **a per-tile stamp** | `atomic.max` of the round number lets a tile into a round's queue once, so ping-pong queues of `n_tiles` entries cannot overflow |
-| **ch06's pack, a coalesced paint** | RGB becomes the 1-bit mask with ch06's `pack_kernel` (imported). One pass paints reached pixels (0, 0, 255), exactly like ch03 |
+| **ch06's pack, a tile paint** | RGB becomes the 1-bit mask with ch06's `pack_kernel` (imported). The paint gives one warp to each tile the fill touched and skips the rest; reached pixels become (0, 0, 255), exactly like ch03. The first kernel painted every word in one coalesced pass |
 
 The pipeline is four launches, each bracketed by CUDA events:
 
 ```
 pack     RGB -> 1 bit/px mask         ch06's pack_kernel
 init     reached = seed bit, stamps   on the device, on the clock
-rounds   cooperative tile BFS         two grid.sync per round
-paint    reached -> (0, 0, 255)       one coalesced pass
+rounds   cooperative tile BFS         one grid.sync per round
+paint    reached -> (0, 0, 255)       one warp per touched tile
 ```
+
+The first kernel, which the Results sections measure, ran two
+`grid.sync` per round and painted in one coalesced pass over every word.
 
 ### The closure
 
@@ -127,8 +141,9 @@ barriers" holds on all six of ch03's scenes (27.8x to 36.1x). It fails
 when every pixel step crosses a tile border (see the worst cases).
 
 So does a frontier of tiles speed the BFS up? Yes, wherever the blob
-lets a tile close in one visit. A step costs one barrier pair whether it
-moves one pixel or one tile, and `sq_8000` needs 31.5x fewer steps.
+lets a tile close in one visit. A step costs the same barrier ritual
+whether it moves one pixel or one tile, and `sq_8000` needs 31.5x fewer
+steps.
 
 ## What is given up, and why the fill is still exact
 
@@ -163,6 +178,10 @@ ch07 config and scene.
 H > 2,097,152 (65,536 words per row). ch03 caps at `W * H < 2**31`.
 
 ## Results (RTX 4060 Laptop, 24 SMs)
+
+These sections measure the first kernel: two `grid.sync` per round and
+the plain paint, the default until session `tiles_20261016T064724Z`.
+Config names such as `w4` and `w4_bare` are that kernel's.
 
 **Method.** One interleaved round-robin per scene: 9 rounds, the order
 reversed on odd rounds. Medians; brackets are the range of the 9
@@ -253,6 +272,9 @@ So ch07's two wins come from the ends, not the middle. ch06's paint
 gives each warp a batch of 32 runs, and a solid blob has one long run
 per row. On sq_2000 its paint takes 0.279 ms against ch07's 0.043.
 
+The ch06 column here is its instrumented twin. Its bare twin is up to
+1.18x faster (the maze); the new section pairs bare with bare.
+
 The pack is the same kernel on both sides: 1.152 ms (ch07) and 1.153
 ms (ch06) on sq_8000.
 
@@ -327,7 +349,7 @@ So a ch07 round on the serpentine costs 4.31 us against a ch03 level's
 | config | blocks x tpb | warps | regs/thread | local bytes/thread | sq_8000 total (rounds) | disk total (rounds) | serpentine |
 |---|---|---:|---:|---:|---|---|---:|
 | `w2` | 144 x 64 | 288 | 143 | 16 | 3.538 (1.314) | 0.871 (0.399) | 4.031 |
-| `w4` (default) | 72 x 128 | 288 | 143 | 16 | 3.495 (1.283) | 0.860 (0.390) | 3.916 |
+| `w4` (then the default) | 72 x 128 | 288 | 143 | 16 | 3.495 (1.283) | 0.860 (0.390) | 3.916 |
 | `w8` | 24 x 256 | 192 | 143 | 16 | 3.732 (1.469) | 0.877 (0.408) | 3.688 |
 | `w4_cap96` | 120 x 128 | 480 | 96 | 48 | 3.529 (1.300) | 0.900 (0.429) | 4.620 |
 | `w4_bare` | 72 x 128 | 288 | 129 | 16 | 3.493 (1.283) | 0.854 (0.381) | 3.935 |
@@ -395,6 +417,10 @@ Then rounds equal levels, and a round costs more than ch03's level.
 round. A wide front does not rescue it: each tile still advances one
 pixel per round, and the round grows from 4.02 to 4.91 us. It takes 14%
 more time (bare pair: 5%).
+
+With one `grid.sync` per round the default now ties `zz_serp_1k` and
+wins `zz_lattice_4k` against ch03's best grid. But ch03 still pays two
+barriers per level (see the new section).
 
 **The maze** is tortuous but realistic: 12.4 visits per tile and 6.53
 closure iterations per visit. It still wins 11.1x, at 8.07 us per
@@ -535,16 +561,318 @@ The clock sampler showed the GPU relaxing during it, so the per-scene
 clock ramp now runs after it, right before the timed rounds. This
 page's session reads 2,070 MHz in every timed window.
 
-## `ncu`: still owed
+## One barrier per round, and a tile paint
 
-`ncu` fails with `ERR_NVGPUCTRPERM` on this machine, also after a WSL
-restart. The Windows driver must allow non-admin access to the
-performance counters (NVIDIA Control Panel, Developer, Manage GPU
-Performance Counters), perhaps with a full Windows reboot.
+Session `tiles_20261016T064724Z`: 12 scenes (the eleven above plus
+`sq_2000_corner`), 9 interleaved rounds, the timing policy above.
+Every painted image equals ch03's.
 
-No profile exists, so every bottleneck claim above rests on timings and
-probes. The questions are ready: the shuffle slow path in the rounds
-kernel, the dependent chain per visit, and ch06's paint occupancy.
+**What changed.** `flood_fill()` now runs two switches by default:
+
+- `one_sync`: one `grid.sync` per round instead of two (open problem 4
+  of the first version);
+- `tile_paint`: the paint skips every tile the fill never touched, and
+  gives each touched tile one warp.
+
+Two more switches exist and stay off. `fused_pack` reads each tile's
+RGB inside the rounds kernel (open problem 5). `skip_full` drops
+exports into a full tile that is already queued.
+
+**Why.** The first `ncu` profile (next section) put 50-54% of every
+one-tile round in the barrier ritual. On the thin strip, 74% of the
+paint's samples waited on loads of `reached` words that were almost all
+zero.
+
+### The protocol, in plain words
+
+**One barrier per round.** The old round ended with two barriers.
+Between them, every thread read the next round's size, and thread 0
+zeroed the counter just used up. The second barrier kept anyone from
+appending to that counter before everyone had read it.
+
+Three counters now take turns. In round *r*, counter *r* + 1 (mod 3)
+collects the next round's tiles, and every thread reads it right after
+the round's one barrier. Before that barrier, thread 0 zeroes counter
+*r* + 2.
+
+So a counter is zeroed one full barrier after its last read, and one
+full barrier before anyone appends to it again. Every thread reads the
+same size, so every thread runs the same number of barriers. The
+kernel's docstring follows one counter through its cycle.
+
+**The tile paint.** A bit lands in a tile only through an atomic that
+also raises the tile's stamp: that is how a tile enters a round. So a
+tile whose stamp is still -1 holds no reached bit, and the paint skips
+it after one load.
+
+A touched tile gets one warp. Each lane loads its row's word before
+any store, then the warp paints the set rows one by one, 96 contiguous
+(רציפים) bytes each. A test checks the premise after a run in every
+switch mode: the tiles holding a reached bit are exactly the tiles with
+stamp >= 0.
+
+**The fused pack** (opt-in). There is no pack launch. The warp that
+first enqueues a tile reads the tile's 32 x 32 RGB pixels and stores its
+mask, one round before the tile's first visit.
+
+An export into a tile whose mask is not stored yet cannot be filtered.
+It goes out as a **candidate** (מועמד): border bits that may not be red.
+The owner ANDs them with the mask at its visit, and so does the paint.
+
+### Before and after
+
+Bare twins at their own grids (72 x 128; the fused pack 48 x 128).
+Paired per-round ratio, median [range of 9]; above 1, the new default is
+faster.
+
+| scene | first kernel ms | default ms | default vs first | fused pack ms | fused pack vs first |
+|---|---:|---:|---|---:|---|
+| sq_2000 center | 0.224 | **0.184** | **1.22x** [1.18-1.23] | 0.164 | 1.37x [1.32-1.38] |
+| sq_4000 corner | 1.188 | **1.024** | **1.16x** [1.14-1.17] | 1.238 | 0.96x [0.94-0.97] |
+| disk r=1900 | 0.871 | **0.768** | **1.12x** [1.03-1.32] | 0.826 | 1.06x [1.03-1.25] |
+| serpentine_256 | 3.843 | **2.937** | **1.31x** [1.30-1.31] | 2.988 | 1.29x [1.28-1.29] |
+| sq_6000 center | 2.020 | **1.801** | **1.12x** [1.05-1.12] | 1.940 | 1.04x [0.98-1.05] |
+| sq_8000 center | 3.457 | **3.107** | **1.11x** [1.05-1.14] | 3.246 | 1.07x [1.01-1.09] |
+| `zz_serp_1k` | 125.59 | **93.88** | **1.34x** [1.33-1.34] | 93.40 | 1.35x [1.34-1.35] |
+| `zz_lattice_4k` | 19.62 | **15.56** | **1.26x** [1.26-1.35] | 18.48 | 1.07x [1.05-1.13] |
+| `maze_1k` | 20.48 | **17.97** | **1.14x** [0.35-1.14] | 18.27 | 1.12x [1.11-1.12] |
+| `thin_h32_blob` | 0.612 | **0.481** | **1.28x** [1.24-1.31] | 0.053 | 11.48x [8.94-11.89] |
+| `tiny_blob_8k` | 1.650 | **1.272** | **1.30x** [1.29-1.34] | 0.127 | 12.96x [12.26-13.22] |
+| sq_2000 corner | 0.445 | **0.374** | **1.19x** [1.19-1.20] | 0.481 | 0.93x [0.92-0.93] |
+
+The default wins on all 12 scenes, 1.11-1.34x. The one-tile fronts
+gain most, where the barrier was half of every round.
+
+The maze's 0.35 is one round in which the default's rounds kernel took
+57.8 ms instead of 17.9. That kernel is the same binary as `one_sync`
+alone, so it was a disturbance, not the switch.
+
+**Where the time went** on `sq_8000` (phase medians, ms):
+
+| phase | first kernel | default | fused pack |
+|---|---:|---:|---:|
+| pack | 1.154 | 1.155 | 0.002 |
+| init | 0.023 | 0.023 | 0.025 |
+| rounds | 1.244 | **1.114** | 2.369 |
+| paint | 1.035 | **0.808** | 0.845 |
+| total (median of totals) | 3.457 | **3.107** | 3.246 |
+
+On the thin strip the paint falls from 0.154 to 0.023 ms, and on
+`tiny_blob_8k` from 0.449 to 0.075 ms. Their `pack` (0.430 and 1.154
+ms) is now nearly all of the default's time.
+
+### Each switch on its own
+
+The first version of this change adopted `one_sync` and the fused pack
+as one bundle (session `tiles_20261016T002856Z`: faster than the first
+kernel on 10 of 11 scenes). A fairness audit found that the bundle hid a
+loss.
+
+So the chapter's **adoption rule** is now applied to each switch's own
+increment (תוספת): on top of the switches adopted before it, a switch
+must lose nothing measurable. Median [range of 9], and the rounds of 9
+it lost when it lost any:
+
+| scene | `one_sync` on the first kernel | `tile_paint` on `one_sync` | `fused_pack` on both | `skip_full` on both |
+|---|---|---|---|---|
+| sq_2000 center | 1.09x [1.08-1.10] | 1.12x [1.09-1.13] | 1.13x [1.08-1.14] | 0.96x [0.95-0.98], 9 lost |
+| sq_4000 corner | 1.12x [1.10-1.13] | 1.03x [1.02-1.06] | 0.83x [0.81-0.84], 9 lost | 1.01x [1.00-1.04] |
+| disk r=1900 | 1.09x [1.07-1.25] | 1.04x [0.96-1.06], 1 lost | 0.93x [0.92-1.04], 8 lost | 1.02x [0.72-1.12], 3 lost |
+| serpentine_256 | 1.29x [1.29-1.30] | 1.01x [1.01-1.01] | 0.98x [0.98-0.99], 9 lost | 0.94x [0.94-0.94], 9 lost |
+| sq_6000 center | 1.05x [1.03-1.06] | 1.07x [1.00-1.08], 1 lost | 0.93x [0.87-1.00], 8 lost | 1.05x [1.04-1.11] |
+| sq_8000 center | 1.04x [1.02-1.05] | 1.07x [1.04-1.09] | 0.96x [0.95-0.96], 9 lost | 1.05x [1.00-1.08] |
+| `zz_serp_1k` | 1.34x [1.33-1.34] | 1.00x [1.00-1.00], 4 lost | 1.01x [1.00-1.01] | 0.95x [0.95-0.95], 9 lost |
+| `zz_lattice_4k` | 1.26x [1.25-1.35] | 1.00x [1.00-1.00] | 0.84x [0.83-0.85], 9 lost | 0.87x [0.87-0.87], 9 lost |
+| `maze_1k` | 1.14x [1.14-1.14] | 1.00x [0.31-1.00], 6 lost | 0.98x [0.97-3.16], 8 lost | 0.93x [0.93-2.97], 8 lost |
+| `thin_h32_blob` | 1.00x [0.99-1.04], 2 lost | 1.27x [1.24-1.31] | 8.98x [6.81-9.54] | 1.00x [0.98-1.01], 6 lost |
+| `tiny_blob_8k` | 1.00x [0.99-1.01], 2 lost | 1.29x [1.28-1.34] | 10.00x [9.13-10.18] | 1.00x [0.99-1.01], 5 lost |
+| sq_2000 corner | 1.17x [1.16-1.17] | 1.02x [1.01-1.03] | 0.78x [0.77-0.78], 9 lost | 0.93x [0.93-0.93], 9 lost |
+
+- **`one_sync`: adopted.** 1.04-1.34x, and a tie on the two sparse
+  scenes, where 2-4 rounds leave little to save.
+- **`tile_paint`: adopted.** 1.02-1.29x where the paint matters. Where
+  it does not, a tie with rounds on both sides of 1. Its paint phase is
+  never slower, except by 0.001 ms on the serpentine.
+- **`fused_pack`: opt-in.** 9.0x on the thin strip, 10.0x on
+  `tiny_blob_8k` and 1.13x on `sq_2000_center`: a mostly untouched image
+  is never read. But it loses 2-22% on the eight dense scenes, in 8 or 9
+  of 9 rounds. Pass `fused_pack=True` when the blob is a small part of a
+  large image.
+- **`skip_full`: off.** It removes revisits: `sq_8000` takes 79,573
+  visits instead of 98,611 (instrumented twins). It wins 1-5% on four
+  big blobs, but loses 4-13% on the serpentines, the lattice, the maze
+  and both 2000 px squares.
+
+**Most of the fused pack's old "dense-blob win" was the tile paint.**
+On `one_sync` alone, without the tile paint, the fused pack still loses
+on seven scenes (0.80-0.99x, 8-9 rounds lost each). It wins `sq_8000`
+by only 1.03x.
+
+**Why the fused pack loses on dense blobs.** Reading RGB inside the
+rounds kernel links it at 247 registers (bare), so only 48 blocks of
+128 fit: 192 warps against 288. `ncu` shows 16.8% achieved occupancy
+(תפוסה) against 25%, and 32,588 cycles per round on `sq_8000` against
+the default's 18,493.
+
+Its rounds phase there takes 2.369 ms: more than the default's separate
+pack and rounds together (1.155 + 1.114 ms). On narrow fronts each pack
+is also a memory trip on the round's critical path (נתיב קריטי), so
+`sq_2000_corner` loses most (0.78x).
+
+**Part of `skip_full`'s loss is its grid.** Its bare twin links at 128
+registers, so its own grid is 96 x 128. There the one-sync ritual costs
+1.36 us against 1.21 at 72 x 128 (this session's probe). That is about
+0.14 of its 0.19 ms loss on the serpentine, and 0.38 of 1.27 ms on the
+maze (*derived*).
+
+### Against ch03 and ch06, measured fairly
+
+The audit also found the cross-chapter columns flattering ch07. The
+benchmark now takes **ch03's best** per scene over all its warp-coop
+grids, bare and instrumented. Its bare kernel also runs at 48 x 256 and,
+on the narrow scenes, at 1 x 128.
+
+It also times **ch06 with its counters off**, the twin the bare ch07
+configs pair with. The instrumented ch06 was 1.18x slower on the maze
+[1.17-1.19] and 1.02-1.07x slower on the big squares.
+
+| scene | ch03 best ms (grid, bare) | default vs ch03 best | ch06 bare ms | default vs ch06 bare |
+|---|---|---|---:|---|
+| sq_2000 center | 2.81 (48 x 256) | 15.26x [14.84-15.46] | 0.403 | **2.19x** [2.10-2.64] |
+| sq_4000 corner | 29.11 (72 x 256) | 28.44x [28.17-30.97] | 0.807 | 0.78x [0.76-0.83] |
+| disk r=1900 | 17.77 (72 x 256) | 23.14x [20.77-26.67] | 1.111 | **1.41x** [1.21-1.51] |
+| serpentine_256 | 93.50 (1 x 128) | 31.83x [31.77-31.91] | 0.127 | 0.04x [0.04-0.05] |
+| sq_6000 center | 42.50 (72 x 256) | 23.59x [22.00-23.72] | 1.946 | **1.08x** [1.01-1.20] |
+| sq_8000 center | 70.56 (72 x 256) | 22.72x [21.48-22.83] | 2.252 | 0.73x [0.67-0.79] |
+| `zz_serp_1k` | 94.25 (1 x 128) | 1.00x [1.00-1.01] | 0.205 | 0.002x |
+| `zz_lattice_4k` | 17.17 (48 x 256) | **1.10x** [1.09-1.25] | 1.830 | 0.12x [0.12-0.12] |
+| `maze_1k` | 226.95 (48 x 256) | 12.63x [3.93-12.66] | 0.495 | 0.03x [0.01-0.03] |
+| `thin_h32_blob` | 0.077 (48 x 256) | 0.16x [0.15-0.18] | 5.621 | **11.74x** [11.39-19.74] |
+| `tiny_blob_8k` | 0.169 (48 x 256) | 0.13x [0.13-0.15] | 1.321 | 1.04x [0.84-1.06] |
+| sq_2000 corner | 11.03 (48 x 256) | 29.48x [29.41-29.62] | 0.427 | **1.14x** [1.07-1.21] |
+
+**The zigzags changed sides, with a caveat.** Against ch03's best, the
+default ties `zz_serp_1k`. At one block it wins it 1.09x [1.09-1.10]
+(86.28 vs 94.25 ms), and it wins `zz_lattice_4k` 1.10x. The first
+kernel lost both (0.96x and 0.88x above).
+
+But every ch03 kernel still runs two `grid.sync` per level, and ch03
+has no one-sync twin. This session's probes price the gap at ch03's
+narrow grid, 1 x 128: 2.50 us per level against 0.89. On `zz_serp_1k`
+that is about 52 ms of 94.25 (*derived*). A one-sync ch03 would win the
+zigzags back.
+
+**ch06 still wins where connectivity is the work**: `sq_8000` (0.73x),
+`sq_4000_corner`, the serpentines, the lattice and the maze. ch07 wins
+`sq_2000_center` (2.19x), the disk (1.41x), `sq_2000_corner`, `sq_6000`
+and the thin strip (11.7x, where ch06's launch shapes starve).
+
+**At 4-connectivity**, `flood_fill()`'s default, the instrumented new
+default beats the first kernel 1.14-1.31x on all 12 scenes. Against
+ch03's `conn4` it wins 26-45x on the blobs, the serpentine and the
+maze. On the zigzags and the two sparse scenes the 4-conn fill is a few
+pixels, and ch03 wins (0.06-0.41x).
+
+### The price of a round, again
+
+This session's probes, us per round (median [range of 7]):
+
+| grid | two `grid.sync` + read | one `grid.sync` + read |
+|---|---|---|
+| 72 x 128 (ch07's grid) | 2.19 [2.19-2.21] | 1.21 [1.15-1.26] |
+| 96 x 128 (`skip_full`'s bare twin) | 2.53 [2.52-2.54] | 1.36 [1.34-1.37] |
+| 48 x 256 | 2.40 [2.39-2.43] | 1.30 [1.30-1.31] |
+| 1 x 128 (ch03's narrow best) | 2.50 [2.48-2.52] | 0.89 [0.87-0.93] |
+| 1 x 32 | 2.41 [2.40-2.55] | 0.86 [0.84-0.87] |
+
+The scenes agree with the 72 x 128 row. The rounds phase lost 1.01 us
+per round on the serpentine and 1.00 on `zz_serp_1k` (*derived*),
+against 0.98 between the two probes.
+
+The two-sync probe at one block is not stable between sessions: 1.49
+us at 1 x 32 in session `114440Z`, 2.41 here. `ncu` counts 3,048 cycles
+for it (1.47 us at 2,070 MHz). Quote the cycles, or the scenes.
+
+**Clocks.** The SM clock's median was 2,070 MHz in every timed window.
+Seven windows dipped to 930-1,620 MHz in their first 10-33%, the first
+round or two. Every config ran through those rounds, so the paired
+ratios carry them.
+
+The memory clock's median was 8,001 MHz in eight scenes, 7,001 in three
+(`sq_2000_center`, the disk, the lattice) and 5,501 on the thin strip.
+Every ch07 median sits within 6.3% of its minimum (the disk; 3.8% for
+the bare default, the first kernel and the fused pack).
+
+### What did not work
+
+- **The fused pack as the default** (above): 9-13x on mostly untouched
+  images, 2-22% slower on dense ones.
+- **Register caps on the fused pack** (kernel docstring, one interleaved
+  A/B). 168 registers (288 warps, 32 bytes of spills) tied two blobs,
+  and lost 6-7% on the serpentines and 37% on `sq_8000`. 128 (384
+  warps) won 9% on `sq_8000` but lost 10-12% on two blobs and 25-90% on
+  the serpentines.
+- **Packing on a tile's first visit** instead of one round ahead.
+  Visits on `sq_8000` rose from 98K to 104K (kernel docstring): the pack
+  sat inside the window in which same-round exports re-enqueue a tile.
+- **One lane per row in the pack** (the plan's layout). It packed
+  `sq_8000` in 1.78 ms, against 0.90 with four rows per load
+  instruction (kernel docstring).
+- **The fused paint** (each visit paints what it added; session
+  `tiles_20261016T002856Z`): 0.69-0.94x on every scene but the thin
+  strip (1.31x) and the tiny blob (1.67x).
+- **`skip_full`** (above): it does remove the revisits, but its extra
+  loads, votes and bigger grid cost more on narrow fronts.
+
+### What the review found
+
+Three bugs, each fixed with a regression test that failed first:
+
+- **F-ordered images.** `flood_fill()` kept an F-ordered input in F
+  order on the device; `chw.T` of a channel-first image is one. The
+  fused pack reads the raw bytes as C-ordered (x, y, c), so it filled 0
+  of a disk's 7,845 px. The upload is now C-ordered, and
+  `TileFill.run()` refuses an F-ordered device image for the fused pack.
+  The tile paint falls back to the plain paint, which follows strides.
+- **Misaligned device views.** `d_big[1:]` can start 2 bytes past a
+  word, and the fused pack's word loads then died with
+  `CUDA_ERROR_MISALIGNED_ADDRESS`. Such a view is now refused (fused
+  pack) or painted by the plain paint (tile paint).
+- **A vote behind a race** (מרוץ). Without the fused pack, `skip_full`
+  ran `stamp >= r and all_sync(FULL, ...)`. Other warps raise that stamp
+  in the same round, so the lanes of one warp could disagree, and only
+  some of them reached the full-warp vote.
+
+  Natural timing never showed it. A legal delay of one thread (schedule
+  jitter, ריצוד) deadlocked (קיפאון) all four test cases. Every lane
+  now votes first. The test runs a jittered build of the kernel in a
+  child process with a kill timeout.
+
+## Under `ncu`, before and after
+
+The curated profiles are in `results/ch07_gpu_1blob_tiles/ncu/` (its
+README holds the tables, the setup and the commands). Both are compared
+in cycles, which do not move with the clock.
+
+- **Before**, the rounds kernel was a latency chain plus the barrier,
+  not a throughput (תפוקה) problem. On `sq_8000` the L2 ran at 31.6% of
+  its peak and the L2 atomic unit was 12% busy. The top stalls were long
+  scoreboard (29.2%), barrier (23.2%) and wait (16.2%). Occupancy was
+  25%, register-bound at 3 blocks of 128.
+- **One `grid.sync`** cut the ritual from 4,517 to 2,387 cycles per
+  round at 72 x 128. A serpentine round fell from 9,015 to 6,578 cycles,
+  a `zz_serp_1k` round from 8,378 to 6,038, an `sq_8000` round from
+  21,613 to 18,493. The ritual is still 36-40% of a one-tile round.
+- **The tile paint is no latency chain.** Its long-scoreboard stall is
+  5.8% on `sq_8000`, against 51.5% for the plain paint, and it is now
+  issue-bound (74.7% of issue slots). On the thin strip it reads 0.1 MB
+  of stamps instead of 2.1 MB of `reached` words.
+- **`pack` is unchanged**: ch06's kernel, about 1.5x a pure read of its
+  bytes. ptxas cannot move a row's load above the previous row's store
+  (the arrays may alias), so each warp has one row in flight. It is now
+  37% of `sq_8000`'s pipeline.
+- **The fused pack** links at 247 registers: 16.8% achieved occupancy
+  and 32,588 cycles per round on `sq_8000`.
 
 ## New problems and lessons
 
@@ -554,16 +882,34 @@ kernel, the dependent chain per visit, and ch06's paint occupancy.
   on the same blobs and 35x cheaper on the serpentine.
 - **Fewer steps is a property of the shape.** Rounds are ~31x fewer than
   levels when paths run through tiles, and equal when every pixel step
-  crosses a border. A zigzag on the tile grid makes ch07 lose to ch03.
+  crosses a border. Then the cheaper barrier decides: with one
+  `grid.sync` ch07 ties or wins the zigzags, against a ch03 that still
+  pays two.
 - **The BFS is no longer the runtime on big blobs.** On `sq_8000` the
-  rounds kernel is 37% of the pipeline. `pack` and `paint` are the RGB
-  read and write, as in Chapter 6.
-- **A round is a latency chain, not a barrier.** On the serpentine half
-  of a round is the barrier pair, half is one tile visit. A visit is
-  ~2.1 closure iterations (about 30%) and ~9-10 dependent memory trips
-  (about 70%, *derived*). Spreading the queue counter did not help
-  (an audit check outside the committed sessions, noted in commit
-  9fe81ac); overlapping the export atomics did.
+  rounds kernel is 36% of today's pipeline (1.114 of 3.107 ms). `pack`
+  and `paint` are the RGB read and write, as in Chapter 6.
+- **A round is a latency chain plus a barrier.** In the first kernel
+  half of a serpentine round was the barrier pair. With one `grid.sync`
+  it is 36% (`ncu`), and the one visit's dependent memory trips are the
+  larger part.
+- **Judge each switch by its own increment.** Bundled with `one_sync`,
+  the fused pack looked like a win on 10 of 11 scenes. On its own it
+  lost 2-22% on every dense scene, and most of its dense-blob gain was
+  the tile paint that came with it.
+- **Skipping work needs a marker the algorithm already keeps.** The
+  stamp already said which tiles the fill touched, so the tile paint
+  skips the rest for one load each: 6.8x on the thin strip's paint.
+- **A switch that saves work can lose on its grid.** `skip_full`
+  removed a fifth of `sq_8000`'s visits, but its registers moved its
+  bare twin to 96 blocks, where every barrier costs more.
+- **A collective must never sit behind a racy load.** The `skip_full`
+  vote was correct only while a warp happened to run in lockstep.
+  Natural timing hid it; a legal delay of one thread exposed it.
+  Schedule jitter is now part of the test suite.
+- **A raw view of a buffer needs the layout it assumes.** The fused
+  pack's flat view of the image assumed C order and a 4-byte-aligned
+  start. The API never promised either, and the stride-aware kernels
+  never needed them.
 - **Warp intrinsics in loops need an explicit reconvergence.** The
   compiler's safety net is a slow path that runs silently. Only a
   one-warp micro-benchmark and the SASS exposed it.
@@ -571,32 +917,44 @@ kernel, the dependent chain per visit, and ch06's paint occupancy.
   tuned on a square. On a 32-px strip it left 7 of 8 warps idle, and
   the same kernel ran 7.7x slower.
 - **Measure the baseline's best, not its default.** The bare twin at its
-  own grid moved the headline from 23.8x to 20.2x.
+  own grid moved the headline from 23.8x to 20.2x. And give the
+  baseline the same ritual before calling a close race.
 
 ## Open problems (Chapter 8 candidates)
 
 1. **Many blobs: labels on `input_blobs.png`.** ch05 and ch06 solved
    the multi-blob job; ch07 fills one. The natural next step merges the
    two ideas: close each tile in registers with local labels, then join
-   labels across tile borders with ch06's union-find. There would be no
-   rounds at all, and the serpentine's 904 visits would become one pass.
+   labels across tile borders with ch06's union-find. *(Chapter 8 took
+   it up.)*
 2. **A narrow-front mode.** When a round has one or two tiles, one block
-   could drain a local queue without `grid.sync`. Half of a serpentine
-   round is the barrier (*derived*), so it could halve those scenes. It
-   would still trail one CPU core.
+   could drain a local queue without `grid.sync`. With one sync the
+   ritual is still 36-40% of a one-tile round and 87-89% of its warp
+   samples (`ncu`). It would still trail one CPU core.
 3. **A shifted tiling against border-aligned paths.** Alternating the
    tile origin by 16 px between rounds puts a zigzag on one tiling's
    border inside the other tiling's tiles. Not measured.
-4. **One `grid.sync` per round.** Three rotating queue counters make the
-   second barrier unnecessary. It helps ch03 by the same amount per
-   step, so it does not change the zigzag verdict.
-5. **Fold `pack` into the rounds.** A tile could read its own RGB on its
-   first visit. Untouched tiles would never be read: the thin strip
-   would cost almost nothing.
+4. **One `grid.sync` per round.** *Done*: the default since session
+   `tiles_20261016T064724Z`, 1.04-1.34x on its own. Its twin for ch03
+   is problem 9.
+5. **Fold `pack` into the rounds.** *Done as an opt-in switch*
+   (`fused_pack`): 9-13x on mostly untouched images, 2-22% slower on
+   dense ones. Open: bring its 247 registers down to a 72-block grid,
+   and take the packs off a narrow front's critical path (idle warps
+   could pack ahead).
 6. **ch06's launch shapes on thin images.** Its pack (3.156 ms), scan
    (1.077 ms) and emit on the 524288 x 32 strip, and its paint on long
    runs.
-7. **`ncu`**, still owed (above).
+7. **`ncu`.** *Done* (section above).
+8. **Several rows in flight in `pack`.** It takes 1.5x a pure read of
+   its bytes, with one row in flight per warp, and it is now 37% of
+   `sq_8000`'s pipeline.
+9. **A one-sync ch03.** Every ch03 kernel still pays two barriers per
+   level; the probes price that at about 52 ms of `zz_serp_1k`'s 94
+   (*derived*). Only with that twin are the zigzags a fair race.
+10. **`skip_full` at the default's grid.** Pinned at 72 x 128 its
+    narrow-scene loss would shrink to its own extra loads and votes
+    (*derived* from the probes); not measured.
 
 ## Glossary
 
@@ -604,7 +962,8 @@ kernel, the dependent chain per visit, and ch06's paint occupancy.
   for one visit.
 - **Frontier** (חזית) - the places reached in the last BFS step; here a
   set of tiles.
-- **Round** (סבב) - one BFS step over the tile graph: two `grid.sync`.
+- **Round** (סבב) - one BFS step over the tile graph: one `grid.sync`
+  (two in the first kernel).
 - **Closure** (סגור) - repeating the fills until nothing changes; the
   tile's part of the blob is then complete.
 - **Fixed point** (נקודת שבת) - the state a repeated step no longer
@@ -625,28 +984,56 @@ kernel, the dependent chain per visit, and ch06's paint occupancy.
   memory when registers run out.
 - **Latency** (השהיה) - the time one operation takes from start to
   result.
+- **Throughput** (תפוקה) - work done per unit of time.
+- **Occupancy** (תפוסה) - resident warps per SM, against the 48 an SM
+  can hold.
 - **Interleaving** (שזירה) - timing every config once per round, in
   turn, so clock drift hits all of them alike.
+- **Increment** (תוספת) - what one switch adds on top of the switches
+  adopted before it.
+- **Candidate** (מועמד) - a border bit the fused pack exports into a
+  tile whose mask is not known yet; it may not be red.
+- **Critical path** (נתיב קריטי) - the chain of dependent steps that
+  sets a round's length.
+- **Race** (מרוץ) - two threads touching the same memory, where the
+  result depends on their timing.
+- **Schedule jitter** (ריצוד) - a delay of one thread that the CUDA
+  model allows; the tests inject it to expose code that needs lockstep.
+- **Deadlock** (קיפאון) - threads that wait for each other forever.
+- **Contiguous** (רציף) - stored in one unbroken run of memory.
 
 ## Files
 
 ```
-kernels.py           bit helpers, the rounds kernel factory, init, paint
+kernels.py           bit helpers, the rounds kernel factory (its switches,
+                     and a tests-only jitter build), init, the paints
 flood_fill.py        host driver: flood_fill(), TileFill (reusable buffers),
-                     plain_shape() (the pack/paint launch)
-test_correctness.py  157 tests: bit helpers, oracle scenes, worst cases,
-                     seed dtypes, ch03 cross-checks
+                     the switches and their defaults, plain_shape()
+test_correctness.py  247 tests, run in each of 9 switch modes: bit
+                     helpers, oracle scenes, worst cases, seed dtypes,
+                     memory layouts, ch03 cross-checks, the switches,
+                     schedule jitter (1,959 runs pass; 264 are skipped,
+                     a switch-independent test runs in one mode)
 benchmarks/
-  benchmark.py       interleaved ch07 vs ch03 vs ch06, clocks, JSON + CSV
+  benchmark.py       interleaved ch07 vs ch03 vs ch06, the switch
+                     ablation, clocks, JSON (with per-round samples) + CSV
   probes.py          latency, shuffle, barrier and register probes
   worst_cases.py     the zigzag, lattice, maze and thin-strip scenes
 ```
 
 Result files are in `results/ch07_gpu_1blob_tiles/benchmark_results/`.
-`114440Z` is this page's session. `0925`/`0926` predate the `syncwarp`
-fix. `0933` has no probes. `0935`/`0936` ran their first scene on a
-relaxed clock. `0937`/`0938` have no `@njit` column. `0941`/`0942` are
-the draft's pair, from the benchmark before the audit.
+`064724Z` is the session of today's default; `114440Z` is the first
+kernel's. `002856Z` timed the first, bundled switch ablation (the fused
+paint's numbers come from it). `001509Z` is discarded: its rounds were
+bimodal at a steady clock, as if another GPU context shared the GPU.
+
+`0925`/`0926` predate the `syncwarp` fix. `0933` has no probes.
+`0935`/`0936` ran their first scene on a relaxed clock. `0937`/`0938`
+have no `@njit` column. `0941`/`0942` are the draft's pair, from the
+benchmark before the audit.
+
+`results/ch07_gpu_1blob_tiles/ncu/` holds the `ncu` profiles before and
+after the switch change (curated tables and their README).
 
 ## Run
 

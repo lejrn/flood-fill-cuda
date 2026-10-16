@@ -107,7 +107,8 @@ PHASES = ("pack", "init", "rounds", "paint")
 #                the round's critical path), so it stays an opt-in switch
 #   skip_full    loses on the narrow scenes (the serpentines, the maze)
 #   fused_paint  loses on every scene but the sparse ones
-# The numbers are in the chapter README's section on these switches.
+# The numbers are in the chapter README's section on these switches
+# (session tiles_20261016T064724Z).
 ROUNDS_SWITCHES = ("one_sync", "fused_pack", "skip_full", "fused_paint")
 SWITCHES = ROUNDS_SWITCHES + ("tile_paint",)
 DEFAULT_SWITCHES = {"one_sync": True, "fused_pack": False,
