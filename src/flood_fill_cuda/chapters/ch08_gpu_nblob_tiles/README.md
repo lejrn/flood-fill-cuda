@@ -910,7 +910,7 @@ fairness. Each bug got a failing test first, then the fix.
    flatten for K3, a CCL inside K3's cooperative launch, a tighter comp
    estimate.
 9. **Earlier sessions of this path:** the draft
-   `dense_20261016T013317Z` (code at `bf82518`) and
+   `dense_20261016T013317Z` (code at `97e8243`) and
    `dense_20261016T021919Z`. Both precede the review: host-clock ch05,
    inflated `paint_tiles`, crops only to 2000.
 
