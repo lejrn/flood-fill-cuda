@@ -1,0 +1,73 @@
+state,scene,config,region,pct_of_pc_samples
+before,sq_8000_center,w4_bare,grid_sync_internals (no SASS shown),37.48
+before,sq_8000_center,w4_bare,grid_sync_wrapper (cudaCGSynchronize),2.07
+before,sq_8000_center,w4_bare,round_head (range check),0.47
+before,sq_8000_center,w4_bare,round_tail (q_state read and reset between syncs),1.15
+before,sq_8000_center,w4_bare,visit_setup (64-bit range trip count),1.22
+before,sq_8000_center,w4_bare,"visit_loads (queue entry, tile and filter words)",17.58
+before,sq_8000_center,w4_bare,"closure (row fill, diagonal, 20 SHFL, vote)",20.21
+before,sq_8000_center,w4_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",10.1
+before,sq_8000_center,w4_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",9.66
+before,serpentine_256,w4_bare,grid_sync_internals (no SASS shown),90.25
+before,serpentine_256,w4_bare,grid_sync_wrapper (cudaCGSynchronize),4.95
+before,serpentine_256,w4_bare,round_head (range check),1.24
+before,serpentine_256,w4_bare,round_tail (q_state read and reset between syncs),3.19
+before,serpentine_256,w4_bare,visit_setup (64-bit range trip count),0.12
+before,serpentine_256,w4_bare,"visit_loads (queue entry, tile and filter words)",0.05
+before,serpentine_256,w4_bare,"closure (row fill, diagonal, 20 SHFL, vote)",0.06
+before,serpentine_256,w4_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",0.02
+before,serpentine_256,w4_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",0.04
+before,zz_serp_1k,w4_bare,grid_sync_internals (no SASS shown),89.59
+before,zz_serp_1k,w4_bare,grid_sync_wrapper (cudaCGSynchronize),5.27
+before,zz_serp_1k,w4_bare,round_head (range check),1.32
+before,zz_serp_1k,w4_bare,round_tail (q_state read and reset between syncs),3.46
+before,zz_serp_1k,w4_bare,visit_setup (64-bit range trip count),0.13
+before,zz_serp_1k,w4_bare,"visit_loads (queue entry, tile and filter words)",0.06
+before,zz_serp_1k,w4_bare,"closure (row fill, diagonal, 20 SHFL, vote)",0.03
+before,zz_serp_1k,w4_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",0.02
+before,zz_serp_1k,w4_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",0.05
+before,serpentine_256,1x32_bare,grid_sync_internals (no SASS shown),32.38
+before,serpentine_256,1x32_bare,grid_sync_wrapper (cudaCGSynchronize),4.66
+before,serpentine_256,1x32_bare,round_head (range check),1.15
+before,serpentine_256,1x32_bare,round_tail (q_state read and reset between syncs),4.36
+before,serpentine_256,1x32_bare,visit_setup (64-bit range trip count),2.81
+before,serpentine_256,1x32_bare,"visit_loads (queue entry, tile and filter words)",12.57
+before,serpentine_256,1x32_bare,"closure (row fill, diagonal, 20 SHFL, vote)",20.68
+before,serpentine_256,1x32_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",7.14
+before,serpentine_256,1x32_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",14.17
+after,sq_8000_center,w4_bare,grid_sync_internals (no SASS shown),30.28
+after,sq_8000_center,w4_bare,grid_sync_wrapper (cudaCGSynchronize),1.14
+after,sq_8000_center,w4_bare,"round_head (range check, counter reset)",1.1
+after,sq_8000_center,w4_bare,"round_tail (the one grid.sync call, q_state read)",1.47
+after,sq_8000_center,w4_bare,visit_setup (range trip count),1.44
+after,sq_8000_center,w4_bare,"visit_loads (queue entry, tile and filter words)",22.41
+after,sq_8000_center,w4_bare,"closure (row fill, diagonal, 20 SHFL, vote)",17.95
+after,sq_8000_center,w4_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",12.37
+after,sq_8000_center,w4_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",11.75
+after,serpentine_256,w4_bare,grid_sync_internals (no SASS shown),88.51
+after,serpentine_256,w4_bare,grid_sync_wrapper (cudaCGSynchronize),3.38
+after,serpentine_256,w4_bare,"round_head (range check, counter reset)",3.28
+after,serpentine_256,w4_bare,"round_tail (the one grid.sync call, q_state read)",4.25
+after,serpentine_256,w4_bare,visit_setup (range trip count),0.28
+after,serpentine_256,w4_bare,"visit_loads (queue entry, tile and filter words)",0.07
+after,serpentine_256,w4_bare,"closure (row fill, diagonal, 20 SHFL, vote)",0.06
+after,serpentine_256,w4_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",0.03
+after,serpentine_256,w4_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",0.05
+after,zz_serp_1k,w4_bare,grid_sync_internals (no SASS shown),87.14
+after,zz_serp_1k,w4_bare,grid_sync_wrapper (cudaCGSynchronize),3.74
+after,zz_serp_1k,w4_bare,"round_head (range check, counter reset)",3.59
+after,zz_serp_1k,w4_bare,"round_tail (the one grid.sync call, q_state read)",4.96
+after,zz_serp_1k,w4_bare,visit_setup (range trip count),0.28
+after,zz_serp_1k,w4_bare,"visit_loads (queue entry, tile and filter words)",0.08
+after,zz_serp_1k,w4_bare,"closure (row fill, diagonal, 20 SHFL, vote)",0.03
+after,zz_serp_1k,w4_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",0.03
+after,zz_serp_1k,w4_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",0.06
+after,serpentine_256,1x32_bare,grid_sync_internals (no SASS shown),20.35
+after,serpentine_256,1x32_bare,grid_sync_wrapper (cudaCGSynchronize),2.68
+after,serpentine_256,1x32_bare,"round_head (range check, counter reset)",3.2
+after,serpentine_256,1x32_bare,"round_tail (the one grid.sync call, q_state read)",5.85
+after,serpentine_256,1x32_bare,visit_setup (range trip count),4.21
+after,serpentine_256,1x32_bare,"visit_loads (queue entry, tile and filter words)",15.62
+after,serpentine_256,1x32_bare,"closure (row fill, diagonal, 20 SHFL, vote)",20.76
+after,serpentine_256,1x32_bare,"exports (3 SHFL, up to 4 ATOMG.OR)",9.68
+after,serpentine_256,1x32_bare,"enqueue (ballots, stamp ATOMG.MAX, queue ATOMG.ADD)",17.59

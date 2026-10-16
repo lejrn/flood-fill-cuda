@@ -1,0 +1,5 @@
+state,ritual,grid,cycles_per_round_ncu,stall_barrier_pct,stall_long_sb_pct,stall_membar_pct,session_064724Z_probe_us_median,session_064724Z_probe_us_range
+before,two grid.sync + read,72x128,4517.0,37.7,17.5,3.0,2.19,2.19-2.21
+before,two grid.sync + read,1x32,3048.0,2.4,28.6,18.8,2.41,2.40-2.55
+after,one grid.sync + read,72x128,2387.0,33.7,19.0,2.6,1.21,1.15-1.26
+after,one grid.sync + read,1x32,1747.0,1.6,30.4,16.5,0.86,0.84-0.87
