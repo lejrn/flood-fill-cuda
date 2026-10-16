@@ -1039,6 +1039,44 @@ def test_dense_twins_limit_the_block(grid_arg):
         TileWaves(64, 64, dense=False, lookup="dindex", _skip_warmup=True)
 
 
+@pytest.mark.parametrize("instrumented", [False, True])
+@pytest.mark.parametrize("lookup", ["dindex", "index", "hybrid", "scan"])
+def test_accepted_blocks_launch(lookup, instrumented):
+    """The engine accepts a block only if every twin it launches with it
+    can launch it. The shared-memory bound of the dense twins (512
+    threads) is not enough: K2b holds 122-178 registers per thread, so
+    on the RTX 4060 its largest block is 384 threads (dindex and index,
+    bare; hybrid, instrumented) or 256 (dindex and index, instrumented).
+    Those blocks passed validation and died in the warm-up with
+    CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES, before any image. Each block
+    must be refused with a ValueError or run exactly, and some must
+    run."""
+    img = S8.dot_lattice_scene((2, 2))
+    label, n = cpu_label_components(img)
+    ran = 0
+    for tpb in (512, 384, 256):
+        try:
+            res = recolor(img, emit_label=True, lookup=lookup,
+                          instrumented=instrumented, label_grid=(2, tpb),
+                          paint_grid=(2, tpb))
+        except ValueError as exc:
+            assert "cannot launch" in str(exc)
+            continue
+        ran += 1
+        assert res.n_blobs == n
+        np.testing.assert_array_equal(res.label, label)
+        np.testing.assert_array_equal(res.img, expected_paint(img, label))
+    assert ran >= 1
+
+
+def test_old_path_refuses_unlaunchable_blocks():
+    """The old path's K2 is capped at 80 registers: a 1024-thread block
+    needs 81,920, over the 65,536 of an SM, so it must be refused before
+    anything launches (it used to fail in the warm-up)."""
+    with pytest.raises(ValueError, match="cannot launch"):
+        TileWaves(64, 64, label_grid=(2, 1024), **OLD_PATH)
+
+
 @pytest.mark.parametrize("cap", [64, 96])
 def test_k2b_register_cap_builds_and_stays_exact(cap):
     """label_dense_max_registers caps K2b's registers. The warm-up used

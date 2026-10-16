@@ -160,6 +160,15 @@ def _fit(grid, n_tiles):
     return (max(1, min(blocks, (n_tiles + wpb - 1) // wpb)), tpb)
 
 
+def _capacity(kern, args, tpb):
+    """Resident blocks of tpb threads per device for `kern` compiled for
+    the types of `args` (its launch arguments). Compiles the twin if it
+    is missing and launches nothing; 0 means a block of tpb threads
+    cannot launch at all (registers or shared memory)."""
+    sig = tuple(kern.typeof_pyval(a) for a in args)
+    return int(kern.compile(sig).max_cooperative_grid_blocks(int(tpb)))
+
+
 def _check_grid(name, grid):
     """A plain launch shape (blocks, threads) for a one-warp-per-tile
     kernel: warp = grid(1) >> 5 and FULL-mask warp calls need whole
@@ -397,18 +406,18 @@ class TileWaves:
             self.waves_blocks = 1 if waves_blocks is None else int(waves_blocks)
             self.coop_max_blocks = -1
             return
+        # every block must fit its twin before anything launches
+        caps = self._check_blocks()
         _warmup(connectivity, self.instrumented, self.debug,
                 label_max_registers, self.paint_fast, pack_variant,
                 lookup, self.label_exits, waves_max_registers, self.dense,
                 self.flat_opt, self.label_wpb, self.paint_wpb,
                 self.waves_compact, label_dense_max_registers)
         if self.dense and self.fit_grids:
-            for name, grid in (("label_dense_grid", self.label_grid),
-                               ("paint_dense_grid", self.paint_grid)):
-                kern = (self.label_dense_k if name == "label_dense_grid"
-                        else self.paint_dense_k)
-                res = _overload(kern).max_cooperative_grid_blocks(grid[1])
-                setattr(self, name, (max(1, min(grid[0], res)), grid[1]))
+            self.label_dense_grid = (min(self.label_grid[0], caps["K2b"]),
+                                     self.label_grid[1])
+            self.paint_dense_grid = (min(self.paint_grid[0], caps["K4b"]),
+                                     self.paint_grid[1])
         cap = min(max_blocks(self.waves_tpb, connectivity, self.instrumented,
                              self.debug, lookup, waves_max_registers,
                              self.flat_opt, cm, self.waves_coop)
@@ -440,24 +449,83 @@ class TileWaves:
         for _, launch in self._label_launches(np.int32(lat)):
             launch()
 
+    def _label_args(self, lat, dense=False):
+        """K2's launch arguments (K2b's: the same without the CCL test's
+        thresholds)."""
+        args = (self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
+                self.ql, self.qd, self.q_state, self.counters, self.idx,
+                self.frame, self.tlist, np.int32(self.width),
+                np.int32(self.height), np.int32(self.words_per_row),
+                np.int32(self.n_tiles), np.int32(lat))
+        if dense:
+            return args
+        return args + (np.int32(self.ccl_min), np.int32(self.ccl_rpc))
+
+    def _paint_args(self, img, lmap, seeds, seed_n, pcount, dense=False):
+        """K4's launch arguments in any mode (K4b's: the same without the
+        hand-off test's thresholds)."""
+        args = (self._mask_flat, self.hdr, self.rec, img, lmap, seeds,
+                seed_n, self.counters, self.tlist, pcount,
+                np.int32(self.width), np.int32(self.height),
+                np.int32(self.words_per_row), np.int32(self.n_tiles))
+        if dense:
+            return args
+        return args + (np.int32(self.paint_ccl_min),
+                       np.int32(self.paint_rpc))
+
+    def _check_blocks(self):
+        """Refuse a label or paint block that a twin the engine launches
+        with it cannot launch: the shared-memory bound above does not see
+        registers (K2b holds 122-178 per thread, so its largest block is
+        256-384 threads on cc 8.9, not 512). Compiles the twins for the
+        engine's argument types and launches nothing. Returns the
+        resident capacity of K2b and K4b (the fitted dense grids)."""
+        lat = self.lattice
+        d = (self._dummy_img, self._dummy_lmap, self._dummy_seeds,
+             self._seed_n)
+        twins = [("label_grid", "K2", self.label_k,
+                  self._label_args(lat))]
+        if self.dense:
+            twins.append(("label_grid", "K2b", self.label_dense_k,
+                          self._label_args(lat, dense=True)))
+        for kern, kern_dense, pcount in (
+                (self.paint_k, getattr(self, "paint_dense_k", None),
+                 self._pcount),
+                (self.lmap_k, getattr(self, "lmap_dense_k", None),
+                 self._pcount_off),
+                (self.seeds_k, getattr(self, "seeds_dense_k", None),
+                 self._pcount_off)):
+            twins.append(("paint_grid", "K4", kern,
+                          self._paint_args(*d, pcount)))
+            if self.dense:
+                twins.append(("paint_grid", "K4b", kern_dense,
+                              self._paint_args(*d, pcount, dense=True)))
+        caps = {}
+        for grid_name, name, kern, args in twins:
+            grid = getattr(self, grid_name)
+            cap = _capacity(kern, args, grid[1])
+            if cap < 1:
+                fits = [t for t in range(32, grid[1], 32)
+                        if _capacity(kern, args, t) >= 1]
+                regs = kern.compile(tuple(kern.typeof_pyval(a)
+                                          for a in args)).regs_per_thread
+                raise ValueError(
+                    f"{grid_name} {tuple(grid)}: {name} cannot launch a "
+                    f"block of {grid[1]} threads ({regs} registers per "
+                    f"thread); at most {max(fits, default=0)} here")
+            caps.setdefault(name, cap)       # the timed (RGB) twin first
+        return caps
+
     def _label_launches(self, lat):
         """K2 (and K2b when dense) as (phase name, launch) pairs."""
-        w, h = np.int32(self.width), np.int32(self.height)
-        wpr, nt = np.int32(self.words_per_row), np.int32(self.n_tiles)
-
         def label():
             self.label_k[self.label_grid[0], self.label_grid[1]](
-                self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-                self.ql, self.qd, self.q_state, self.counters, self.idx,
-                self.frame, self.tlist, w, h, wpr, nt, lat,
-                np.int32(self.ccl_min), np.int32(self.ccl_rpc))
+                *self._label_args(lat))
 
         def label_ccl():
             self.label_dense_k[self.label_dense_grid[0],
                                self.label_dense_grid[1]](
-                self._mask_flat, self.hdr, self.rec, self.parent, self.qc,
-                self.ql, self.qd, self.q_state, self.counters, self.idx,
-                self.frame, self.tlist, w, h, wpr, nt, lat)
+                *self._label_args(lat, dense=True))
 
         out = [("label", label)]
         if self.dense:
@@ -467,19 +535,14 @@ class TileWaves:
     def _paint_launches(self, kern, kern_dense, img, lmap, seeds, seed_n,
                         pcount):
         """K4 (and K4b when dense) of one mode as (name, launch) pairs."""
-        w, h = np.int32(self.width), np.int32(self.height)
-        wpr, nt = np.int32(self.words_per_row), np.int32(self.n_tiles)
-
         def paint():
             kern[self.paint_grid[0], self.paint_grid[1]](
-                self._mask_flat, self.hdr, self.rec, img, lmap, seeds,
-                seed_n, self.counters, self.tlist, pcount, w, h, wpr, nt,
-                np.int32(self.paint_ccl_min), np.int32(self.paint_rpc))
+                *self._paint_args(img, lmap, seeds, seed_n, pcount))
 
         def paint_ccl():
             kern_dense[self.paint_dense_grid[0], self.paint_dense_grid[1]](
-                self._mask_flat, self.hdr, self.rec, img, lmap, seeds,
-                seed_n, self.counters, self.tlist, pcount, w, h, wpr, nt)
+                *self._paint_args(img, lmap, seeds, seed_n, pcount,
+                                  dense=True))
 
         out = [("paint", paint)]
         if self.dense:
