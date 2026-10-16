@@ -909,9 +909,17 @@ fairness. Each bug got a failing test first, then the fix.
    1.20] in rgb, 1.19x in mask, 1.97x in labelling.
    zz_lattice's K3 is 1.57 ms of its 2.66: 2 rounds of 535k and 441k
    entries (976k in all) and a flatten of 976k comps by 18k threads.
-7. **One CCL tile costs about 10-15 us of latency** on a lone warp
-   (thousands of dependent shared-memory steps). A sparse image with a
-   few dense tiles pays that once per K2b and K4b.
+7. **A few CCL tiles still cost a CCL's latency.** On `stair_decoy_19`
+   133 tiles take the CCL (52 runs each on average), one warp per tile,
+   all in flight at once.
+
+   In the phase pass K2b takes 0.0174 ms and K4b 0.0236, against
+   0.0041-0.0051 for a launch with no CCL tile. So the slowest tile
+   costs about 12-13 us in K2b and 18-19 us in K4b (*derived*).
+
+   The cause is likely the CCL's chain of dependent shared-memory steps
+   on one warp (inferred). A sparse image with a few dense tiles pays
+   that once per K2b and K4b.
 8. **Not built:** a bulk path for isolated pixels alone (the run CCL
    handles them, a run with no union), a per-warp shared-memory
    flatten for K3, a CCL inside K3's cooperative launch, a tighter comp
@@ -1115,8 +1123,8 @@ also pass.
 1. **Dense tiles: done, with what remains.** K2b and K4b took
    `dots_4k` from 15.4 to 1.5 ms. `zz_lattice_4k` (K3: two rounds of
    535k and 441k entries, a flatten of 976k comps) and `input_blocks`
-   still lose to ch06. One CCL tile costs 10-15 us of latency on a lone
-   warp.
+   still lose to ch06. A few CCL tiles cost about 12 us in K2b and 18
+   us in K4b (limit 7).
 2. **An index for dense tiles only: done** (the dindex lookup). Its
    compacting twin spills at 80 registers, and on `input_blobs` it is
    0.011 ms slower than the first version's K3 (phase pass); fewer live
