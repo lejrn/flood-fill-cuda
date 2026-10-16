@@ -907,8 +907,8 @@ fairness. Each bug got a failing test first, then the fix.
    1.46x), and so do `serpentine_2048`, `zz_serp_1k` and the decoy
    staircase (1.47-1.77x). `zz_serp_4k` loses by less: 1.08x [0.91,
    1.20] in rgb, 1.19x in mask, 1.97x in labelling.
-   zz_lattice's K3 is 1.57 ms of its 2.66: 2 rounds of 976k entries
-   and a flatten of 976k comps by 18k threads.
+   zz_lattice's K3 is 1.57 ms of its 2.66: 2 rounds of 535k and 441k
+   entries (976k in all) and a flatten of 976k comps by 18k threads.
 7. **One CCL tile costs about 10-15 us of latency** on a lone warp
    (thousands of dependent shared-memory steps). A sparse image with a
    few dense tiles pays that once per K2b and K4b.
@@ -1114,8 +1114,9 @@ also pass.
 
 1. **Dense tiles: done, with what remains.** K2b and K4b took
    `dots_4k` from 15.4 to 1.5 ms. `zz_lattice_4k` (K3: two rounds of
-   976k entries, a flatten of 976k comps) and `input_blocks` still
-   lose to ch06. One CCL tile costs 10-15 us of latency on a lone warp.
+   535k and 441k entries, a flatten of 976k comps) and `input_blocks`
+   still lose to ch06. One CCL tile costs 10-15 us of latency on a lone
+   warp.
 2. **An index for dense tiles only: done** (the dindex lookup). Its
    compacting twin spills at 80 registers, and on `input_blobs` it is
    0.011 ms slower than the first version's K3 (phase pass); fewer live
