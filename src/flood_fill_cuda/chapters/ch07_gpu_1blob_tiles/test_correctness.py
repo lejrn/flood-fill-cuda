@@ -486,6 +486,54 @@ def test_unreached_pixels_untouched():
     np.testing.assert_array_equal(r.img[60:80, 60:80], img[60:80, 60:80])
 
 
+def _layout_scene(name):
+    """(C-ordered image, seed) for the memory-layout tests."""
+    if name == "stripes":
+        img = np.zeros((99, 64, 3), dtype=np.uint8)   # rows 0, 3, 6, ... red
+        img[0::3, :] = RED
+        return img, 0, 0
+    return scenes.disk_scene(150, 130, 50)
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", ["disk", "stripes", "chw_T"])
+def test_fortran_ordered_input(name, connectivity):
+    """Regression: flood_fill() accepts any (W, H, 3) uint8 array, and an
+    F-contiguous one kept its F order on the device. `chw.T` of a
+    channel-first (3, H, W) image is exactly such an array. The fused
+    pack read the device bytes as C-ordered (x, y, c): it filled 0 of the
+    disk's 7,845 px, and on the stripes it filled 2,112 px instead of 64
+    and painted 2,112 black pixels."""
+    img, sx, sy = _layout_scene("disk" if name == "chw_T" else name)
+    if name == "chw_T":
+        f_img = np.ascontiguousarray(img.transpose(2, 1, 0)).T
+    else:
+        f_img = np.asfortranarray(img)
+    assert f_img.flags.f_contiguous and not f_img.flags.c_contiguous
+    np.testing.assert_array_equal(f_img, img)
+    before = f_img.copy(order="K")
+    assert_matches_reference(f_img, sx, sy, connectivity)
+    np.testing.assert_array_equal(f_img, before)      # input untouched
+
+
+def test_run_on_a_fortran_ordered_device_array(switch_mode):
+    """TileFill.run() takes a device array as it is. The separate pack and
+    paint index img[x, y, c] through its strides, so F order works; the
+    fused pack reads the raw buffer as C-ordered (x, y, c) words, so it
+    must refuse F order instead of filling the wrong pixels."""
+    img, sx, sy = _layout_scene("disk")
+    exp_img, _, _ = expected_image(img, sx, sy, 8)
+    d = cuda.to_device(np.asfortranarray(img))
+    assert d.is_f_contiguous() and not d.is_c_contiguous()
+    eng = TileFill(img.shape[0], img.shape[1], connectivity=8)
+    if eng.fused_pack:
+        with pytest.raises(ValueError, match="C-contiguous"):
+            eng.run(d, sx, sy)
+    else:
+        eng.run(d, sx, sy)
+        np.testing.assert_array_equal(d.copy_to_host(), exp_img)
+
+
 def test_counters_are_consistent():
     """Full-red 128x128 from a corner: 4x4 tiles, so the tile frontier
     needs at least 4 rounds (Chebyshev, 8-conn) or 7 (Manhattan, 4-conn);

@@ -360,21 +360,45 @@ class TileFill:
                 int(tx * self.words_per_row + ty),
                 int((tx << TY_BITS) | ty))
 
+    def rgb_views(self, img_dev):
+        """(flat bytes, uint32 words, word count) of the device image, for
+        the kernels that address the RGB buffer themselves (the fused pack
+        and its paint compute (x * height + y) * 3 + c).
+
+        That offset is the array's layout only when it is C-contiguous.
+        Numba's reshape of an F-contiguous array reinterprets the buffer
+        instead of copying it, so an F-ordered image would be read and
+        painted at the wrong pixels: it is refused. pack_kernel and
+        paint_kernel index img[x, y, c] through the strides and take any
+        layout."""
+        if (img_dev.shape != (self.width, self.height, 3)
+                or img_dev.dtype != np.uint8):
+            raise ValueError(
+                f"img_dev must be a ({self.width}, {self.height}, 3) uint8 "
+                f"device array, got {img_dev.shape} {img_dev.dtype}")
+        if not img_dev.is_c_contiguous():
+            raise ValueError(
+                "fused_pack reads the image as C-contiguous (x, y, c) bytes, "
+                "and this device array is not C-contiguous (upload "
+                "np.ascontiguousarray(img), or pass fused_pack=False)")
+        img8 = img_dev.reshape(self.width * self.height * 3)
+        n32 = img8.shape[0] // 4
+        img32 = img8[:4 * n32].view(np.uint32) if n32 else self._dummy_u32
+        return img8, img32, n32
+
     def run(self, img_dev, seed_x, seed_y):
         """Enqueue the four phases; returns (phase names, 5 events).
 
         With fused_pack there is no pack launch (its interval is empty:
         the RGB is read inside `rounds`), and `paint` is
-        paint_tiles_kernel."""
+        paint_tiles_kernel. The fused pack needs a C-contiguous image
+        (rgb_views); the separate pack and paint take any layout."""
         seed_word, seed_bits, seed_tile, seed_entry = self.seed_args(
             seed_x, seed_y)
         if self.fused_pack or self.skip_full:
             seed_entry |= FIRST_ENTRY     # the seed tile's first visit
         if self.fused_pack:
-            img8 = img_dev.reshape(self.width * self.height * 3)
-            n32 = img8.shape[0] // 4
-            img32 = (img8[:4 * n32].view(np.uint32) if n32
-                     else self._dummy_u32)
+            img8, img32, n32 = self.rgb_views(img_dev)
         else:
             img8, img32, n32 = self._dummy_u8, self._dummy_u32, 0
         events = [cuda.event(timing=True) for _ in range(len(PHASES) + 1)]
@@ -498,7 +522,9 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
                fused_pack=None, skip_full=None, fused_paint=None):
     """Flood-fill the red blob containing (seed_x, seed_y) by tile BFS.
 
-    img_host: (width, height, 3) uint8. Not modified; a recolored copy is
+    img_host: (width, height, 3) uint8, in any memory layout (an
+    F-ordered array is copied to C order first: the fused pack reads the
+    device copy as C-ordered bytes). Not modified; a recolored copy is
     returned. Raises ValueError for bad inputs (including a seed that is
     not red, exactly like ch03) and RuntimeError if the GPU cannot host
     the requested cooperative launch.
@@ -511,6 +537,7 @@ def flood_fill(img_host, seed_x, seed_y, connectivity=4,
     if not _is_red(img_host, seed_x, seed_y):
         raise ValueError(
             f"seed pixel ({seed_x}, {seed_y}) is not red - nothing to fill")
+    img_host = np.ascontiguousarray(img_host)   # a no-op when already C
 
     t0 = time.perf_counter()
     eng = TileFill(width, height, connectivity=connectivity,
