@@ -36,7 +36,15 @@ ch08 fairness review):
 Configs (contract: rgb = RGB in, recoloured RGB out; mask = packed mask
 in, RGB painted; label = packed mask in, every comp or run labelled,
 nothing painted):
-  ch08_L8         rgb, lattice 8, the default lookup and valve: headline
+  ch08_L8         rgb, lattice 8, the engine's defaults: the dense-tile
+                  path (K2b run CCL, K4b, the dindex K3): headline
+  ch08_old        rgb, the chapter's path before the dense-tile work
+                  (flood_fill.OLD_PATH: comp loop K2 and K4, hybrid K3,
+                  full grids): the ablation; ch08_old_mask, ch08_old_label
+  ch08_new_nocomp the dense path without K3's task compaction
+  ch08_new_k3only the dense path's K3 alone (no tile reaches the CCL)
+  ch08_new_hybk3  the dense path's K2b and K4b with the old hybrid K3
+  ch08_new_nofit  the dense path with K2's and K4's full grids (crops)
   ch08_L8_mask    mask contract
   ch08_L8_label   labelling only: init, label, waves
   ch08_L0         rgb, S2 seeds alone and the valve off: pure waves
@@ -60,6 +68,12 @@ painted image must equal ch06's own RunRecolor.run (all three chapters
 paint palette[canonical label % 6]); ch05's too. An instrumented ch08
 engine runs each ch08 config once more for the counters and the
 per-round frontier.
+
+--session dense (the dense-tile session) times old vs new ch08 in every
+contract, the three ablations, ch06 in every contract at its best merge
+grid (and with ch08's pack), and ch05, on the dense targets (dots_4k,
+random_4000, input_blocks, zz_lattice_4k), input_blobs, the other main
+and worst scenes, and three small crops; files dense_<stamp>.*.
 
 Scenes: input_blobs and input_blocks (PNGs from --images DIR or
 FLOOD_FILL_IMAGES; a missing file is an error; md5 recorded), then
@@ -131,35 +145,66 @@ PACK_VARIANT = "direct"    # ch08 and ch06_tp (E1 picks it)
 PNG_MD5 = {"input_blobs": "47639eb37f973b5092ec2c4db86f45a4",
            "input_blocks": "68f1fda7f2eba3d73b87e1cc11155061"}
 
-LOOKUP = ff.DEFAULT_LOOKUP       # the headline's neighbour lookup (E13)
+LOOKUP = ff.DEFAULT_LOOKUP       # the headline's neighbour lookup
 VALVE = ff.DEFAULT_VALVE_ROUND   # the default valve round (E9)
-# name -> (side, contract, lattice, valve_round, lookup)
+OLD = dict(ff.OLD_PATH)          # the path before the dense-tile work
+NEVER = 1 << 20                  # a ccl_min no tile reaches
+# name -> (side, contract, lattice, valve_round, lookup, engine kwargs)
 CONFIGS = {
-    "ch08_L8": ("ch08", "rgb", 8, VALVE, LOOKUP),
-    "ch08_L8_mask": ("ch08", "mask", 8, VALVE, LOOKUP),
-    "ch08_L8_label": ("ch08", "label", 8, VALVE, LOOKUP),
-    "ch08_L0": ("ch08", "rgb", 0, 0, LOOKUP),
-    "ch08_L16": ("ch08", "rgb", 16, VALVE, LOOKUP),
-    "ch08_L8_scan": ("ch08", "rgb", 8, VALVE, "scan"),
-    "ch08_L8_index": ("ch08", "rgb", 8, VALVE, "index"),
-    "ch08_L8_voff": ("ch08", "rgb", 8, 0, LOOKUP),
-    "ch06": ("ch06", "rgb", None, None, None),
-    "ch06_mask": ("ch06", "mask", None, None, None),
-    "ch06_label": ("ch06", "label", None, None, None),
-    "ch06_tp": ("ch06_tp", "rgb", None, None, None),
-    "ch06_m512": ("ch06_m512", "rgb", None, None, None),
+    "ch08_L8": ("ch08", "rgb", 8, VALVE, LOOKUP, {}),
+    "ch08_L8_mask": ("ch08", "mask", 8, VALVE, LOOKUP, {}),
+    "ch08_L8_label": ("ch08", "label", 8, VALVE, LOOKUP, {}),
+    "ch08_L0": ("ch08", "rgb", 0, 0, LOOKUP, {}),
+    "ch08_L16": ("ch08", "rgb", 16, VALVE, LOOKUP, {}),
+    "ch08_L8_scan": ("ch08", "rgb", 8, VALVE, "scan", {}),
+    "ch08_L8_index": ("ch08", "rgb", 8, VALVE, "index", {}),
+    "ch08_L8_voff": ("ch08", "rgb", 8, 0, LOOKUP, {}),
+    "ch08_old": ("ch08", "rgb", 8, VALVE, OLD["lookup"], OLD),
+    "ch08_old_mask": ("ch08", "mask", 8, VALVE, OLD["lookup"], OLD),
+    "ch08_old_label": ("ch08", "label", 8, VALVE, OLD["lookup"], OLD),
+    "ch08_new_nocomp": ("ch08", "rgb", 8, VALVE, LOOKUP,
+                        {"waves_compact": False}),
+    "ch08_new_k3only": ("ch08", "rgb", 8, VALVE, LOOKUP,
+                        {"ccl_min": NEVER, "paint_ccl_min": NEVER}),
+    "ch08_new_hybk3": ("ch08", "rgb", 8, VALVE, "hybrid", {}),
+    "ch08_new_nofit": ("ch08", "rgb", 8, VALVE, LOOKUP, {"fit_grids": False}),
+    "ch06": ("ch06", "rgb", None, None, None, None),
+    "ch06_mask": ("ch06", "mask", None, None, None, None),
+    "ch06_label": ("ch06", "label", None, None, None, None),
+    "ch06_tp": ("ch06_tp", "rgb", None, None, None, None),
+    "ch06_m512": ("ch06_m512", "rgb", None, None, None, None),
 }
-MAIN_CONFIGS = ["ch08_L8", "ch08_L8_mask", "ch08_L8_label", "ch08_L0",
-                "ch08_L16", "ch08_L8_scan", "ch08_L8_index", "ch06",
-                "ch06_mask", "ch06_label", "ch06_tp", "ch06_m512"]
-CROP_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch06", "ch06_label",
-                "ch06_tp"]
-WORST_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_L8_voff", "ch08_L0",
-                 "ch08_L8_scan", "ch08_L8_index", "ch06", "ch06_label"]
-PHASE_CONFIGS = ["ch08_L8", "ch06"]     # the per-phase pass
+MAIN_CONFIGS = ["ch08_L8", "ch08_L8_mask", "ch08_L8_label", "ch08_old",
+                "ch08_L0", "ch08_L16", "ch08_L8_scan", "ch08_L8_index",
+                "ch06", "ch06_mask", "ch06_label", "ch06_tp", "ch06_m512"]
+CROP_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old", "ch06",
+                "ch06_label", "ch06_tp"]
+WORST_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old", "ch08_L8_voff",
+                 "ch08_L0", "ch08_L8_scan", "ch08_L8_index", "ch06",
+                 "ch06_label"]
+# the dense-tile session: old vs new in every contract, the ablations,
+# ch06 in every contract (and with ch08's pack)
+DENSE_CONFIGS = ["ch08_L8", "ch08_L8_mask", "ch08_L8_label", "ch08_old",
+                 "ch08_old_mask", "ch08_old_label", "ch08_new_nocomp",
+                 "ch08_new_k3only", "ch08_new_hybk3", "ch06", "ch06_mask",
+                 "ch06_label", "ch06_tp"]
+DENSE_CROP_CONFIGS = ["ch08_L8", "ch08_L8_label", "ch08_old",
+                      "ch08_old_label", "ch08_new_nofit", "ch06",
+                      "ch06_label"]
+PHASE_CONFIGS = ["ch08_L8", "ch08_old", "ch06"]     # the per-phase pass
 HEADLINE = "ch08_L8"
 # per-round ratios a / b (< 1: a is faster)
 PAIRS = {
+    "new_over_old": ("ch08_L8", "ch08_old"),
+    "new_mask_over_old_mask": ("ch08_L8_mask", "ch08_old_mask"),
+    "new_label_over_old_label": ("ch08_L8_label", "ch08_old_label"),
+    "old_over_ch06": ("ch08_old", "ch06"),
+    "old_label_over_ch06_label": ("ch08_old_label", "ch06_label"),
+    "old_mask_over_ch06_mask": ("ch08_old_mask", "ch06_mask"),
+    "nocomp_over_new": ("ch08_new_nocomp", "ch08_L8"),
+    "k3only_over_old": ("ch08_new_k3only", "ch08_old"),
+    "hybk3_over_new": ("ch08_new_hybk3", "ch08_L8"),
+    "nofit_over_new": ("ch08_new_nofit", "ch08_L8"),
     "L8_over_ch06": ("ch08_L8", "ch06"),
     "L8_over_ch06_tp": ("ch08_L8", "ch06_tp"),
     "L8_over_ch06_m512": ("ch08_L8", "ch06_m512"),
@@ -174,6 +219,7 @@ PAIRS = {
     "voff_over_L8": ("ch08_L8_voff", "ch08_L8"),
 }
 CROP_SIDES = (1000, 1500, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000)
+DENSE_CROP_SIDES = (1000, 1500, 2000)
 
 
 # ------------------------------------------------------------ helpers
@@ -335,26 +381,37 @@ def _ch05_call(img):
 
 # ------------------------------------------------------------- scenes
 
+def _ekey(cfg):
+    """A ch08 config's engine: (lookup, sorted engine kwargs)."""
+    _, _, _, _, lk, kw = CONFIGS[cfg]
+    return (lk, tuple(sorted((k, v) for k, v in kw.items()
+                             if k != "lookup")))
+
+
+def _engine(width, height, key, **extra):
+    return ff.TileWaves(width, height, pack_variant=PACK_VARIANT,
+                        lookup=key[0], **dict(key[1]), **extra)
+
+
 def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
                 run_ch05=False, e2e=True, group="main"):
     width, height = img.shape[0], img.shape[1]
     t_scene0 = time.time()
     d_pristine = cuda.to_device(img)
     d_img = cuda.device_array_like(img)
-    lookups = sorted({CONFIGS[c][4] for c in cfg_names
-                      if CONFIGS[c][0] == "ch08"})
-    engs = {lk: ff.TileWaves(width, height, pack_variant=PACK_VARIANT,
-                             lookup=lk) for lk in lookups}
-    eng = engs[LOOKUP]
+    keys = sorted({_ekey(c) for c in cfg_names if CONFIGS[c][0] == "ch08"},
+                  key=repr)
+    engs = {ky: _engine(width, height, ky) for ky in keys}
+    eng = engs[_ekey(HEADLINE)]
     n_runs_host = _host_run_count(img)
     side6 = Ch06Side(width, height, max(8192, int(n_runs_host * 1.05)))
     phase_cfgs = [c for c in PHASE_CONFIGS if c in cfg_names]
     has_ch06 = any(CONFIGS[c][0].startswith("ch06") for c in cfg_names)
 
     def stages_of(cfg):
-        side, contract, lat, valve, lk = CONFIGS[cfg]
+        side, contract, lat, valve, lk, _ = CONFIGS[cfg]
         if side == "ch08":
-            return engs[lk].stages(
+            return engs[_ekey(cfg)].stages(
                 d_img, "rgb" if contract == "rgb" else "mask", lattice=lat,
                 valve_round=valve, paint=contract != "label")
         return side6.stages(d_img, side, contract)
@@ -362,11 +419,11 @@ def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
     def prepare(cfg):
         """Restore, pack off the clock if the contract says so, flush,
         sync, queue the sleep kernel."""
-        side, contract, lat, valve, lk = CONFIGS[cfg]
+        side, contract, lat, valve, lk, _ = CONFIGS[cfg]
         d_img.copy_to_device(d_pristine)
         if contract in ("mask", "label"):
             if side == "ch08":
-                engs[lk].pack(d_img)
+                engs[_ekey(cfg)].pack(d_img)
             else:
                 side6.pack(d_img)
         _l2_flush[512, 256](flush, sink)
@@ -394,14 +451,13 @@ def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
         if cfg.startswith("ch06"):
             check[cfg] = check[cfg] and (side6.counters()["runs"]
                                          == n_runs_host)
-    engis = {lk: ff.TileWaves(width, height, instrumented=True,
-                              pack_variant=PACK_VARIANT, lookup=lk)
-             for lk in lookups}
+    engis = {ky: _engine(width, height, ky, instrumented=True)
+             for ky in keys}
     for cfg in cfg_names:
-        side, contract, lat, valve, lk = CONFIGS[cfg]
+        side, contract, lat, valve, lk, _ = CONFIGS[cfg]
         if side != "ch08" or contract == "label":
             continue
-        engi = engis[lk]
+        engi = engis[_ekey(cfg)]
         d_img.copy_to_device(d_pristine)
         if contract == "mask":
             engi.pack(d_img)
@@ -550,7 +606,7 @@ def bench_scene(name, img, note, cfg_names, sampler, flush, sink,
     line = f"{name:16s} "
     for cfg in cfg_names:
         line += f"{cfg.replace('ch08_', '')} {row[f'{cfg}_ms']:.3f} "
-    for key in ("L8_over_ch06", "label_over_ch06_label"):
+    for key in ("new_over_old", "L8_over_ch06", "label_over_ch06_label"):
         if f"ratio_{key}_median" in row:
             line += f"| {key} {row[f'ratio_{key}_median']:.3f} "
     if row.get("ch05_ms"):
@@ -663,7 +719,15 @@ def main():
                     help="worst-case scenes to run (default: all)")
     ap.add_argument("--no-ch05", action="store_true")
     ap.add_argument("--no-save", action="store_true")
+    ap.add_argument("--session", choices=("full", "dense"), default="full",
+                    help="dense: old vs new ch08 (the dense-tile path), "
+                         "the ablations, ch06 in every contract and ch05")
     args = ap.parse_args()
+    dense = args.session == "dense"
+    main_cfgs = DENSE_CONFIGS if dense else MAIN_CONFIGS
+    worst_cfgs = DENSE_CONFIGS if dense else WORST_CONFIGS
+    crop_cfgs = DENSE_CROP_CONFIGS if dense else CROP_CONFIGS
+    crop_sides = DENSE_CROP_SIDES if dense else CROP_SIDES
 
     pngs = _resolve_pngs(args.images)
     md5 = {n: _md5(p) for n, p in pngs.items()}
@@ -682,6 +746,8 @@ def main():
     for inst in (False, True):
         for lk in ff.LOOKUPS:
             ff._warmup(8, inst, False, "auto", True, PACK_VARIANT, lk)
+        ff._warmup(8, inst, False, "auto", True, PACK_VARIANT,
+                   OLD["lookup"], dense=False)
     ch06_warmup()
     warm = S5.random_blobs_scene(96, 96, 0.3, 1)[0]
     side = Ch06Side(96, 96, 8192)
@@ -708,6 +774,11 @@ def main():
                                                        lk),
             "waves_coop_max_blocks_256_instrumented": ff.max_blocks(
                 256, 8, True, False, lk)}
+    resources["old_path"] = {
+        "bare": ff.kernel_resources(8, False, False, lookup=OLD["lookup"],
+                                    dense=False),
+        "waves_coop_max_blocks_256": ff.max_blocks(256, 8, False, False,
+                                                   OLD["lookup"])}
     print(f"  resources: {resources}")
 
     sampler = ClockSampler()
@@ -727,10 +798,19 @@ def main():
     print(f"  clocks: {clocks_start}")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    json_path = os.path.join(RESULTS_DIR, f"waves_{stamp}.json")
+    prefix = "dense" if dense else "waves"
+    json_path = os.path.join(RESULTS_DIR, f"{prefix}_{stamp}.json")
     payload = {
         "device": dev_name.strip(), "sm_count": sm_count,
+        "session": args.session,
         "experiment": (
+            "ch08's dense-tile path (K2b run CCL, K4b, the dindex K3 with "
+            "task compaction) vs the old path (OLD_PATH) in every "
+            "contract, three ablations, ch06 run CCL in every contract at "
+            "its best merge grid (and with ch08's pack) and ch05 split_L8, "
+            "one interleaved session; totals with two events, phases in a "
+            "separate pass, ch06's merge grid swept per scene"
+            if dense else
             "ch08 seeded waves over tile components vs ch06 run CCL (rgb, "
             "mask, labelling only, ch06 with ch08's pack, ch06 at its "
             "shipped merge grid) and ch05 split_L8, one interleaved "
@@ -738,7 +818,8 @@ def main():
             "ch06's merge grid swept per scene"),
         "headline_config": HEADLINE,
         "configs": {k: dict(zip(("side", "contract", "lattice",
-                                 "valve_round", "lookup"), v))
+                                 "valve_round", "lookup", "engine_kwargs"),
+                                v))
                     for k, v in CONFIGS.items()},
         "ch08_defaults": {"label_grid": ff.LABEL_GRID,
                           "label_max_registers": ff.LABEL_MAX_REGISTERS,
@@ -750,7 +831,17 @@ def main():
                           "valve_round": VALVE,
                           "lattice": ff.DEFAULT_LATTICE,
                           "pack_variant": PACK_VARIANT,
-                          "coll_capacity": "16 * n_tiles"},
+                          "coll_capacity": "16 * n_tiles",
+                          "dense": ff.DEFAULT_DENSE,
+                          "ccl_min": ff.DEFAULT_CCL_MIN,
+                          "ccl_rpc": ff.DEFAULT_CCL_RPC,
+                          "paint_ccl_min": ff.DEFAULT_PAINT_CCL_MIN,
+                          "paint_rpc": ff.DEFAULT_PAINT_RPC,
+                          "waves_compact": ff.DEFAULT_COMPACT,
+                          "flat_opt": ff.DEFAULT_FLAT_OPT,
+                          "waves_coop": ff.DEFAULT_COOP,
+                          "fit_grids": ff.DEFAULT_FIT_GRIDS},
+        "old_path": OLD,
         "ch06_launch": {"phase_blocks": dict(CH06_PHASE_BLOCKS),
                         "merge_sweep": list(MERGE_SWEEP),
                         "merge": "per scene: the sweep's fastest bare "
@@ -805,7 +896,7 @@ def main():
              if args.scenes is None or s[0] in args.scenes]
     for name, build, note, ch05 in mains:
         img = build()
-        rows.append(bench_scene(name, img, note, MAIN_CONFIGS, sampler,
+        rows.append(bench_scene(name, img, note, main_cfgs, sampler,
                                 flush, sink, run_ch05=ch05 and not
                                 args.no_ch05))
         del img
@@ -815,14 +906,14 @@ def main():
     if not args.no_crops:
         print("\ncrop sweep of input_blobs")
         full = S5.png_scene(pngs["input_blobs"])[0]
-        for side_px in CROP_SIDES:
+        for side_px in crop_sides:
             c0 = (full.shape[0] - side_px) // 2
             c1 = (full.shape[1] - side_px) // 2
             crop = np.ascontiguousarray(full[c0:c0 + side_px,
                                              c1:c1 + side_px])
             rows.append(bench_scene(f"crop_{side_px}", crop,
                                     f"centred {side_px}^2 crop of "
-                                    f"input_blobs", CROP_CONFIGS, sampler,
+                                    f"input_blobs", crop_cfgs, sampler,
                                     flush, sink, e2e=False, group="crop"))
             del crop
             gc.collect()
@@ -836,7 +927,7 @@ def main():
             if args.worst is not None and name not in args.worst:
                 continue
             img = build()
-            rows.append(bench_scene(name, img, note, WORST_CONFIGS, sampler,
+            rows.append(bench_scene(name, img, note, worst_cfgs, sampler,
                                     flush, sink, run_ch05=not args.no_ch05,
                                     e2e=False, group="worst"))
             del img
