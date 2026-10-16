@@ -1,0 +1,3 @@
+scene,ch08_comps,ch06_runs,ch08_labelling_mcycles,ch06_labelling_mcycles,labelling_ratio_ch08_over_ch06,ch08_labelling_warp_inst_M,ch06_labelling_warp_inst_M,ch08_warp_inst_per_comp,ch06_warp_inst_per_run,ch08_paint_mcycles,ch06_paint_mcycles,paint_ratio_ch08_over_ch06,ch08_paint_warp_inst_M,ch06_paint_warp_inst_M,ch08_pack_mcycles,ch06_pack_mcycles
+random_4000,907448,3361514,6.489,4.106,1.58,384.34,166.06,423.5,49.4,7.0448,7.1275,0.99,469.548,496.982,0.453,0.6552
+dots_4k,4194304,4194304,14.138,2.864,4.94,896.94,34.02,213.8,8.1,17.9939,8.7124,2.07,1223.973,619.947,0.4679,0.5516

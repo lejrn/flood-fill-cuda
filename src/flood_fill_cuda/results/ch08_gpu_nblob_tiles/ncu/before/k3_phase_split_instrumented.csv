@@ -1,0 +1,5 @@
+scene,rounds,frontier_comps,pct_rounds,pct_union,pct_flatten,instrumented_total_us
+input_blobs,6,11586/14744/7834/2306/289/6,76.1,8.2,15.8,188.4
+random_4000,4,131698/104493/4139/36,82.7,1.8,15.5,1106.9
+dots_4k,0,,0.0,2.2,97.8,282.6
+zz_lattice_4k,2,534812/441056,85.4,1.4,13.1,9140.2

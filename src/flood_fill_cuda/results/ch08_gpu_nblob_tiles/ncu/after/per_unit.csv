@@ -1,0 +1,5 @@
+scene,tiles_touched,comps,ccl_tiles,ccl_runs,ccl_unions,indexed_tiles,paint_ccl_tiles,paint_uniform,paint_reclosed_tiles,K3_rounds,K3_tasks,K3_dense_tasks,K3_ksteps,K3_sig_tests,K3_cas,K3_claims,K3_rmin_atomics,labelling_warp_inst_per_comp_before,labelling_warp_inst_per_comp_after,paint_warp_inst_per_comp_before,paint_warp_inst_per_comp_after,K2b_warp_inst_per_ccl_tile,K2b_warp_inst_per_run,K4b_warp_inst_per_tile,K3_warp_inst_per_task_before,K3_warp_inst_per_task_after,K3_warp_inst_per_ring_comp_after
+input_blobs,28276,36863,0,0,0,0,0,27534,674,6,136764,739,15082,170995,145044,25179,2141,826.9,865.3,888.3,890.4,,,,49.9,44.6,165.8
+random_4000,15625,907448,15625,3405989,2498541,15625,15625,0,0,4,260258,260258,28342,308152,308152,108668,17662,365.6,77.8,517.4,113.5,4189.7,19.22,6419.5,201.9,42.6,33.9
+dots_4k,16384,4194304,16384,4194304,0,16384,16384,0,0,0,0,0,0,0,0,0,0,213.5,7.2,291.8,14.5,1504.5,5.88,3545.2,,,2.6
+zz_lattice_4k,16384,975868,16384,1008126,32258,16384,0,16384,0,2,1072642,1072642,114849,2048002,2048002,441056,0,242.8,38.1,24.4,24.4,1939.1,31.51,,297.7,43.5,47.8

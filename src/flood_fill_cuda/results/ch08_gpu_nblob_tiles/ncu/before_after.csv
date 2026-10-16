@@ -1,0 +1,21 @@
+scene,stage,mcycles_before,mcycles_after,cycles_after_over_before,warp_inst_M_before,warp_inst_M_after,inst_after_over_before
+input_blobs,labelling (K2 + K2b),0.606,0.548,0.905,30.482,31.898,1.046
+input_blobs,waves (K3),0.255,0.266,1.041,6.819,6.099,0.894
+input_blobs,paint (K4 + K4b),0.996,0.932,0.936,32.745,32.823,1.002
+input_blobs,pack (K1),2.234,2.107,0.943,114.302,114.302,1.0
+input_blobs,pipeline (sum of kernels),4.094,3.856,0.942,184.348,185.122,1.004
+random_4000,labelling (K2 + K2b),5.215,1.885,0.361,331.806,70.604,0.213
+random_4000,waves (K3),1.271,0.554,0.436,52.534,11.087,0.211
+random_4000,paint (K4 + K4b),7.045,1.769,0.251,469.548,103.038,0.219
+random_4000,pack (K1),0.453,0.434,0.959,22.459,22.459,1.0
+random_4000,pipeline (sum of kernels),13.987,4.646,0.332,876.347,207.188,0.236
+dots_4k,labelling (K2 + K2b),13.646,1.091,0.08,895.415,30.028,0.034
+dots_4k,waves (K3),0.488,0.222,0.455,1.524,1.313,0.862
+dots_4k,paint (K4 + K4b),17.994,1.258,0.07,1223.973,60.939,0.05
+dots_4k,pack (K1),0.468,0.458,0.978,23.544,23.544,1.0
+dots_4k,pipeline (sum of kernels),32.599,3.032,0.093,2144.456,115.824,0.054
+zz_lattice_4k,labelling (K2 + K2b),3.592,0.986,0.275,236.948,37.15,0.157
+zz_lattice_4k,waves (K3),8.877,2.294,0.258,319.315,46.624,0.146
+zz_lattice_4k,paint (K4 + K4b),0.505,0.422,0.834,23.81,23.851,1.002
+zz_lattice_4k,pack (K1),0.462,0.448,0.969,23.544,23.544,1.0
+zz_lattice_4k,pipeline (sum of kernels),13.439,4.154,0.309,603.617,131.169,0.217

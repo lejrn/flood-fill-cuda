@@ -1,0 +1,5 @@
+scene,red_px,tiles_touched,comps,ring_comps,one_px_comps,comps_per_touched_tile,close_iters,K2_warp_inst_per_comp,K2_warp_inst_per_close_iter,K2_sm_cycles_per_comp,K4_warp_inst_per_comp,K4_warp_inst_per_red_px,K4_reclosed_tiles,K4_reclose_iters,K3_rounds,K3_tasks,K3_dense_tasks,K3_sig_tests,K3_cas,K3_claims,K3_collisions,K3_rmin_atomics,K3_roots,K3_warp_inst_per_task,K3_warp_inst_per_ring_comp,K2_dram_bytes_per_touched_tile,K3_dram_bytes_per_touched_tile,K4_dram_bytes_per_touched_tile
+input_blobs,13451960,28276,36863,36788,3092,1.3,76355,826.9,399.2,394.3,888.3,2.4,674,3552,6,136764,739,170995,144967,25179,31227,34341,2447,49.9,185.4,746,321,2926
+random_4000,4802736,15625,907448,327000,344411,58.08,1786223,365.6,185.8,137.9,517.4,97.8,15625,1786223,4,260258,260258,5488683,308152,108668,44163,151871,175129,201.9,160.7,1751,2253,8833
+dots_4k,4194304,16384,4194304,507904,4194304,256.0,4194304,213.5,213.5,78.1,291.8,291.8,16384,4194304,0,0,0,0,0,0,0,0,507904,,3.0,2419,2891,6893
+zz_lattice_4k,1008126,16384,975868,975868,943610,59.56,975868,242.8,242.8,88.3,24.4,23.6,0,0,2,1072642,1072642,64009006,2048002,441056,568866,975867,1,297.7,327.2,2510,16475,5003

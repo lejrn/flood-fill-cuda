@@ -1,0 +1,103 @@
+scene,kernel,region,pct_stall_samples,pct_warp_inst,warp_inst_per_unit,unit
+dots_4k,K2 label,closure (_close_exits),67.2,68.4,145.9,comp
+dots_4k,K2 label,_first_pixel,8.4,8.0,17.0,comp
+dots_4k,K2 label,interior branch / loop back-edge,7.6,3.3,7.0,comp
+dots_4k,K2 label,_is_ring,5.6,5.6,12.0,comp
+dots_4k,K2 label,anchor arithmetic,4.0,8.9,19.0,comp
+dots_4k,K2 label,comp loop test (any_sync),3.2,2.4,5.0,comp
+dots_4k,K2 label,_flush: records + seeds + queue,1.7,1.2,2.5,comp
+dots_4k,K2 label,ring comp: side words + ordinal,1.4,1.4,2.9,comp
+dots_4k,K2 label,tile setup + prefetch + facing loads,0.6,0.5,1.0,comp
+dots_4k,K2 label,rem / counts,0.1,0.5,1.0,comp
+dots_4k,K2 label,other,0.0,0.0,0.0,comp
+dots_4k,K2 label,frame + header + counters,0.0,0.0,0.1,comp
+dots_4k,K2 label,= closure warp inst per closure iteration,,,145.9,iteration
+dots_4k,K2 label,= non-closure warp inst per comp,,,67.5,comp
+dots_4k,K3 waves,flatten 1 (find + rmin atomicMin),65.4,59.8,1.6,ring comp
+dots_4k,K3 waves,flatten 2 (canonical label),33.5,33.8,0.9,ring comp
+dots_4k,K3 waves,counters,0.5,3.1,0.1,ring comp
+dots_4k,K3 waves,setup,0.3,1.4,0.0,ring comp
+dots_4k,K3 waves,union pass,0.3,1.7,0.0,ring comp
+dots_4k,K3 waves,round: task decode + own side word,0.1,0.3,0.0,ring comp
+dots_4k,K3 waves,round: sparse scan k-steps,0.0,0.0,0.0,ring comp
+dots_4k,K3 waves,round: dense path (whole warp),0.0,0.0,0.0,ring comp
+dots_4k,K3 waves,grid.sync + round bookkeeping + valve,0.0,0.0,0.0,ring comp
+dots_4k,K4 paint,closure (_close),54.3,49.7,144.9,comp
+dots_4k,K4 paint,_paint_rgb (3 byte stores per px),15.9,18.5,54.0,comp
+dots_4k,K4 paint,_is_ring + ring label shuffle,8.0,5.9,17.3,comp
+dots_4k,K4 paint,colour (lab % 6),7.6,8.2,24.0,comp
+dots_4k,K4 paint,_first_pixel,5.6,6.2,18.0,comp
+dots_4k,K4 paint,comp loop test (any_sync),3.6,2.1,6.0,comp
+dots_4k,K4 paint,anchor arithmetic,3.2,6.5,19.0,comp
+dots_4k,K4 paint,tile setup + labels,1.4,2.9,8.5,comp
+dots_4k,K4 paint,fast paths (uniform + single interior),0.2,0.0,0.0,comp
+dots_4k,K4 paint,= closure warp inst per closure iteration,,,144.9,iteration
+dots_4k,K4 paint,= non-closure warp inst per comp,,,146.9,comp
+random_4000,K2 label,closure (_close_exits),77.6,78.0,285.2,comp
+random_4000,K2 label,_first_pixel,5.0,4.9,18.0,comp
+random_4000,K2 label,interior branch / loop back-edge,4.4,1.9,7.1,comp
+random_4000,K2 label,_is_ring,3.3,3.3,12.0,comp
+random_4000,K2 label,anchor arithmetic,2.3,5.2,19.0,comp
+random_4000,K2 label,ring comp: side words + ordinal,1.9,2.4,8.6,comp
+random_4000,K2 label,tile setup + prefetch + facing loads,1.9,1.3,4.6,comp
+random_4000,K2 label,comp loop test (any_sync),1.9,1.4,5.1,comp
+random_4000,K2 label,_flush: records + seeds + queue,1.6,1.3,4.7,comp
+random_4000,K2 label,frame + header + counters,0.1,0.1,0.3,comp
+random_4000,K2 label,rem / counts,0.1,0.3,1.0,comp
+random_4000,K2 label,other,0.1,0.0,0.1,comp
+random_4000,K2 label,= closure warp inst per closure iteration,,,144.9,iteration
+random_4000,K2 label,= non-closure warp inst per comp,,,80.4,comp
+random_4000,K3 waves,round: dense path (whole warp),66.3,72.0,143.2,task
+random_4000,K3 waves,round: task decode + own side word,12.0,18.7,37.2,task
+random_4000,K3 waves,flatten 1 (find + rmin atomicMin),8.9,2.2,4.4,task
+random_4000,K3 waves,flatten 2 (canonical label),7.3,0.8,1.5,task
+random_4000,K3 waves,setup,2.1,4.0,8.0,task
+random_4000,K3 waves,union pass,1.6,0.4,0.9,task
+random_4000,K3 waves,round: sparse scan k-steps,1.5,1.6,3.2,task
+random_4000,K3 waves,counters,0.2,0.1,0.2,task
+random_4000,K3 waves,grid.sync + round bookkeeping + valve,0.1,0.1,0.2,task
+random_4000,K4 paint,closure (_close),61.1,54.7,283.2,comp
+random_4000,K4 paint,_paint_rgb (3 byte stores per px),19.7,23.3,120.5,comp
+random_4000,K4 paint,_is_ring + ring label shuffle,5.0,3.9,20.0,comp
+random_4000,K4 paint,colour (lab % 6),4.2,4.6,24.0,comp
+random_4000,K4 paint,_first_pixel,3.3,3.9,19.9,comp
+random_4000,K4 paint,tile setup + labels,2.5,4.7,24.5,comp
+random_4000,K4 paint,comp loop test (any_sync),2.2,1.2,6.1,comp
+random_4000,K4 paint,anchor arithmetic,1.8,3.7,19.0,comp
+random_4000,K4 paint,fast paths (uniform + single interior),0.1,0.0,0.1,comp
+random_4000,K4 paint,= closure warp inst per closure iteration,,,143.9,iteration
+random_4000,K4 paint,= non-closure warp inst per comp,,,234.2,comp
+zz_lattice_4k,K2 label,closure (_close_exits),60.6,60.0,145.8,comp
+zz_lattice_4k,K2 label,_first_pixel,7.6,7.0,17.0,comp
+zz_lattice_4k,K2 label,ring comp: side words + ordinal,7.3,9.9,24.0,comp
+zz_lattice_4k,K2 label,interior branch / loop back-edge,6.9,2.9,7.1,comp
+zz_lattice_4k,K2 label,_is_ring,5.1,4.9,12.0,comp
+zz_lattice_4k,K2 label,anchor arithmetic,3.6,7.8,19.0,comp
+zz_lattice_4k,K2 label,_flush: records + seeds + queue,3.3,2.9,7.1,comp
+zz_lattice_4k,K2 label,comp loop test (any_sync),2.9,2.1,5.1,comp
+zz_lattice_4k,K2 label,tile setup + prefetch + facing loads,2.3,1.8,4.5,comp
+zz_lattice_4k,K2 label,other,0.3,0.1,0.1,comp
+zz_lattice_4k,K2 label,rem / counts,0.1,0.4,1.0,comp
+zz_lattice_4k,K2 label,frame + header + counters,0.1,0.1,0.2,comp
+zz_lattice_4k,K2 label,= closure warp inst per closure iteration,,,145.8,iteration
+zz_lattice_4k,K2 label,= non-closure warp inst per comp,,,97.0,comp
+zz_lattice_4k,K3 waves,round: dense path (whole warp),69.0,81.2,243.4,task
+zz_lattice_4k,K3 waves,flatten 1 (find + rmin atomicMin),15.0,1.0,3.0,task
+zz_lattice_4k,K3 waves,round: task decode + own side word,7.3,12.1,36.2,task
+zz_lattice_4k,K3 waves,flatten 2 (canonical label),4.0,0.3,0.8,task
+zz_lattice_4k,K3 waves,setup,2.4,3.7,11.2,task
+zz_lattice_4k,K3 waves,union pass,1.3,0.7,2.0,task
+zz_lattice_4k,K3 waves,round: sparse scan k-steps,0.9,1.1,3.2,task
+zz_lattice_4k,K3 waves,counters,0.0,0.0,0.0,task
+zz_lattice_4k,K3 waves,grid.sync + round bookkeeping + valve,0.0,0.0,0.0,task
+zz_lattice_4k,K4 paint,fast paths (uniform + single interior),90.3,91.4,22.3,comp
+zz_lattice_4k,K4 paint,tile setup + labels,9.2,8.5,2.1,comp
+zz_lattice_4k,K4 paint,comp loop test (any_sync),0.6,0.1,0.0,comp
+zz_lattice_4k,K4 paint,_first_pixel,0.0,0.0,0.0,comp
+zz_lattice_4k,K4 paint,anchor arithmetic,0.0,0.0,0.0,comp
+zz_lattice_4k,K4 paint,closure (_close),0.0,0.0,0.0,comp
+zz_lattice_4k,K4 paint,_is_ring + ring label shuffle,0.0,0.0,0.0,comp
+zz_lattice_4k,K4 paint,colour (lab % 6),0.0,0.0,0.0,comp
+zz_lattice_4k,K4 paint,_paint_rgb (3 byte stores per px),0.0,0.0,0.0,comp
+zz_lattice_4k,K4 paint,= closure warp inst per closure iteration,,,,iteration
+zz_lattice_4k,K4 paint,= non-closure warp inst per comp,,,24.4,comp

@@ -1,0 +1,92 @@
+scene,kernel,line,code,pct_stall_samples,pct_warp_inst,threads_per_warp_inst,top_stalls
+dots_4k,K2 label,664,"f, it, last = _close_exits(f, rem, lane, conn8, exits)",67.2,68.4,32.0,wait 25%; not_selected 22%
+dots_4k,K2 label,662,"f, a, bit = _first_pixel(rem, lane)",8.4,8.0,32.0,short_sb 34%; wait 33%
+dots_4k,K2 label,727,c_int += 1,7.6,3.3,32.0,branch_resolving 32%; wait 20%
+dots_4k,K2 label,671,"if _is_ring(f, lane):",5.6,5.6,19.0,wait 43%; branch_resolving 15%
+dots_4k,K2 label,663,anchor = int32((x0 + a) * height + ty * 32 + bit),4.0,8.9,32.0,not_selected 28%; selected 27%
+dots_4k,K2 label,661,"while cuda.any_sync(FULL, rem != U0):",3.2,2.4,32.0,wait 50%; not_selected 16%
+dots_4k,K2 label,717,"s, sl, q, ap = _flush(",1.6,0.9,32.0,branch_resolving 45%; wait 28%
+dots_4k,K3 waves,1079,"root = _find(parent, lab)",62.2,18.1,32.0,long_sb 99%; wait 0%
+dots_4k,K3 waves,1100,rec[w + R_LABEL] = rec[uint32(REC * root + R_RMIN)],28.9,5.2,32.0,long_sb 98%; lg 1%
+dots_4k,K3 waves,1094,for kk in range(nr):,2.8,14.6,32.0,long_sb 94%; selected 3%
+dots_4k,K3 waves,1082,c_roots += 1,1.6,2.4,32.0,long_sb 95%; branch_resolving 3%
+dots_4k,K3 waves,1096,root = rec[w + R_LABEL],1.5,8.8,32.0,long_sb 73%; lg 18%
+dots_4k,K3 waves,1072,cid = IDS_PER_TILE * tt + kk,0.5,3.6,32.0,branch_resolving 83%; misc 6%
+dots_4k,K3 waves,1071,for kk in range(nr):,0.4,13.7,32.0,wait 57%; selected 25%
+dots_4k,K3 waves,1074,lab = rec[w + R_LABEL],0.2,9.6,32.0,wait 35%; branch_resolving 24%
+dots_4k,K3 waves,1092,"for tt in range(tid, n_tiles, stride):",0.1,2.5,32.0,long_sb 36%; wait 27%
+dots_4k,K3 waves,1081,if root == cid:,0.1,4.8,32.0,wait 80%; branch_resolving 20%
+dots_4k,K3 waves,1061,"for j in range(tid, n_coll, stride):",0.1,1.2,32.0,no_inst 40%; math 20%
+dots_4k,K3 waves,1069,"for tt in range(tid, n_tiles, stride):",0.1,3.2,32.0,wait 44%; math 22%
+dots_4k,K3 waves,1095,w = uint32(REC * (IDS_PER_TILE * tt + kk)),0.1,2.4,32.0,wait 62%; selected 38%
+dots_4k,K3 waves,1080,rec[w + R_LABEL] = root,0.0,2.4,32.0,lg 33%; mio 33%
+dots_4k,K4 paint,1282,"f, it, last = _close(f, rem, lane, conn8)",54.3,49.7,32.0,not_selected 30%; math 26%
+dots_4k,K4 paint,1300,"n = _paint_rgb(f, x0, y, lane, img, palette[col, 0],",15.3,17.8,18.9,wait 32%; not_selected 20%
+dots_4k,K4 paint,1299,col = lab % N_PALETTE,7.6,8.2,32.0,not_selected 30%; wait 25%
+dots_4k,K4 paint,1287,"if _is_ring(f, lane):",6.5,5.1,21.6,wait 36%; not_selected 20%
+dots_4k,K4 paint,1280,"f, a, bit = _first_pixel(rem, lane)",5.6,6.2,32.0,wait 30%; short_sb 29%
+dots_4k,K4 paint,1279,"while cuda.any_sync(FULL, rem != U0):",3.6,2.1,32.0,wait 29%; not_selected 29%
+dots_4k,K4 paint,1281,anchor = int32((x0 + a) * height + ty * 32 + bit),3.2,6.5,32.0,not_selected 34%; math 29%
+dots_4k,K4 paint,1234,y = ty * 32 + lane,0.8,2.7,1.1,wait 40%; selected 32%
+random_4000,K2 label,664,"f, it, last = _close_exits(f, rem, lane, conn8, exits)",77.6,78.0,32.0,wait 25%; not_selected 22%
+random_4000,K2 label,662,"f, a, bit = _first_pixel(rem, lane)",5.0,4.9,32.0,wait 34%; short_sb 34%
+random_4000,K2 label,727,c_int += 1,4.4,1.9,32.0,branch_resolving 33%; wait 20%
+random_4000,K2 label,671,"if _is_ring(f, lane):",3.3,3.3,19.6,wait 45%; branch_resolving 14%
+random_4000,K2 label,663,anchor = int32((x0 + a) * height + ty * 32 + bit),2.3,5.2,32.0,selected 28%; not_selected 27%
+random_4000,K2 label,661,"while cuda.any_sync(FULL, rem != U0):",1.9,1.4,32.0,wait 51%; not_selected 14%
+random_4000,K2 label,717,"s, sl, q, ap = _flush(",1.0,0.6,32.0,branch_resolving 41%; wait 29%
+random_4000,K3 waves,1005,"_claim(hit, c2, d2, labl, sl, lane, rec,",33.4,36.2,22.1,long_sb 36%; wait 25%
+random_4000,K3 waves,1001,hit = uint32(s2 & wl) != U0,11.0,0.5,21.1,long_sb 98%; not_selected 1%
+random_4000,K3 waves,1100,rec[w + R_LABEL] = rec[uint32(REC * root + R_RMIN)],6.4,0.1,23.2,long_sb 99%; wait 1%
+random_4000,K3 waves,1079,"root = _find(parent, lab)",6.0,1.0,12.2,long_sb 95%; wait 2%
+random_4000,K3 waves,994,while base < n2l:              # uniform,5.2,7.0,32.0,wait 35%; branch_resolving 29%
+random_4000,K3 waves,981,"while cuda.any_sync(FULL, pend):",2.7,2.6,32.0,wait 58%; no_inst 12%
+random_4000,K3 waves,984,ld = int32(cuda.ffs(bal) - 1),2.4,2.0,32.0,short_sb 41%; wait 35%
+random_4000,K3 waves,999,if kk < n2l:,2.3,3.0,32.0,wait 37%; branch_resolving 21%
+random_4000,K3 waves,886,n2 = hdr[uint32(t2)] & HDR_RING_MASK,2.3,1.3,6.5,long_sb 77%; wait 8%
+random_4000,K3 waves,867,valid = valid and ((dirs >> d) & 1) != 0,2.2,0.7,32.0,long_sb 91%; wait 2%
+random_4000,K3 waves,1000,s2 = uint32(rec[uint32(REC * c2 + fsl)]),1.6,3.5,18.2,wait 43%; selected 20%
+random_4000,K3 waves,1003,d2 = rec[uint32(REC * c2 + R_DIRS)],1.6,5.0,1.2,wait 31%; not_selected 23%
+random_4000,K3 waves,872,fs = (FACING >> (2 * d)) & 3,0.9,3.0,32.0,wait 36%; selected 24%
+random_4000,K3 waves,824,lane = cuda.laneid,0.3,2.3,32.0,selected 57%; wait 31%
+random_4000,K4 paint,1282,"f, it, last = _close(f, rem, lane, conn8)",61.1,54.7,32.0,not_selected 30%; math 25%
+random_4000,K4 paint,1300,"n = _paint_rgb(f, x0, y, lane, img, palette[col, 0],",19.4,22.9,16.3,wait 32%; not_selected 17%
+random_4000,K4 paint,1299,col = lab % N_PALETTE,4.2,4.6,32.0,not_selected 29%; wait 28%
+random_4000,K4 paint,1287,"if _is_ring(f, lane):",3.6,2.9,22.1,wait 38%; not_selected 19%
+random_4000,K4 paint,1280,"f, a, bit = _first_pixel(rem, lane)",3.3,3.9,32.0,wait 30%; short_sb 30%
+random_4000,K4 paint,1279,"while cuda.any_sync(FULL, rem != U0):",2.2,1.2,32.0,wait 29%; not_selected 27%
+random_4000,K4 paint,1281,anchor = int32((x0 + a) * height + ty * 32 + bit),1.8,3.7,32.0,not_selected 34%; math 28%
+random_4000,K4 paint,1234,y = ty * 32 + lane,1.3,4.3,2.0,wait 40%; selected 32%
+zz_lattice_4k,K2 label,664,"f, it, last = _close_exits(f, rem, lane, conn8, exits)",60.6,60.0,32.0,wait 24%; not_selected 22%
+zz_lattice_4k,K2 label,662,"f, a, bit = _first_pixel(rem, lane)",7.6,7.0,32.0,short_sb 34%; wait 32%
+zz_lattice_4k,K2 label,727,c_int += 1,6.9,2.9,32.0,branch_resolving 32%; wait 19%
+zz_lattice_4k,K2 label,671,"if _is_ring(f, lane):",5.1,4.9,19.0,wait 42%; branch_resolving 15%
+zz_lattice_4k,K2 label,663,anchor = int32((x0 + a) * height + ty * 32 + bit),3.6,7.8,32.0,not_selected 28%; selected 27%
+zz_lattice_4k,K2 label,661,"while cuda.any_sync(FULL, rem != U0):",2.9,2.1,32.0,wait 48%; not_selected 17%
+zz_lattice_4k,K2 label,717,"s, sl, q, ap = _flush(",2.4,1.8,29.9,wait 28%; branch_resolving 27%
+zz_lattice_4k,K2 label,709,if lane == (b & 31):,2.0,3.3,32.0,not_selected 28%; wait 28%
+zz_lattice_4k,K2 label,676,"sE = uint32(cuda.ballot_sync(FULL, (f >> S31) != U0))",1.8,0.8,32.0,wait 52%; math 22%
+zz_lattice_4k,K2 label,675,"sW = uint32(cuda.ballot_sync(FULL, (f & U1) != U0))",1.3,1.6,32.0,math 33%; not_selected 29%
+zz_lattice_4k,K2 label,729,"s, sl, q, ap = _flush(",0.9,1.0,28.4,wait 27%; long_sb 23%
+zz_lattice_4k,K2 label,715,b += 1,0.3,1.2,32.0,selected 48%; wait 38%
+zz_lattice_4k,K3 waves,1005,"_claim(hit, c2, d2, labl, sl, lane, rec,",39.0,45.7,22.4,long_sb 35%; wait 27%
+zz_lattice_4k,K3 waves,1001,hit = uint32(s2 & wl) != U0,11.7,0.7,29.7,long_sb 98%; not_selected 1%
+zz_lattice_4k,K3 waves,1079,"root = _find(parent, lab)",11.4,0.6,21.9,long_sb 99%; wait 1%
+zz_lattice_4k,K3 waves,994,while base < n2l:              # uniform,4.5,8.0,30.8,wait 37%; branch_resolving 26%
+zz_lattice_4k,K3 waves,1100,rec[w + R_LABEL] = rec[uint32(REC * root + R_RMIN)],3.8,0.0,31.3,long_sb 100%; wait 0%
+zz_lattice_4k,K3 waves,999,if kk < n2l:,2.9,4.4,29.1,wait 36%; branch_resolving 27%
+zz_lattice_4k,K3 waves,1084,"cuda.atomic.min(rec, uint32(REC * root + R_RMIN),",2.4,0.1,31.9,long_sb 99%; wait 0%
+zz_lattice_4k,K3 waves,844,rear = q_state[Q_SEEDS]         # final: written by K2's launch,1.9,1.5,19.5,branch_resolving 79%; selected 10%
+zz_lattice_4k,K3 waves,981,"while cuda.any_sync(FULL, pend):",1.7,1.7,32.0,wait 57%; no_inst 16%
+zz_lattice_4k,K3 waves,1000,s2 = uint32(rec[uint32(REC * c2 + fsl)]),1.7,4.4,27.5,wait 52%; selected 19%
+zz_lattice_4k,K3 waves,867,valid = valid and ((dirs >> d) & 1) != 0,1.6,0.5,32.0,long_sb 93%; wait 2%
+zz_lattice_4k,K3 waves,1003,d2 = rec[uint32(REC * c2 + R_DIRS)],1.1,3.4,1.9,wait 36%; selected 26%
+zz_lattice_4k,K3 waves,872,fs = (FACING >> (2 * d)) & 3,0.6,2.0,32.0,wait 33%; selected 27%
+zz_lattice_4k,K3 waves,824,lane = cuda.laneid,0.5,2.0,30.9,no_inst 32%; selected 26%
+zz_lattice_4k,K4 paint,1258,"n = _paint_rgb(m, x0, y, lane, img, palette[col, 0],",67.6,84.4,14.0,wait 23%; short_sb 21%
+zz_lattice_4k,K4 paint,1248,bits = int32(1) << (lab0 % N_PALETTE),17.7,1.9,32.0,long_sb 96%; wait 1%
+zz_lattice_4k,K4 paint,1223,if h == 0:,4.9,0.6,32.0,long_sb 97%; wait 1%
+zz_lattice_4k,K4 paint,1251,"bits |= cuda.shfl_xor_sync(FULL, bits, 16)",1.1,0.4,32.0,short_sb 40%; mio 35%
+zz_lattice_4k,K4 paint,1227,tx = int32(uint32(t) // uint32(wpr)),1.0,1.4,32.0,wait 38%; not_selected 20%
+zz_lattice_4k,K4 paint,1250,bits |= int32(1) << (lab1 % N_PALETTE),0.7,1.9,26.7,wait 41%; selected 18%
+zz_lattice_4k,K4 paint,1221,"for t in range(warp, n_tiles, n_warps):",0.5,1.6,32.0,wait 25%; selected 21%

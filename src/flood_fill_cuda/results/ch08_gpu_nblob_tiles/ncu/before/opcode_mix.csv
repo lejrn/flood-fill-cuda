@@ -1,0 +1,117 @@
+scene,kernel,family,pct_warp_inst,warp_inst_per_unit,unit,threads_per_warp_inst,pct_stall_samples
+input_blobs,K2 label,int arith/compare,43.3,358.3,comp,29.1,40.4
+input_blobs,K2 label,bit (lop3/shf/popc/flo/brev),30.3,250.53,comp,30.7,31.6
+input_blobs,K2 label,branch/control,13.0,107.11,comp,29.4,14.3
+input_blobs,K2 label,shfl,6.3,51.85,comp,32.0,4.7
+input_blobs,K2 label,mov/const,2.1,17.41,comp,31.8,1.9
+input_blobs,K2 label,vote/match,1.7,13.82,comp,31.5,3.9
+input_blobs,K2 label,other,1.5,12.67,comp,32.0,1.6
+input_blobs,K2 label,global store,1.2,9.74,comp,3.7,1.0
+input_blobs,K2 label,global load,0.6,5.23,comp,23.5,0.6
+input_blobs,K2 label,atomic/red,0.0,0.23,comp,1.0,0.1
+input_blobs,K4 paint,int arith/compare,45.8,406.55,comp,24.0,26.4
+input_blobs,K4 paint,bit (lop3/shf/popc/flo/brev),22.9,203.2,comp,27.6,35.0
+input_blobs,K4 paint,branch/control,16.2,144.09,comp,29.1,13.4
+input_blobs,K4 paint,global store,5.9,52.4,comp,20.9,14.2
+input_blobs,K4 paint,shfl,3.1,27.3,comp,32.0,7.4
+input_blobs,K4 paint,mov/const,3.1,27.23,comp,24.9,0.5
+input_blobs,K4 paint,other,2.5,21.89,comp,32.0,0.4
+input_blobs,K4 paint,global load,0.5,4.46,comp,32.0,2.7
+input_blobs,K4 paint,vote/match,0.1,1.15,comp,32.0,0.1
+input_blobs,K3 waves,int arith/compare,43.9,20.47,task,19.1,38.1
+input_blobs,K3 waves,bit (lop3/shf/popc/flo/brev),21.0,9.82,task,20.3,36.8
+input_blobs,K3 waves,branch/control,18.4,8.61,task,24.9,9.6
+input_blobs,K3 waves,mov/const,8.9,4.16,task,19.3,2.4
+input_blobs,K3 waves,global load,2.7,1.25,task,15.8,1.2
+input_blobs,K3 waves,vote/match,1.5,0.71,task,29.1,3.1
+input_blobs,K3 waves,global store,1.3,0.63,task,8.3,1.8
+input_blobs,K3 waves,other,1.0,0.47,task,30.5,0.6
+input_blobs,K3 waves,atomic/red,0.7,0.31,task,5.3,2.0
+input_blobs,K3 waves,shfl,0.5,0.25,task,32.0,4.4
+random_4000,K2 label,bit (lop3/shf/popc/flo/brev),41.1,150.19,comp,31.6,46.4
+random_4000,K2 label,int arith/compare,30.0,109.56,comp,31.3,32.0
+random_4000,K2 label,shfl,12.3,45.11,comp,32.0,7.4
+random_4000,K2 label,branch/control,12.3,45.01,comp,31.2,7.6
+random_4000,K2 label,vote/match,2.1,7.74,comp,31.9,5.4
+random_4000,K2 label,other,2.0,7.33,comp,32.0,1.0
+random_4000,K2 label,mov/const,0.1,0.37,comp,28.5,0.1
+random_4000,K2 label,global store,0.1,0.22,comp,18.9,0.0
+random_4000,K2 label,global load,0.0,0.09,comp,20.4,0.0
+random_4000,K2 label,atomic/red,0.0,0.02,comp,1.0,0.0
+random_4000,K4 paint,int arith/compare,35.5,183.77,comp,23.9,34.5
+random_4000,K4 paint,bit (lop3/shf/popc/flo/brev),35.3,182.64,comp,28.0,43.6
+random_4000,K4 paint,branch/control,13.2,68.16,comp,30.2,8.4
+random_4000,K4 paint,shfl,9.2,47.43,comp,32.0,5.9
+random_4000,K4 paint,other,2.7,14.07,comp,32.0,1.1
+random_4000,K4 paint,global store,1.6,8.39,comp,1.9,0.9
+random_4000,K4 paint,vote/match,1.5,7.94,comp,32.0,4.8
+random_4000,K4 paint,mov/const,1.0,4.98,comp,15.1,0.8
+random_4000,K4 paint,global load,0.0,0.07,comp,32.0,0.0
+random_4000,K3 waves,int arith/compare,33.0,65.83,task,21.1,36.7
+random_4000,K3 waves,bit (lop3/shf/popc/flo/brev),26.2,52.32,task,23.6,30.4
+random_4000,K3 waves,branch/control,20.9,41.77,task,28.2,14.0
+random_4000,K3 waves,mov/const,9.3,18.64,task,23.2,1.9
+random_4000,K3 waves,shfl,3.3,6.56,task,32.0,5.6
+random_4000,K3 waves,vote/match,2.3,4.62,task,31.0,3.7
+random_4000,K3 waves,global load,1.8,3.58,task,15.4,1.2
+random_4000,K3 waves,other,1.5,3.06,task,31.8,1.1
+random_4000,K3 waves,global store,0.8,1.61,task,3.5,3.2
+random_4000,K3 waves,atomic/red,0.8,1.57,task,1.6,2.2
+dots_4k,K2 label,bit (lop3/shf/popc/flo/brev),41.1,87.84,comp,31.3,47.6
+dots_4k,K2 label,int arith/compare,29.1,62.18,comp,30.9,29.2
+dots_4k,K2 label,branch/control,14.4,30.68,comp,30.9,9.1
+dots_4k,K2 label,shfl,10.9,23.26,comp,32.0,6.7
+dots_4k,K2 label,vote/match,2.5,5.26,comp,32.0,6.2
+dots_4k,K2 label,other,1.9,4.14,comp,32.0,1.0
+dots_4k,K2 label,mov/const,0.0,0.07,comp,28.2,0.0
+dots_4k,K2 label,global store,0.0,0.04,comp,31.1,0.0
+dots_4k,K2 label,global load,0.0,0.02,comp,20.4,0.0
+dots_4k,K2 label,atomic/red,0.0,0.0,comp,1.0,0.0
+dots_4k,K4 paint,int arith/compare,36.3,105.83,comp,26.4,34.6
+dots_4k,K4 paint,bit (lop3/shf/popc/flo/brev),33.9,99.05,comp,28.9,41.2
+dots_4k,K4 paint,branch/control,14.3,41.65,comp,30.5,9.0
+dots_4k,K4 paint,shfl,8.3,24.11,comp,32.0,5.2
+dots_4k,K4 paint,other,3.1,9.12,comp,32.0,1.6
+dots_4k,K4 paint,vote/match,2.1,6.0,comp,32.0,6.4
+dots_4k,K4 paint,mov/const,1.0,3.04,comp,21.8,1.3
+dots_4k,K4 paint,global store,1.0,3.0,comp,1.0,0.6
+dots_4k,K4 paint,global load,0.0,0.02,comp,32.0,0.0
+dots_4k,K3 waves,int arith/compare,64.2,869760.0,task,31.9,85.9
+dots_4k,K3 waves,branch/control,12.5,169025.0,task,31.5,0.5
+dots_4k,K3 waves,bit (lop3/shf/popc/flo/brev),9.1,123840.0,task,32.0,0.3
+dots_4k,K3 waves,global load,5.2,70848.0,task,32.0,0.7
+dots_4k,K3 waves,mov/const,5.0,67075.0,task,29.7,0.5
+dots_4k,K3 waves,global store,2.7,36929.0,task,32.0,11.9
+dots_4k,K3 waves,shfl,0.9,11520.0,task,32.0,0.2
+dots_4k,K3 waves,other,0.3,4480.0,task,32.0,0.1
+dots_4k,K3 waves,atomic/red,0.0,512.0,task,1.0,0.0
+zz_lattice_4k,K2 label,bit (lop3/shf/popc/flo/brev),38.5,93.55,comp,31.3,44.2
+zz_lattice_4k,K2 label,int arith/compare,31.1,75.61,comp,30.9,31.3
+zz_lattice_4k,K2 label,branch/control,14.5,35.28,comp,30.9,9.1
+zz_lattice_4k,K2 label,shfl,10.4,25.2,comp,32.0,6.9
+zz_lattice_4k,K2 label,vote/match,2.9,7.15,comp,31.9,6.8
+zz_lattice_4k,K2 label,other,2.1,5.1,comp,32.0,1.3
+zz_lattice_4k,K2 label,global store,0.2,0.42,comp,26.6,0.1
+zz_lattice_4k,K2 label,mov/const,0.2,0.38,comp,31.9,0.2
+zz_lattice_4k,K2 label,global load,0.0,0.08,comp,20.4,0.0
+zz_lattice_4k,K2 label,atomic/red,0.0,0.03,comp,1.0,0.0
+zz_lattice_4k,K4 paint,int arith/compare,45.0,10.99,comp,11.4,26.1
+zz_lattice_4k,K4 paint,bit (lop3/shf/popc/flo/brev),22.8,5.55,comp,20.4,39.2
+zz_lattice_4k,K4 paint,branch/control,16.9,4.13,comp,27.7,13.0
+zz_lattice_4k,K4 paint,global store,6.6,1.6,comp,1.9,12.3
+zz_lattice_4k,K4 paint,mov/const,3.0,0.72,comp,9.8,0.6
+zz_lattice_4k,K4 paint,shfl,2.9,0.7,comp,32.0,6.8
+zz_lattice_4k,K4 paint,other,2.5,0.62,comp,32.0,0.6
+zz_lattice_4k,K4 paint,global load,0.3,0.07,comp,32.0,1.3
+zz_lattice_4k,K4 paint,vote/match,0.1,0.02,comp,32.0,0.1
+zz_lattice_4k,K3 waves,int arith/compare,33.8,101.39,task,21.2,41.4
+zz_lattice_4k,K3 waves,bit (lop3/shf/popc/flo/brev),24.1,72.34,task,25.6,27.7
+zz_lattice_4k,K3 waves,branch/control,23.5,70.6,task,27.6,14.9
+zz_lattice_4k,K3 waves,mov/const,9.3,28.02,task,23.6,2.4
+zz_lattice_4k,K3 waves,vote/match,2.3,6.87,task,30.1,3.3
+zz_lattice_4k,K3 waves,shfl,2.3,6.76,task,32.0,4.6
+zz_lattice_4k,K3 waves,global load,1.8,5.33,task,17.7,1.0
+zz_lattice_4k,K3 waves,other,1.7,5.01,task,32.0,0.9
+zz_lattice_4k,K3 waves,atomic/red,0.7,2.04,task,2.0,2.8
+zz_lattice_4k,K3 waves,global store,0.5,1.61,task,2.8,1.1
+zz_lattice_4k,K3 waves,warpsync/bar,0.0,0.02,task,16.0,0.0
