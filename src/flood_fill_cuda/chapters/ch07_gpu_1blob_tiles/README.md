@@ -794,9 +794,9 @@ us at 1 x 32 in session `114440Z`, 2.41 here. `ncu` counts 3,048 cycles
 for it (1.47 us at 2,070 MHz). Quote the cycles, or the scenes.
 
 **Clocks.** The SM clock's median was 2,070 MHz in every timed window.
-Seven windows dipped to 930-1,620 MHz in their first 10-33%, the first
-round or two. Every config ran through those rounds, so the paired
-ratios carry them.
+Eight windows dipped to 930-1,620 MHz. In each, the last dip fell in
+the first 9-33% of the window, about the first one to three rounds.
+Every config ran through those rounds, so the paired ratios carry them.
 
 The memory clock's median was 8,001 MHz in eight scenes, 7,001 in three
 (`sq_2000_center`, the disk, the lattice) and 5,501 on the thin strip.
