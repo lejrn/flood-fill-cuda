@@ -311,6 +311,23 @@ def chunk_bounds(n, nch, c):
     return n * c // nch, n * (c + 1) // nch
 
 
+# chunk stamps are one byte (1..255)
+MAX_CHUNKS = 255
+
+
+@njit(cache=True)
+def chunks_per_round(n_threads):
+    """The most chunks a parallel loop is cut into: ONE PER THREAD.
+    Numba's OpenMP layer schedules a prange statically: thread k runs
+    one contiguous block of the iterations (a chunk size or OMP_SCHEDULE
+    does not change that here). More chunks than threads would only be
+    run back to back by the same threads, and a count that is not a
+    multiple of the threads would give some threads one chunk more than
+    the rest (17 chunks on 16 threads: thread 0 does twice the work).
+    MAX_CHUNKS bounds the stamps (one byte)."""
+    return min(MAX_CHUNKS, max(n_threads, 1))
+
+
 # ------------------------------------------------------------- pixel BFS
 #
 # ch03 on the CPU: a level-synchronous BFS. The frontier is an array of
@@ -358,7 +375,6 @@ def chunk_bounds(n, nch, c):
 # in one level only (the barrier makes the level's stores visible to
 # the next), so stamps can be reused from level to level.
 
-MAX_CHUNKS = 255
 
 # neighbour orders as the oracles (ch01's 4-conn, shared/'s 8-conn)
 DX4 = np.array([1, 0, -1, 0], dtype=np.int64)
@@ -408,15 +424,15 @@ def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
     """Level-synchronous BFS from (seed_x, seed_y), a red pixel; visited
     must be all 0. Levels with fewer than serial_below entries run on
     the calling thread (a prange costs a fork and a barrier); larger
-    ones use up to 4 chunks per thread (n_threads: numba's current
-    setting, passed in so the function can be cached), at least
-    min_chunk entries each.
+    ones use one chunk per thread (n_threads: numba's current setting,
+    passed in so the function can be cached), at least min_chunk
+    entries each.
 
     Returns (levels, filled, duplicates, peak frontier, parallel levels,
-    front, raw): front and raw may have been grown."""
+    peak chunks, front, raw): front and raw may have been grown."""
     height = img.shape[1]
     k = 8 if conn8 else 4
-    max_chunks = min(MAX_CHUNKS, 4 * max(n_threads, 1))
+    max_chunks = chunks_per_round(n_threads)
     counts = np.zeros(max_chunks, np.int64)
     expd = np.zeros(max_chunks, np.int64)
     drop = np.zeros(max_chunks, np.int64)
@@ -429,6 +445,7 @@ def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
     dups = 0
     peak = 0
     par_levels = 0
+    peak_nch = 1
     while n > 0:
         levels += 1
         if n > peak:
@@ -438,6 +455,8 @@ def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
             nch = max_chunks
         if n < serial_below or nch < 2:
             nch = 1
+        if nch > peak_nch:
+            peak_nch = nch
         if raw.size < k * n:
             raw = np.empty(2 * k * n, np.int64)
         if nch == 1:
@@ -474,7 +493,7 @@ def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
                 for j in range(counts[c]):
                     front[dst + j] = raw[src + j]
         n = total
-    return levels, filled, dups, peak, par_levels, front, raw
+    return levels, filled, dups, peak, par_levels, peak_nch, front, raw
 
 
 # ---------------------------------------------------------------- tiles
@@ -797,9 +816,10 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
              serial_below, n_threads):
     """Rounds of the tile BFS from (seed_x, seed_y), a red pixel, on
     reset state. A round with fewer than serial_below tiles runs on the
-    calling thread. Returns (rounds, peak frontier, parallel rounds,
+    calling thread; a larger one is cut into one chunk per thread.
+    Returns (rounds, peak frontier, parallel rounds, peak chunks,
     counters summed over chunks: visits, idle visits, passes, sends)."""
-    max_chunks = min(MAX_CHUNKS, 4 * max(n_threads, 1))
+    max_chunks = chunks_per_round(n_threads)
     counts = np.zeros(max_chunks, np.int64)
     st = np.zeros((max_chunks, N_TS), np.int64)
     t0 = (seed_x >> 6) * wpr + (seed_y >> 6)
@@ -814,6 +834,7 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
     rounds = 0
     peak = 0
     par = 0
+    peak_nch = 1
     while n > 0:
         rounds += 1
         if n > peak:
@@ -822,6 +843,8 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
         nch = min(max_chunks, n)
         if n < serial_below:
             nch = 1
+        if nch > peak_nch:
+            peak_nch = nch
         if nch == 1:
             counts[0] = _visit_tiles(front, 0, n, out, 0, tw, wpr, mask, colm,
                                      reach, inbox, cur, known, sent, tdirty,
@@ -851,7 +874,7 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
     for c in range(max_chunks):
         for k in range(N_TS):
             tot[k] += st[c, k]
-    return rounds, peak, par, tot
+    return rounds, peak, par, peak_nch, tot
 
 
 # ------------------------------------------------------------ tile labels
@@ -1097,7 +1120,7 @@ def label_pieces(mask, colm, wpr, tw, width, height, conn8, lattice, n_ring,
                  n_int, n_seed, anchor, lab, claimer, dirs, fmap, n_threads):
     """The pieces pass over every tile, chunks of tiles in parallel."""
     n_tiles = mask.shape[0]
-    nch = min(n_tiles, 4 * max(n_threads, 1))
+    nch = min(n_tiles, chunks_per_round(n_threads))
     for c in prange(nch):
         rem = np.empty(TILE, np.uint64)
         f = np.empty(TILE, np.uint64)
@@ -1314,10 +1337,12 @@ def _gather(c, n, nch, cpe, mpe, cc, rc, mc, co, mo, ca, cw, ra, rw, ma, mb,
 def label_waves(ent_a, ent_w, n, lab, claimer, dirs, fmap, wpr, conn8,
                 meet_a, meet_b, claims_per_entry, meets_per_entry,
                 serial_below, n_threads):
-    """The waves from the n round-1 entries until no piece is claimed.
-    Returns (rounds, peak frontier, parallel rounds, meetings, counters,
-    meet_a, meet_b): the meeting arrays may have been grown."""
-    max_chunks = min(MAX_CHUNKS, 4 * max(n_threads, 1))
+    """The waves from the n round-1 entries until no piece is claimed;
+    a round of serial_below entries or more is cut into one chunk per
+    thread. Returns (rounds, peak frontier, parallel rounds, peak
+    chunks, meetings, counters, meet_a, meet_b): the meeting arrays may
+    have been grown."""
+    max_chunks = chunks_per_round(n_threads)
     st = np.zeros((max_chunks, N_LS), np.int64)
     cc = np.zeros(max_chunks, np.int64)
     rc = np.zeros(max_chunks, np.int64)
@@ -1328,6 +1353,7 @@ def label_waves(ent_a, ent_w, n, lab, claimer, dirs, fmap, wpr, conn8,
     rounds = 0
     peak = 0
     par = 0
+    peak_nch = 1
     cpe = claims_per_entry
     mpe = meets_per_entry
     while n > 0:
@@ -1337,6 +1363,8 @@ def label_waves(ent_a, ent_w, n, lab, claimer, dirs, fmap, wpr, conn8,
         nch = min(max_chunks, n)
         if n < serial_below:
             nch = 1
+        if nch > peak_nch:
+            peak_nch = nch
         ca = np.empty(cpe * n + MAX_ADJ * nch, np.int64)
         cw = np.empty(cpe * n + MAX_ADJ * nch, np.int64)
         ra = np.empty(n, np.int64)
@@ -1398,7 +1426,7 @@ def label_waves(ent_a, ent_w, n, lab, claimer, dirs, fmap, wpr, conn8,
     for c in range(max_chunks):
         for k in range(N_LS):
             tots[k] += st[c, k]
-    return rounds, peak, par, n_meet, tots, meet_a, meet_b
+    return rounds, peak, par, peak_nch, n_meet, tots, meet_a, meet_b
 
 
 @njit(cache=True)
@@ -1514,7 +1542,7 @@ def paint_labels(img, labmap, to_img, mask, wpr, conn8, n_ring, n_int, lab,
     it. Returns the number of tiles painted from their mask alone."""
     n_tiles = mask.shape[0]
     height = img.shape[1] if to_img else labmap.shape[1]
-    nch = min(n_tiles, 4 * max(n_threads, 1))
+    nch = min(n_tiles, chunks_per_round(n_threads))
     uni = np.zeros(nch, np.int64)
     for c in prange(nch):
         rem = np.empty(TILE, np.uint64)

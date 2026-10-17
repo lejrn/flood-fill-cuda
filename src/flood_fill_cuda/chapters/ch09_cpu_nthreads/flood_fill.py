@@ -38,8 +38,9 @@ from . import kernels as K
 CONNECTIVITIES = (4, 8)
 
 # pixel BFS: a level below SERIAL_BELOW entries runs on the calling
-# thread; above it, chunks of at least MIN_CHUNK entries (up to four per
-# thread). Untuned defaults, recorded by the benchmark.
+# thread; above it, chunks of at least MIN_CHUNK entries (at most one
+# per thread: kernels.chunks_per_round). Untuned defaults, recorded by
+# the benchmark.
 PIXEL_SERIAL_BELOW = 1024
 PIXEL_MIN_CHUNK = 256
 FRONT_START = 1 << 16
@@ -144,7 +145,7 @@ class PixelBFS:
         sx, sy = check_seed(img, seed_x, seed_y)
         with num_threads(self.threads) as nt:
             K.reset_u8(self._visited)
-            (levels, filled, dups, peak, par, self._front,
+            (levels, filled, dups, peak, par, pch, self._front,
              self._raw) = K.pixel_bfs(img, self._visited, sx, sy,
                                       self.connectivity == 8, self._front,
                                       self._raw, self.min_chunk,
@@ -153,7 +154,8 @@ class PixelBFS:
                 K.paint_visited(img, self._visited)
         return {"levels": int(levels), "filled": int(filled),
                 "duplicates": int(dups), "peak_frontier": int(peak),
-                "parallel_levels": int(par), "threads": int(nt)}
+                "parallel_levels": int(par), "peak_chunks": int(pch),
+                "threads": int(nt)}
 
     def visited(self):
         """bool (W, H): the reached set of the last run (off clock)."""
@@ -204,7 +206,7 @@ class TileBFS:
             K.tile_columns(self.mask, self.colm)
             K.reset_tile_state(self.reach, self.inbox, self.known, self.sent,
                                self.tdirty, self.tlo, self.thi, self.queued)
-            rounds, peak, par, tot = K.tile_bfs(
+            rounds, peak, par, pch, tot = K.tile_bfs(
                 self.mask, self.colm, self.reach, self.inbox, self.known,
                 self.sent, self.tdirty, self.tlo, self.thi, self.queued,
                 self.front, self.out, self.connectivity == 8, self.tiles_x,
@@ -212,7 +214,7 @@ class TileBFS:
             if paint:
                 K.paint_tiles(img, self.reach, self.wpr)
         return {"rounds": int(rounds), "peak_round_tiles": int(peak),
-                "parallel_rounds": int(par),
+                "parallel_rounds": int(par), "peak_chunks": int(pch),
                 "tile_visits": int(tot[K.TS_VISITS]),
                 "idle_visits": int(tot[K.TS_IDLE]),
                 "closure_passes": int(tot[K.TS_PASSES]),
@@ -310,7 +312,7 @@ class TileLabels:
             K.assign_seeds(self.n_ring, self.seed_off, self.lab, self.anchor,
                            self.seed_slot, self.seed_anchor, self.parent,
                            self.ent_a, self.ent_w)
-            (rounds, peak, par, n_meet, tots, self.meet_a,
+            (rounds, peak, par, pch, n_meet, tots, self.meet_a,
              self.meet_b) = K.label_waves(
                 self.ent_a, self.ent_w, n_seeds, self.lab, self.claimer,
                 self.dirs, self.fmap, self.wpr, conn8, self.meet_a,
@@ -328,6 +330,7 @@ class TileLabels:
         self.n_blobs = int(roots + n_int)
         return {"n_blobs": self.n_blobs, "rounds": int(rounds),
                 "peak_round_entries": int(peak), "parallel_rounds": int(par),
+                "peak_chunks": int(pch),
                 "seeds": int(n_seeds), "ring_pieces": int(self.n_ring.sum()),
                 "interior_pieces": int(n_int), "meetings": int(n_meet),
                 "expanded": int(tots[K.LS_EXPANDED]),

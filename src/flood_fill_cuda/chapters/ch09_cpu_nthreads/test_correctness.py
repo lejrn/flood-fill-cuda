@@ -27,6 +27,7 @@ from pathlib import Path
 import numba
 import numpy as np
 import pytest
+from numba import njit, prange
 
 from . import kernels as K
 from . import flood_fill as ff
@@ -344,9 +345,10 @@ def test_fill_matches_oracle(name, method, connectivity, threads):
 @pytest.mark.parametrize("name", ["full_red_512", "noise_0.62_big",
                                   "disk_400"])
 def test_pixel_bfs_forced_races(name, connectivity):
-    """Every level split into as many chunks as allowed (serial_below=1,
-    min_chunk=1, 16 threads): races between chunks are as frequent as
-    they get, and the output must not move."""
+    """Every level of two entries or more split into one chunk per
+    thread (serial_below=1, min_chunk=1, 16 threads): races happen at
+    the 15 boundaries between the threads' chunks, and the output must
+    not move."""
     img, sx, sy = {
         "full_red_512": lambda: scenes.full_red_scene(512, 512),
         "noise_0.62_big": lambda: _noise(500, 400, 0.62, 9),
@@ -368,6 +370,51 @@ def test_pixel_bfs_forced_races(name, connectivity):
         assert st["parallel_levels"] > 0
         # duplicates never multiply: at most one copy per racing chunk
         assert st["duplicates"] < want_filled
+
+
+@njit(parallel=True)
+def _who_runs(n):
+    out = np.empty(n, np.int64)
+    for i in prange(n):
+        out[i] = numba.get_thread_id()
+    return out
+
+
+def test_prange_schedule_is_static_and_contiguous():
+    """Why every ch09 loop has one chunk per thread: the OpenMP layer
+    gives thread k ONE contiguous block of a prange's iterations, so
+    four chunks per thread are one big chunk plus bookkeeping, and a
+    chunk count that is not a multiple of the threads gives some
+    threads one chunk more than the rest."""
+    with ff.num_threads(16):
+        got = _who_runs(64)
+    if numba.threading_layer() != "omp":
+        pytest.skip("the static schedule is the OpenMP layer's")
+    assert list(got) == [k for k in range(16) for _ in range(4)]
+    with ff.num_threads(16):
+        got = _who_runs(17)
+    assert list(got) == [0, 0] + list(range(1, 16))
+
+
+@pytest.mark.parametrize("threads", [2, 16])
+def test_one_chunk_per_thread(threads):
+    """Every parallel level, round and wave round is cut into at most
+    one chunk per thread, and the big ones into exactly one."""
+    img, _, _ = scenes.full_red_scene(512, 512)
+    eng = ff.PixelBFS(512, 512, threads=threads, serial_below=1, min_chunk=1)
+    st = eng.run(img.copy(), 256, 256)
+    assert st["peak_chunks"] == threads
+    eng = ff.TileBFS(512, 512, threads=threads, serial_below=1)
+    st = eng.run(img.copy(), 256, 256)
+    assert st["peak_round_tiles"] >= threads
+    assert st["peak_chunks"] == threads
+    noise = noise_img(400, 300, 0.45, 21)
+    st = ff.TileLabels(400, 300, threads=threads, serial_below=1).run(noise)
+    assert st["peak_round_entries"] >= threads
+    assert st["peak_chunks"] == threads
+    for Eng in (ff.PixelBFS, ff.TileBFS):
+        st = Eng(512, 512, threads=1, serial_below=1).run(img.copy(), 0, 0)
+        assert st["peak_chunks"] == 1
 
 
 def test_pixel_bfs_repeatable_and_reusable():
