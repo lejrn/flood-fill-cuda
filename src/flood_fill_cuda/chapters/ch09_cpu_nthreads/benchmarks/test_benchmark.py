@@ -290,3 +290,38 @@ def test_session_names_the_gpu(monkeypatch):
                    "temperature_c": 41, "power_w": 3.2}
     monkeypatch.setattr(B, "_smi", lambda q: None)
     assert B.gpu_clocks() == {}
+
+
+def _cell(ms, rounds=2, **meta):
+    return {"ms": ms, "round_medians": [ms] * rounds, **meta}
+
+
+def test_each_variant_is_paired_with_its_own_gpu_chapter():
+    """Same work, same idea: the pixel BFS against ch03's pixel BFS at
+    the same connectivity, the tile BFS against ch07, the labels against
+    ch08's first version. Every factor names its GPU cell, and the
+    factors against the other GPU cells are kept apart."""
+    row = {"connectivities": [8, 4], "cells": {
+        "ch09_pixel_t1_c8": _cell(400.0), "ch09_pixel_t16_c8": _cell(200.0),
+        "ch09_tile_t1_c8": _cell(100.0), "ch09_tile_t16_c8": _cell(31.0),
+        "one_fill_paint_c8": _cell(1400.0), "one_fill_c8": _cell(1390.0)},
+        "gpu": {"ch07_c8": {"ms": 3.1, "connectivity": 8},
+                "ch03_conn8": {"ms": 96.9, "connectivity": 8},
+                "ch03_wc_bare": {"ms": 70.9, "connectivity": 8},
+                "ch07_c4": {"ms": 3.3, "connectivity": 4},
+                "ch03_conn4": {"ms": 133.3, "connectivity": 4}}}
+    sm = B.summarize(row, "one", [1, 16])
+    px, tl = sm["pixel_c8"][16], sm["tile_c8"][16]
+    assert px["gpu_cell"] == "ch03_conn8"
+    assert px["gpu_x"] == pytest.approx(200.0 / 96.9)
+    assert px["gpu_x_other"] == {"ch07_c8": pytest.approx(200.0 / 3.1),
+                                 "ch03_wc_bare": pytest.approx(200 / 70.9)}
+    assert tl["gpu_cell"] == "ch07_c8"
+    assert tl["gpu_x"] == pytest.approx(31.0 / 3.1)
+    many = {"connectivities": [8], "cells": {
+        "ch09_labels_t16": _cell(20.0), "one_label_paint": _cell(300.0)},
+        "gpu": {"ch08_old": {"ms": 2.2, "connectivity": 8},
+                "ch08": {"ms": 1.9, "connectivity": 8}}}
+    lb = B.summarize(many, "many", [16])["labels"][16]
+    assert lb["gpu_cell"] == "ch08_old"
+    assert lb["gpu_x_other"] == {"ch08": pytest.approx(20.0 / 1.9)}

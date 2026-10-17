@@ -45,9 +45,17 @@ CPU cells (many blobs):
 GPU cells (CUDA events, the image restored and L2 flushed off the
 clock, bench_v5's gap before every timed launch):
 
-  ch07_conn{4,8}   ch07's default TileFill (one_sync + tile_paint),
-                   bare, 128 threads per block, at its own grid
-  ch08_old         ch08's first version (flood_fill.OLD_PATH), rgb
+  ch03_conn{4,8}   ch03's level-synchronous pixel BFS (ch07's benchmark
+                   configs, bench_v5's twins): the same idea as ch09's
+                   pixel BFS. Its visited reset, seed and kernel are on
+                   the clock (kernel_only: the kernel alone, bench_v5's
+                   clock); the depth, owner and stats resets are not
+  ch03_wc_bare     ch03's uninstrumented warp kernel, 8-conn: reference
+  ch07_c{4,8}      ch07's default TileFill (one_sync + tile_paint),
+                   bare, 128 threads per block, at its own grid: the
+                   same idea as ch09's tile BFS
+  ch08_old         ch08's first version (flood_fill.OLD_PATH), rgb: the
+                   same idea as ch09's tile labels (no dense-tile path)
   ch08             ch08's default engine (the dense-tile path), rgb
 
 Policy:
@@ -108,7 +116,11 @@ Policy:
                   MAX_ATTEMPTS, with more light load between runs)
   stats           medians, min, max, stdev, every sample; per-round
                   medians; speedups and CPU-vs-GPU factors with their
-                  range over the CPU rounds
+                  range over the CPU rounds. gpu_x is against the GPU
+                  cell with the same idea (gpu_cell: pixel - ch03_conn
+                  {c}, tile - ch07_c{c}, labels - ch08_old); gpu_x_other
+                  against every other GPU cell of that connectivity,
+                  kept apart
 
 Checks (every CPU output): EVERY timed call of a CPU cell is checked
 right after it, off the clock and on one thread (a check must not wake
@@ -214,6 +226,10 @@ EVENT_REASONS = {0x1: "gpu_idle", 0x2: "app_clocks", 0x4: "sw_power_cap",
                  0x8: "hw_slowdown", 0x10: "sync_boost",
                  0x20: "sw_thermal", 0x40: "hw_thermal",
                  0x80: "hw_power_brake", 0x100: "display_clock"}
+
+# the GPU cell with the same idea as each ch09 variant
+SAME_IDEA_GPU = {"pixel": "ch03_conn{conn}", "tile": "ch07_c{conn}",
+                 "labels": "ch08_old"}
 
 # which one-core cell is each ch09 / GPU cell's like-for-like twin
 TWIN_FULL = {"one": "one_fill_paint", "many": "one_label_paint"}
@@ -1301,16 +1317,19 @@ def gpu_clocks():
 
 
 class Gpu:
-    """The GPU side: ch07's and ch08's engines, the L2 flush, the gap."""
+    """The GPU side: ch03's, ch07's and ch08's engines, the L2 flush, the
+    gap."""
 
     def __init__(self):
         from numba import cuda
+        from ...ch03_gpu_1blob_nblock import flood_fill as ff3
         from ...ch07_gpu_1blob_tiles import flood_fill as ff7
         from ...ch07_gpu_1blob_tiles.kernels import gpu_sleep_kernel
-        from ...ch07_gpu_1blob_tiles.benchmarks.benchmark import _l2_flush
+        from ...ch07_gpu_1blob_tiles.benchmarks import benchmark as b7
         from ...ch08_gpu_nblob_tiles import flood_fill as ff8
-        self.cuda, self.ff7, self.ff8 = cuda, ff7, ff8
-        self.sleep, self.l2 = gpu_sleep_kernel, _l2_flush
+        self.cuda, self.ff3, self.ff7, self.ff8 = cuda, ff3, ff7, ff8
+        self.b7 = b7
+        self.sleep, self.l2 = gpu_sleep_kernel, b7._l2_flush
         self.flush = cuda.to_device(np.zeros(L2_FLUSH_BYTES // 4, np.uint32))
         self.sink = cuda.device_array(1, np.uint32)
         dev = cuda.get_current_device()
@@ -1339,6 +1358,16 @@ class Gpu:
             self.gap()
             self.cuda.synchronize()
 
+    def ch03_launch(self, key):
+        """ch03's kernel and grid for one of ch07's benchmark configs
+        (bench_v5's: blocks None = the kernel's cooperative maximum)."""
+        layout, conn, bare, tpb, blocks, _ = self.b7.CH03[key]
+        cap = self.ff3.max_blocks(threads_per_block=tpb, bare=bare,
+                                  connectivity=conn, probe_layout=layout)
+        return {"kernel": self.b7._ch03_kernel(layout, conn, bare),
+                "layout": layout, "conn": conn, "bare": bare, "tpb": tpb,
+                "blocks": cap if blocks is None else blocks}
+
     def full_clocks(self, w):
         return bool(w.get("clk_samples") and w["clk_pstates"] == ["P0"]
                     and w["clk_mem_min"] >= self.mem_full_mhz
@@ -1348,15 +1377,35 @@ class Gpu:
 
 class GpuCell:
     """One GPU config on one image: restore (off the clock), the gap,
-    then the timed pipeline between CUDA events."""
+    then the timed pipeline between CUDA events.
 
-    def __init__(self, gpu, key, img, seed=None, conn=8, ch08_kw=None):
+    ch03 (runner, launch): ch03's pixel BFS on ch07's benchmark runner.
+    Its timed span is the visited reset, the seed and the kernel (the
+    painted image needs no more; the depth, owner and stats resets run
+    between them, off the clock), like ch07's and ch09's on-clock
+    resets; last_kernel_ms keeps the kernel alone (bench_v5's clock).
+    The ch03 cells of a scene share one runner: its counters belong to
+    the last ch03 run, so they are checked right after a cell's own
+    untimed run; each cell's painted image (its own work image) is
+    checked after its last timed run too."""
+
+    def __init__(self, gpu, key, img, seed=None, conn=8, ch08_kw=None,
+                 ch03=None):
         cuda = gpu.cuda
         self.gpu, self.key, self.seed, self.conn = gpu, key, seed, conn
         self.w, self.h = img.shape[0], img.shape[1]
         self.d_pristine = cuda.to_device(img)
         self.d_img = cuda.device_array_like(img)
-        if ch08_kw is None:
+        self.last_kernel_ms = None
+        if ch03 is not None:
+            self.runner, self.launch = ch03
+            L = self.launch
+            self.conn = L["conn"]
+            self.meta = {"chapter": "ch03", "connectivity": L["conn"],
+                         "layout": L["layout"], "bare": L["bare"],
+                         "tpb": L["tpb"], "blocks": L["blocks"],
+                         "timed": "visited reset + seed + kernel"}
+        elif ch08_kw is None:
             cfg = dict(connectivity=conn, threads_per_block=128, bare=True,
                        **{k: gpu.ff7.DEFAULT_SWITCHES[k]
                           for k in gpu.ff7.SWITCHES})
@@ -1375,6 +1424,15 @@ class GpuCell:
         cuda = self.gpu.cuda
         self.d_img.copy_to_device(self.d_pristine)
         self.gpu.gap()
+        if self.meta["chapter"] == "ch03":
+            ev = self.runner.reset(*self.seed)
+            L = self.launch
+            e0, e1 = self.runner.run(L["kernel"], L["bare"], L["blocks"],
+                                     L["tpb"], self.d_img)
+            e1.synchronize()
+            self.last_kernel_ms = cuda.event_elapsed_time(e0, e1)
+            return (cuda.event_elapsed_time(ev[0], ev[1])
+                    + self.last_kernel_ms)
         if self.meta["chapter"] == "ch07":
             _, ev = self.eng.run(self.d_img, *self.seed)
             ev[-1].synchronize()
@@ -1389,9 +1447,16 @@ class GpuCell:
         e1.synchronize()
         return cuda.event_elapsed_time(e0, e1)
 
-    def verify(self, ref):
+    def verify(self, ref, counters=True):
         out = self.d_img.copy_to_host()
-        if self.meta["chapter"] == "ch07":
+        if self.meta["chapter"] == "ch03":
+            r = ref[self.conn]
+            ok = {"image": same(out, r["blue"])}
+            info = {}
+            if counters:
+                info = self.runner.read()
+                ok["filled"] = info["filled"] == r["filled"]
+        elif self.meta["chapter"] == "ch07":
             r = ref[self.conn]
             ok = {"image": bool(np.array_equal(out, r["blue"])),
                   "filled": self.eng.filled() == r["filled"]}
@@ -1407,6 +1472,11 @@ class GpuCell:
             info = {"rounds": c["rounds"], "n_blobs": c["n_blobs"]}
             del lab
         return {"ok": all(ok.values()), **ok, "info": info}
+
+
+# ch03 cells per connectivity: the same idea as ch09's pixel BFS
+# (bench_v5's twins), and the uninstrumented warp kernel as a reference
+CH03_CELLS = {4: ("ch03_conn4",), 8: ("ch03_conn8", "ch03_wc_bare")}
 
 
 def timed_block(gpu, sampler, label, run_round, warm_round, args):
@@ -1448,6 +1518,12 @@ def gpu_scene(gpu, sampler, name, kind, img, seed, conns, ref, args):
     """The GPU cells of one scene, timed as one block."""
     if kind == "one":
         cells = [GpuCell(gpu, f"ch07_c{c}", img, seed, conn=c) for c in conns]
+        keys3 = [k for c in conns for k in CH03_CELLS[c]]
+        launches = {k: gpu.ch03_launch(k) for k in keys3}
+        runner = gpu.b7.Ch03Runner(img.shape[0], img.shape[1],
+                                   max(L["blocks"] for L in launches.values()))
+        cells += [GpuCell(gpu, k, img, seed, ch03=(runner, launches[k]))
+                  for k in keys3]
     else:
         cells = [GpuCell(gpu, "ch08_old", img, ch08_kw=dict(gpu.ff8.OLD_PATH)),
                  GpuCell(gpu, "ch08", img, ch08_kw={})]
@@ -1460,6 +1536,8 @@ def gpu_scene(gpu, sampler, name, kind, img, seed, conns, ref, args):
         out = {}
         for c in (cells if i % 2 == 0 else cells[::-1]):
             out[c.key] = c.run_timed()
+            if c.last_kernel_ms is not None:
+                out[c.key + ":kernel"] = c.last_kernel_ms
             if spacing:
                 gpu.filler(spacing)
         return out
@@ -1472,12 +1550,17 @@ def gpu_scene(gpu, sampler, name, kind, img, seed, conns, ref, args):
     res = {}
     for c in cells:
         samples = [r[c.key] for r in data]
-        last = c.verify(ref)      # the last timed run's output
+        # the last timed run's output (ch03: its image; the shared
+        # runner's counters were checked after its own untimed run)
+        last = c.verify(ref, counters=c.meta["chapter"] != "ch03")
         res[c.key] = {**_stats(samples), "samples": samples, **c.meta,
                       "side": "gpu", "check": checks[c.key],
                       "check_last_timed": last,
                       "checks_ok": bool(checks[c.key]["ok"] and last["ok"]),
                       "full_clocks": attempts[-1]["full_clocks"]}
+        if c.last_kernel_ms is not None:
+            res[c.key]["kernel_only"] = _stats(
+                [r[c.key + ":kernel"] for r in data])
     block = {"attempts": attempts}
     del cells
     gpu.cuda.current_context().deallocations.clear()
@@ -1661,10 +1744,12 @@ def summarize(row, kind, threads):
         sfx = f"_c{conn}" if kind == "one" else ""
         twin = cells.get(TWIN_FULL[kind] + sfx)
         twin_np = cells.get(TWIN_NOPAINT[kind] + sfx)
-        gpu = (row["gpu"].get(f"ch07_c{conn}") if kind == "one"
-               else row["gpu"].get("ch08_old"))
+        gpus = {k: g for k, g in row["gpu"].items()
+                if g.get("connectivity", 8) == conn}
         for name, fmt, fmt_np in variants:
             base = cells.get(fmt.format(1) + sfx)
+            gkey = SAME_IDEA_GPU[name].format(conn=conn)
+            gpu = gpus.get(gkey)
             sc = {}
             for nt in threads:
                 c = cells.get(fmt.format(nt) + sfx)
@@ -1683,10 +1768,17 @@ def summarize(row, kind, threads):
                     e.update(x_vs_one_core=statistics.median(rr),
                              x_vs_one_core_range=[min(rr), max(rr)])
                 if gpu:
-                    e.update(gpu_x=c["ms"] / gpu["ms"],
+                    # the same idea on the GPU (its cell named)
+                    e.update(gpu_cell=gkey, gpu_x=c["ms"] / gpu["ms"],
                              gpu_x_range_cpu_rounds=[
                                  min(c["round_medians"]) / gpu["ms"],
                                  max(c["round_medians"]) / gpu["ms"]])
+                other = {k: c["ms"] / g["ms"] for k, g in gpus.items()
+                         if k != gkey}
+                if other:
+                    # against the other GPU cells (another idea, or the
+                    # GPU's best): kept apart from gpu_x
+                    e["gpu_x_other"] = other
                 sc[nt] = e
             for nt in NOPAINT_THREADS:
                 c = cells.get(fmt_np.format(nt) + sfx)
@@ -1710,10 +1802,12 @@ def summarize(row, kind, threads):
                     "rounds": [l0["work"]["rounds"], l8["work"]["rounds"]],
                     "meetings": [l0["work"]["meetings"],
                                  l8["work"]["meetings"]]}
-        if gpu and twin:
-            out[f"gpu{sfx}"] = {"gpu": gpu["ms"], "one_core_like_for_like":
-                                twin["ms"], "x_gpu_vs_one_core":
-                                twin["ms"] / gpu["ms"]}
+        if gpus and twin:
+            out[f"gpu{sfx}"] = {
+                "one_core_like_for_like": twin["ms"],
+                "x_gpu_vs_one_core": {k: twin["ms"] / g["ms"]
+                                      for k, g in gpus.items()},
+                "gpu_ms": {k: g["ms"] for k, g in gpus.items()}}
     return out
 
 
