@@ -11,13 +11,20 @@ The user's rules (2026-10-17), which this session implements:
   like for like   the CPU does exactly the work of the GPU it is compared
                   with: the same connectivity (a 4-conn GPU fill against
                   the 4-conn @njit BFS, an 8-conn one against the 8-conn
-                  BFS) and the same output (many blobs: labels only,
-                  cpu_label_components, no depth). Every GPU cell names
-                  its CPU twin, and every ratio is taken against it
-  no dense path   no GPU number from ch08's dense-tile path (the run
-                  labelling inside tiles, K2b / K4b): ch08's two dense
-                  lists (q_state[Q_DENSE], q_state[Q_PDENSE]) are read
-                  after every checked run and must be empty
+                  BFS), the same output (no depth map where the GPU keeps
+                  none; many blobs: labels only) and the same scope (its
+                  buffers allocated once, as the GPU's are, and reset off
+                  the clock or on it as its GPU side resets its own; see
+                  cpu_twins). Every GPU cell names its CPU twin, and every
+                  ratio is taken against it
+  no dense path   no GPU number from ch08's dense-tile path (K2b, K4b and
+                  the dindex K3, ch08's default engine): every ch08
+                  number of the story is ch08's first version,
+                  flood_fill.OLD_PATH (no K2b or K4b launch, the hybrid
+                  K3). The default engine is timed beside it on the
+                  frame, for reference only. ch08's two dense lists
+                  (q_state[Q_DENSE], q_state[Q_PDENSE]) are read after
+                  every checked run and must be empty
   full clocks     every timed block runs at full clocks or again (below)
 
 Scenes:
@@ -33,13 +40,28 @@ Scenes:
                    converted as bench_drones.mask_image does; their SHA-1
                    are checked against v4's drones session (i1, r14)
 
-GPU configs, each with its CPU twin (cpu_bfs4 = ch01's cpu_flood_fill,
-the 4-conn BFS; cpu_bfs8 = the shared cpu_flood_fill_8; cpu_label =
-ch05's cpu_label_components, 8-conn labels only):
+The CPU twins (cpu_twins: each oracle's loop on buffers allocated once
+per image; "before" = reset before the clock, "on" = on it):
+
+  cpu_bfs4        ch01's 4-conn BFS, visited + depth, reset before
+  cpu_bfs8        the shared 8-conn BFS, visited + depth, reset before
+  cpu_fill8       the same 8-conn BFS without the depth map, visited
+                  only, reset on the clock (ch07 keeps no depth and
+                  clears its reached bits on its clock)
+  cpu_label       ch05's labels only, 8-conn, reset on the clock (ch08
+                  initialises on its clock)
+  cpu_label_pre   the same, reset before the clock (ch05 and act 2's
+                  loops reset off theirs)
+  oracle_bfs4, oracle_bfs8, oracle_label, cpu_fill_canonical
+                  reference only: the oracles as called (fresh arrays on
+                  every call, v5's earlier sessions' CPU), and v4's frame
+                  baseline (labels + a fill per blob, with depth)
+
+GPU configs, each with its CPU twin:
 
   sq_256 (two blocks)
     ch07              ch07's default: one_sync + tile_paint, 8-conn, the
-                      bare twin at its own grid (72 x 128)     cpu_bfs8
+                      bare twin at its own grid (72 x 128)     cpu_fill8
     ch01_ring         ch01's one block of 256, the shared-memory ring
                       (v4's ch01_ring cell): r02               cpu_bfs4
     ch05_fused_L8     reference only (v4's "GPU so far"): ch05
@@ -49,27 +71,36 @@ ch05's cpu_label_components, 8-conn labels only):
     ch02_global       two blocks, global queue: r04            cpu_bfs4
     ch03_conn4        ch03, 48 x 256, 4-conn: r05              cpu_bfs4
     ch03_conn8        ch03 at its 8-conn cap: r06's diagonals  cpu_bfs8
-    ch07              the tile BFS: r11                        cpu_bfs8
+    ch07              the tile BFS: r11                        cpu_fill8
     ch03_wc_bare      reference: the tuned pixel BFS (warp
                       layout, bare, 72 x 256)                  cpu_bfs8
-  input_blobs (four blocks, every cell against cpu_label)
-    ch08              ch08's default engine, TileWaves(w, h): r13
-    ch05_split_L8     ch05 seed_merge, lattice 8, split build: r09
+  input_blobs (four blocks)
+    ch08_old          ch08's first version, TileWaves(w, h,
+                      **OLD_PATH): r13                         cpu_label
+    ch08              reference only: ch08's default engine (the
+                      dense-tile path), interleaved with it     cpu_label
+    ch05_split_L8     ch05 seed_merge, lattice 8, split build:
+                      r09                                  cpu_label_pre
     est_ch03_conn8    r07, one launch per blob: ch03's instrumented 8-conn
-                      kernel at its cap, ESTIMATED as v4 did
+                      kernel at its cap, ESTIMATED as v4 did cpu_label_pre
     est_ch04_multi8   r08, two blobs per launch with tags: ch04's
                       multisource kernel, 8-conn, ESTIMATED as v4 did
+                                                           cpu_label_pre
     loop_ch03_conn8   the same two loops MEASURED in full (a check on the
     loop_ch04_multi8  estimates): every blob (pair) in turn, one seed
                       kernel and one cooperative launch each
+                                                           cpu_label_pre
   drone frames (one block)
-    ch08_nodense      ch08's default engine with its dense thresholds
-                      (ccl_min, paint_ccl_min) out of reach: every tile
-                      takes the piece loop in registers, the same kernels
-                      as the frame's engine; the dense lists are checked
-                      empty on every frame                    cpu_label
+    ch08_old          ch08's first version on every frame; the dense
+                      lists are checked empty on every frame  cpu_label
                       An untimed census of the default engine's dense
                       tiles on every frame is kept for the record
+
+Every GPU cell records its outputs (GPU_OUT) and every twin its own
+(CPU_META): a twin's outputs are a subset of its GPU side's. Act 2's
+loops keep no label map: a blob's identity is its call (ch03) or its
+tag within the call (ch04), and their seeds are handed in, found off
+the clock from the CPU's labels; their twin finds its own.
 
 The estimates (v4's method, overview/bench.py _cell_gpu_est): one seed
 per blob, each blob's canonical (lex-min) pixel, from the CPU labels; a
@@ -131,16 +162,22 @@ Timing policy (ch07's, with ch08's two-event rule):
                   ch05 resets are off theirs (as in ch07's benchmark)
   CPU             all @njit cells run last, after every GPU block (a CPU
                   pass between scenes lets the GPU clock fall), and they
-                  are interleaved too: one warm call per cell (its result
-                  is checked), then 5 rounds over every cell of every
-                  scene and every drone frame, the order reversed on odd
-                  rounds. A cell under 0.4 s repeats within a round (at
-                  most 101 calls). Each CPU round, and each GPU block's
-                  attempt, first waits (up to 600 s / 120 s) until the
-                  rest of the machine is at most 10% busy, and records
-                  what it saw
-  end to end      context only: ch07 (sq_256, sq_8000_center), ch08
-                  (input_blobs) and ch08_nodense (every drone frame) with
+                  are interleaved too: one untimed check per cell (a
+                  twin's arrays and counts must equal its oracle's), one
+                  timed first call, then 5 rounds over every cell of
+                  every scene and every drone frame, the order reversed
+                  on odd rounds. A cell under 0.4 s repeats within a
+                  round (at most 101 calls); a twin resetting before the
+                  clock resets before each call, untimed. Each CPU round,
+                  and each GPU block's attempt, first waits (up to 600 s
+                  / 120 s) until the rest of the machine is at most 10%
+                  busy, and records what it saw. The pass starts after
+                  60 s of idle: the laptop's CPU and GPU share one
+                  cooler, and a dry run with the pass straight after the
+                  GPU blocks read the 4-conn oracle about 15% slower than
+                  a cold scratch run (1,750 against 1,516 ms)
+  end to end      context only: ch07 (sq_256, sq_8000_center), ch08_old
+                  (input_blobs and every drone frame) with
                   a pageable host-to-GPU copy of the image, the pipeline,
                   and the copy back (perf_counter, 5 repeats, reused
                   buffers)
@@ -165,8 +202,10 @@ cells, times and ratio.
 
 Run:  PYTHONUNBUFFERED=1 uv run python -m flood_fill_cuda.overview.bench_v5
 Smoke: ... bench_v5 --no-save --drone-step 24 --scenes sq_256 drones
-Budget: about 6-10 min (compiles, 4 s ramps per block, ~2 s per
-sq_8000 round, the loops ~4 s per round, about 1.5 min of CPU cells).
+Budget: about 8-12 min (compiles, 4 s ramps per block, ~2 s per
+sq_8000 round, the loops ~4 s per round, about 2 min of CPU cells and
+their checks). Peak host memory about 5 GB (the CPU buffers of the 64 Mpx
+square and the 81 Mpx frame, beside the oracles' own arrays).
 """
 
 import os
@@ -217,6 +256,7 @@ from ..chapters.ch07_gpu_1blob_tiles.benchmarks.benchmark import (
 from ..chapters.ch08_gpu_nblob_tiles import flood_fill as ff8
 from ..chapters.ch08_gpu_nblob_tiles.kernels import Q_DENSE, Q_PDENSE
 from ..shared import results_paths
+from . import cpu_twins
 
 warnings.simplefilter("ignore", NumbaPerformanceWarning)
 
@@ -244,10 +284,10 @@ QUIET_WAIT_GPU_S = 120      # before each GPU block attempt, at most
 CPU_ROUNDS = 5              # interleaved rounds over every CPU cell
 CPU_ROUND_S = 0.4           # a shorter cell repeats within a round
 CPU_MAX_CALLS = 101         # calls per cell per round, at most
+CPU_COOLDOWN_S = 60         # idle before the CPU pass (see the docstring)
 EST_SAMPLE = 6              # v4's EST_SAMPLE_HUGE (images past 20 Mpx)
 HOST_CLOCK_REPEATS = 3      # v4's host clock, per sampled call
 LOOP_ROUNDS = 3             # the measured loops take seconds per round
-NO_DENSE = 1 << 30          # a ccl_min no tile reaches
 FLUSH_READS = 2             # 96 MB L2-flush reads before each timed run
 GAP_NAPS = 15               # then ~1.5 ms of GPU sleep (see _gap)
 TPB = 256                   # ch01-ch05's block size (their defaults)
@@ -263,9 +303,10 @@ EVENT_REASONS = {0x1: "gpu_idle", 0x2: "app_clocks", 0x4: "sw_power_cap",
 # ch07 configs: TileFill kwargs, every switch pinned
 CH07_DEFAULT = dict(connectivity=8, threads_per_block=128, bare=True,
                     **{k: ff7.DEFAULT_SWITCHES[k] for k in ff7.SWITCHES})
-# ch08 engines: TileWaves kwargs
+# ch08 engines: TileWaves kwargs. The story's is the first version (no
+# dense-tile path); the default engine is timed beside it, reference only
 CH08_DEFAULT = {}
-CH08_NODENSE = dict(ccl_min=NO_DENSE, paint_ccl_min=NO_DENSE)
+CH08_OLD = dict(ff8.OLD_PATH)
 # ch03 configs: (layout, connectivity, bare, tpb, blocks or None = coop max)
 CH03 = {
     "ch03_conn8": ("thread", 8, False, TPB, None),
@@ -280,7 +321,7 @@ BLOCKS = {
     "sq_8000_center": [("interleaved",
                         ["ch07", "ch03_conn8", "ch03_conn4", "ch03_wc_bare",
                          "ch02_global", "ch01_spill"], GPU_REPEATS)],
-    "input_blobs": [("waves", ["ch08"], GPU_REPEATS),
+    "input_blobs": [("waves", ["ch08_old", "ch08"], GPU_REPEATS),
                     ("ch05", ["ch05_split_L8"], GPU_REPEATS),
                     ("estimates", ["est_ch03_conn8", "est_ch04_multi8"],
                      GPU_REPEATS),
@@ -292,30 +333,99 @@ SCENE_NOTES = {
     "sq_8000_center": "one huge blob: 8000 x 8000 all red, centre seed",
     "input_blobs": "the 81 Mpx frame, 9000 x 9000, 2,522 blobs",
 }
-# the GPU config's CPU twin: the same connectivity, the same output
+# the GPU config's CPU twin: the same connectivity, the same output, the
+# same reset scope
 TWIN = {
     "ch01_ring": "cpu_bfs4", "ch01_spill": "cpu_bfs4",
     "ch02_global": "cpu_bfs4", "ch03_conn4": "cpu_bfs4",
     "ch03_conn8": "cpu_bfs8", "ch03_wc_bare": "cpu_bfs8",
-    "ch07": "cpu_bfs8", "ch05_fused_L8": "cpu_bfs8",
-    "ch08": "cpu_label", "ch05_split_L8": "cpu_label",
-    "est_ch03_conn8": "cpu_label", "est_ch04_multi8": "cpu_label",
-    "loop_ch03_conn8": "cpu_label", "loop_ch04_multi8": "cpu_label",
-    "ch08_nodense": "cpu_label",
+    "ch05_fused_L8": "cpu_bfs8",
+    "ch07": "cpu_fill8",
+    "ch08_old": "cpu_label", "ch08": "cpu_label",
+    "ch05_split_L8": "cpu_label_pre",
+    "est_ch03_conn8": "cpu_label_pre", "est_ch04_multi8": "cpu_label_pre",
+    "loop_ch03_conn8": "cpu_label_pre", "loop_ch04_multi8": "cpu_label_pre",
 }
 REFERENCE_ONLY = {"ch05_fused_L8", "ch03_wc_bare", "loop_ch03_conn8",
-                  "loop_ch04_multi8"}
-CPU_FNS = {
-    "cpu_bfs4": "cpu_flood_fill (ch01: 4-conn BFS, visited + depth)",
-    "cpu_bfs8": "cpu_flood_fill_8 (shared: 8-conn BFS, visited + depth)",
-    "cpu_label": "cpu_label_components (ch05: 8-conn labels only)",
-    "cpu_fill_canonical": ("cpu_fill_canonical (ch05: labels + a BFS from "
-                           "each canonical seed, with depth): v4's "
-                           "baseline, reference only"),
+                  "loop_ch04_multi8", "ch08"}
+# What each GPU cell's timed run leaves (beside its counters) and where
+# its state is reset: "before" the clock (on the device, off the clock)
+# or "on" it. "labels": which blob each pixel belongs to (a label map,
+# ch08's labels per piece, or, for act 2's loops, the call or the tag)
+GPU_OUT = {
+    "ch01_ring": (("visited", "depth", "paint"), "before"),
+    "ch01_spill": (("visited", "depth", "paint"), "before"),
+    "ch02_global": (("visited", "depth", "owner", "paint"), "before"),
+    "ch03_conn4": (("visited", "depth", "owner", "paint"), "before"),
+    "ch03_conn8": (("visited", "depth", "owner", "paint"), "before"),
+    "ch03_wc_bare": (("visited", "depth", "paint"), "before"),
+    "ch07": (("visited", "paint"), "on"),
+    "ch05_fused_L8": (("visited", "depth", "labels", "owner", "paint"),
+                      "before"),
+    "ch05_split_L8": (("visited", "depth", "labels", "owner", "paint"),
+                      "before"),
+    "ch08_old": (("labels", "paint"), "on"),
+    "ch08": (("labels", "paint"), "on"),
+    "est_ch03_conn8": (("visited", "depth", "owner", "paint", "labels"),
+                       "before"),
+    "est_ch04_multi8": (("visited", "depth", "owner", "paint", "labels"),
+                        "before"),
+    "loop_ch03_conn8": (("visited", "depth", "owner", "paint", "labels"),
+                        "before"),
+    "loop_ch04_multi8": (("visited", "depth", "owner", "paint", "labels"),
+                         "before"),
 }
-CPU_CELLS = {"one": ("cpu_bfs4", "cpu_bfs8"),
-             "frame": ("cpu_label", "cpu_fill_canonical")}
-E2E = {"sq_256": "ch07", "sq_8000_center": "ch07", "input_blobs": "ch08"}
+GPU_OUT_NOTES = {
+    "ch07": "visited = the reached bits; no per-pixel depth",
+    "ch08_old": ("labels per piece; the per-pixel label map is an off-clock "
+                 "twin (emit_label_map)"),
+    "ch08": ("labels per piece; the per-pixel label map is an off-clock "
+             "twin (emit_label_map)"),
+    "est_ch03_conn8": ("one blob per call: the call is its label; seeds "
+                       "handed in, from the CPU's labels off the clock"),
+    "est_ch04_multi8": ("two blobs per call, a tag bit each; seeds handed "
+                        "in, from the CPU's labels off the clock"),
+    "loop_ch03_conn8": "as est_ch03_conn8, every call",
+    "loop_ch04_multi8": "as est_ch04_multi8, every call",
+}
+# CPU cell -> (cpu_twins kind or None for an oracle as called, reset
+# "before" / "on" the clock / None, description)
+CPU_META = {
+    "cpu_bfs4": ("bfs4", "before",
+                 "ch01's 4-conn BFS loop (cpu_flood_fill), visited + depth, "
+                 "buffers kept between calls, reset before the clock"),
+    "cpu_bfs8": ("bfs8", "before",
+                 "the shared 8-conn BFS loop (cpu_flood_fill_8), visited + "
+                 "depth, buffers kept, reset before the clock"),
+    "cpu_fill8": ("fill8", "on",
+                  "the shared 8-conn BFS loop without its depth map, "
+                  "visited only, buffers kept, reset on the clock"),
+    "cpu_label": ("label", "on",
+                  "ch05's labels-only loop (cpu_label_components), 8-conn, "
+                  "buffers kept, reset on the clock"),
+    "cpu_label_pre": ("label", "before",
+                      "ch05's labels-only loop, 8-conn, buffers kept, reset "
+                      "before the clock"),
+    "oracle_bfs4": (None, None,
+                    "cpu_flood_fill as called (fresh arrays every call): "
+                    "reference only"),
+    "oracle_bfs8": (None, None,
+                    "cpu_flood_fill_8 as called (fresh arrays every call): "
+                    "reference only"),
+    "oracle_label": (None, None,
+                     "cpu_label_components as called (fresh arrays every "
+                     "call): reference only"),
+    "cpu_fill_canonical": (None, None,
+                           "cpu_fill_canonical (ch05: labels + a BFS from "
+                           "each canonical seed, with depth, fresh arrays): "
+                           "v4's baseline, reference only"),
+}
+CPU_FNS = {k: v[2] for k, v in CPU_META.items()}
+CPU_CELLS = {"one": ("cpu_bfs4", "cpu_bfs8", "cpu_fill8", "oracle_bfs4",
+                     "oracle_bfs8"),
+             "frame": ("cpu_label", "cpu_label_pre", "oracle_label",
+                       "cpu_fill_canonical")}
+E2E = {"sq_256": "ch07", "sq_8000_center": "ch07", "input_blobs": "ch08_old"}
 # GPU-vs-GPU ratios worth keeping (num / den: > 1 = den faster); paired
 # per round inside a block, a ratio of medians across blocks
 PAIRS = {
@@ -324,8 +434,10 @@ PAIRS = {
                        ("ch03_conn4", "ch07"), ("ch01_spill", "ch02_global"),
                        ("ch02_global", "ch03_conn4"),
                        ("ch03_conn4", "ch03_conn8")],
-    "input_blobs": [("ch05_split_L8", "ch08"), ("est_ch03_conn8", "ch08"),
-                    ("est_ch04_multi8", "ch08"),
+    "input_blobs": [("ch08", "ch08_old"),
+                    ("ch05_split_L8", "ch08_old"),
+                    ("est_ch03_conn8", "ch08_old"),
+                    ("est_ch04_multi8", "ch08_old"),
                     ("est_ch03_conn8", "est_ch04_multi8"),
                     ("est_ch04_multi8", "ch05_split_L8"),
                     ("loop_ch03_conn8", "est_ch03_conn8"),
@@ -335,8 +447,8 @@ PAIRS = {
 # what is said). The CPU side is the GPU cell's twin.
 STORY = [
     ("small_pixel_bfs", "r02", "sq_256", "ch01_ring",
-     "one block, shared-memory ring, against the 4-conn CPU BFS: the CPU "
-     "still wins the small blob"),
+     "one block, shared-memory ring, against the 4-conn CPU BFS (depth, "
+     "reset before the clock): the CPU still wins the small blob"),
     ("big_1block", "r03b", "sq_8000_center", "ch01_spill",
      "one block (spill) against the 4-conn CPU BFS"),
     ("big_2blocks", "r04", "sq_8000_center", "ch02_global",
@@ -344,19 +456,23 @@ STORY = [
     ("big_48blocks", "r05", "sq_8000_center", "ch03_conn4",
      "48 blocks against the 4-conn CPU BFS"),
     ("big_8ways", "r06", "sq_8000_center", "ch03_conn8",
-     "diagonals (8-conn) against the 8-conn CPU BFS: row 2"),
+     "diagonals (8-conn) against the 8-conn CPU BFS (depth): row 2"),
     ("frame_one_launch_per_blob", "r07", "input_blobs", "est_ch03_conn8",
-     "one launch per blob (estimate) against the CPU labels"),
+     "one launch per blob (estimate) against the CPU labels (reset before "
+     "the clock)"),
     ("frame_two_per_launch", "r08", "input_blobs", "est_ch04_multi8",
      "two blobs per launch with tags (estimate) against the CPU labels"),
     ("frame_seeds", "r09", "input_blobs", "ch05_split_L8",
      "the GPU finds its own seeds against the CPU labels: row 3"),
     ("big_tiles", "r11", "sq_8000_center", "ch07",
-     "the tile BFS against the 8-conn CPU BFS: row 2"),
-    ("frame_waves", "r13", "input_blobs", "ch08",
-     "the tile waves against the CPU labels: row 3"),
+     "the tile BFS against the 8-conn CPU BFS without depth (reset on the "
+     "clock): row 2"),
+    ("frame_waves", "r13", "input_blobs", "ch08_old",
+     "the tile waves (first version) against the CPU labels (reset on the "
+     "clock): row 3"),
     ("small_tiles", "r14", "sq_256", "ch07",
-     "the tile BFS on the small blob against the 8-conn CPU BFS: row 1"),
+     "the tile BFS on the small blob against the 8-conn CPU BFS without "
+     "depth: row 1"),
 ]
 
 
@@ -381,6 +497,26 @@ def _ratio_stats(num, den):
     r = [a / b for a, b in zip(num, den)]
     return {"median": statistics.median(r), "min": min(r), "max": max(r),
             "rounds_below_1": sum(x < 1 for x in r), "n": len(r)}
+
+
+def _gpu_out(name):
+    """A GPU cell's outputs and reset scope, as recorded in its cell."""
+    outs, reset = GPU_OUT[name]
+    out = {"outputs": list(outs), "reset": reset}
+    if name in GPU_OUT_NOTES:
+        out["outputs_note"] = GPU_OUT_NOTES[name]
+    return out
+
+
+def _cpu_meta(key):
+    """A CPU cell's kind, outputs, connectivity and reset scope."""
+    kind, reset, desc = CPU_META[key]
+    out = {"fn": desc, "reset": reset, "kind": kind,
+           "reference_only": kind is None}
+    if kind is not None:
+        _, outs, conn, oracle = cpu_twins.KINDS[kind]
+        out.update(outputs=list(outs), connectivity=conn, oracle=oracle)
+    return out
 
 
 def _red_mask(img):
@@ -712,8 +848,12 @@ class Ch08Side:
         self.eng = ff8.TileWaves(ctx.w, ctx.h, **kw)
         e = self.eng
         self.meta = {"chapter": "ch08", "connectivity": 8, "contract": "rgb",
-                     "engine": ("TileWaves defaults" if not kw else
+                     "engine": ("TileWaves defaults (the dense-tile path)"
+                                if not kw else
+                                "the first version (flood_fill.OLD_PATH)"
+                                if kw == CH08_OLD else
                                 f"TileWaves defaults but {sorted(kw)}"),
+                     "fit_grids": e.fit_grids,
                      "dense": e.dense, "ccl_min": e.ccl_min,
                      "paint_ccl_min": e.paint_ccl_min, "lookup": e.lookup,
                      "lattice": e.lattice, "instrumented": False,
@@ -1274,8 +1414,8 @@ def build_sides(names, ctx):
             sides.append(Ch07Side(n, ctx, CH07_DEFAULT))
         elif n == "ch08":
             sides.append(Ch08Side(n, ctx, CH08_DEFAULT))
-        elif n == "ch08_nodense":
-            sides.append(Ch08Side(n, ctx, CH08_NODENSE))
+        elif n == "ch08_old":
+            sides.append(Ch08Side(n, ctx, CH08_OLD))
         elif n == "ch05_fused_L8":
             sides.append(Ch05Side(n, ctx, 8, "fused"))
         elif n == "ch05_split_L8":
@@ -1524,6 +1664,7 @@ def bench_scene(name, kind, img, seed, sampler, flush, sink, rounds_min):
             cell = {**_stats(tot), "side": "gpu", "chapter": s.chapter
                     if s.chapter != "est" else s.meta["chapter"],
                     "block": label, "config": s.meta,
+                    **_gpu_out(s.name),
                     "reference_only": s.name in REFERENCE_ONLY,
                     "info": infos[s.name], "check": checks[s.name],
                     "samples": tot}
@@ -1605,10 +1746,11 @@ def bench_scene(name, kind, img, seed, sampler, flush, sink, rounds_min):
 
 
 def bench_drones(frames, sampler, flush, sink, rounds_min):
-    """ch08 without its dense path on every drone frame: one engine, the
-    timed rounds over all frames (the frame order reversed on odd
-    rounds). First an untimed census of the default engine's dense tiles
-    (the instrumented twin), then the checks of the timed engine."""
+    """ch08's first version (no dense-tile path) on every drone frame:
+    one engine, the timed rounds over all frames (the frame order
+    reversed on odd rounds). First an untimed census of the default
+    engine's dense tiles (the instrumented twin), then the checks of the
+    timed engine."""
     w, h = frames[0]["img"].shape[:2]
     print(f"\ndrones: {len(frames)} frames of {w} x {h}", flush=True)
     ctx = Ctx(frames[0]["img"])
@@ -1633,7 +1775,7 @@ def bench_drones(frames, sampler, flush, sink, rounds_min):
     print(f"  default engine's dense tiles (census, untimed): {cen}",
           flush=True)
 
-    side = Ch08Side("ch08_nodense", ctx, CH08_NODENSE)
+    side = Ch08Side("ch08_old", ctx, CH08_OLD)
     ok_all = True
     for f, dp in zip(frames, pristine):
         label, nb = cpu_label_components(f["img"])
@@ -1699,11 +1841,12 @@ def bench_drones(frames, sampler, flush, sink, rounds_min):
     blk = {k: v for k, v in attempts[used].items()
            if k.startswith("clk") or k.startswith("power")
            or k in ("timed_window_s", "rounds", "full_clocks")}
-    print(f"  ch08_nodense per-frame medians: median "
+    print(f"  ch08_old per-frame medians: median "
           f"{statistics.median(f['gpu']['ms'] for f in frames):.4f} ms, "
           f"max {max(f['gpu']['ms'] for f in frames):.4f}; worst run "
           f"{max(f['gpu']['ms_max'] for f in frames):.4f}", flush=True)
-    return {"config": meta, "checks_ok": bool(ok_all),
+    return {"config": meta, "gpu_cell": "ch08_old", **_gpu_out("ch08_old"),
+            "twin": TWIN["ch08_old"], "checks_ok": bool(ok_all),
             "last_timed_run_matches_cpu": last_ok,
             "e2e_matches_cpu": bool(e2e_ok),
             "default_engine_dense_census": cen,
@@ -1742,58 +1885,100 @@ def wait_quiet(max_wait_s):
 
 
 def _cpu_cells(rows, scenes, frames):
-    """Every CPU cell as a dict: where its result goes, its call, and the
-    check of the warm call's result against the CPU reference."""
+    """Every CPU cell as a dict: where its result goes, its timed call,
+    its untimed prep (a twin's reset before the clock, or None), and its
+    check: a twin's arrays and counts against its oracle's
+    (cpu_twins.check_against_oracle), plus the counts against the scene's
+    reference; an oracle's counts against the reference."""
     cells = []
+
+    def twin_cell(where, key, img, seed, bufs, count_ok):
+        kind, reset, _ = CPU_META[key]
+        tw = cpu_twins.Twin(kind, img, seed, bufs, reset == "on")
+
+        def check(tw=tw, count_ok=count_ok):
+            same, res = cpu_twins.check_against_oracle(tw)
+            n = int(res) if tw.kind == "label" else int(res[1])
+            out = ({"n_blobs": n} if tw.kind == "label" else {"filled": n})
+            return {**out, "same_as_oracle": bool(same),
+                    "ok": bool(same) and count_ok(n)}
+        return dict(**where, key=key, fn=tw.call,
+                    prep=None if reset == "on" else tw.prepare,
+                    check=check)
+
+    def oracle_cell(where, key, fn, count):
+        def check(fn=fn, count=count):
+            n, ok = count(fn())
+            return {"filled" if key != "oracle_label" else "n_blobs": n,
+                    "ok": ok}
+        return dict(**where, key=key, fn=fn, prep=None, check=check)
+
     for row, (name, kind, img, seed) in zip(rows, scenes):
+        w = {"row": row}
         if kind == "one":
             sx, sy = seed
+            bufs = cpu_twins.Buffers(img.shape[0], img.shape[1],
+                                     ("bfs4", "bfs8", "fill8"))
+            f4 = (lambda n, r=row: n == r["cpu_filled4"])
+            f8 = (lambda n, r=row: n == r["cpu_filled8"])
             cells += [
-                dict(row=row, key="cpu_bfs4",
-                     fn=(lambda i=img, x=sx, y=sy: cpu_flood_fill(i, x, y)),
-                     check=(lambda r, w=row: {
-                         "filled": int(r[3]),
-                         "ok": int(r[3]) == w["cpu_filled4"]})),
-                dict(row=row, key="cpu_bfs8",
-                     fn=(lambda i=img, x=sx, y=sy: cpu_flood_fill_8(i, x, y)),
-                     check=(lambda r, w=row: {
-                         "filled": int(r[3]),
-                         "ok": int(r[3]) == w["cpu_filled8"]}))]
+                twin_cell(w, "cpu_bfs4", img, seed, bufs, f4),
+                twin_cell(w, "cpu_bfs8", img, seed, bufs, f8),
+                twin_cell(w, "cpu_fill8", img, seed, bufs, f8),
+                oracle_cell(w, "oracle_bfs4",
+                            (lambda i=img, x=sx, y=sy: cpu_flood_fill(i, x, y)),
+                            (lambda res, r=row: (int(res[3]), int(res[3])
+                                                 == r["cpu_filled4"]))),
+                oracle_cell(w, "oracle_bfs8",
+                            (lambda i=img, x=sx, y=sy:
+                             cpu_flood_fill_8(i, x, y)),
+                            (lambda res, r=row: (int(res[3]), int(res[3])
+                                                 == r["cpu_filled8"])))]
         else:
+            bufs = cpu_twins.Buffers(img.shape[0], img.shape[1], ("label",))
+            nb = (lambda n, r=row: n == r["n_blobs"])
             cells += [
-                dict(row=row, key="cpu_label",
-                     fn=(lambda i=img: cpu_label_components(i)),
-                     check=(lambda r, w=row: {
-                         "n_blobs": int(r[1]),
-                         "ok": int(r[1]) == w["n_blobs"]})),
-                dict(row=row, key="cpu_fill_canonical",
+                twin_cell(w, "cpu_label", img, None, bufs, nb),
+                twin_cell(w, "cpu_label_pre", img, None, bufs, nb),
+                oracle_cell(w, "oracle_label",
+                            (lambda i=img: cpu_label_components(i)),
+                            (lambda res, r=row: (int(res[1]), int(res[1])
+                                                 == r["n_blobs"]))),
+                dict(row=row, key="cpu_fill_canonical", prep=None,
                      fn=(lambda i=img: cpu_fill_canonical(i)),
-                     check=(lambda r, w=row: {
-                         "filled": int(r[4]),
-                         "ok": int(r[4]) == w["red_px"]}))]
-    for f in frames:
-        cells.append(dict(frame=f, key="cpu_label", calls=1,
-                          fn=(lambda i=f["img"]: cpu_label_components(i)),
-                          check=(lambda r, g=f: {
-                              "n_blobs": int(r[1]),
-                              "ok": int(r[1]) == g["n_blobs"]})))
+                     check=(lambda i=img, r=row: (lambda res: {
+                         "filled": int(res[4]),
+                         "ok": int(res[4]) == r["red_px"]})(
+                             cpu_fill_canonical(i))))]
+    if frames:
+        # one buffer set for every drone frame (one shape)
+        h0 = frames[0]["img"]
+        bufs = cpu_twins.Buffers(h0.shape[0], h0.shape[1], ("label",))
+        for f in frames:
+            c = twin_cell({"frame": f}, "cpu_label", f["img"], None, bufs,
+                          (lambda n, g=f: n == g["n_blobs"]))
+            c["calls"] = 1
+            cells.append(c)
     return cells
 
 
 def cpu_pass(rows, scenes, frames):
-    """All @njit cells, interleaved like the GPU configs: one warm call
-    per cell (its result is checked), then CPU_ROUNDS rounds over every
-    cell, the order reversed on odd rounds, so a slow stretch of the host
-    (other processes, turbo, scheduling) hits every scene alike. A cell
-    shorter than CPU_ROUND_S runs several calls per round. Each round
-    records the load average and the machine's busy fraction."""
+    """All @njit cells, interleaved like the GPU configs: one untimed
+    check per cell, one timed first call (it sets the calls per round),
+    then CPU_ROUNDS rounds over every cell, the order reversed on odd
+    rounds, so a slow stretch of the host (other processes, turbo,
+    scheduling) hits every scene alike. A cell shorter than CPU_ROUND_S
+    runs several calls per round; a twin that resets before the clock
+    resets before each call, untimed. Each round records the load
+    average and the machine's busy fraction."""
     cells = _cpu_cells(rows, scenes, frames)
     for c in cells:
+        c["result"] = c.pop("check")()
+        if c["prep"] is not None:
+            c["prep"]()
         t0 = time.perf_counter()
-        res = c["fn"]()
+        c["fn"]()
         first = time.perf_counter() - t0
-        c["result"] = c.pop("check")(res)
-        del res
         c.setdefault("calls", max(1, min(CPU_MAX_CALLS,
                                          int(CPU_ROUND_S / max(first, 1e-6)))))
         c["times"] = []
@@ -1806,9 +1991,12 @@ def cpu_pass(rows, scenes, frames):
         w0 = time.time()
         for c in (cells if r % 2 == 0 else cells[::-1]):
             ts = []
+            fn, prep = c["fn"], c["prep"]
             for _ in range(c["calls"]):
+                if prep is not None:
+                    prep()
                 t0 = time.perf_counter()
-                c["fn"]()
+                fn()
                 ts.append((time.perf_counter() - t0) * 1000)
             c["times"] += ts
             c["round_medians"].append(statistics.median(ts))
@@ -1826,10 +2014,11 @@ def cpu_pass(rows, scenes, frames):
     for c in cells:
         cell = {**_stats(c["times"]), "side": "cpu",
                 "calls_per_round": c["calls"],
-                "round_medians": c["round_medians"], **c["result"]}
+                "round_medians": c["round_medians"], **c["result"],
+                **(_cpu_meta(c["key"]) if "row" in c else {})}
         cell["check_ok"] = cell.pop("ok")
         if "row" in c:
-            c["row"]["cells"][c["key"]] = {**cell, "fn": CPU_FNS[c["key"]]}
+            c["row"]["cells"][c["key"]] = cell
         else:
             c["frame"][c["key"]] = cell
     for row in rows:
@@ -1845,8 +2034,9 @@ def cpu_pass(rows, scenes, frames):
             c["check_ok"] for c in cells_r.values())
         print(f"  {row['scene']:16s} " + "  ".join(
             f"{k} {c['ms']:.3f} ms (n={c['n']})" for k, c in cells_r.items())
-            + "  " + ", ".join(f"{n} x{row['cells'][n]['twin']['x']:.2f}"
-                               for n in row["configs"]),
+            + "\n  " + " " * 16 + ", ".join(
+                f"{n} x{row['cells'][n]['twin']['x']:.2f}"
+                for n in row["configs"]),
             flush=True)
     return rounds
 
@@ -1858,7 +2048,13 @@ def _twin(key, cpu, gpu):
     out = {"cpu": key, "fn": CPU_FNS[key], "cpu_ms": cpu["ms"],
            "x": cpu["ms"] / gpu["ms"],
            "x_range_cpu_rounds": [min(cpu["round_medians"]) / gpu["ms"],
-                                  max(cpu["round_medians"]) / gpu["ms"]]}
+                                  max(cpu["round_medians"]) / gpu["ms"]],
+           # like for like: the twin's outputs within the GPU's, the same
+           # connectivity, the same reset scope
+           "like_for_like": bool(
+               set(cpu["outputs"]) <= set(gpu["outputs"])
+               and cpu["connectivity"] == gpu["config"]["connectivity"]
+               and cpu["reset"] == gpu["reset"])}
     if "e2e" in gpu:
         out["x_e2e"] = cpu["ms"] / gpu["e2e"]["ms"]
     return out
@@ -1896,11 +2092,12 @@ def story(rows, drones):
         c = by["input_blobs"]["cells"]
         out.append({"key": "frame_cpu", "beat": "i1", "scene": "input_blobs",
                     "cpu": "cpu_label", "cpu_ms": c["cpu_label"]["ms"],
-                    "what": "the CPU on the 81 Mpx frame (labels only)"})
+                    "what": ("the CPU on the 81 Mpx frame (labels only, its "
+                             "reset on the clock: the whole job)")})
     if drones:
         s = drones["summary"]
         out.append({"key": "drones", "beat": "i1, r14", "scene": "drones",
-                    "gpu": "ch08_nodense", "gpu_ms": s["gpu"]["median_ms"],
+                    "gpu": "ch08_old", "gpu_ms": s["gpu"]["median_ms"],
                     "gpu_max_ms": s["gpu"]["max_ms"],
                     "gpu_worst_run_ms": s["gpu_worst_run_ms"],
                     "gpu_e2e_ms": s["gpu_e2e"]["median_ms"],
@@ -1910,8 +2107,8 @@ def story(rows, drones):
                     "x": s["cpu_over_gpu_median"],
                     "gpu_block_full_clocks": drones["full_clocks"],
                     "what": ("per-frame medians over 240 frames, the tile "
-                             "waves without the dense path, against the "
-                             "CPU labels; budget 33 ms")})
+                             "waves' first version (no dense-tile path), "
+                             "against the CPU labels; budget 33 ms")})
     return out
 
 
@@ -1991,7 +2188,7 @@ def main():
     sink = cuda.device_array(1, np.uint32)
     _l2_flush[512, 256](flush, sink)
     all_names = sorted({n for s in scenes for _, ns, _ in BLOCKS[s[0]]
-                        for n in ns} | ({"ch08_nodense"} if frames else set()))
+                        for n in ns} | ({"ch08_old"} if frames else set()))
     for s in build_sides(all_names, wctx):
         run_once(s, flush, sink)
         if s.paints not in ("est", "loop"):
@@ -2004,6 +2201,15 @@ def main():
     cpu_flood_fill_8(warm, wx, wy)
     cpu_fill_canonical(warm)
     cpu_label_components(warm)
+    wbufs = cpu_twins.Buffers(warm.shape[0], warm.shape[1],
+                              tuple(cpu_twins.KINDS))
+    for kind in cpu_twins.KINDS:                     # compile every twin
+        for on in (False, True):
+            ok, _ = cpu_twins.check_against_oracle(cpu_twins.Twin(
+                kind, warm, (wx, wy), wbufs, on))
+            if not ok:
+                raise RuntimeError(f"CPU twin {kind} differs from its oracle")
+    del wbufs
     print(f"  warm in {time.perf_counter() - t_w:.0f} s", flush=True)
 
     sampler = Sampler()
@@ -2018,7 +2224,9 @@ def main():
         drones = bench_drones(frames, sampler, flush, sink, args.rounds)
     clocks_gpu_end = _clocks()
 
-    print("\n@njit CPU cells, after every GPU block, interleaved:",
+    print(f"\nCPU cooldown: {CPU_COOLDOWN_S} s idle", flush=True)
+    time.sleep(CPU_COOLDOWN_S)
+    print("@njit CPU cells, after every GPU block, interleaved:",
           flush=True)
     t_cpu0 = time.time()
     cpu_rounds = cpu_pass(rows, scenes, frames)
@@ -2045,6 +2253,12 @@ def main():
         }
         drones["cpu_checks_ok"] = all(f["cpu_label"]["check_ok"]
                                       for f in frames)
+        drones["cpu_twin_meta"] = _cpu_meta(drones["twin"])
+        drones["like_for_like"] = bool(
+            set(drones["cpu_twin_meta"]["outputs"]) <= set(drones["outputs"])
+            and drones["cpu_twin_meta"]["connectivity"]
+            == drones["config"]["connectivity"]
+            and drones["cpu_twin_meta"]["reset"] == drones["reset"])
         drones["frames"] = [
             {"key": f["key"], "file": f["file"], "mask_sha1": f["sha1"],
              "width": int(f["img"].shape[0]), "height": int(f["img"].shape[1]),
@@ -2064,18 +2278,30 @@ def main():
         "experiment": (
             "every CPU-vs-GPU number of the chain cut v5 in one session, "
             "each GPU cell against its CPU twin (same connectivity, same "
-            "output): one small blob (sq_256), one huge blob "
-            "(sq_8000_center), the 81 Mpx frame (input_blobs.png, act 2's "
-            "estimates re-made with v4's method) and the 240 drone frames "
-            "(ch08 without its dense path); every block at full clocks or "
-            "run again; CUDA events, CPU last"),
+            "output, buffers kept and reset in the same scope): one small "
+            "blob (sq_256), one huge blob (sq_8000_center), the 81 Mpx "
+            "frame (input_blobs.png, act 2's estimates re-made with v4's "
+            "method) and the 240 drone frames (ch08's first version, no "
+            "dense-tile path); every block at full clocks or run again; "
+            "CUDA events, CPU last"),
         "rules": {
             "one_session": True,
             "cpu_twin": TWIN,
             "cpu_fns": CPU_FNS,
-            "no_dense_tile_path": ("ch08's dense lists checked empty on "
-                                   "every checked run: the frame's default "
-                                   "engine and the drones' ch08_nodense"),
+            "cpu_meta": {k: _cpu_meta(k) for k in CPU_META},
+            "gpu_outputs": {k: _gpu_out(k) for k in GPU_OUT},
+            "like_for_like": ("a twin's outputs are a subset of its GPU "
+                              "cell's, with the same connectivity and the "
+                              "same reset scope (before / on the clock); "
+                              "every twin's arrays equal its oracle's"),
+            "no_dense_tile_path": ("every ch08 number of the story is ch08's "
+                                   "first version (flood_fill.OLD_PATH: no "
+                                   "K2b or K4b, the hybrid K3); the default "
+                                   "engine (the dense-tile path) is timed "
+                                   "on the frame for reference only; the "
+                                   "dense lists are checked empty on every "
+                                   "checked run"),
+            "ch08_old_path": dict(CH08_OLD),
             "full_clocks": {"pstates": ["P0"], "mem_min_mhz": MEM_FULL_MHZ,
                             "sm_median_min_mhz": SM_MEDIAN_MIN,
                             "max_attempts": MAX_ATTEMPTS},
@@ -2090,12 +2316,15 @@ def main():
         "git_head": _git("rev-parse", "--short", "HEAD"),
         "script_matches_head": _git("status", "--porcelain", "--",
                                     "src/flood_fill_cuda/overview/"
-                                    "bench_v5.py") == "",
+                                    "bench_v5.py",
+                                    "src/flood_fill_cuda/overview/"
+                                    "cpu_twins.py") == "",
         "config": {"gpu_rounds_min": args.rounds,
                    "min_timed_s": MIN_TIMED_S, "max_rounds": MAX_ROUNDS,
                    "e2e_repeats": E2E_REPEATS,
                    "cpu_rounds": CPU_ROUNDS, "cpu_round_s": CPU_ROUND_S,
                    "cpu_max_calls_per_round": CPU_MAX_CALLS,
+                   "cpu_cooldown_s": CPU_COOLDOWN_S,
                    "est_sample": EST_SAMPLE,
                    "host_clock_repeats": HOST_CLOCK_REPEATS,
                    "loop_rounds": LOOP_ROUNDS,
@@ -2118,10 +2347,16 @@ def main():
             "v4's estimate: median sampled call x calls, each sampled call "
             "timed alone; host_clock_est_ms is v4's clock on the same calls. "
             "e2e = pageable H2D + pipeline + D2H (perf_counter), context "
-            "only. CPU *_ms: @njit, one core, end to end of the call "
-            "(allocations included, no paint), after all GPU work, in 5 "
+            "only. CPU *_ms: @njit, one core, after all GPU work, in 5 "
             "interleaved rounds over every cell (median over all calls; "
-            "round_medians show drift; cpu_rounds the host load). "
+            "round_medians show drift; cpu_rounds the host load). The twins "
+            "(cpu_bfs4, cpu_bfs8, cpu_fill8, cpu_label, cpu_label_pre) run "
+            "their oracle's loop on buffers allocated once per image, no "
+            "paint; their reset (visited 0, depth -1, label -1) is untimed "
+            "before each call or inside the timed call, as their GPU side "
+            "resets its own (cpu_meta.reset). oracle_* and "
+            "cpu_fill_canonical are the oracles as called, fresh arrays on "
+            "every call (allocations included): reference only. "
             "twin.x = CPU twin / GPU median (> 1: the GPU is faster)."),
         "inputs": {"png": PNG_NAME if png_md5 else None, "png_md5": png_md5,
                    "drone_masks": len(frames),
@@ -2144,12 +2379,18 @@ def main():
                            and drones["last_timed_run_matches_cpu"]))
     full = all(r["all_blocks_full_clocks"] for r in rows) and (
         drones is None or drones["full_clocks"])
+    lfl = all(c["twin"]["like_for_like"] for r in rows
+              for c in r["cells"].values()
+              if c["side"] == "gpu" and not c["reference_only"]) and (
+        drones is None or drones["like_for_like"])
     payload["all_checks_ok"] = ok
     payload["all_blocks_full_clocks"] = full
+    payload["all_like_for_like"] = lfl
 
     print(f"\nSession {session}  checks: {'all OK' if ok else 'FAILED'}; "
-          f"clocks: {'all full' if full else 'NOT ALL FULL'}")
-    print(f"{'scene':16s} {'config':18s} {'ms':>11s} {'cpu twin':>12s} "
+          f"clocks: {'all full' if full else 'NOT ALL FULL'}; "
+          f"twins: {'all like for like' if lfl else 'NOT ALL LIKE FOR LIKE'}")
+    print(f"{'scene':16s} {'config':18s} {'ms':>11s} {'cpu twin':>14s} "
           f"{'cpu ms':>10s} {'x':>9s}")
     for r in rows:
         for k, c in r["cells"].items():
@@ -2157,11 +2398,12 @@ def main():
                 continue
             t = c["twin"]
             print(f"{r['scene']:16s} {k:18s} {c['ms']:11.4f} "
-                  f"{t['cpu']:>12s} {t['cpu_ms']:10.3f} {t['x']:9.3f}"
+                  f"{t['cpu']:>14s} {t['cpu_ms']:10.3f} {t['x']:9.3f}"
+                  + ("" if t["like_for_like"] else "  NOT like for like")
                   + ("  (ref)" if c["reference_only"] else ""))
     if drones:
         s = drones["summary"]
-        print(f"drones: ch08_nodense median {s['gpu']['median_ms']:.4f} ms, "
+        print(f"drones: ch08_old median {s['gpu']['median_ms']:.4f} ms, "
               f"max {s['gpu']['max_ms']:.4f}; cpu_label median "
               f"{s['cpu_label']['median_ms']:.3f}, max "
               f"{s['cpu_label']['max_ms']:.3f}; "
@@ -2201,7 +2443,7 @@ def main():
                     json.dumps(c["info"]) if gpu else c["fn"]])
         if drones:
             s = drones["summary"]
-            for key, side, d in (("ch08_nodense", "gpu", s["gpu"]),
+            for key, side, d in (("ch08_old", "gpu", s["gpu"]),
                                  ("cpu_label", "cpu", s["cpu_label"])):
                 w.writerow([
                     "drones (per-frame medians)", side, key,
