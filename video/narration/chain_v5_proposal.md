@@ -449,8 +449,10 @@ Picture:
   every ~0.4 s. The 17 entry bits sit on the left edge (bit 0, rows
   13-31 but 19 and 28), where the round-3 tile beside it handed them
   over. Then row 86, diagonal 109, column 181, row 387, diagonal 481,
-  column 541, row 543. A small glyph under the card shows the direction
-  (along, diagonal, down); no words.
+  column 541, row 543. A small two-headed glyph under the card shows
+  each sweep's directions (along the rows both ways, both diagonals,
+  along the columns both ways: ch07's `_row_fill`, `_diag_step` and
+  `_col_fill` all run both ways); no words.
 - "until nothing changes": trip 4 changes nothing. On "changes", with
   caption 3: the 32 threads vote (the column of dots dims), the card
   folds back into SM 0, and the 7 round-4 tiles on the floor turn blue

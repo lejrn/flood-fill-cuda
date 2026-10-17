@@ -1131,7 +1131,8 @@ class WarpCard(Group):
     pixel. One ImageMobject whose pixels change per sweep (`show`), a frame
     (`frame`: pulse it for "registers"), a column of 32 vote dots right of
     the rows (`votes`), and under the grid a slot for a direction glyph
-    (`glyph(kind)`: row, diag, col). No title: the caption names it.
+    (`glyph(kind)`: row, diag, col, each two-way). No title: the caption
+    names it.
 
     Grow it out of `partition_point(closeup)` (FadeIn with target_position)
     and fold it back into `sm_point(pl, 0)`."""
@@ -1223,17 +1224,22 @@ class WarpCard(Group):
         return r
 
     def glyph(self, kind: str, color: str = INK_SOFT):
-        """The sweep's direction under the grid, no words: row (along a row,
-        right), diag (one diagonal step, down-right), col (down a column)."""
-        from manim import Arrow
+        """The sweep's direction under the grid, no words. Every sweep runs
+        both ways (ch07's _row_fill, _diag_step, _col_fill), so every glyph
+        has two heads: row (along the rows, both ways), diag (a cross of the
+        two diagonals: the step reaches every pixel round a reached one in
+        the rows above and below) and col (along the columns, both ways)."""
+        from manim import DoubleArrow, VGroup
 
-        d = {"row": np.array([1.0, 0, 0]), "diag": np.array([0.72, -0.72, 0]),
-             "col": np.array([0, -1.0, 0])}[kind]
-        L = self.glyph_h * 0.9
-        a = Arrow(self.glyph_c - d * L / 2, self.glyph_c + d * L / 2, buff=0, stroke_width=4, color=color,
-                  max_tip_length_to_length_ratio=0.35)
-        a.set_z_index(self.z + 1)
-        return a
+        h = self.glyph_h
+        dirs = {"row": [(np.array([1.0, 0, 0]), 1.5 * h)], "col": [(np.array([0, 1.0, 0]), 0.94 * h)],
+                "diag": [(np.array([s, 1.0, 0]) / np.sqrt(2), 1.2 * h) for s in (1.0, -1.0)]}[kind]
+        g = VGroup(*[DoubleArrow(self.glyph_c - d * L / 2, self.glyph_c + d * L / 2, buff=0, stroke_width=4,
+                                 color=color, tip_length=0.25 * h, max_tip_length_to_length_ratio=0.5)
+                     for d, L in dirs])
+        for m in g.get_family():
+            m.set_z_index(self.z + 1)
+        return g
 
 
 def warp_closeup(centre, height: float, mask, reached=None, z: float = Z_CALLOUT) -> WarpCard:
