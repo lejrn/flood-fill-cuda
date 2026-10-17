@@ -3,9 +3,10 @@
   drones_sky     the camera
   drones_mask    the motion filter: |frame - static background| above a
                  threshold, white on black
-  drones_labels  the mask labelled and coloured by the repo's Chapter 6
-                 run-table kernel (real GPU output through `recolor`),
-                 drawn on black
+  drones_labels  the mask labelled by the repo's Chapter 8 tile waves,
+                 the first version (flood_fill.OLD_PATH: no dense-tile
+                 path; real GPU output through `recolor`), and coloured
+                 by track, drawn on black
 
 Two sources:
   default        a simulation: a clear sky with soft clouds, five
@@ -30,15 +31,19 @@ to the previous frame's tracks by nearest centroid within GATE pixels
 (greedy, closest pairs first), unmatched blobs open new tracks, and a
 track survives MISS_LIMIT frames without a match. Each track keeps one
 colour for its life. This is the classic centroid tracker; the labelling
-itself is still the ch06 kernel's. By default it runs on the GPU
-(gpu_tracker.py), straight from ch06's run table; `--tracker host` is
-the numpy version, and `--tracker both` runs the two and checks that
-they agree exactly on every frame.
+itself is still the kernel's. With ch08 (the default) the tracker is the
+numpy version on the host. `--labeller ch06` brings back the older
+ch06 run-table kernel, whose run table also feeds the GPU tracker
+(gpu_tracker.py, then the default); `--tracker both` runs the host and
+GPU trackers and checks that they agree exactly on every frame.
 
 Run from the repo root with the ROOT venv (numba + CUDA):
     .venv/bin/python video/assets/make_drone_frames.py
-    .venv/bin/python video/assets/make_drone_frames.py --source video/assets/source/drones_short.mp4 --start 200 --frames 240 --tracker both
-Writes video/assets/drones_*/frame_NNN.png + meta.json (gitignored).
+    .venv/bin/python video/assets/make_drone_frames.py --source video/assets/source/drones_short.mp4 --start 200 --frames 240
+    ... --labeller ch06 --tracker both        (the older ch06 set; checks host == GPU)
+Writes video/assets/drones_*/frame_NNN.png + meta.json (gitignored), or
+the same three folders under --out DIR (to compare a new set with the
+one in use before replacing it).
 """
 from __future__ import annotations
 
@@ -56,8 +61,23 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-from flood_fill_cuda.chapters.ch06_gpu_nblob_runs.recolor import RunRecolor, recolor  # noqa: E402
-from gpu_tracker import GpuTracker  # noqa: E402
+# the labellers, imported on use: ch08's first version (the default), or ch06
+LABELLERS = {
+    "ch08": "ch08 tile waves, the first version (flood_fill.OLD_PATH: no dense-tile path), 8 neighbours",
+    "ch06": "ch06 run-table kernel",
+}
+
+
+def labeller(name: str):
+    """(engine factory (w, h) -> engine, recolor) of a labeller. Both
+    recolor()s take the same arguments and return a label map (W, H),
+    -1 off-blob, with canonical (sparse) labels."""
+    if name == "ch08":
+        from flood_fill_cuda.chapters.ch08_gpu_nblob_tiles import flood_fill as ff8
+        return (lambda w, h: ff8.TileWaves(w, h, **ff8.OLD_PATH)), ff8.recolor
+    from flood_fill_cuda.chapters.ch06_gpu_nblob_runs.recolor import RunRecolor, recolor
+    return (lambda w, h: RunRecolor(w, h, run_capacity=max(65536, w * h // 8))), recolor
+
 
 W, H, N, FPS, SS = 640, 360, 240, 30, 2
 THRESH = 24
@@ -369,7 +389,7 @@ def host_track(r, tracker: Tracker, min_area: int, max_bbox: int, timing: dict, 
     centroids, the numpy tracker, painting. Appends its stage timings."""
     for k in ("label_map", "blob_prep", "track", "paint"):
         timing.setdefault(k, [])
-    timing["label_map"].append(r.label_ms + r.d2h_ms)                   # label map to the host
+    timing["label_map"].append(getattr(r, "label_ms", 0.0) + r.d2h_ms)  # label map to the host (ch08: in d2h)
     label_hw = np.ascontiguousarray(r.label.T)                          # (H, W), -1 off-blob
     # the kernel's labels are canonical run indices (sparse); make them dense 0..n-1
     on = label_hw >= 0
@@ -419,10 +439,20 @@ def main() -> int:
     ap.add_argument("--fps", type=float, default=FPS)
     ap.add_argument("--no-stabilise", action="store_true", help="median filter: skip alignment")
     ap.add_argument("--filter", choices=["tophat", "median"], default="tophat")
-    ap.add_argument("--tracker", choices=["gpu", "host", "both"], default="gpu",
-                    help="gpu: blob prep, tracking and paint on the device (gpu_tracker.py); host: the numpy "
-                         "path; both: run the two and check they agree exactly on every frame")
+    ap.add_argument("--labeller", choices=sorted(LABELLERS), default="ch08",
+                    help="ch08: the tile waves' first version (the default); ch06: the run-table kernel")
+    ap.add_argument("--tracker", choices=["gpu", "host", "both"], default=None,
+                    help="host (the default with ch08): the numpy path; gpu (the default with ch06): blob prep, "
+                         "tracking and paint on the device from ch06's run table (gpu_tracker.py); both: run the "
+                         "two and check they agree exactly on every frame (ch06 only)")
+    ap.add_argument("--out", type=Path, default=HERE,
+                    help="the folder that gets drones_{sky,mask,labels}/ (default: next to this script)")
     args = ap.parse_args()
+    if args.tracker is None:
+        args.tracker = "host" if args.labeller == "ch08" else "gpu"
+    if args.labeller != "ch06" and args.tracker != "host":
+        ap.error("the GPU tracker reads ch06's run table: use --tracker host, or --labeller ch06")
+    make_engine, recolor = labeller(args.labeller)
 
     if args.source:
         gen = source_frames(args.source, args.start, args.frames,
@@ -434,7 +464,7 @@ def main() -> int:
         thresh = args.thresh if args.thresh is not None else THRESH
         source = "make_drone_frames.py (simulation)"
 
-    folders = {k: HERE / f"drones_{k}" for k in ("sky", "mask", "labels")}
+    folders = {k: args.out / f"drones_{k}" for k in ("sky", "mask", "labels")}
     for p in folders.values():
         p.mkdir(parents=True, exist_ok=True)
         for old in p.glob("frame_*.png"):
@@ -447,7 +477,7 @@ def main() -> int:
     for f, (arr, bg_gray) in enumerate(gen):
         h, w = arr.shape[:2]
         if engine is None:
-            engine = RunRecolor(w, h, run_capacity=max(65536, w * h // 8))
+            engine = make_engine(w, h)
             size = [w, h]
         t0 = time.perf_counter()
         if args.source and args.filter == "tophat":
@@ -468,6 +498,7 @@ def main() -> int:
             n_blobs, painted = host["n_blobs"], host["painted"]
         if args.tracker != "host":
             if gpu is None:
+                from gpu_tracker import GpuTracker
                 gpu = GpuTracker(engine, GATE, MISS_LIMIT, min_area, max_bbox, TRACK_PALETTE)
             tg, t3 = {}, time.perf_counter()
             painted = gpu.step(tg)
@@ -495,6 +526,7 @@ def main() -> int:
             meta["blobs_min"], meta["blobs_max"] = min(blobs), max(blobs)
             meta["blobs_per_frame"] = blobs                  # what the kernel counted, per frame
             meta["tracks"] = n_tracks
+            meta["labeller"] = LABELLERS[args.labeller]
             meta["tracking"] = (f"centroid + constant velocity, gate {GATE} px, miss limit {MISS_LIMIT}, "
                                 f"on the {'GPU' if args.tracker != 'host' else 'host'}")
         (p / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")

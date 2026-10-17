@@ -75,6 +75,7 @@ and exits 1 if a stated fact does not hold.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sys
@@ -477,6 +478,16 @@ def load() -> dict[str, Num]:
     meta = _load(DRONE_META)
     put("drone_blobs_median", sorted(meta["blobs_per_frame"])[len(meta["blobs_per_frame"]) // 2],
         "assets/drones_labels/meta.json:blobs_per_frame (median)")
+    # the intro's footage and its counter: labelled by ch08's first version
+    # (make_drone_frames.py), from the very masks V5 timed, and counting what V5 counted
+    put("drone_footage_ch08", meta.get("labeller", "").startswith("ch08") and "OLD_PATH" in meta["labeller"],
+        "assets/drones_labels/meta.json:labeller (ch08's first version, flood_fill.OLD_PATH)")
+    masks = DRONE_META.parent.parent / "drones_mask"
+    put("drone_footage_masks_v5", meta["frames"] == len(dr["frames"]) and all(
+        hashlib.sha1((masks / fm["file"]).read_bytes()).hexdigest() == fm["mask_sha1"] for fm in dr["frames"]),
+        f"assets/drones_mask/frame_NNN.png SHA-1 == {fd}.frames[].mask_sha1")
+    put("drone_footage_counts_v5", meta["blobs_per_frame"] == [fm["n_blobs"] for fm in dr["frames"]],
+        f"assets/drones_labels/meta.json:blobs_per_frame == {fd}.frames[].n_blobs")
     put("cpu_cores", CPU_CORES, CPU_CORES_SOURCE)
 
     # ================= act 1's mechanism (Jul 19-20): GPU only =================
@@ -925,6 +936,9 @@ def facts() -> list[tuple[str, bool]]:
         ("V5's frame: 2,522 blobs in the scene, the CPU's labels and both wave engines", n["n_blobs_agree"] == 1),
         # ---- intro
         ("i0 thirty-three milliseconds", round(d["budget_ms"]) == 33),
+        ("i0 'Count them all, every frame': the count panel's footage is ch08's first version's labels of V5's "
+         "240 drone masks (SHA-1 equal), and every count its counter shows is V5's per-frame blob count",
+         n["drone_footage_ch08"] == 1 and n["drone_footage_masks_v5"] == 1 and n["drone_footage_counts_v5"] == 1),
         ("i1 on frames this small, compiled CPU code keeps up (drone frames, labels only, worst frame 0.88 ms)",
          n["drone_cpu_max_ms"] < d["budget_ms"] and n["drone_ok"] == 1),
         ("i1 drone card: CPU 0.679 ms against the 33 ms budget, the GPU a '?' (as the 81 Mpx card): no GPU drone "

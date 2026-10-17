@@ -56,7 +56,7 @@ row, and the intro's four footage panels become two rows of two.
 benchmarks (JSON, committed)  ->  scenes/panes/data.py  ->  matrix cells, captions
 triton_twins JSON (committed) ->  data.load_twins()    ->  the Triton stage's cells and card
 chapter GIFs (committed)      ->  assets/extract_gifs.py -> assets/<name>/frame_NNN.png
-drone-show Short (yt-dlp)     ->  assets/make_drone_frames.py (+ gpu_tracker.py) -> drones_{sky,mask,labels}/
+drone-show Short (yt-dlp)     ->  assets/make_drone_frames.py (ch08 labels) -> drones_{sky,mask,labels}/
 narration/script.md           ->  narration/tts_kokoro.py -> out/kokoro/<beat>.wav + timing.json
 narration/script.md           ->  ElevenLabs connector, one TTS node per beat -> out/elevenlabs_raw/<beat>.mp3
 out/elevenlabs_raw/           ->  narration/import_audio.py -> out/elevenlabs/<beat>.wav + timing.json
@@ -106,7 +106,7 @@ video/
   assets/
     extract_gifs.py             chapter GIFs -> assets/<name>/ (gitignored output)
     make_drone_frames.py        footage -> camera / filter / tracked-labels sets + meta.json
-    gpu_tracker.py              blob prep, centroid tracker and paint on the GPU, from ch06's run table
+    gpu_tracker.py              blob prep, centroid tracker and paint on the GPU, from ch06's run table (--labeller ch06)
     source/                     downloaded footage (gitignored)
   build/
     assemble.py                 --render [--only stem] [--layout vertical] [--voice name] [--no-audio] [--check]
@@ -130,7 +130,7 @@ uv run assets/extract_gifs.py                                  # chapter GIFs ->
 .venv/bin/yt-dlp -f "bv*[height<=1080]" -o "assets/source/drones_short.%(ext)s" \
     https://www.youtube.com/shorts/p2cDTfSIwqs                 # video stream only; rename to drones_short.mp4
 ../.venv/bin/python assets/make_drone_frames.py --source assets/source/drones_short.mp4 \
-    --start 200 --frames 240 [--tracker both]                  # root venv, GPU; `both` checks host == GPU
+    --start 200 --frames 240 [--out DIR]                       # root venv, GPU; ch08's first version, host tracker
 uv run python scenes/panes/data.py                             # the matrix as text, exit 1 on a mismatch
 uv run build/audit_numbers.py                                  # every on-screen number vs the JSON
 uv run build/layout_check.py --layout landscape                # then --layout vertical; both must exit 0
@@ -210,8 +210,11 @@ the outro fade. Rules that keep this true:
    (Peter Baker's s05): encoder noise over the whole picture, not content.
 4. Look at contact sheets (`build/review.py`) of any scene you touched,
    and at the final file around the seams and at 20-30 s (the counter).
-5. After touching the tracker: `make_drone_frames.py ... --tracker both`
-   reports 240 of 240 frames identical.
+5. After touching the tracker: `make_drone_frames.py ... --labeller ch06
+   --tracker both` reports 240 of 240 frames identical. After touching
+   the labelling: regenerate with `--out` into scratch, compare the frames
+   with the set in use, and run `numbers.py` (its i0 fact checks the
+   labeller, the masks' SHA-1 and the counts against V5).
 6. `git status` clean; `out/` and `media/` never committed.
 
 ## 7. Gotchas (all handled; keep them handled)
@@ -241,10 +244,13 @@ the outro fade. Rules that keep this true:
   spatial: a white top-hat (gray minus its 9x9 opening), threshold 60,
   blobs under 4 px or wider than 26 px dropped. The wording on screen and
   in the narration is "a filter", not "a motion filter".
-- **Labels vs tracks.** The ch06 kernel labels each frame on its own, in
-  scan order. Colours come from a centroid tracker with constant-velocity
-  prediction (gate 18 px, coast 8 frames), on the GPU by default. It is a
-  simple tracker: crossings inside a dense swarm can swap identities.
+- **Labels vs tracks.** ch08's first version (`OLD_PATH`) labels each
+  frame on its own. Colours come from a centroid tracker with
+  constant-velocity prediction (gate 18 px, coast 8 frames), on the host.
+  It is a simple tracker: crossings inside a dense swarm can swap
+  identities. Until v5 the labels came from ch06's run kernel and the
+  tracker ran on the GPU (`--labeller ch06`); the ch08 set came out byte
+  for byte the same (2026-10-17).
 - **ch06's `parent[]` is not fully compressed after flatten.** Its path
   halving races, so some runs point at an ancestor, not the root.
   `run_label` is always right. `gpu_tracker.py` walks to the root
