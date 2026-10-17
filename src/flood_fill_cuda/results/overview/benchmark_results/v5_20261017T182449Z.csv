@@ -1,0 +1,24 @@
+scene,side,config,ms,ms_min,ms_max,n,cpu_twin,twin_ms,x_twin,reference_only,full_clocks,check,detail
+sq_256,gpu,ch07,0.0440,0.0410,0.0676,210,cpu_bfs8,0.1896,4.3052,False,True,OK,"{""rounds"": 4, ""filled"": 16384}"
+sq_256,gpu,ch01_ring,0.5212,0.5151,0.7188,210,cpu_bfs4,0.1208,0.2317,False,True,OK,"{""levels"": 129, ""filled"": 16384, ""peak_occupancy"": 506}"
+sq_256,gpu,ch05_fused_L8,0.1659,0.1495,0.1976,300,cpu_bfs8,0.1896,1.1427,True,True,OK,"{""levels"": 8, ""filled"": 16384}"
+sq_256,cpu,cpu_bfs4,0.1208,0.1172,0.2403,505,,,,,,OK,"cpu_flood_fill (ch01: 4-conn BFS, visited + depth)"
+sq_256,cpu,cpu_bfs8,0.1896,0.1811,0.5416,505,,,,,,OK,"cpu_flood_fill_8 (shared: 8-conn BFS, visited + depth)"
+sq_8000_center,gpu,ch07,3.0966,3.0925,3.1713,9,cpu_bfs8,1396.1613,450.8726,False,True,OK,"{""rounds"": 127, ""filled"": 64000000}"
+sq_8000_center,gpu,ch03_conn8,96.9093,96.7393,97.1244,9,cpu_bfs8,1396.1613,14.4069,False,True,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 202393942}"
+sq_8000_center,gpu,ch03_conn4,133.3289,133.0995,134.6376,9,cpu_bfs4,1581.1792,11.8592,False,True,OK,"{""levels"": 8001, ""filled"": 64000000, ""cas_attempts"": 127984000}"
+sq_8000_center,gpu,ch03_wc_bare,70.9499,70.5874,71.8766,9,cpu_bfs8,1396.1613,19.6781,True,True,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 0}"
+sq_8000_center,gpu,ch02_global,515.6915,513.7162,517.3811,9,cpu_bfs4,1581.1792,3.0661,False,True,OK,"{""levels"": 8001, ""filled"": 64000000}"
+sq_8000_center,gpu,ch01_spill,1046.7656,1043.5328,1048.7399,9,cpu_bfs4,1581.1792,1.5105,False,True,OK,"{""levels"": 8001, ""filled"": 64000000, ""peak_occupancy"": 31994, ""spilled"": 35426302}"
+sq_8000_center,cpu,cpu_bfs4,1581.1792,1527.2014,1642.2529,5,,,,,,OK,"cpu_flood_fill (ch01: 4-conn BFS, visited + depth)"
+sq_8000_center,cpu,cpu_bfs8,1396.1613,1379.3189,1458.0237,5,,,,,,OK,"cpu_flood_fill_8 (shared: 8-conn BFS, visited + depth)"
+input_blobs,gpu,ch08,2.2323,2.2118,2.4504,199,cpu_label,274.3800,122.9125,False,True,OK,"{""rounds"": 6, ""n_blobs"": 2522, ""dense_label_tiles"": 0, ""dense_paint_tiles"": 0}"
+input_blobs,gpu,ch05_split_L8,48.2524,47.4716,51.6803,24,cpu_label,274.3800,5.6863,False,True,OK,"{""levels"": 19, ""filled"": 13451960}"
+input_blobs,gpu,est_ch03_conn8,1448.7983,1444.9244,1459.1284,13,cpu_label,274.3800,0.1894,False,True,OK,"{""sample_blob_px"": [16548, 2705, 4502, 898, 4645, 145], ""sample_filled"": [16548, 2705, 4502, 898, 4645, 145], ""sample_levels"": [154, 65, 81, 37, 80, 15]}"
+input_blobs,gpu,est_ch04_multi8,854.8167,852.2343,856.7537,13,cpu_label,274.3800,0.3210,False,True,OK,"{""sample_blob_px"": [27534, 17823, 8195, 3729, 7649, 220], ""sample_filled"": [27534, 17823, 8195, 3729, 7649, 220], ""sample_levels"": [154, 145, 81, 66, 80, 15]}"
+input_blobs,gpu,loop_ch03_conn8,1564.4928,1564.1017,1564.9709,3,cpu_label,274.3800,0.1754,True,True,OK,"{""untimed_ms"": 1564.13134765625}"
+input_blobs,gpu,loop_ch04_multi8,1104.2202,1103.6918,1104.4025,3,cpu_label,274.3800,0.2485,True,True,OK,"{""untimed_ms"": 1107.3116455078125}"
+input_blobs,cpu,cpu_label,274.3800,268.3521,279.8288,5,,,,,,OK,cpu_label_components (ch05: 8-conn labels only)
+input_blobs,cpu,cpu_fill_canonical,1151.7056,1080.8315,1211.3032,5,,,,,,OK,"cpu_fill_canonical (ch05: labels + a BFS from each canonical seed, with depth): v4's baseline, reference only"
+drones (per-frame medians),gpu,ch08_nodense,0.0993,0.0850,0.1147,240,cpu_label,0.6705,6.7499,False,True,OK,p90 0.1096
+drones (per-frame medians),cpu,cpu_label,0.6705,0.5838,0.8915,240,,,,False,,OK,p90 0.7382
