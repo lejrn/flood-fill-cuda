@@ -394,6 +394,14 @@ def largest_blob() -> int:
     return k
 
 
+def blob_seed_frac() -> tuple[float, float]:
+    """The close-up blob's one seed (TL closeup.seed, [x, y] pixels) as a
+    fraction of a frame floor's side, for Floor.frac_point: r11's "from
+    one seed" dot on frame_one_blob."""
+    x, y = a3_meta()["seed"]
+    return x / SIDE_PX, y / SIDE_PX
+
+
 @lru_cache(maxsize=1)
 def one_blob_picture() -> np.ndarray:
     """The red frame with its largest blob filled (REACHED): r11's "that's
