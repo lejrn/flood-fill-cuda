@@ -68,8 +68,8 @@ Saved to video/assets/tiles/ (see its README.md):
 - ch08_waves_<UTC>.npz   the arrays
 - ch08_waves_<UTC>.json  the facts, the checks and the provenance
 
-Memory: about 4 GB host at 81 Mpx (the image, the model, the oracle's
-and the GPU's label maps); about 1.2 GB device. About a minute.
+Memory: 3.7 GB host at peak, measured (the image, the model, the
+oracle's and the GPU's label maps); about 1.2 GB device. About 20 s.
 
 Run:  uv run python -m flood_fill_cuda.chapters.ch08_gpu_nblob_tiles.benchmarks.video_waves --images images/input
       (--quick: the crop only, every check, no files written)
@@ -476,7 +476,8 @@ def main():
         "script": "src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/"
                   "benchmarks/video_waves.py",
         "commit": git_commit(), "utc": stamp,
-        "device": dev.decode() if isinstance(dev, bytes) else str(dev),
+        "device": (dev.decode() if isinstance(dev, bytes) else str(dev))
+        .split("\x00")[0].strip(),
         "image": os.path.basename(png), "png_md5": PNG_MD5,
         "chapter_sessions": list(SESSIONS),
         "config": {"connectivity": CONN, "lattice": LATTICE,

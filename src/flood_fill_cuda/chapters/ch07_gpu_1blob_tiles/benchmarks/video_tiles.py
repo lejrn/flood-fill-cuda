@@ -66,8 +66,8 @@ Saved to video/assets/tiles/ (see its README.md):
 - ch07_tiles_<UTC>.npz   the arrays
 - ch07_tiles_<UTC>.json  the facts, the checks and the provenance
 
-Memory: about 2 GB host at 64 Mpx (the image, the oracle's visited,
-depth and queue); about 0.5 GB device. A minute or two in all.
+Memory: 1.6 GB host at peak, measured (the image, the oracle's
+visited, depth and queue); about 0.5 GB device. About 10 s in all.
 
 Run:  uv run python -m flood_fill_cuda.chapters.ch07_gpu_1blob_tiles.benchmarks.video_tiles --images images/input
       (--quick: a 1024^2 square, every check, no files written)
@@ -634,6 +634,13 @@ def closeup_export(png_path, checks, blob_rank=0, quick=False, tile=None):
     return arrays, facts
 
 
+def device_name():
+    """The GPU's name, without the driver's NUL padding."""
+    n = cuda.get_current_device().name
+    n = n.decode() if isinstance(n, bytes) else str(n)
+    return n.split("\x00")[0].strip()
+
+
 def git_commit():
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
@@ -681,9 +688,7 @@ def main():
         "script": "src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/"
                   "benchmarks/video_tiles.py",
         "commit": git_commit(), "utc": stamp,
-        "device": cuda.get_current_device().name.decode()
-        if isinstance(cuda.get_current_device().name, bytes)
-        else str(cuda.get_current_device().name),
+        "device": device_name(),
         "chapter_session": SESSION,
         "config": {"connectivity": CONN, "threads_per_block": TPB,
                    "switches": SWITCHES, "instrumented": True},
