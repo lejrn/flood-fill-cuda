@@ -4,6 +4,9 @@ Real data for the chain cut's third act (v5). Every array was recorded
 from the chapters' own GPU kernels on the RTX 4060 Laptop, then checked
 against the CPU oracles (אורקל) and the chapters' CPU model.
 
+One file is the exception: `input_blobs_red.npz` is the input frame
+itself, not kernel output (see "The input frame" below).
+
 These files hold mechanism data: rounds, tiles, pieces, seeds, labels.
 They hold no timings. Every CPU-vs-GPU ratio the video shows comes from
 the bench session (`src/flood_fill_cuda/overview/bench_v5.py`), not
@@ -13,6 +16,7 @@ from here.
 |---|---|
 | `ch07_tiles_20261017T160022Z.npz` / `.json` | ch07 on `sq_8000_center`, and one warp close-up on `input_blobs.png` |
 | `ch08_waves_20261017T160051Z.npz` / `.json` | ch08 on a 384 px crop of `input_blobs.png`, and the full frame's facts |
+| `input_blobs_red.npz` | the red pixels of `input_blobs.png`, all of them: r13's zoom |
 
 ## Provenance (מקור)
 
@@ -286,6 +290,31 @@ collision, pred-skip and CAS counters include the repeats. In this run,
 142 of the full frame's 31,198 collisions are repeats; the crop has
 none. The ch08 README's "every collision is seen once" does not quite
 hold. The kernel was left as it is.
+
+## The input frame: `input_blobs_red.npz`
+
+This file is not kernel output. It holds the red pixels of
+`input_blobs.png` (the md5 above), all 81,000,000 of them.
+
+r13 uses it to pull back from the crop to the whole frame at full
+resolution. The 900 px frame pictures hold a tenth of the frame's side.
+At the start of that zoom their pixels would be squares 25 px wide.
+
+| array | shape, dtype | meaning |
+|---|---|---|
+| `red_bits` | (9000, 1125) uint8 | the red mask in `[x, y]`, 8 pixels a byte along y: `np.unpackbits(red_bits, axis=1)` |
+| `shape` | (2,) int64 | (9000, 9000) |
+| `source_md5` | str | `47639eb37f973b5092ec2c4db86f45a4` |
+
+`video/assets/make_frame_mask.py` makes it, from `video/`:
+
+```
+uv run assets/make_frame_mask.py
+```
+
+It checks the image's md5, and that the image holds pure red and white
+only (13,451,960 red pixels). It also checks that ch08's crop
+(`crop_red` at its origin) equals its window of the mask.
 
 ## Numbers worth showing
 
