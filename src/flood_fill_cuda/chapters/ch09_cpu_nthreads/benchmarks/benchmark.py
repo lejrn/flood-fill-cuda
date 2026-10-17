@@ -79,12 +79,21 @@ Policy:
                   medians; speedups and CPU-vs-GPU factors with their
                   range over the CPU rounds
 
-Checks (every output): each cell's untimed call and its LAST timed call
-(in the final round) are checked: a painted image must equal the one
-built from the oracle (blue on the fill set, palette[label % 6] on red),
-fill counts and levels (pixel BFS) the oracle's, label maps (ch09, and
-ch08's off-clock map) the oracle's, blob counts the oracle's. A twin's
-arrays must equal its oracle's.
+Checks (every CPU output): EVERY timed call of a CPU cell is checked
+right after it, off the clock and on one thread (a check must not wake
+the thread pool between calls): the work image must equal the expected
+one (blue on the fill set, palette[label % 6] on red, or the pristine
+image for a cell that does not paint), fill counts and levels (pixel
+BFS) the oracle's, the tile BFS's rounds the first call's, label maps
+(ch09's off-clock map, the twins' arrays) and blob counts the oracle's,
+and ch09's wave invariants must hold (every ring piece expanded once,
+claims = ring pieces - seeds + dropped entries). A cell's untimed call
+and its last timed call also compare the visited sets. A cell with
+any mismatch is reported (calls_checked, call_mismatches, where) and
+fails all_checks_ok. The drone pass checks every call in full. GPU
+cells check their untimed run and their last timed run (ch08's label
+map too): a host check between timed GPU runs would let the clock
+fall.
 
 Output: results/ch09_cpu_nthreads/benchmark_results/ch09_<stamp>.json
 and ch09_<stamp>.csv (files named, never paths).
@@ -305,6 +314,26 @@ def paint_palette_serial(img, label):
                 img[x, y, 2] = K.PALETTE[c, 2]
 
 
+@njit(cache=True)
+def _count_differences(a, b):
+    """Positions where two flat arrays of one dtype and size differ (no
+    early exit, so the loop vectorises)."""
+    n = 0
+    for i in range(a.size):
+        if a[i] != b[i]:
+            n += 1
+    return n
+
+
+def same(a, b):
+    """a and b have one shape, one dtype and equal values (no temporary
+    arrays: the checks after every timed call stay cheap)."""
+    if a.shape != b.shape or a.dtype != b.dtype:
+        return False
+    return _count_differences(np.ascontiguousarray(a).reshape(-1),
+                              np.ascontiguousarray(b).reshape(-1)) == 0
+
+
 class OneCore:
     """The one-core twins of one image shape, buffers allocated once."""
 
@@ -467,7 +496,8 @@ def build_scenes(args):
             img = np.ascontiguousarray(img[:w, :h])
             name = f"input_blobs_crop_{w}x{h}"
         out.append((name, "many", img, None, (8,)))
-    return out
+    return [(n, k, np.ascontiguousarray(im), sd, c)
+            for n, k, im, sd, c in out]
 
 
 def load_drones(args):
@@ -489,7 +519,7 @@ def load_drones(args):
 
 
 def reference(kind, img, seed, conns):
-    """The oracle results every output is checked against (untimed)."""
+    """The oracle results the outputs are checked against (untimed)."""
     ref = {"red_px": int(np.count_nonzero(
         (img[..., 0] == 255) & (img[..., 1] == 0) & (img[..., 2] == 0)))}
     if kind == "one":
@@ -510,7 +540,14 @@ def reference(kind, img, seed, conns):
 
 def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
     """Every CPU cell of a scene: {key, fn (timed), prep (untimed),
-    verify (the output of the last call, untimed), meta}."""
+    verify(full) (the output of the last call, untimed), meta}.
+
+    verify(full=False) is the per-call check, run after EVERY timed call
+    (off the clock, on one thread): the work image against the expected
+    one (the painted image, or the pristine one for a cell that does
+    not paint), the counts against the oracle's, and for ch09's labels
+    the label map and the wave invariants. verify(full=True) adds the
+    visited sets (the untimed call and the last timed call)."""
     pristine = img
     cells = []
 
@@ -547,20 +584,23 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
                             eng.threads = nt
                             last["st"] = eng.run(work, sx, sy, paint=paint)
 
-                        def verify(eng=eng, paint=paint, r=r, last=last,
-                                   method=method):
+                        def verify(full=True, eng=eng, paint=paint, r=r,
+                                   last=last, method=method):
                             st = last["st"]
-                            vis = eng.visited()
-                            ok = {"visited": bool(np.array_equal(
-                                vis, r["visited"]))}
-                            if paint:
-                                ok["image"] = bool(np.array_equal(
-                                    work, r["blue"]))
+                            ok = {"image": same(work, r["blue"] if paint
+                                                else pristine)}
                             if method == "pixel":
                                 ok["filled"] = st["filled"] == r["filled"]
                                 ok["levels"] = st["levels"] == r["levels"]
                             else:
+                                # tile BFS counters do not depend on the
+                                # threads: every call has the first's
                                 ok["filled"] = eng.filled() == r["filled"]
+                                last.setdefault("rounds", st["rounds"])
+                                ok["rounds"] = st["rounds"] == last["rounds"]
+                            if full:
+                                ok["visited"] = bool(np.array_equal(
+                                    eng.visited(), r["visited"]))
                             return {"ok": all(ok.values()), **ok,
                                     "work": st}
                         cell(key, fn, verify, variant=method, threads=nt,
@@ -572,14 +612,15 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
                 def fn(paint=paint, c8=c8, last=last):
                     last["res"] = one.fill(work, sx, sy, c8, paint)
 
-                def verify(paint=paint, r=r, last=last):
+                def verify(full=True, paint=paint, r=r, last=last):
                     lv, f = last["res"]
-                    ok = {"visited": bool(np.array_equal(
-                        one.visited != 0, r["visited"])),
-                        "filled": int(f) == r["filled"],
-                        "levels": int(lv) == r["levels"]}
-                    if paint:
-                        ok["image"] = bool(np.array_equal(work, r["blue"]))
+                    ok = {"image": same(work, r["blue"] if paint
+                                        else pristine),
+                          "filled": int(f) == r["filled"],
+                          "levels": int(lv) == r["levels"]}
+                    if full:
+                        ok["visited"] = bool(np.array_equal(
+                            one.visited != 0, r["visited"]))
                     return {"ok": all(ok.values()), **ok}
                 cell(key, fn, verify, variant="one_core", threads=1,
                      paint=paint, connectivity=conn, side="one_core",
@@ -589,12 +630,14 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
             def fn_bfs(c8=c8, last=last):
                 last["res"] = one.bfs(work, sx, sy, c8)
 
-            def verify_bfs(r=r, last=last, conn=conn):
+            def verify_bfs(full=True, r=r, last=last):
                 lv, f = last["res"]
-                ok = {"visited": bool(np.array_equal(one.visited != 0,
-                                                     r["visited"])),
+                ok = {"image": same(work, pristine),
                       "filled": int(f) == r["filled"],
                       "levels": int(lv) == r["levels"]}
+                if full:
+                    ok["visited"] = bool(np.array_equal(one.visited != 0,
+                                                        r["visited"]))
                 return {"ok": all(ok.values()), **ok}
             cell(f"one_bfs{sfx}", fn_bfs, verify_bfs, prep=one.bfs_prep,
                  variant="one_core_depth", threads=1, paint=False,
@@ -606,10 +649,14 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
             def fn_or(oracle=oracle, last=last):
                 last["res"] = oracle(work, sx, sy)
 
-            def verify_or(r=r, last=last):
+            def verify_or(full=True, r=r, last=last):
                 v, _, lv, f = last["res"]
-                ok = {"filled": int(f) == r["filled"],
+                ok = {"image": same(work, pristine),
+                      "filled": int(f) == r["filled"],
                       "levels": int(lv) == r["levels"]}
+                if full:
+                    ok["visited"] = bool(np.array_equal(v != 0,
+                                                        r["visited"]))
                 return {"ok": all(ok.values()), **ok}
             cell(f"oracle_bfs{sfx}", fn_or, verify_or, variant="oracle",
                  threads=1, paint=False, connectivity=conn, side="oracle",
@@ -637,13 +684,20 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
                 eng.threads = nt
                 last["st"] = eng.run(work, paint=paint)
 
-            def verify(eng=eng, paint=paint, last=last):
+            def verify(full=True, eng=eng, paint=paint, last=last):
                 st = last["st"]
-                ok = {"labels": bool(np.array_equal(eng.label_map(),
-                                                    ref["label"])),
-                      "n_blobs": st["n_blobs"] == ref["n_blobs"]}
-                if paint:
-                    ok["image"] = bool(np.array_equal(work, ref["palette"]))
+                # seeds depend on the lattice only: every call has the
+                # first's; every ring piece is expanded once
+                last.setdefault("seeds", st["seeds"])
+                ok = {"image": same(work, ref["palette"] if paint
+                                    else pristine),
+                      "labels": same(eng.label_map(), ref["label"]),
+                      "n_blobs": st["n_blobs"] == ref["n_blobs"],
+                      "seeds": st["seeds"] == last["seeds"],
+                      "expanded": st["expanded"] == st["ring_pieces"],
+                      "claims": st["claims"] == (st["ring_pieces"]
+                                                 - st["seeds"]
+                                                 + st["dropped"])}
                 return {"ok": all(ok.values()), **ok, "work": st}
             cell(key, fn, verify, variant="labels", threads=nt, paint=paint,
                  lattice=lat, connectivity=8, side="ch09")
@@ -654,11 +708,11 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
             def fn(paint=paint, last=last):
                 last["n"] = one.labels(work, paint)
 
-            def verify(paint=paint, last=last):
-                ok = {"labels": bool(np.array_equal(one.label, ref["label"])),
+            def verify(full=True, paint=paint, last=last):
+                ok = {"image": same(work, ref["palette"] if paint
+                                    else pristine),
+                      "labels": same(one.label, ref["label"]),
                       "n_blobs": int(last["n"]) == ref["n_blobs"]}
-                if paint:
-                    ok["image"] = bool(np.array_equal(work, ref["palette"]))
                 return {"ok": all(ok.values()), **ok}
             cell(key, fn, verify, variant="one_core", threads=1, paint=paint,
                  connectivity=8, side="one_core", reset="on the clock")
@@ -667,9 +721,10 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
         def fn_or(last=last):
             last["res"] = cpu_label_components(work)
 
-        def verify_or(last=last):
+        def verify_or(full=True, last=last):
             lab, nb = last["res"]
-            ok = {"labels": bool(np.array_equal(lab, ref["label"])),
+            ok = {"image": same(work, pristine),
+                  "labels": same(lab, ref["label"]),
                   "n_blobs": int(nb) == ref["n_blobs"]}
             return {"ok": all(ok.values()), **ok}
         cell("oracle_label", fn_or, verify_or, variant="oracle", threads=1,
@@ -677,18 +732,34 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
     return cells
 
 
+def check_call(c, where):
+    """The per-call check of a timed call, off the clock and on one
+    thread (a check must not wake the thread pool between calls)."""
+    with ff.num_threads(1):
+        ok = c["verify"](False)["ok"]
+    c["calls_checked"] += 1
+    if not ok:
+        c["call_mismatches"] += 1
+        c["mismatch_at"].append(where)
+
+
 def cpu_pass(cells, args):
     """One untimed checked call per cell, a timed first call (it sets
-    the calls per round), then the interleaved rounds; the final round
-    checks every cell's last timed output. Returns the rounds' records."""
+    the calls per round), then the interleaved rounds. Every timed call
+    is checked (check_call); the untimed call and the last timed call
+    get the full check. Returns the rounds' records."""
     for c in cells:
         c["prep"]()
         c["fn"]()
-        c["check"] = c["verify"]()
+        with ff.num_threads(1):
+            c["check"] = c["verify"]()
+        c["calls_checked"], c["call_mismatches"] = 0, 0
+        c["mismatch_at"] = []
         c["prep"]()
         t0 = time.perf_counter()
         c["fn"]()
         first = time.perf_counter() - t0
+        check_call(c, "first timed call")
         c["calls"] = max(1, min(args.max_calls,
                                 int(args.round_s / max(first, 1e-6))))
         c["times"], c["round_medians"] = [], []
@@ -701,15 +772,17 @@ def cpu_pass(cells, args):
         final = r == args.cpu_rounds - 1
         for c in (cells if r % 2 == 0 else cells[::-1]):
             ts = []
-            for _ in range(c["calls"]):
+            for i in range(c["calls"]):
                 c["prep"]()
                 t0 = time.perf_counter()
                 c["fn"]()
                 ts.append((time.perf_counter() - t0) * 1000)
+                check_call(c, f"round {r} call {i}")
             c["times"] += ts
             c["round_medians"].append(statistics.median(ts))
             if final:
-                c["check_last"] = c["verify"]()
+                with ff.num_threads(1):
+                    c["check_last"] = c["verify"]()
         b1, j1 = _cpu_busy()
         rounds.append({"round": r, "seconds": round(time.time() - w0, 2),
                        "loadavg": list(os.getloadavg()),
@@ -730,7 +803,11 @@ def cpu_record(c):
     last.pop("work", None)
     out["check"] = chk
     out["check_last_timed"] = last
-    out["checks_ok"] = bool(chk["ok"] and last["ok"])
+    out["calls_checked"] = c["calls_checked"]
+    out["call_mismatches"] = c["call_mismatches"]
+    out["mismatch_at"] = c["mismatch_at"][:20]
+    out["checks_ok"] = bool(chk["ok"] and last["ok"]
+                            and c["call_mismatches"] == 0)
     return out
 
 
@@ -1218,9 +1295,11 @@ def warm_up(args):
     cpu_flood_fill(img, sx, sy)
     cpu_flood_fill_8(img, sx, sy)
     cpu_label_components(many)
+    same(img, img)
+    same(onel.label, onel.label)
 
 
-def main():
+def build_parser():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--scenes", nargs="*", default=None,
                     help="only these (sq_256 sq_8000_center serpentine_256 "
@@ -1245,7 +1324,12 @@ def main():
                          "check: its timings mean nothing)")
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--out-dir", default=None)
-    args = ap.parse_args()
+    return ap
+
+
+def parse_args(argv=None):
+    """The command line, with --smoke's small sizes applied."""
+    args = build_parser().parse_args(argv)
     if args.smoke:
         args.sq_size = min(args.sq_size, 1000)
         args.crop = args.crop or (1024, 1024)
@@ -1254,6 +1338,11 @@ def main():
         args.cpu_rounds, args.round_s, args.max_calls = 1, 0.02, 3
         args.gpu_rounds, args.warm_seconds, args.max_attempts = 2, 0.3, 1
         args.cooldown, args.gate = 0.0, False
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
     args.threads = sorted(t for t in set(args.threads)
                           if 1 <= t <= numba.config.NUMBA_NUM_THREADS)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1342,7 +1431,8 @@ def main():
     ok = all(r["all_checks_ok"] for r in rows) and (
         drones is None or (drones.get("cpu_checks_ok", True) and all(
             c["checks_ok"] for c in drones.get("gpu", {}).values())))
-    print(f"\nAll outputs {'match' if ok else 'DO NOT match'} the oracles",
+    print(f"\nAll checked outputs {'match' if ok else 'DO NOT match'} the "
+          "oracles (every CPU call; GPU: the untimed and last timed runs)",
           flush=True)
     session = {
         "session": f"ch09_{stamp}", "smoke": bool(args.smoke),
