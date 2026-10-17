@@ -2,8 +2,9 @@
 
 Status: PROPOSAL on the user's decisions of 2026-10-17, every CPU-vs-GPU
 number re-made like for like in one session, after two critics' reviews
-(answered below). Nothing is built. The script is `script_chain.md`.
-Every number below is pinned in `scenes/chain/numbers.py`: 114 claim
+(answered below). Built and rendered on 2026-10-18 (278.4 s; see
+`video/HANDOFF.md` section 11). The script is `script_chain.md`.
+Every number below is pinned in `scenes/chain/numbers.py`: 115 claim
 checks, all passing (`cd video && uv run python -m scenes.chain.numbers`).
 
 Base: v4 (`chain_v4_proposal.md`, 16 beats, 217.5 s with Kokoro, paced).
@@ -36,7 +37,7 @@ All binding.
 | 2 | The CPU does exactly the GPU's work: the same neighbours, the same output; smaller ratios accepted | Each GPU cell has a CPU twin (below), checked for outputs, neighbours and setup. Spoken lines change for it in i1, r03b, r05, r08 and r09, and every scoreboard factor. |
 | 3 | The finale says both sides of the small blob aloud | r14: "In kernel time, the GPU now; with the copy to the card, still the CPU." Both hold (4.4× and 3.5×). |
 | 4 | Title card "flood fill, from pixels to tiles" (plus the repo name) | r14's last seconds. |
-| 5 | Kokoro `am_adam`, paced; Cairo renders in parallel on the CPU, the GPU measures; act 3 at the end, mechanism and numbers; at most 5 minutes | About 287 s (4:47). |
+| 5 | Kokoro `am_adam`, paced; Cairo renders in parallel on the CPU, the GPU measures; act 3 at the end, mechanism and numbers; at most 5 minutes | About 287 s (4:47) planned; 278.4 s (4:38) rendered. |
 
 Defaults adopted with them:
 - r13 keeps "once the frame is on the card" (with the copies the frame
@@ -1004,6 +1005,9 @@ Against the evening draft (276.5 s): r02 +1.0 s, r03b +1.2 s, r05 +1.0
 s, r09 +3.1 s, r10 +2.0 s, r11 +0.9 s, r14 +0.9 s. Against v4 (218 s):
 +69 s, under the five-minute cap with 13 s to spare. The task formula,
 scaled by its v4 error (218 / 270), gives about 281 s.
+
+Rendered (2026-10-18): 278.4 s (4:38), 258.8 s of it speech plus gaps.
+The model read about 3% long.
 
 Caption spacing: every new caption is cued at least 1.75 s (MIN_DWELL)
 after the one before, by word count at 3.11 words per second; r13 keeps

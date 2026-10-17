@@ -1,11 +1,12 @@
 # Narration script: the chain cut, v5 ("size, count, then tiles")
 
-Status 2026-10-17 (night): v5 DRAFT on the user's decisions, every
-CPU-vs-GPU number re-made like for like in one session, after two
-critics' reviews. The full design, with every picture, number and
-source, is `narration/chain_v5_proposal.md`; the numbers and the claim
-checks are `scenes/chain/numbers.py` (114 checks). v4 (approved
-2026-10-14) is in git history.
+Status 2026-10-18: v5, rendered (278.4 s with Kokoro, paced; see
+`video/HANDOFF.md` section 11), not yet reviewed by the user. Written on
+the user's decisions, every CPU-vs-GPU number re-made like for like in
+one session, after two critics' reviews. The full design, with every
+picture, number and source, is `narration/chain_v5_proposal.md`; the
+numbers and the claim checks are `scenes/chain/numbers.py` (115 checks).
+v4 (approved 2026-10-14) is in git history.
 
 ## v5's decisions
 
@@ -50,7 +51,8 @@ Defaults adopted with them:
 
 v5 has 19 beats: v4's first 14 (i0 to r09), four new act-3 beats
 (r10_tiles, r11_rounds, r12_pieces, r13_frame) and a new finale
-(r14_reveal). About 287 s (4:47) with Kokoro, paced.
+(r14_reveal). Rendered: 278.4 s (4:38) with Kokoro, paced (the plan said
+about 287 s).
 
 History: v1 (11 beats, "you build a machine"), v2 (the two-act ladder,
 `chain_v2_proposal.md`), v3 (the hardware look, `chain_v3_plan.md`) and
