@@ -1,9 +1,10 @@
 # The chain cut, v5: tiles replace the run-based beat
 
-Status: PROPOSAL, revised after the accuracy, story and build review,
-2026-10-17. Nothing is built. The script is `script_chain.md`. Every
-number below is pinned in `scenes/chain/numbers.py`: 103 claim checks,
-all passing (`cd video && uv run python -m scenes.chain.numbers`).
+Status: PROPOSAL on the user's decisions of 2026-10-17, every CPU-vs-GPU
+number re-made like for like in one session, after two critics' reviews
+(answered below). Nothing is built. The script is `script_chain.md`.
+Every number below is pinned in `scenes/chain/numbers.py`: 114 claim
+checks, all passing (`cd video && uv run python -m scenes.chain.numbers`).
 
 Base: v4 (`chain_v4_proposal.md`, 16 beats, 217.5 s with Kokoro, paced).
 Every v4 rule stays: at most three captions per beat, a caption sub of at
@@ -12,105 +13,187 @@ through `numbers.py`, "~" on estimates, "kernel time" where it applies,
 no "chapter".
 
 New for v5:
-- No "CCL", "runs", "spans" or "union-find" (איחוד-חיפוש), spoken or shown.
-- On-screen CPU-vs-GPU factors keep two significant figures (1.4×, 17×,
-  540×): the CPU's round medians spread by up to 9%.
+- No "CCL", "runs", "spans" or "union-find" (איחוד-חיפוש), spoken or
+  shown, and no GPU number from ch08's dense-tile path.
+- Like for like: every CPU does the work of the GPU it is compared with,
+  with the same setup (arrays kept between calls, reset where the GPU
+  resets its own).
+- On-screen CPU-vs-GPU factors keep two significant figures (4.4×, 11×,
+  340×): the CPU's round medians spread by up to 19%.
 - A flashing element flashes at most twice per second (r05b's
-  photosensitivity (רגישות לאור) rule, made stricter).
+  photosensitivity (רגישות לאור) rule, made stricter), and large areas
+  never flash.
 
 ---
 
-## What the user asked, and where it lands
+## The user's decisions (2026-10-17)
 
-| # | The user asked (short) | Where in v5 | Note |
-|---|---|---|---|
-| 1 | Make the video again; render with the GPU | the build stage | Manim's Cairo renderer draws on the CPU; the GPU did every new measurement. See Q7. |
-| 2 | The run-based labelling beat is not relevant: the focus is the BFS | r10_runs is gone, with every number from it | `numbers.py` drops sessions C6, R61, DR, and v4's 1 Mpx count row (its tiles take the dense-tile path) |
-| 3 | The tile BFS and the tile waves replace it | act 3: r10_tiles, r11_rounds (tile BFS), r12_pieces, r13_frame (tile waves) | both are BFS: a frontier (חזית) of tiles, then of pieces |
-| 4 | Just continue the video with them | i0 to r09 keep their pictures and most of their text | five phrases change their numbers (Q1) |
-| 5 | Ask if needed | the open questions at the end | |
+All binding.
+
+| # | Decision | Where it lands |
+|---|---|---|
+| 1 | Every CPU-vs-GPU number from one new session; no July numbers | `v5_20261017T192640Z` (V5). Act 2's estimates are re-made in it; `numbers.py` reads no other CPU-vs-GPU session. |
+| 2 | The CPU does exactly the GPU's work: the same neighbours, the same output; smaller ratios accepted | Each GPU cell has a CPU twin (below), checked for outputs, neighbours and setup. Spoken lines change for it in i1, r03b, r05, r08 and r09, and every scoreboard factor. |
+| 3 | The finale says both sides of the small blob aloud | r14: "In kernel time, the GPU now; with the copy to the card, still the CPU." Both hold (4.4× and 3.5×). |
+| 4 | Title card "flood fill, from pixels to tiles" (plus the repo name) | r14's last seconds. |
+| 5 | Kokoro `am_adam`, paced; Cairo renders in parallel on the CPU, the GPU measures; act 3 at the end, mechanism and numbers; at most 5 minutes | About 287 s (4:47). |
+
+Defaults adopted with them:
+- r13 keeps "once the frame is on the card" (with the copies the frame
+  takes 54.8 ms; the r14 footnote says so).
+- r11 compares against r06's kernel, the last one the viewer saw.
+- Act 2's ch05 is timed at full clocks.
+- The drones are timed without ch08's dense-tile path. V5 goes further:
+  every tile-wave number (the drones and the frame) is ch08's first
+  version, which has no dense-tile path at all (see the critics' F3).
+- The frame floors are transposed, so one orientation holds everywhere.
+
+Pitfalls the critics named, and how v5 meets them:
+- **Undefined terms.** Thread and block (r02: "two hundred fifty-six
+  workers, called threads, in one block"), warp (r10: "thirty-two
+  threads that run in step") and registers (r10: "the thread's own
+  memory, closer than shared memory") are defined in plain words where
+  first spoken.
+- **r11 overloaded.** No replay of later rounds after the first gate
+  flash; one pill change, no caption with it.
+- **Strobe.** No flashing above twice per second; the frame's 11,609
+  seeds fade in as dots, with no white rings.
+- **"Label" in two senses.** One sense only: a blob's own number. Row
+  3's tag reads "CPU: same labels".
+- **Orientation.** The 900 px PNGs are PNG order, act 3's arrays [x, y];
+  v5 transposes the PNG side once (checked).
+- **The crop in r12** is its own image, shown with its own border.
 
 ---
 
-## What the review changed
+## The critics' second review (2026-10-17), and what changed
 
-Three critics read the draft. Every "must" and almost every "should" is
-in; the table lists what moved.
+Two critics read the evening draft (session `v5_20261017T182449Z`). Every
+"must" and "should" is applied; so is every "could". None is rejected.
+Where a finding offered two fixes, the choice is named.
 
-| finding | change |
-|---|---|
-| Row 3 rested on ch08's dense-tile path (A1, M1: 1,023 of 1,024 tiles on v4's 1 Mpx noise) | Row 3 is now the 81 Mpx frame, the one the meter shows: GPU 22× at r09, GPU 520× at r13. On the frame no tile takes that path (WV, D8). A check pins it. |
-| The frame's ch05 block ran at a 7,001 MHz memory clock (A2) | Disclosed; the clock check now covers every block and names the 3 exceptions. r09 says "about fifty milliseconds" (51.7 here, 47.1 at full clocks in D8). |
-| r07-r08 compare July GPU estimates with October's CPU (A3) | Labelled as the one cross-session comparison; both claims are checked against both CPUs. |
-| The crop is its own image, not a window of the frame (A4) | It is shown with its own border, and nothing of it carries into the frame. 6 of its 8 blobs are cut by its edge. |
-| Orientation of the floors (A5, F1) | The 900 px frame is transposed once at the source, so a lane is a screen row everywhere. Checked. |
-| "Inside the budget" holds for kernel time only (A6, S3) | r13: "once the frame is on the card: inside the budget"; caption sub "kernel time, no copies"; the card's footnote gives 53 ms. |
-| "best GPU" in r02 is false within V5 (A7) | The bar reads "GPU so far". |
-| warp, lane and registers undefined (S1, F7) | "One warp, thirty-two threads"; "each thread holds one row"; "in registers, closer than shared memory". The warp card grows out of r02's SM close-up. |
-| The finale's flip is kernel time only (S2) | Spoken: "In kernel time, the GPU now; with the copy, still the CPU." |
-| r11 overloaded; strobing gate (S4, S5, F2) | No tag flips, no ghost flash; the gate flashes at most twice per second, then holds while the rounds race. |
-| "label" in two senses (S6) | "every tile finds the blob pieces". |
-| Act-3 pictures that did not match the data (F3, F4, F8, A11) | The context floor starts with rounds 0-3 blue; border bits travel only into the 4 tiles they really opened; the labelled frame is v4's picture, not the kernel's palette. |
-| Missing cues, helpers and checks (F5, F6, F12) | Added below; 7 new array-based checks. |
-| "0.05 ms" on the card (F10) | Three decimals under 0.1 ms; every card row is checked to read true. |
+Critic 1 (the numbers):
 
-Not taken, or taken another way:
-- **A2, re-time ch05**: not done; the disclosure option was taken. Q9
-  offers a re-time.
-- **A3, re-estimate r07-r08 in V5**: not done (it needs new benchmark
-  code); both CPUs are checked instead.
-- **C1, "fifty-two"**: "about fifty" instead, true at both memory clocks.
-- **A8, a footnote for the tuned 73 ms kernel**: kept in this document
-  and Q6 only; the card's footnote already holds the copies.
-- **S6, the optional "a tile can cut through several blobs"**: left out;
-  caption 1 says it.
-- **F8, the crop's hues taken from the frame's picture**: left out,
-  because the crop is its own image (A4).
-- **F14, "one round fills a tile the pixel BFS needs 16 rings for"**:
-  not used, because the number is wrong. The seed sits on its tile's
-  corner, so the pixel BFS needs 32 levels to fill that tile.
-- **F15, a per-round frontier note in r13**: left out; r13 is busy enough.
-- **F9, regenerate the drone footage from ch08**: planned for the build
-  stage (the frames are local, not committed).
-- **F3's count**: round 4 opens 7 tiles in the context (the centre and 6
-  others), not 6.
+| # | Finding | Done |
+|---|---|---|
+| F1 must | The CPU twins allocated fresh full-image arrays on every call, so first-touch page faults (חריגות דף) were on the CPU's clock; the GPU sides allocate once | The twins (`overview/cpu_twins.py`) run each oracle's loop on arrays kept between calls, reset before the clock or on it as their GPU side resets its own. Re-run as one new session. |
+| F2 must | ch07 keeps no depth map, but its twin built one | A new twin, `cpu_fill8`: the 8-neighbour BFS without depth. Every GPU cell and twin now records its outputs and reset scope, and a check requires the twin's outputs within the GPU's. |
+| F3 should | The drones' engine was the default with its dense lists empty, not "the pure wave path" | Every tile-wave number is ch08's first version (`OLD_PATH`: no K2b or K4b launch, the hybrid K3), the frame's too. The default is timed beside it on the frame, reference only (2.25 vs 2.21 ms). |
+| F4 could | Two more blocks logged the power cap; the ch05 probe is in no JSON | Named below (Clocks), and the probe is marked unpinned. |
+| F5 could | `card_ms` truncates 10-100 ms, so the footnote's copy times read low | The footnote uses `card_ms_note`, which rounds (44.3, 54.8 ms). Spoken values keep the truncation. |
+| F6 could | ch08's per-pixel label map is an off-clock twin; the CPU builds its own on the clock | Disclosed in "What v5 does not claim". |
+| F7 could | "+3 words" for r08; "3-6×" | r08 is +3 words against v4 and +2 against the morning draft; the range now reads 4.2-9.5×. |
+
+Critic 2 (the viewer):
+
+| # | Finding | Done |
+|---|---|---|
+| F1 should | r09 never says the GPU now beats the CPU, nor that it misses the budget | r09: "Faster than the CPU. But over budget: every red pixel still rides the queue." Row 3's pill lands on "Faster". |
+| F2 should | Row 1's flip changes four things at once, and the tag is drawn nowhere | Two steps: at "And one small blob?" the CPU cell and tag change and the GPU cell and winner go to "?"; at "now" the GPU cell and "GPU 4.4×" land. Tags are drawn under the row names. |
+| F3 should | "Block" is never put into words | r02: "...workers, called threads, in one block, paint a whole ring at once." |
+| F4 should | r10 is the densest beat; the third cube lands under "tiles" | The registers sentence is split off; the third cube lands as the warp card folds back (the first of the two places offered). |
+| F5 should | The i1 drone card shows a kernel-time GPU win that r02 then contradicts | The drone card shows the CPU against the budget and the GPU as "?"; r14's caption 3 gives the drones' time with the copies (1.26 ms worst). |
+| F6 could | The SM close-up prints "32 lanes" while the voice says threads | The partitions read "32" only (build). |
+| F7 could | r11's "its ... its neighbours" after a beat cut | "Only the tile's border bits go out, into the tiles around it". |
+| F8 could | r11 replays rounds 6-8 for no reason | The replay is dropped. |
+| F9 could | "CPU: labels only" sounds like less work | "CPU: same labels". |
+| F10 could | "copy" is spoken without a bridge | "with the copy to the card", echoing r13. |
+| F11 could | "4 trips / then nothing changes" reads as five | "4 trips" / "the last changes nothing". |
+| F12 could | 11,609 white rings over the whole frame | The seeds fade in as dots over at least 1 s. |
+
+What the re-run moved, against the evening session:
+
+| number | evening (`182449Z`) | V5 (`192640Z`) |
+|---|---|---|
+| i1, the CPU on the frame | 274 ms ("over a quarter of a second") | 225 ms ("over a fifth of a second") |
+| r02 / row 1 | CPU 4.3× | CPU 4.3× |
+| r03b | 1.5× ("beats the CPU") | 1.1× ("a little faster than the CPU") |
+| r05 | 12× ("Twelve") | 8.5× ("Eight and a half") |
+| r06 / row 2 | GPU 14× | GPU 11× |
+| r07, r08 | the CPU by 5.3× and 3.1× | the CPU by 7.2× and 4.2× |
+| r09 / row 3 | GPU 5.7× | GPU 3.8× |
+| r11 / row 2 | GPU 450× | GPU 340× |
+| r13 / row 3 | GPU 120× | GPU 100× |
+| r14 / row 1 | GPU 4.3× (0.19 vs 0.044 ms) | GPU 4.4× (0.192 vs 0.044 ms) |
+| the drones | CPU 0.67 ms, GPU 0.099 ms (default engine, dense lists empty) | CPU 0.679 ms; GPU not shown (0.090 ms, first version) |
 
 ---
 
 ## The data behind v5
 
-Three kinds of source, each with one job.
+**Every CPU-vs-GPU number: one session**, `v5_20261017T192640Z` (V5),
+benchmark `src/flood_fill_cuda/overview/bench_v5.py` with
+`overview/cpu_twins.py`, both at the committed HEAD
+(`script_matches_head`).
+- GPU: kernel-only CUDA events, interleaved rounds per scene.
+- CPU: `@njit` on one core, after all GPU work and 60 s of idle, 5
+  interleaved rounds, each behind a gate that waits for a quiet host.
+- Every GPU output matched the CPU's, in every scene and on all 240
+  drone frames, and every twin's arrays equal its oracle's.
 
-**Every CPU-vs-GPU number: one session**, `v5_20261017T161122Z` (V5).
-- GPU: kernel-only CUDA events, 9 interleaved rounds per scene.
-- CPU: `@njit` on one core, 5 interleaved rounds, each behind a gate that
-  waits for a quiet host.
-- Every GPU output matched an image built from the CPU's result.
+**The CPU twins** (`rules.cpu_twin`, `rules.cpu_meta`; checked for every
+GPU cell). Each runs its oracle's loop on arrays allocated once per
+image:
 
-**V5's clocks, block by block.**
-- The SM clock's median is 2,070 MHz in every timed block.
-- The huge blob's window has 9 of 177 samples under 2,070: 5 at 1,995
-  and 4 at 2,055.
-- The memory clock is 8,001 MHz in P0 everywhere but three blocks:
-  - the frame's ch05 block: P3 at 7,001 MHz in all 5 samples. That is
-    act 2's 51.7 ms. D8 timed the same kernel at 47.1 ms with the memory
-    mostly at 8,001.
-  - the drones: memory median 7,001 (P0 and P3).
-  - the small blob's tiles block: P3 in 5 of 6 samples, memory at 8,001.
-- The bench notes said "2,070 MHz in every timed window". That holds for
-  the SM medians only. `numbers.py` now checks every block.
+| CPU twin | what it keeps | reset | GPU cells it is compared with |
+|---|---|---|---|
+| `cpu_bfs4` | BFS, 4 neighbours: visited + depth | before the clock | ch01 ring and spill (1 block), ch02 (2 blocks), ch03 4-way (48 blocks) |
+| `cpu_bfs8` | BFS, 8 neighbours: visited + depth | before the clock | ch03 8-way (diagonals) |
+| `cpu_fill8` | BFS, 8 neighbours: visited only | on the clock | ch07 (the tiles) |
+| `cpu_label` | labels only, 8 neighbours | on the clock | ch08's first version (the waves), the drones |
+| `cpu_label_pre` | labels only, 8 neighbours | before the clock | act 2: the estimates, the loops, ch05 (seeds) |
+| `oracle_*`, `cpu_fill_canonical` | the oracles as called (fresh arrays every call); v4's baseline | in the call | none: reference only |
 
-**The one cross-session comparison: r07 and r08.** Their GPU times are
-July estimates (OV: 6 sampled blobs times the call count). V5 has no
-re-estimate. So the meter sets July needles against October's CPU tick.
-- r07: ~2,181 ms is slower than both CPUs (1,157 in V5, 1,346 in OV).
-- r08: ~1,368 ms is 18% slower than V5's CPU and 2% slower than OV's.
-  "close to CPU speed" holds for both. v4's "about CPU speed" was OV's 2%.
+Why the reset differs: ch01-ch05 and act 2's loops reset their arrays on
+the device between runs, off their clocks; ch07 clears its reached bits
+and ch08 sets up its state inside the timed pipeline. Each twin does the
+same. Every GPU cell records its outputs (visited, depth, labels, owner,
+paint), and a twin's outputs must be among them (`twin.like_for_like`).
+
+What the kept arrays changed (reference cells, same session): the
+oracles as called took 1.49× (4 neighbours, 1,775 vs 1,195 ms on the 64
+Mpx square), 1.39× (8 neighbours) and 1.40× (labels, 315 vs 225 ms on
+the frame) of their twins. On the small blob the gain is small (0.126 vs
+0.121 ms). The label map's reset is 10% of the frame time (225 ms on the
+clock, 202 ms before it).
+
+**Clocks.** All 8 timed blocks ran at full clocks: P0 only, memory 8,001
+MHz, SM median 2,070 MHz in every block.
+- 7 blocks reached full clocks on their first attempt. ch05 on the frame
+  did on its second: its first sat in P3 (memory 7,001 MHz) at 41.9 W
+  under the software power cap, and the retry put 0.1 s of light load
+  between its runs, as the protocol allows.
+- Three blocks logged `sw_power_cap` and still met the rule: the huge
+  blob's interleaved block (median 21.8 W, peak 39.0 W), the frame's
+  waves block (median 39.5 W, SM minimum 2,025 MHz) and ch05's used
+  attempt (median 33.4 W).
+- ch05 on the frame read 53.9 ms here (50.8-56.1 over its rounds); a
+  probe on 2026-10-17 read 48.9-51.3 ms at any spacing. The probe is not
+  in a committed JSON (only bench_v5's docstring quotes it), so it is
+  context, not a pinned number. "About fifty" holds for both.
+- The CPU's round medians spread by up to 19% in this session (the
+  labels reset before the clock: 189-226 ms; the 4-neighbour BFS on the
+  square: 1,120-1,284 ms). Every shown factor is checked against its
+  range over the CPU's rounds.
+
+**Act 2's estimates, re-made in V5.** v4's method (the median of 6
+sampled calls, each timed alone by CUDA events, times the call count),
+at 8 neighbours, as the CPU's labels:
+- One launch per blob: ~1,462 ms (2,522 calls). Two per launch: ~850 ms
+  (1,261 calls).
+- v4's host clock on the same calls: 1,919 and 1,016 ms.
+- The full loops, measured once: 1,647 and 1,147 ms, 1.13× and 1.35× the
+  estimates. So the estimates run low, ch04 the most.
+- Every form is 4.2-9.5× slower than the CPU's 202 ms: the direction of
+  r07 and r08 is safe.
 
 **The mechanism and its counters: the tiles' own sessions.**
 - Tile BFS: `tiles_20261016T064724Z` (T7).
 - Tile waves: `dense_20261016T054922Z` (D8) and
-  `waves_20261015T183401Z` (W8). Their deterministic counters agree.
+  `waves_20261015T183401Z` (W8). Their deterministic counters agree. D8
+  also timed the first version (its `old_path`, V5's engine): the same
+  counters as the default, so the default's floors (WV) describe the
+  first version's run.
 
 **The pictures: recorded from the kernels**, `video/assets/tiles/` (TL, WV).
 - TL: the 64 Mpx square's 250 x 250 tiles, round by round, and one warp's
@@ -119,18 +202,11 @@ re-estimate. So the meter sets July needles against October's CPU tick.
   and the whole frame's claim rounds.
 - 47 and 31 checks against the CPU oracles (אורקלים), all true.
 
-**Why one session.** The CPU is faster today than in July: the 4-way BFS
-on the square takes 1,666 ms, against 2,584 in v4's session. The GPU
-cells did not move (within 0-4%). Mixing a July CPU in act 1 with an
-October CPU in act 3 would mix two CPU speeds in one scoreboard (Q1).
-
-**Why row 3 moved to the frame.** v4's row 3 was 1 Mpx of noise
+**Why row 3 is the frame.** v4's row 3 was 1 Mpx of noise
 (random_1000). On it, ch08's default sends 1,023 of its 1,024 tiles down
-the dense-tile path (K2b and K4b, built on ch06's run labelling), and 77%
-of its blobs never ride a wave. That is the mechanism v5 leaves out. On
-the 81 Mpx frame no tile takes that path, in labelling or in paint (WV
-and D8 both count 0), and V5 timed the very engine WV recorded. So row 3
-is now the frame: the same picture as the meter, 2,522 blobs.
+the dense-tile path, which v5 leaves out. On the 81 Mpx frame no tile
+takes that path (V5's timed runs, WV and D8 all count 0). So row 3 is
+the frame: the same picture as the meter, 2,522 blobs.
 
 ---
 
@@ -141,24 +217,24 @@ is now the frame: the same picture as the meter, 2,522 blobs.
 | k | beat | status | rung |
 |---|---|---|---|
 | 0 | i0_problem | same | |
-| 1 | i1_compare | one word ("two") | the CPU needs 1.2 s, not 1.3 |
+| 1 | i1_compare | changed | the CPU needs over a fifth of a second (225 ms, labels only) |
 | 2 | r00_zoom | same | |
 | 3 | r01_cpu | same | |
-| 4 | r02_one_block | same text, new numbers | CPU still wins the small blob (0.12 vs 0.17 ms) |
+| 4 | r02_one_block | "workers, called threads, in one block" | the CPU still wins the small blob: 0.121 vs 0.520 ms, CPU 4.3× |
 | 5 | r03_giant | same | |
-| 6 | r03b_one_sm | changed | "beats the CPU" (1.5×) |
-| 7 | r04_two_blocks | same | twice as fast: 2.03x |
-| 8 | r05_all_blocks | one word ("Twelve") | 12× |
+| 6 | r03b_one_sm | changed | "a little faster than the CPU" (1.1×) |
+| 7 | r04_two_blocks | same | twice as fast: 2.04× |
+| 8 | r05_all_blocks | changed | eight and a half times (8.5×) |
 | 9 | r05b_snake | same | |
-| 10 | r06_diagonals | same text, new caption | 17×; row 2 |
-| 11 | r07_real_frame | same | |
-| 12 | r08_tags | two words ("close to") | ~1,368 ms against 1,157: 18% slower |
-| 13 | r09_seeds | two words ("about fifty"), row 3 fills | 51.7 ms, GPU 22×. But every red pixel still rides the queue. |
+| 10 | r06_diagonals | same text, new caption | 11× against the 8-neighbour CPU; row 2 |
+| 11 | r07_real_frame | same | ~1,462 ms against 202: slower than the CPU |
+| 12 | r08_tags | changed | two per launch, faster (~850 ms). But still slower than the CPU: only two seeds, each handed in. |
+| 13 | r09_seeds | changed, row 3 fills | 53.9 ms: faster than the CPU (3.8×), but over budget: every red pixel still rides the queue. |
 | 14 | r10_tiles | new | So the queue carries tiles; one warp closes a tile in registers. |
-| 15 | r11_rounds | new | One gate per round: 4,001 rings become 127 rounds, 100 ms become 3.10. But one blob, one seed. |
+| 15 | r11_rounds | new | One gate per round: 4,001 rings become 127 rounds, 101 ms become 3.12. But one blob, one seed. |
 | 16 | r12_pieces | new | So every tile finds its pieces; seeds send waves; at the end, the smallest label. |
-| 17 | r13_frame | new | The frame: 6 rounds, every blob counted, 2.24 ms once the frame is on the card. |
-| 18 | r14_reveal | new text | Huge or many: the GPU. The small blob: the GPU in kernel time, the CPU with the copy. |
+| 17 | r13_frame | new | The frame: 6 rounds, every blob counted, 2.21 ms once the frame is on the card. |
+| 18 | r14_reveal | new text | Huge or many: the GPU. The small blob: the GPU in kernel time, the CPU with the copy to the card. |
 
 Gone: r10_runs and everything only it used: the "runs" form of the VRAM
 close-up, the "1 warp" row read and its "coalesced" caption, the six
@@ -170,91 +246,132 @@ teal frame.
 ## Beats that stay unchanged
 
 i0_problem, r00_zoom, r01_cpu, r03_giant, r04_two_blocks, r05b_snake,
-r07_real_frame: same text, same takes, same pictures.
+r06_diagonals and r07_real_frame: same text, same takes, same pictures.
 
 Their numbers that come from GPU-only comparisons keep their July
 sessions, each within one session: 48 KB and 125 KB (r03), SM 2, 1.7x
-and "no slower" (r04), the snake and its gates (r05b), +15% (r05).
+and "no slower" (r04), the snake and its gates (r05b), +15% (r05). None
+of them is set against a CPU.
 
-r04's "twice as fast" is now read from V5 (1,077 vs 530 ms, paired
-2.03x). r07's needle swings past the new CPU tick (1.2 s) to the same
-~2,181 ms estimate: still slower (cross-session, see above).
+r04's "twice as fast" is read from V5 (1,097 vs 538 ms, paired 2.04x).
+r06's caption and r07's needle move with V5 (below).
 
 ---
 
 ## Changed beats (acts 1 and 2)
 
-Every change comes from the one-session rule (Q1), except r09's (the
-memory clock, Q9).
-
-### i1_compare: "one point two seconds"
+### i1_compare: "over a fifth of a second"
 
 ```text
-On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixels, same thirty-three milliseconds. The CPU needs one point two seconds. Where does the GPU win? Two places: size and count.
+On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixels, same thirty-three milliseconds. The CPU needs over a fifth of a second. Where does the GPU win? Two places: size and count.
 ```
 
-- CPU on the frame: 1,157 ms (`njit_ms`, V5 `input_blobs.njit.ms`, the
-  median; its 5 rounds read 1,048-1,242). v4 said 1.3 s (1,346, July).
-- The drone card: CPU 1.46 ms, GPU 0.11 ms, budget 33 ms (`drone_cpu_ms`,
-  `drone_gpu_ms`, V5 `drones.summary`). v4's GPU number (0.93 ms) was
-  the run-based kernel's; this is the tile waves', 12.7x the CPU.
-- "keeps up" still holds: the CPU's worst drone frame is 1.88 ms
+- The CPU on the frame, labels only, its label map reset on the clock
+  (the whole job): 225 ms (`njit_ms`, V5 `input_blobs.cpu_label.ms`; its
+  5 rounds read 214-238). "Over a fifth of a second" holds in every
+  round, and "a quarter" would not. It is still nearly 7× the budget.
+  v4 said 1.3 s for labels plus a fill per blob (that work now reads
+  1,165 ms, reference only).
+- The stopwatch on the 81 Mpx card runs to "225 ms"; its stop cue moves
+  from "seconds" to "second".
+- The drone card: the CPU's bar, 0.679 ms (labels only,
+  `drone_cpu_ms`), against the 33 ms budget, and the GPU as "?", as on
+  the 81 Mpx card. Caption "0.59 Mpx" / "240 frames, one session".
+  "Keeps up" is about the CPU and the budget, so nothing is lost; and no
+  kernel-time GPU win on small frames comes before r02's "the CPU still
+  wins" (critic 2, F5).
+- "keeps up": the CPU's worst drone frame is 0.88 ms
   (`drone_cpu_max_ms`).
 
-### r02_one_block: same text, new numbers
-
-- The race: CPU 0.12 ms (`small_cpu_ms`) against "GPU so far", 0.17 ms
-  (`small_gpu_ms`, V5 `sq_256.ch05_fused_L8`). The bar was "best GPU";
-  V5 itself times the tiles at 0.045 ms on this blob, so "best" is false
-  (A7).
-- Which cell was fastest before the tiles comes from July's host-clock
-  ranking of every ch01-ch05 cell (`ov_small_best_is_pin`; ch05_r128_L8
-  was within 3% of it). V5 re-timed only that one, by events.
-- Scoreboard row 1: "one small blob: CPU 1.4×" (v4: 2.4×).
-
-### r03b_one_sm: "beats the CPU"
+### r02_one_block: "workers, called threads, in one block"
 
 ```text
-Now one block beats the CPU. But that's one SM of twenty-four.
+So move it onto one SM, its queue in the SM's shared memory: two hundred fifty-six workers, called threads, in one block, paint a whole ring at once. But on one small blob, the CPU still wins. So: size first.
 ```
 
-- 1,666 / 1,077 = 1.55 (`big_1block_x`), so "over twice" is false now.
-- Caption: "1.5×" / "vs CPU, kernel time" (four words, C2), cued at
-  "beats" (was "twice").
+- The first spoken "thread" and "block", defined: "workers, called
+  threads, in one block" (+5 words against v4; the "threads" cue stays).
+  It matches the "1 block" bar and the cube on SM 0.
+- The race is like for like: the 4-neighbour CPU BFS, 0.121 ms
+  (`small_cpu_ms`), against this very kernel, one block of 256 threads
+  with its ring in shared memory, 0.520 ms (`small_gpu_ms`, V5
+  `sq_256.ch01_ring`). The CPU wins by 4.3× (4.26-4.44 over its rounds).
+  The bar reads "1 block".
+- Scoreboard row 1: "one small blob: CPU 4.3×", tag "CPU: 4 neighbours".
 
-### r05_all_blocks: "Twelve"
-
-- 1,666 / 137.7 = 12.1 (`big_48_x`). Caption "12×" / "kernel time".
-
-### r06_diagonals: same text, new caption
-
-- 1,666 / 99.96 = 16.7 (`big_8ways_x`). Caption "17×" / "vs CPU, kernel
-  time"; scoreboard row 2: "one huge blob: GPU 17×" (v4: 25.8×).
-
-### r08_tags: "close to CPU speed"
-
-- ~1,368 ms (estimate, `est_ch04_ms`, July) against V5's 1,157 ms: 18%
-  slower; against OV's own CPU: 2% slower. "close to CPU speed" holds for
-  both (the check: 1.0 < ratio < 1.25 for each).
-
-### r09_seeds: "about fifty", row 3 fills
+### r03b_one_sm: "a little faster than the CPU"
 
 ```text
-So the GPU finds its own seeds: every blob in one fill launch, about fifty milliseconds. But every red pixel still rides the queue.
+Now one block is a little faster than the CPU. But that's one SM of twenty-four.
 ```
 
-- "fifty-one" becomes "about fifty". The meter stops at 51.7 ms
-  (`ch05_ms`, V5), which ran at a 7,001 MHz memory clock; D8 timed the
-  same kernel at 47.1 ms (`d8_ch05_ms`). Both are "about fifty"; v4's
-  51.0 was July's host clock.
-- New: about 0.6 s after the needle settles, before "But" (C6),
-  scoreboard row 3 fills: "many blobs: GPU 22×" (`count_ch05_x`: CPU
-  1,157 ms, GPU 51.7 ms, the same 81 Mpx frame).
-- Why now: the GPU already beats the CPU on count; it only misses the
-  budget. COUNT stays unwon (no tick) until r13. And row 3 needs a value
-  to jump from in act 3.
-- The P3 window makes the GPU look slower here, so 22× is conservative;
-  at full clocks it would read about 25×.
+- 1,195 / 1,097 = 1.09 (`big_1block_x`; 1.02-1.17 over the CPU's
+  rounds), against the 4-neighbour CPU on kept arrays. "Beats the CPU"
+  (the evening draft, 1.5×) overstated it once the CPU stopped paying
+  its allocations; "a little faster" says the margin.
+- Caption: "1.1×" / "vs CPU, kernel time", cued at "faster".
+
+### r05_all_blocks: "Eight and a half"
+
+```text
+So use every SM: forty-eight blocks, two on each. Eight and a half times the CPU. Each colour is one block: they share one queue, so their pixels mix, and small rings keep only a few busy. We also tried other threads per block and block counts: on a smaller square, the best gained fifteen percent. We kept forty-eight by two hundred fifty-six.
+```
+
+- 1,195 / 140.6 = 8.5 (`big_48_x`; 8.0-9.1, within 8% in every round),
+  against the 4-neighbour CPU. Caption "8.5×" / "kernel time".
+
+### r06_diagonals: same text, the CPU steps diagonally too
+
+- From here the huge blob's CPU is the 8-neighbour BFS, with its depth
+  map (ch03 keeps one): 1,126 / 101 = 11.1 (`big_8ways_x`; 9.9-11.7).
+- Caption "11×" / "CPU: 8 neighbours too". Scoreboard row 2: "one huge
+  blob: GPU 11×", tag "CPU: 8 neighbours" (v4: 25.8×).
+
+### r07_real_frame: same text
+
+- ~1,462 ms (`est_ch03_ms`, V5 `input_blobs.est_ch03_conn8`) against the
+  labels-only CPU's 202 ms (`count_cpu_pre_ms`, its reset before the
+  clock, as act 2's loops reset theirs): the CPU by 7.2× (6.5-7.8).
+  Slower by every form of the number (host clock 1,919 ms, the full loop
+  1,647 ms).
+- Caption "~1,462 ms" / "estimate".
+
+### r08_tags: "faster. But still slower than the CPU"
+
+```text
+So tag each queue entry with its blob: one spare bit of the entry's word, in global memory. Each new pixel inherits the tag, and the tag picks its colour: its label. One bit tells two blobs apart: two per launch, faster. But still slower than the CPU: only two seeds, each handed in.
+```
+
+- ~850 ms (`est_ch04_ms`, V5 `input_blobs.est_ch04_multi8`, 8 neighbours)
+  against 202 ms: the CPU by 4.2× (3.8-4.5). "About CPU speed" (v4) is
+  false.
+- "faster": two per launch beats one per launch by every measure
+  (estimates paired 1.72×; host clock 1,016 vs 1,919; full loops 1,147
+  vs 1,647).
+- "But still slower than the CPU": by every measure, over the CPU's
+  slowest round. The cause is said with it: "only two seeds, each handed
+  in", which r09's "So the GPU finds its own seeds" fixes.
+- Picture: the two blobs now fill 8 ways (the estimate's kernel); the
+  needle moves at "faster" and settles well right of the CPU tick, not
+  beside it. The floor play ends at "faster" (was "speed").
+
+### r09_seeds: "Faster than the CPU. But over budget", row 3 fills
+
+```text
+So the GPU finds its own seeds: every blob in one fill launch, about fifty milliseconds. Faster than the CPU. But over budget: every red pixel still rides the queue.
+```
+
+- 53.9 ms at full clocks (`ch05_ms`, V5 `input_blobs.ch05_split_L8`, its
+  block's second attempt). "About fifty" holds; v4's 51.0 was July's
+  host clock.
+- "Faster than the CPU" (critic 2, F1): 202 vs 53.9 ms, 3.8×
+  (`count_ch05_x`; 3.5-4.2), in every CPU round. Row 3's pill lands on
+  these words: "many blobs: GPU 3.8×", tag "CPU: same labels".
+- "But over budget": 53.9 ms against 33. The caption "53.9 ms" / "still
+  over 33 ms" lands at "budget". COUNT stays unwon (no tick) until r13,
+  and row 3 has a value to jump from in act 3.
+- "every red pixel still rides the queue" stays the cause that act 3
+  fixes.
 
 ---
 
@@ -263,10 +380,10 @@ So the GPU finds its own seeds: every blob in one fill launch, about fifty milli
 Four beats. The first two follow the tile BFS from one tile to the giant
 square; the last two take the same tiles to the whole frame.
 
-**One orientation for the whole cut (A5, F1).** The kernels index
-[x, y] with x the PNG column, and lane i = x0 + i. The act-3 arrays drop
-onto the floors as (row, col), so a lane is a screen row. The 900 px frame
-PNGs are in PNG order: v5 transposes them once at the source
+**One orientation for the whole cut.** The kernels index [x, y] with x
+the PNG column, and lane i = x0 + i. The act-3 arrays drop onto the
+floors as (row, col), so a lane is a screen row. The 900 px frame PNGs
+are in PNG order: v5 transposes them once at the source
 (`state.picture()` returns `.transpose(1, 0, 2)`; the intro's frame card
 the same). Then every floor from i1 to r14 shows one frame, the zooms in
 r07-r13 stay continuous, and the warp card's rows are the tile's lanes.
@@ -275,19 +392,20 @@ intersection over union 0.78 transposed, 0.10 as is.
 
 Shared devices:
 - **The warp card** (new helper `warp_closeup`, a sibling of `sm_closeup`
-  and `vram_closeup`): it grows out of one "32 lanes" partition of r02's
-  SM close-up (`dz.sm_detail`), so the picture defines the warp. 32 rows
-  of 32 bit cells: a red cell is a red pixel, a blue cell is reached. One
-  `ImageMobject` whose pixels change per sweep (as `Floor.show_raster`),
-  plus a frame, a row bracket and a column of 32 vote dots. No title: the
-  caption names it.
+  and `vram_closeup`): it grows out of one "32" partition of r02's SM
+  close-up (`dz.sm_detail`, whose partitions lose the word "lanes"), so
+  the picture defines the warp. 32 rows of 32 bit cells: a red cell is a
+  red pixel, a blue cell is reached. One `ImageMobject` whose pixels
+  change per sweep (as `Floor.show_raster`), plus a frame, a row bracket
+  and a column of 32 vote dots. No title: the caption names it.
 - **Tile tokens**: in act 3 a queue token carries a tiny 2 x 2 grid (a
   tile); in r12-r13 the tokens are pieces (a tile token with one cell
   lit). `mc.Spec` gets a `token_kind`; tokens are textures on the token
   top.
 - **Three blocks per SM**: both act-3 kernels launch 72 cooperative
-  blocks (tiles 72 x 128, waves 72 x 256), the most that fit at once: 3
-  per SM. The third cube lands visibly at r10's first words (C7).
+  blocks (tiles 72 x 128, the first version's waves 72 x 256), the most
+  that fit at once: 3 per SM. The third cube lands quietly as r10's warp
+  card folds back into SM 0, not under the line that introduces tiles.
 - **The gate** flashes amber once per round, at most twice per second.
   When rounds race, it holds up at steady amber (r05b's pattern) and
   lowers when they end.
@@ -300,47 +418,55 @@ Rung: So (fixes r09's "every red pixel still rides the queue") the queue
 carries tiles, and one warp closes a tile in registers (אוגרים).
 
 ```text
-So the queue carries tiles, not pixels: squares of thirty-two by thirty-two. One warp, thirty-two threads, takes a tile. Each thread holds one row as a thirty-two bit word, one bit per pixel, in registers, closer than shared memory. Fill along every row at once, step diagonally, fill along the columns, and repeat until nothing changes.
+So the queue carries tiles, not pixels: squares of thirty-two by thirty-two. One warp, thirty-two threads that run in step, takes a tile. Each thread holds one row, one bit per pixel. The row sits in registers: the thread's own memory, closer than shared memory. Fill along every row at once, step diagonally, fill along the columns, and repeat until nothing changes.
 ```
+
+Changed from the evening draft (critic 2, F4): "Each thread holds one
+row, one bit per pixel, in registers: its own memory, closer than shared
+memory." packed five ideas into one sentence. It is split: the row, then
+where the row sits. +4 words and one sentence end, about +2 s.
+"as a thirty-two bit word" stays cut (N3).
 
 Picture:
 - "So the queue carries tiles": the labelled frame turns back to red.
-  One `machine_to`: the twelve red tokens become tile tokens, the launch
-  pill fades out, and each SM's third cube lands (F5).
+  One `machine_to`: the twelve red tokens become tile tokens and the
+  launch pill fades out.
 - "thirty-two by thirty-two": the floor zooms into the frame's largest
   blob (76,090 px). A 7 x 7 grid of tiles lands on it (TL `cu_ctx_red`,
   224 x 224 px). The 15 tiles the BFS opened in rounds 0-3 are already
   blue (`cu_ctx_fill`), the blob's seed tile among them. The 7 tiles of
   round 4 are red; the centre is outlined. No round numbers: on this blob
-  the rounds move with timing (F3).
-- "One warp, thirty-two threads, takes a tile": SM 0's close-up opens as
-  in r02; one partition's "32 lanes" lights, and the warp card unfolds
-  out of it with the tile's real mask (`cu_mask`: 543 of 1,024 red) (F7).
+  the rounds move with timing.
+- "One warp, thirty-two threads that run in step, takes a tile": SM 0's
+  close-up opens as in r02; one partition's "32" lights, and the warp
+  card unfolds out of it with the tile's real mask (`cu_mask`: 543 of
+  1,024 red).
 - "Each thread holds one row": the rows light top to bottom; one row's
-  32 cells get a bracket (one word).
-- "in registers, closer than shared memory": the card's frame pulses
-  (the new-part convention).
+  32 cells get a bracket.
+- "The row sits in registers": the card's frame pulses (the new-part
+  convention).
 - "Fill along every row": the recorded sweeps (`cu_sweeps`) play, one
   every ~0.4 s. The 17 entry bits sit on the left edge (bit 0, rows
   13-31 but 19 and 28), where the round-3 tile beside it handed them
   over. Then row 86, diagonal 109, column 181, row 387, diagonal 481,
   column 541, row 543. A small glyph under the card shows the direction
   (along, diagonal, down); no words.
-- "until nothing changes": trip 4 changes nothing. On "changes" (F17),
-  with caption 3: the 32 threads vote (the column of dots dims), the card
+- "until nothing changes": trip 4 changes nothing. On "changes", with
+  caption 3: the 32 threads vote (the column of dots dims), the card
   folds back into SM 0, and the 7 round-4 tiles on the floor turn blue
-  together: the frontier closes in parallel.
+  together: the frontier (חזית) closes in parallel. As the card folds
+  back, each SM's third cube lands.
 
 Captions (3):
 1. "1 tile, 1 warp" / "32 x 32 pixels", at "warp".
 2. "1 bit per pixel" / "a row per thread", at "pixel".
-3. Carried: "4 trips" / "then nothing changes", at "changes".
+3. Carried: "4 trips" / "the last changes nothing", at "changes".
 
 Numbers:
 - 32 x 32: `tile_px` (TL `square.width / tiles[0]`), and the crop's 384 /
   12 (WV). One thread per row: `WARP_LANES` = 32, a CUDA constant.
 - 3 per SM: `big_tiles_blocks` = `small_tiles_blocks` =
-  `frame_waves_blocks` = 72 = 3 x 24.
+  `frame_waves_blocks` = 72 = 3 x 24 (V5).
 - 543 of 1,024 red, 17 entry bits: `cu_red_px`, `cu_entry_px` (TL
   `closeup`).
 - The context: `floors()` `ctx_seed_tile_round` 0, `ctx_tiles_before`
@@ -355,53 +481,59 @@ red, grid lines faint, no outline); machine: all SMs lit, three cubes
 each, queue full (12 tile tokens), gate at rest, no launch pill; the
 meter, rows and tag as at k = 14; caption "4 trips".
 
-Length: 56 words, about 20.7 s of speech, 22.1 s with its tail.
+Length: 62 words, about 23.8 s of speech, 25.2 s with its tail.
 
 ### r11_rounds (k = 15), new
 
-Rung: one gate per round: 4,001 rings become 127 rounds, 100 ms become
-3.10. But that's one blob, from one seed.
+Rung: one gate per round: 4,001 rings become 127 rounds, 101 ms become
+3.12. But that's one blob, from one seed.
 
 ```text
-Only its border bits go out, into its neighbours, and those join the next round's queue. One gate per round, not two per ring. On the giant square, four thousand rings become a hundred twenty-seven rounds: from a hundred milliseconds to three. But that's one blob, from one seed.
+Only the tile's border bits go out, into the tiles around it, and those join the next round's queue. One gate per round, not two per ring. On the giant square, four thousand rings become a hundred twenty-seven rounds: from a hundred milliseconds to three. But that's one blob, from one seed.
 ```
 
+Changed from the evening draft (critic 2, F7): "its border bits ... into
+its neighbours" becomes "the tile's border bits ... into the tiles
+around it". After the beat cut, "its" had to reach back two sentences,
+and "neighbours" meant pixels until now. +3 words.
+
 Picture:
-- "Only its border bits go out": the closed tile's reached border cells
-  light: 31 on the top row (lane 0), 26 on the left column (bit 0), 18
-  on the right (bit 31), 2 on the bottom row (lane 31).
-- "into its neighbours": bits travel only into the 4 tiles they really
-  open: above (32 px), right (18), above-left (1), above-right (1). The
-  tiles to the left and lower left are already blue (round 3) and the
-  one below closed with the centre (round 4): no arrows go there. No
-  arrow goes into the lower-right tile either: it touches no reached
-  pixel, and another tile opens it in round 6 (F4, A11).
+- "Only the tile's border bits go out": the closed tile's reached border
+  cells light: 31 on the top row (lane 0), 26 on the left column (bit
+  0), 18 on the right (bit 31), 2 on the bottom row (lane 31).
+- "into the tiles around it": bits travel only into the 4 tiles they
+  really open: above (32 px), right (18), above-left (1), above-right
+  (1). The tiles to the left and lower left are already blue (round 3)
+  and the one below closed with the centre (round 4): no arrows go
+  there. No arrow goes into the lower-right tile either: it touches no
+  reached pixel, and another tile opens it in round 6.
 - "join the next round's queue": the 12 tile tokens fade (consumed) and
-  4 drop in (F5).
+  4 drop in.
 - "One gate per round": the gate flashes once and the 4 tiles turn blue
-  (round 5). During "not two per ring" the context plays on: rounds 6-8,
-  one flash each, 0.5 s apart (`cu_ctx_first_open`, no numbers shown).
+  (round 5). Then the context holds still through "not two per ring"
+  (critic 2, F8: the replay of rounds 6-8 is gone, three flashes and one
+  floor change fewer).
 - "On the giant square": the floor swells into the 64 Mpx square, at
-  act 1's footprint (F14). The inset reads "stress test"; the tag stays
-  COUNT (S4, F17). The square is drawn from the real rounds: 250 x 250
-  tiles, each shaded by the round it first opened (TL `sq_first_open`),
-  quantized (לכמת) into about 12 bands, light to dark.
-- The rounds play in about 4 s (F2): 2 slow rounds, one flash each; then
-  the gate holds up at steady amber while the rest race and a small
-  counter beside the floor runs to 127; the gate lowers as the counter
-  lands. The queue refills to 12 tile tokens.
+  act 1's footprint. The inset reads "stress test"; the tag stays COUNT.
+  The square is drawn from the real rounds: 250 x 250 tiles, each shaded
+  by the round it first opened (TL `sq_first_open`), quantized (לכמת)
+  into about 12 bands, light to dark.
+- The rounds play in about 4 s: 2 slow rounds, one flash each; then the
+  gate holds up at steady amber while the rest race and a small counter
+  beside the floor runs to 127; the gate lowers as the counter lands.
+  The queue refills to 12 tile tokens.
 - "from a hundred milliseconds to three": the row 2 pill turns from
-  "GPU 17×" to "GPU 540×". One change; no caption lands with it.
+  "GPU 11×" to "GPU 340×". One change; no caption lands with it.
 - "But that's one blob": the floor pulls back to the 81 Mpx frame: the
   largest blob blue, the other 2,521 red; the seed dot pulses. The inset
   returns to "drone frame".
 
-Captions (3, S4):
-1. "1 gate" / "per round", at "round," (word 20).
+Captions (3):
+1. "1 gate" / "per round", at "round," (word 23).
 2. "127 rounds" / "was 4,001 rings", at "twenty-seven".
 3. Carried: "1 blob" / "from 1 seed", at "seed".
 
-The 3.10 ms is on the r14 card; here the pill carries the jump.
+The 3.12 ms is on the r14 card; here the pill carries the jump.
 
 Numbers:
 - The border bits and their targets: `floors()` `cu_border_bits` (31,
@@ -417,17 +549,19 @@ Numbers:
 - The floor: the seed tile, then 125 rings of tiles (rounds 0-125, a
   tile's round is its ring, `tl_chebyshev`); round 126 only revisits and
   opens none.
-- 100 ms: `big_8ways_ms` (V5 `ch03_conn8.ms`, 99.96: r06's kernel). 3.10
-  ms: `big_tiles_ms`. Paired per round: 32.2x (`big_8_over_tiles_paired`).
-- 540×: `big_tiles_x` = 1,665.9 / 3.10 = 537.
+- 100 ms: `big_8ways_ms` (V5 `ch03_conn8.ms`, 101: r06's kernel). 3.12
+  ms: `big_tiles_ms`. Paired per round: 32.4x (`big_8_over_tiles_paired`).
+- 340×: `big_tiles_x` = 1,065 / 3.12 = 341 (311-345), against the
+  8-neighbour CPU without a depth map, reset on the clock (`cpu_fill8`,
+  `big_cpu_fill_ms`).
 - One seed: `big_seed` (V5 `sq_8000_center.seed`).
 
 State at the cut (k = 16): floor `frame_one_blob` (the 900 px frame,
-red, the largest blob blue); machine as k = 15; rows (small CPU 1.4×,
-huge GPU 540×, many GPU 22×); tag COUNT; inset as k = 14; needle 51.7 ms;
-caption "1 blob".
+red, the largest blob blue); machine as k = 15; rows (small CPU 4.3×,
+huge GPU 340×, many GPU 3.8×); tag COUNT; inset as k = 14; needle 53.9
+ms; caption "1 blob".
 
-Length: 49 words, about 18.5 s, 20.1 s with its tail.
+Length: 52 words, about 19.4 s, 21.0 s with its tail.
 
 ### r12_pieces (k = 16), new
 
@@ -438,18 +572,18 @@ and at the end each blob keeps its smallest label.
 So first, every tile finds the blob pieces inside it, in registers, all at once. Some pieces are seeds: each seed sends a wave from piece to piece, one round at a time. Where two waves meet, the meeting is noted, and at the end each blob keeps its smallest label.
 ```
 
-The picture is WV's crop: 384 x 384 px at x 4352, y 5632, run as its own
-image (A4). It shares the frame's tile grid and seed lattice (סריג):
-its 36 seeds are the frame's, tile for tile. But it is not a window of
-the frame's run:
+Unchanged. The picture is WV's crop: 384 x 384 px at x 4352, y 5632,
+run as its own image. It shares the frame's tile grid and seed lattice
+(סריג): its 36 seeds are the frame's, tile for tile. But it is not a
+window of the frame's run:
 - 6 of its 8 blobs are cut by its edge, so they are parts of larger
   blobs.
 - 7 of its 98 tiles end on another round than in the frame (its last
   claim comes in round 5; the frame's tiles there end by round 4).
 - Its labels are its own.
 
-So the picture shows it as a small image of its own, and nothing of it
-carries back into the frame.
+So the picture shows it as a small image of its own, inside its own
+border, and nothing of it carries back into the frame.
 
 Picture:
 - "So first, every tile": the floor zooms from the frame into the crop's
@@ -457,20 +591,20 @@ Picture:
   the frame fades out: 12 x 12 tiles, 8 blobs, red.
 - "finds the blob pieces inside it": the SM rooms pulse once. Finding
   the pieces is its own launch, one warp per tile, so the cubes (the
-  waves' blocks) stay still (F16). Each piece gets an outline and a dot
-  at its first pixel (its anchor): 135 pieces, at most 4 in a tile
+  waves' blocks) stay still. Each piece gets an outline and a dot at its
+  first pixel (its anchor): 135 pieces, at most 4 in a tile
   (`crop_piece`, `crop_comp`).
 - "Some pieces are seeds": 36 sparks (as r09's); 11 of them are seeds
   only because their tile is on the lattice (`crop_tile_lattice`, faint
   diagonal hatching).
-- "each seed sends a wave": the queue's tokens become piece tokens (F5).
+- "each seed sends a wave": the queue's tokens become piece tokens.
   Six rounds, one gate flash each, 0.5 s apart. A claimed piece takes
   its wave's hue in its round (`crop_comp_round`, `crop_comp_wave`): 50,
   38, 7, 3, 1, then none. Each round's meetings appear as faint white
   ticks on the tile borders (`crop_meet_tester`, `crop_meet_other`,
   `crop_meet_round`, 116 in all).
 - "Where two waves meet": the ticks brighten together, once.
-- "and at the end": the dots, hatching and ticks fade (F5). At "smallest
+- "and at the end": the dots, hatching and ticks fade. At "smallest
   label", every piece of a blob turns to one hue at once
   (`crop_comp_label`).
 - Hues: the waves need distinct hues where they meet (a colouring of the
@@ -494,7 +628,9 @@ Numbers:
   `crop_collisions_repeated`; 28 links = 36 seeds - 8 blobs: `crop_links`.
 - "in registers": no tile of the crop or the frame takes the dense-tile
   path, in labelling or paint (`crop_dense_tiles`, `full_ccl_tiles`,
-  `full_paint_ccl_tiles`, `d8_ccl_tiles`, `d8_paint_ccl_tiles`: all 0).
+  `full_paint_ccl_tiles`, `d8_ccl_tiles`, `d8_paint_ccl_tiles`, and V5's
+  timed `frame_dense_tiles`, both engines, and `drone_dense_tiles`: all
+  0).
 - The crop as its own image: `floors()` `crop_blobs_cut_by_edge` 6,
   `crop_tiles_other_last_round` 7, `crop_seeds_are_frame_seeds`.
 
@@ -507,132 +643,166 @@ Length: 51 words, about 18.3 s, 19.5 s with its tail.
 
 ### r13_frame (k = 17), new
 
-Rung: the frame: over 11,000 seeds, 6 rounds, every blob counted, 2.24
+Rung: the frame: over 11,000 seeds, 6 rounds, every blob counted, 2.21
 ms once the frame is on the card: inside the budget.
 
 ```text
 On the big frame: over eleven thousand seeds, six rounds, every blob counted. Two point two milliseconds, once the frame is on the card: inside the budget.
 ```
 
+Unchanged; it holds (2.21 ms, ch08's first version).
+
 Picture:
 - "On the big frame": the crop's hues blend back to red and its border
-  fades (F8); then the floor pulls back to the whole red frame.
-- "over eleven thousand seeds": seeds spark over the frame, tile by tile
-  (WV `full_tile_seeds`, 282 x 282).
+  fades; then the floor pulls back to the whole red frame.
+- "over eleven thousand seeds": the seeds fade in as small dots over at
+  least 1 s, tile by tile (WV `full_tile_seeds`, 282 x 282). No white
+  rings at this scale (critic 2, F12): r09's ring stays for r09's toy
+  and r12's 36 seeds.
 - "six rounds": six gate flashes, 0.5 s apart; the claims spread out
   from the seeds (WV `full_round_900`, the claim round at 900 x 900
   samples). At 900 px only rounds 0-4 show: rounds 5 and 6 claim 6 and
   0 pieces, so the last two flashes change nothing visible. The 94
-  interior samples are drawn labelled from the start (F15).
+  interior samples are drawn labelled from the start.
 - "every blob counted": the frame turns into the labelled picture (v4's
   `frame_labels`: one pastel hue per blob, the same blobs; not the
-  palette ch08 paints) (F8, C5).
+  palette ch08 paints).
 - "Two point two milliseconds": with caption 2, the needle slides from
-  51.7 ms past the 33 ms line to 2.24 ms and turns teal.
+  53.9 ms past the 33 ms line to 2.21 ms and turns teal.
 - "inside the budget": about 0.6 s later, the tag turns "COUNT ✓" and
-  row 3's pill turns from "GPU 22×" to "GPU 520×".
+  row 3's pill turns from "GPU 3.8×" to "GPU 100×".
 
 Captions (2; a third would land under MIN_DWELL after the first):
 1. "11,609 seeds" / "6 rounds, 2,522 blobs", at "rounds".
-2. Carried: "2.24 ms" / "kernel time, no copies", at "milliseconds".
+2. Carried: "2.21 ms" / "kernel time, no copies", at "milliseconds".
 
 Numbers:
 - 11,609 seeds: `full_seeds` (WV) = `d8_seeds` (D8); W8 agrees.
 - 6 rounds: `frame_rounds` (V5) = `full_rounds` = `d8_rounds`; frontier
   11,586 / 14,744 / 7,834 / 2,306 / 289 / 6 pieces (`full_frontier` =
-  `d8_frontier`). V5 timed the engine WV recorded (`wv_engine_is_v5`).
-- 2,522 blobs, labels equal the CPU's: `n_blobs`, `frame_labels_ok` (V5),
-  `full_blobs`, `d8_n_blobs`.
-- 2.24 ms: `frame_ms` (V5, kernel only). With the copies 53.1 ms
-  (`frame_e2e_ms`), over 33: hence "once the frame is on the card".
-- The needle's drop: 51.7 / 2.24 = 23x in V5; 21x against D8's
-  full-clock ch05 (47.1 ms).
-- 520×: `count_x` = 1,157 / 2.24 = 517.
+  `d8_frontier`).
+- The engine: V5 times ch08's first version (`frame_first_version`:
+  `OLD_PATH`, dense off, the hybrid lookup, no fitted grids), which is
+  D8's `old_path` (`d8_old_is_v5_engine`); D8's counters for it equal the
+  default's (`d8_old_same_as_default`), and WV recorded the default
+  (`wv_engine_is_v5`). The default, timed beside it for reference: 2.25
+  ms (paired 1.017).
+- 2,522 blobs, labels equal the CPU's: `n_blobs`, `frame_labels_ok` (V5,
+  both engines), `full_blobs`, `d8_n_blobs`.
+- 2.21 ms: `frame_ms` (V5 `ch08_old`, kernel only), 0 dense tiles. With
+  the copies 54.8 ms (`frame_e2e_ms`), over 33: hence "once the frame is
+  on the card".
+- The needle's drop: 53.9 / 2.21 = 24.3x (V5's ratio of medians).
+- 100×: `count_x` = 225 / 2.21 = 101 (97-107), against the labels-only
+  CPU with its reset on the clock, as the waves set up on theirs.
 
-State at the cut (k = 18): floor `frame_labels`; needle 2.24 ms, teal;
-rows (small CPU 1.4×, huge GPU 540×, many GPU 520×); tag COUNT ✓; machine
-as k = 17; caption "2.24 ms / kernel time, no copies".
+State at the cut (k = 18): floor `frame_labels`; needle 2.21 ms, teal;
+rows (small CPU 4.3×, huge GPU 340×, many GPU 100×); tag COUNT ✓; machine
+as k = 17; caption "2.21 ms / kernel time, no copies".
 
 Length: 27 words, about 10.3 s, 12.5 s with its tail (HOLD 1.8 s).
 
 ### r14_reveal (k = 18), new text
 
 Rung: the opening question, answered with the scoreboard. Row 1 flips in
-kernel time, and the voice says what the copy does.
+kernel time, and the voice says what the copy does (decision 3).
 
 ```text
-One huge blob, or many at once: the GPU. And one small blob? In kernel time, the GPU now; with the copy, still the CPU. Every drone, every frame.
+One huge blob, or many at once: the GPU. And one small blob? In kernel time, the GPU now; with the copy to the card, still the CPU. Every drone, every frame.
 ```
+
+"with the copy to the card" (critic 2, F10) echoes r13's "once the frame
+is on the card", the only bridge to the copy; +3 words.
 
 Picture (v4's r11_reveal, re-cued):
 - "One huge blob": the full card opens; rows 2 and 3 framed in teal;
-  the machine's blocks land column by column (as v4).
+  the machine's blocks land column by column (as v4). Each row's tag is
+  drawn under its name.
 - "the GPU": caption 1.
-- "And one small blob?": row 1's frame.
-- "In kernel time, the GPU now": row 1's winner cell cross-fades from
-  "CPU 1.4×" to "GPU 2.7×" (0.12 vs 0.045 ms); caption 2.
-- "with the copy, still the CPU": the footnote's copy line lights; P-core
-  0 lights and goes dark again.
+- "And one small blob?": row 1's frame, and the first step of its flip
+  (critic 2, F2): the CPU cell alone changes, from 0.121 to 0.192 ms,
+  and its tag from "CPU: 4 neighbours" to "CPU: 8 neighbours"; the GPU
+  cell and the winner go to "?" (the scoreboard's "promised, unknown").
+  No ratio of 0.192 against r02's 0.520 is ever on screen.
+- "In kernel time, the GPU now": the second step, about 3 s later: the
+  GPU cell lands at 0.044 ms and the winner at "GPU 4.4×"; caption 2.
+- "with the copy to the card, still the CPU": the footnote's copy line
+  lights; P-core 0 lights and goes dark again.
 - "Every drone": the card closes onto the live drones; caption 3. The
-  title card fades in for the last seconds (Q4).
+  title card fades in for the last seconds: "flood fill, from pixels to
+  tiles" over "flood-fill-cuda".
 
-The card (`score_rows(beat)`, every number through `card_ms` / `card_x`):
+The card (`score_rows(beat)`, every number through `card_ms` / `card_x`;
+header "one session, GPU kernel time"):
 
 | row | sub | CPU | GPU | winner | tag |
 |---|---|---|---|---|---|
-| one small blob | 16 K px test blob | 0.12 ms | 0.045 ms | GPU 2.7× | one session, kernel time |
-| one huge blob | 64 Mpx test blob | 1,666 ms | 3.10 ms | GPU 540× | one session, kernel time |
-| many blobs | 81 Mpx frame, 2,522 blobs | 1,157 ms | 2.24 ms | GPU 520× | one session, kernel time |
+| one small blob | 16 K px test blob | 0.192 ms | 0.044 ms | GPU 4.4× | CPU: 8 neighbours |
+| one huge blob | 64 Mpx test blob | 1,065 ms | 3.12 ms | GPU 340× | CPU: 8 neighbours |
+| many blobs | 81 Mpx frame, 2,522 blobs | 225 ms | 2.21 ms | GPU 100× | CPU: same labels |
 
-Footnote: "kernel time. With the copies: small blob GPU 0.60 ms (CPU
-0.12), frame GPU 53 ms (CPU 1,157)."
+Footnote (`card_ms_note`, rounded): "With the copies: small blob 0.665
+ms (CPU 0.192), huge blob 44.3 ms, frame 54.8 ms."
 
 Captions (3):
 1. "the GPU" / "huge or many blobs", at "GPU".
 2. "small blob too" / "in kernel time", at "now".
-3. "every drone frame" / "kernel: 0.13 ms max", at "Every" (A13).
+3. "every drone frame" / "with copies: 1.26 ms", at "Every".
 
 Numbers:
-- Row 1: CPU 0.121 ms (`small_cpu_ms`), GPU 0.045 ms (`small_tiles_ms`,
-  V5 `sq_256.ch07.ms`, 4 rounds): 2.7× (`small_tiles_x`).
-- With the copy: 0.60 ms (`small_tiles_e2e_ms`): the CPU wins by 5.0x
-  (`small_e2e_cpu_x`). Rows 2 and 3 stay the GPU's with the copies too
-  (44.7 and 53.1 ms against 1,666 and 1,157).
-- Drones: GPU median 0.115 ms, worst frame 0.130 ms (`drone_gpu_ms`,
-  `drone_gpu_max_ms`, each frame's median of 9 runs); the worst single
-  run 0.342 ms; with the copies the worst frame is 1.89 ms
-  (`drone_e2e_max_ms`): still far under 33.
+- Row 1: CPU 0.192 ms (`small_cpu8_ms`, the 8-neighbour BFS without a
+  depth map, reset on the clock, as ch07 keeps none and clears on its
+  clock), GPU 0.044 ms (`small_tiles_ms`, V5 `sq_256.ch07.ms`, 4
+  rounds): 4.4× (`small_tiles_x`; 4.27-4.54 over the CPU's rounds).
+- With the copy: 0.665 ms (`small_tiles_e2e_ms`): the CPU wins by 3.5x
+  (`small_e2e_cpu_x`), and by 5.5x against the 4-neighbour CPU. Rows 2
+  and 3 stay the GPU's with the copies too: 44.3 and 54.8 ms against
+  1,065 and 225 (24x and 4.1x).
+- Caption 3: the drones with the copies, the worst frame's median 1.26
+  ms (`drone_e2e_max_ms`; median 0.977 ms), far under 33, so "every
+  drone, every frame" holds end to end without naming a winner: the CPU's
+  0.679 ms beats the GPU's 0.977 there. The GPU's kernel time on the
+  drones (0.090 ms median, first version) is shown nowhere.
 
-Length: 29 words, about 12.5 s, 16.4 s with its tail (HOLD 3.5 s).
+Length: 32 words, about 13.4 s, 17.3 s with its tail (HOLD 3.5 s).
 
 ---
 
 ## The scoreboard, before and after
 
 All rows: one session (V5), GPU kernel time, CPU `@njit` on one core,
-v4's CPU baseline per scene. Every card row is checked to read true: its
-two shown times give its shown factor (`card_row_ok`).
+each row against its like-for-like CPU twin, named in its tag. Every
+card row is checked to read true: its two shown times give its shown
+factor (`card_row_ok`). The strip during the acts shows the pills only.
 
 | row | r02 | r06 | r09 | r11_rounds | r13_frame | r14_reveal |
 |---|---|---|---|---|---|---|
-| one small blob (16 K px) | CPU 1.4× (0.12 vs 0.17 ms) | | | | | **GPU 2.7×** (0.12 vs 0.045 ms) |
-| one huge blob (64 Mpx) | ? | GPU 17× (1,666 vs 99.9 ms) | | **GPU 540×** (1,666 vs 3.10 ms) | | |
-| many blobs (81 Mpx frame, 2,522 blobs) | ? | ? | GPU 22× (1,157 vs 51.7 ms) | | **GPU 520×** (1,157 vs 2.24 ms) | |
+| one small blob (16 K px) | CPU 4.3× (0.121 vs 0.520 ms), 4 neighbours | | | | | **GPU 4.4×** (0.192 vs 0.044 ms), 8 neighbours |
+| one huge blob (64 Mpx) | ? | GPU 11× (1,126 vs 101 ms), 8 neighbours | | **GPU 340×** (1,065 vs 3.12 ms) | | |
+| many blobs (81 Mpx frame, 2,522 blobs) | ? | ? | GPU 3.8× (202 vs 53.9 ms), same labels | | **GPU 100×** (225 vs 2.21 ms) | |
 
 v4 for comparison: CPU 2.4× (July, host clock), GPU 25.8× (July), GPU 35×
 (1 Mpx noise, two sessions, the run-based kernel).
 
-How far each shown factor moves with the CPU's 5 round medians (A15):
+Within a row the CPU's time moves when its twin does, and only the
+r14 card shows times: row 1 from 0.121 (4 neighbours, r02) to 0.192 (8
+neighbours, no depth, r14), in its own step; row 2 from 1,126 (depth,
+r06) to 1,065 (no depth, r11); row 3 from 202 (reset before the clock,
+r09) to 225 (reset on it, r13). The meter's CPU tick and i1's stopwatch
+are the 225 ms of the r14 card.
 
-| shown | CPU round medians | factor range |
+How far each shown factor moves with the CPU's 5 round medians:
+
+| shown | CPU twin, round medians | factor range |
 |---|---|---|
-| row 1: CPU 1.4×, then GPU 2.7× | 0.119-0.127 ms | 1.35-1.43, then 2.65-2.82 |
-| r03b 1.5×, r05 12×, row 2: 17×, then 540× | 1,647-1,794 ms | 1.53-1.67, 12.0-13.0, 16.5-17.9, 531-579 |
-| row 3: 22×, then 520× | 1,048-1,242 ms | 20.3-24.0, 469-555 |
-
-The like-for-like CPU twins (Q2): small blob 8-way BFS 0.187 ms (GPU
-4.1×); huge blob 8-way BFS 1,472 ms (GPU 470×); the frame, labels only,
-282 ms (GPU 130×); drones, labels only, 0.64 ms (GPU 5.6×).
+| row 1 at r02: CPU 4.3× | 4 neighbours, 0.117-0.122 ms | 4.26-4.44 |
+| row 1 at r14: GPU 4.4× | 8 neighbours, no depth, 0.188-0.200 ms | 4.27-4.54 |
+| r03b 1.1×, r05 8.5× | 4 neighbours, 1,120-1,284 ms | 1.02-1.17, 7.97-9.13 |
+| row 2 at r06: 11× | 8 neighbours, depth, 1,003-1,182 ms | 9.92-11.7 |
+| row 2 at r11: 340× | 8 neighbours, no depth, 971-1,077 ms | 311-345 |
+| r07 CPU 7.2×, r08 CPU 4.2× | labels, reset before, 189-226 ms | 6.5-7.8, 3.8-4.5 |
+| row 3 at r09: 3.8× | labels, reset before, 189-226 ms | 3.51-4.19 |
+| row 3 at r13: 100× | labels, reset on, 214-238 ms | 96.8-107 |
 
 ---
 
@@ -649,26 +819,26 @@ r09_seeds, r10_tiles, r11_rounds, r12_pieces, r13_frame, r14_reveal
 | k | the state when this beat starts | from v4 |
 |---|---|---|
 | 2-13 | as v4, with V5's numbers and the transposed picture | `boundary(k)` unchanged in code |
-| 14 | the labelled frame, 51.7 ms, rows (CPU 1.4×, GPU 17×, **GPU 22×**), tag COUNT, cap "51.7 ms" | v4's k = 14 + row 3 |
+| 14 | the labelled frame, 53.9 ms, rows (CPU 4.3×, GPU 11×, **GPU 3.8×**), tag COUNT, cap "53.9 ms" | v4's k = 14 + row 3 |
 | 15 | `tile_ctx` (rounds 0-4 blue), three cubes per SM, 12 tile tokens, no launch pill, cap "4 trips" | new |
-| 16 | `frame_one_blob`, row 2 GPU 540×, tag COUNT, cap "1 blob" | new |
+| 16 | `frame_one_blob`, row 2 GPU 340×, tag COUNT, cap "1 blob" | new |
 | 17 | `crop_labels` (bordered, hues only), piece tokens, cap "min" | new |
-| 18 | `frame_labels`, needle 2.24 ms teal, row 3 GPU 520×, COUNT ✓, cap "2.24 ms" / "kernel time, no copies" | replaces v4's k = 15 |
+| 18 | `frame_labels`, needle 2.21 ms teal, row 3 GPU 100×, COUNT ✓, cap "2.21 ms" / "kernel time, no copies" | replaces v4's k = 15 |
 
 ---
 
 ## New fields, rasters and helpers
 
-- `state.picture()` returns the 900 px frame transposed (F1); so do
+- `state.picture()` returns the 900 px frame transposed; so do
   `picture_blobs()`, `filled_picture()`, `teal_picture()` and r07's
   zoom target, which build on it.
 - `mc.Spec`: `token_kind` ("pixel", "tile", "piece"); `teams` up to 3.
   `mc._boxes` and `place_blocks` draw 3 cubes (about 0.10 wide each).
-- A gridless floor raster (F6): an RGB array upscaled nearest to the
-  floor's pixels, alpha 255, no keying, with an optional faint tile grid
-  every N cells. `fl.toy_raster` draws a line on every cell edge (every
-  3.5-3.9 px at 250-282 cells), and `fl.picture_raster` keys light
-  colours as white (the square's light end would wash out).
+- A gridless floor raster: an RGB array upscaled nearest to the floor's
+  pixels, alpha 255, no keying, with an optional faint tile grid every N
+  cells. `fl.toy_raster` draws a line on every cell edge (every 3.5-3.9
+  px at 250-282 cells), and `fl.picture_raster` keys light colours as
+  white (the square's light end would wash out).
 - Raster primitives: piece outlines (from `crop_comp`), anchor dots,
   lattice hatching, meeting ticks (from the pixel pairs of
   `crop_meet_tester` and `crop_meet_other`).
@@ -681,24 +851,57 @@ r09_seeds, r10_tiles, r11_rounds, r12_pieces, r13_frame, r14_reveal
   `frame_rounds` (from `full_round_900`).
 - `numbers.act3_arrays()` returns every TL and WV array by name;
   `numbers.floors()` the facts computed from them.
-- `score_rows(beat)`: the small row's GPU cell is `small_gpu_ms` until
-  r14 and `small_tiles_ms` after; the huge row's `big_8ways_ms` until
-  r11, then `big_tiles_ms`; the many row's `count_ch05_ms` from r09, then
-  `count_gpu_ms` from r13. Sub "81 Mpx frame, 2,522 blobs"; every tag
-  "one session, kernel time" (A14).
-- `overlays.fmt_ms` gets three decimals under 0.1 ms and `fmt_x` two
-  significant figures: both as `numbers.card_ms` / `numbers.card_x`,
-  which the checks use. The meter's packed-mask mark goes (it reads the
-  removed `ch06_mask_ms`).
+- `score_rows(beat)`, like for like:
+  - small row: until r14, CPU `small_cpu_ms` (4 neighbours) against
+    `small_gpu_ms` (r02's one block), "CPU 4.3×"; at r14, in two steps,
+    CPU `small_cpu8_ms` (8 neighbours, no depth) with the GPU and winner
+    "?", then `small_tiles_ms` and "GPU 4.4×".
+  - huge row: CPU `big_cpu8_ms` (= `big_cpu_ms`) against `big_8ways_ms`
+    until r11, then `big_cpu_fill_ms` against `big_tiles_ms`.
+  - many row: CPU `count_cpu_pre_ms` against `count_ch05_ms` from r09,
+    then `count_cpu_ms` against `count_gpu_ms` from r13.
+  - Tags "CPU: 4 neighbours", "CPU: 8 neighbours", "CPU: same labels",
+    drawn under the row name by `ov.score_card` (today neither
+    `score_strip` nor `score_card` draws `Row.tag`); the card header
+    "one session, GPU kernel time". Sub "81 Mpx frame, 2,522 blobs" for
+    row 3.
+- `overlays.fmt_ms` becomes `numbers.card_ms` (three decimals under 1
+  ms: 0.192, 0.044), the footnote's format `numbers.card_ms_note`
+  (rounded 10-100 ms), and `fmt_x` two significant figures
+  (`numbers.card_x`); the checks use the same functions. Every scene's
+  own factor format goes through them too: r03b's `:.2f` would print
+  "1.09×", r05's `int()` "8×", and state.py's r06 caption and
+  `score_rows()` `:.1f` / `:.0f`. The meter's packed-mask mark goes (it
+  reads the removed `ch06_mask_ms`).
 
 About 400-600 new lines in all, every piece on an existing pattern.
+
+Scene edits the decisions and the reviews add (build stage):
+- intro: the stopwatch stops at "second" (was "seconds"); the drone
+  card shows the CPU's bar against the budget and the GPU as "?",
+  caption sub "240 frames, one session".
+- r02: the race bar reads "1 block", its value from `small_gpu_ms` (now
+  r02's own kernel); `dz.sm_detail`'s partitions read "32", not "32
+  lanes" (also in r10).
+- r03b: caption "1.1×", cued at "faster".
+- r05: caption "8.5×".
+- r06: caption "11×", sub "CPU: 8 neighbours too".
+- r08: the two blobs fill 8 ways; the floor play ends and the needle
+  moves at "faster"; the needle settles right of the CPU tick.
+- r09: row 3's pill at "Faster than the CPU"; the caption at "budget".
+- r10: the "registers" pulse on the card's frame; the third cube as the
+  card folds back; caption 3's sub "the last changes nothing".
+- r11: no replay of rounds 6-8.
+- r13: the frame's seeds fade in as dots.
+- r14: row 1's two-step flip; the tags on the card; caption 3 "with
+  copies: 1.26 ms"; the footnote through `card_ms_note`.
 
 Other files that list beats:
 - `base.py` HOLD: drop r10_runs and r11_reveal; add r10_tiles 1.0,
   r11_rounds 1.2, r13_frame 1.8, r14_reveal 3.5.
 - `build/assemble.py` CHAIN: drop r10_runs and r11_reveal; add the five.
 - `build/seam_check.py` FADES_OUT: "chain/r11_reveal" becomes
-  "chain/r14_reveal" (F13).
+  "chain/r14_reveal".
 - `HANDOFF.md` section 11.
 - `r10_runs.py` and `r11_reveal.py` leave the chain. `r14_reveal.py`
   starts as a copy of `r11_reveal.py`. Deleting the two old files is the
@@ -708,27 +911,43 @@ Other files that list beats:
 
 ## `numbers.py`: what changed
 
-- Sessions: + V5, T7, D8, W8, TL, WV. - C6, R61, DR (every number of the
-  run-based kernel, the old drone session).
-- Moved to V5: every CPU time and every act-1 GPU time on the square
-  (`big_*_ms`), the frame (`njit_ms`, `ch05_ms`, `red_px`, `n_blobs`), the
-  small blob, the drones.
-- Row 3 is the frame: `count_*` keep their names (so `score_rows()`
-  keeps working) and point at V5's `input_blobs`. V5's random_1000 is
-  not read.
-- Kept from July: act 2's two estimates (now checked against V5's CPU and
-  OV's own, `ov_njit_ms`) and act 1's GPU-only facts (levels, placement,
-  sweep, snake, shared ring, owner maps).
-- Removed keys: `ch06_rgb_ms`, `ch06_mask_ms`, `n_runs`, `runs_x`,
-  `big_total_ms`, `small_ch01_ms`, `count_gpu_e2e_ms`, `count_ok`, and the
-  `frame_x` family (now `count_x`).
-- New: the clock of every timed block with its named exceptions;
-  `d8_ch05_ms`; the dense-tile counters of the frame and the crop;
-  `wv_engine_is_v5`; `floors()` (the context floor, the border bits and
-  their targets, the crop against the frame, the frame's 900 px rounds,
-  the orientation); `card_ms`, `card_x`, `card_row_ok`.
-- 103 checks (v4 had 59).
-- Today `state.py` builds `boundary(0)` to `boundary(14)` with the new
+- Sessions: V5 is now `v5_20261017T192640Z`. The evening session
+  (`182449Z`, the oracles as called), the morning one and July's
+  overview session (OV) are no longer read: act 2's estimates, the 24
+  SMs and the 256 threads all come from V5. T7, D8, W8, TL, WV and act
+  1's GPU-only July sessions (CH01, DB2, CH03, OWN) stay.
+- V5's schema: CPU cells `cpu_bfs4`, `cpu_bfs8`, `cpu_fill8`,
+  `cpu_label`, `cpu_label_pre`, and the reference cells `oracle_bfs4`,
+  `oracle_bfs8`, `oracle_label`, `cpu_fill_canonical`; every CPU twin
+  carries `outputs`, `connectivity`, `reset` and `same_as_oracle`; every
+  GPU cell carries `outputs`, `reset`, `twin` (with `like_for_like`) and
+  `block`; blocks carry `attempts` and `full_clocks`; the frame has
+  `ch08_old` (the story's) and `ch08` (reference); the drones carry
+  their engine, outputs, twin and `default_engine_dense_census`.
+- Keys with a new meaning (the names scenes read stay):
+  - `njit_ms`: the CPU on the frame, labels only, its reset on the clock
+    (225 ms): i1's stopwatch, the meter's CPU tick, row 3 from r13.
+  - `count_cpu_pre_ms` (new): the same, reset before the clock (202
+    ms): act 2's twin and row 3 at r09.
+  - `small_cpu8_ms`: the 8-neighbour BFS without depth (0.192 ms), r14's
+    twin; `small_cpu8_depth_ms` the BFS with depth (reference).
+  - `big_cpu8_ms`: the 8-neighbour BFS with depth (r06's twin);
+    `big_cpu_fill_ms` (new): without depth, reset on the clock (r11's
+    twin, the r14 card's row 2).
+  - `frame_ms`, `frame_rounds`, `frame_e2e_ms`: ch08's first version;
+    `frame_default_ms` (new) the default engine (reference).
+  - `drone_gpu_ms`: the first version (not shown); `drone_e2e_max_ms`:
+    r14's caption 3.
+- New checks: every twin within its GPU side's outputs, with the same
+  neighbours and reset, equal to its oracle (`v5_twins_ok`,
+  `v5_all_like_for_like`); every shown factor within its range over the
+  CPU's rounds; the clock attempts (7 first, ch05 second); the power-cap
+  blocks; the first version's engine against D8's `old_path`; the
+  oracles' allocation cost (reference); `card_ms_note` for the footnote.
+- A wrong twin fails: giving ch07 on the square the 8-neighbour twin
+  with depth (the evening session's pairing) turns `v5_twins_ok` false.
+- 114 checks (the evening draft had 108, v4 59).
+- `state.py` still builds `boundary(0)` to `boundary(14)` with the new
   numbers; `boundary(15)` (v4's r10) fails on the removed `ch06_rgb_ms`,
   as it should until the build stage rewrites it.
 
@@ -740,8 +959,8 @@ Model, calibrated on the real v4 paced takes:
 - Speech: words / 3.11 + 0.77 s per inner sentence end + 0.41 s per
   colon or semicolon. It reads v4's 16 takes at +1.8% in all (beat by
   beat within about 12%).
-- An unchanged beat uses its real v4 take; a beat with a word or two
-  changed uses its take plus the word difference.
+- An unchanged beat uses its real v4 take; a beat with a few words
+  changed uses its take plus the differences.
 - The slot adds the tail: max(BREATH 0.75 s, HOLD) + 0.4 s.
 
 The task's simpler formula (2.6 words per second + 1.125 s per sentence
@@ -750,57 +969,87 @@ reads about 23% long; its column is given for reference.
 
 | beat | words | status | speech, s | slot, s | task formula, s |
 |---|---|---|---|---|---|
-| i0_problem | 22 | same (take) | 8.8 | 9.9 | 11.9 |
-| i1_compare | 33 | one word | 16.4 | 17.6 | 19.5 |
-| r00_zoom | 9 | same | 3.8 | 5.7 | 6.5 |
-| r01_cpu | 24 | same | 8.6 | 9.7 | 12.1 |
-| r02_one_block | 35 | same | 12.8 | 14.4 | 18.4 |
-| r03_giant | 34 | same | 12.6 | 13.7 | 16.5 |
-| r03b_one_sm | 12 | changed | 4.4 | 5.6 | 6.9 |
+| i0_problem | 22 | same (take) | 8.8 | 9.9 | 11.8 |
+| i1_compare | 35 | changed (+2 words vs v4) | 17.1 | 18.2 | 20.2 |
+| r00_zoom | 9 | same | 3.8 | 5.7 | 5.7 |
+| r01_cpu | 24 | same | 8.6 | 9.7 | 12.0 |
+| r02_one_block | 40 | +5 words vs v4 | 14.4 | 16.0 | 19.9 |
+| r03_giant | 34 | same | 12.6 | 13.7 | 16.4 |
+| r03b_one_sm | 16 | changed (+2 words vs v4) | 5.6 | 6.8 | 8.4 |
 | r04_two_blocks | 62 | same | 23.8 | 24.9 | 32.3 |
-| r05_all_blocks | 60 | one word | 22.2 | 23.3 | 30.4 |
+| r05_all_blocks | 63 | changed (+3 words vs v4) | 23.1 | 24.3 | 31.5 |
 | r05b_snake | 23 | same | 8.2 | 9.4 | 12.2 |
-| r06_diagonals | 16 | same | 5.9 | 7.5 | 9.4 |
+| r06_diagonals | 16 | same | 6.0 | 7.6 | 9.0 |
 | r07_real_frame | 25 | same | 10.2 | 11.3 | 14.1 |
-| r08_tags | 52 | two words | 18.4 | 19.5 | 26.2 |
-| r09_seeds | 24 | two words | 8.9 | 10.0 | 12.1 |
-| r10_tiles | 56 | new | 20.7 | 22.1 | 26.9 |
-| r11_rounds | 49 | new | 18.5 | 20.1 | 24.4 |
+| r08_tags | 54 | changed (+3 words vs v4, +2 vs the morning draft) | 19.4 | 20.6 | 27.5 |
+| r09_seeds | 30 | changed (+7 words vs v4) | 12.0 | 13.1 | 16.0 |
+| r10_tiles | 62 | new | 23.8 | 25.2 | 30.6 |
+| r11_rounds | 52 | new | 19.4 | 21.0 | 25.1 |
 | r12_pieces | 51 | new | 18.3 | 19.5 | 23.6 |
-| r13_frame | 27 | new | 10.3 | 12.5 | 14.8 |
-| r14_reveal | 29 | new | 12.5 | 16.4 | 19.5 |
-| **whole cut** | 643 (v4 496) | | | **273 s (4:33)** | 338 s |
+| r13_frame | 27 | new | 10.3 | 12.5 | 13.8 |
+| r14_reveal | 32 | new | 13.4 | 17.3 | 17.9 |
+| **whole cut** | 677 (v4 496) | | | **286.9 s (4:47)** | 348 s |
 
-Against v4 (218 s): act 3 adds 74.2 s (r10-r13), r10_runs (23.0 s) goes,
-r14 is 3.7 s longer than r11_reveal, and the act 1-2 edits net about 0 s.
-So +55 s, under the five-minute cap with 27 s to spare.
+Against the evening draft (276.5 s): r02 +1.0 s, r03b +1.2 s, r05 +1.0
+s, r09 +3.1 s, r10 +2.0 s, r11 +0.9 s, r14 +0.9 s. Against v4 (218 s):
++69 s, under the five-minute cap with 13 s to spare. The task formula,
+scaled by its v4 error (218 / 270), gives about 281 s.
 
 Caption spacing: every new caption is cued at least 1.75 s (MIN_DWELL)
 after the one before, by word count at 3.11 words per second; r13 keeps
 two captions for this reason, and the scenes enforce it in code
-(`max(cue, previous + MIN_DWELL)`). Re-check all of them from the new
-`words.json`.
+(`max(cue, previous + MIN_DWELL)`). r14's two flip steps sit about 3 s
+apart. Re-check all of them from the new `words.json`.
 
 ---
 
 ## What v5 does not claim
 
-- **Kernel time only.** Every GPU time is kernel only, as in v4. With the
-  copies, the frame takes 53.1 ms (`frame_e2e_ms`, over 33), the square
-  44.7 ms, the small blob 0.60 ms (the CPU's 0.12 wins). The drones fit
-  even with the copies (worst 1.89 ms). r13 and r14 say so aloud.
-- **v4's CPU baselines.** On many blobs the baseline labels and then
-  fills each blob; labels alone are 4.1x faster on the frame. The twins
-  are in this document (Q2).
+- **Kernel time only.** Every GPU time is kernel only, as in v4. With
+  the copies: the frame takes 54.8 ms (over 33; the GPU still 4.1x), the
+  square 44.3 ms (the GPU still 24x), the small blob 0.665 ms (the CPU's
+  0.192 wins by 3.5x). The drones take 0.977 ms per frame with the
+  copies (worst 1.26), so there the CPU's 0.679 ms wins too; both stay
+  far under 33, and nothing in the script says the GPU wins the drones.
+  r13 and r14 say the frame's and the small blob's cost aloud.
+- **The CPU's arrays are kept between calls.** Like the GPU's, they are
+  allocated once per image, and each twin resets them where its GPU side
+  resets its own. Called as the oracles are, with fresh arrays (as the
+  evening session timed them), the CPU took 1.4-1.5x longer on the big
+  images (V5's reference cells).
+- **v4's CPU baselines are gone from the screen.** On the frame, v4's
+  baseline labelled and then filled each blob from its seed, with depth:
+  1,165 ms, 5.2x the labels-only CPU. V5 times it as reference only.
+- **The CPU's label map against ch08's labels.** The CPU writes a
+  per-pixel int32 label map on its clock; ch08's timed run labels its
+  pieces and paints the image, and its per-pixel label map is an
+  off-clock twin (`emit_label_map`; ch08 README). Both say which blob
+  each pixel is in, in different forms (critic 1, F6).
+- **Act 2's loops are handed their seeds.** Their seeds (each blob's
+  first pixel) come from the CPU's labels, off the clock, and a loop
+  keeps no label map: a blob's identity is its launch (r07) or its tag
+  (r08). Their twin finds its own seeds and writes the map. The CPU does
+  more there and still wins, so r07 and r08 hold.
+- **Row 1 changes its CPU** between r02 (4 neighbours, against r02's
+  one block) and r14 (8 neighbours, no depth, against the tiles). The
+  tag says so, and the flip shows the CPU's change as its own step.
+- **Act 2's seeds kernel on the small blob is not shown.** Like for
+  like, it already edges the 8-neighbour CPU there: 0.166 ms against
+  0.186 (with depth, as ch05 keeps one), 1.12x (1.10-1.17). Row 1 keeps
+  r02's comparison until the finale, so "the GPU now" is the first win
+  the viewer sees, not the first that exists. See N2.
 - **"From a hundred milliseconds to three"** compares r06's own 8-way
   kernel: the thread layout with its counters on (`bare=False`, 104
   registers), against the bare tiles. The square's best tuned pixel BFS
-  (warp layout, bare, 72 x 256) takes 73.2 ms, 23.3x the tiles, paired
-  (`big_tuned_ms`, `big_tuned_over_tiles_paired`). The tiles' own README
-  quotes that one (Q6).
-- **Where the 3.10 ms go.** The rounds take 1.11 ms; packing the image to
-  bits (1.15 ms) and painting it back (0.81 ms) take the rest
+  (warp layout, bare, 72 x 256) takes 75.2 ms, 23.9x the tiles, paired
+  (`big_tuned_ms`, `big_tuned_over_tiles_paired`).
+- **Where the 3.12 ms go.** The rounds take 1.11 ms; packing the image to
+  bits (1.16 ms) and painting it back (0.82 ms) take the rest
   (`big_tiles_*_ms`). Not spoken (Q8).
+- **Act 2's estimates** are v4's method: the median of 6 sampled calls
+  times the call count. The full loops, measured once, take 1.13x and
+  1.35x the estimates, so the needles sit a little left of the truth.
+  Every form is 4.2-9.5x slower than the CPU, so r07 and r08 hold.
 - **Rounds on irregular blobs move with timing.** On the square they do
   not (127 in every run). The close-up's blob took 9 or 10 rounds in five
   runs, so the video gives that blob no round count. A tile's fill is
@@ -813,98 +1062,82 @@ two captions for this reason, and the scenes enforce it in code
   meetings, which have none.
 - **The crop is its own image** (6 of 8 blobs cut by its edge, 7 tiles
   on other rounds than the frame's); the picture says so with a border.
-- **Act 2's ch05 time** ran at a 7,001 MHz memory clock (V5: 51.7 ms;
-  D8 at full clocks: 47.1). Spoken "about fifty".
+- **The power cap.** ch05 on the frame draws more than the laptop's 40 W
+  cap: its first attempt here sat in P3 and the second, with light load
+  between runs, read 53.9 ms. The huge blob's block and the waves' block
+  also logged the cap at full clocks. Spoken "about fifty".
+- **The CPU's spread.** Its round medians spread by up to 19% here (8%
+  in the evening session), with the host quiet and 60 s of idle before
+  the pass. Every shown factor is checked over that range, and r03b's
+  margin is the thinnest (1.02-1.17; see N4).
 - **Seeds are not one per blob**: 11,609 seeds for 2,522 blobs (3,673
   only from the lattice).
-- **ch06's code is still inside the tiles, unseen** (A12, C3). Nothing
-  of it is spoken or shown, but the user should know:
-  - ch08's default sends dense tiles down the dense-tile path. On the
-    frame and the crop that is 0 tiles; on the drone frames, a critic's
-    probe (not committed) found about 0.8% of the tiles in labelling
-    and 2.6% in paint. The drone times include that small share (Q10).
-  - The merge after the waves reuses ch06's `_union` code, and ch07's
-    bit packing is ch06's `pack_kernel`.
+- **ch06's code is still inside the tiles, unseen.** Nothing of it is
+  spoken or shown, and no ch06 cell is timed, but the user should know:
+  - ch07's pack phase is ch06's `pack_kernel`, and the merge after the
+    waves reuses ch06's `_union` code.
+  - ch08's default sends dense tiles down the dense-tile path. V5 times
+    the first version, which has none; on the frame and the crop the
+    default sends 0 tiles there anyway. An untimed census of the default
+    on the drones found 596 labelling and 2,022 paint tiles of 80,402 on
+    that path.
   - The drone footage (`assets/drones_labels`) was coloured by ch06's
     run kernel (`make_drone_frames.py`). V5 found ch08's labels equal
     on all 240 frames, so the build stage regenerates the footage from
-    ch08 and checks that the frames come out the same (F9).
+    ch08 and checks that the frames come out the same.
 
 ---
 
-## Open questions for the user
+## Open questions
 
-- **Q1. One session for every CPU-vs-GPU number?** Default: yes. Five
-  phrases of acts 1-2 change: "one point two seconds", "beats the CPU",
-  "Twelve times", "close to CPU speed" and "about fifty milliseconds".
-  r07-r08 stay the one cross-session comparison (July GPU estimates). The
-  other way keeps v4's lines and July's numbers, but then the scoreboard
-  mixes two CPU speeds (the huge row would read 830×).
-- **Q2. Which CPU in the scoreboard?** Default: v4's baselines (540×,
-  520×, 2.7×) with the twins in this document. Or the twins in the rows
-  (470×, 130×, 4.1×).
-- **Q3. The finale.** Default: the caveat is spoken ("In kernel time, the
-  GPU now; with the copy, still the CPU"). Or the shorter "And now one
-  small blob too, in kernel time" (about -3 s), with the copy only in the
-  footnote.
-- **Q4. The title card.** Default: "flood fill, from pixels to tiles"
-  over "flood-fill-cuda". Others: "breadth-first flood fill on the GPU";
-  "counting blobs with a BFS".
-- **Q5. The copies on the big frame.** Default: "Two point two
-  milliseconds, once the frame is on the card: inside the budget", with
-  "kernel time, no copies" under the number. Or say the cost: "With the
-  copies in and out, fifty-three." (about +2.5 s, ends act 3 on a loss).
-- **Q6. "From a hundred milliseconds to three."** Default: r06's own
-  kernel (32x), the last one the viewer saw. Or "from seventy" (the tuned
-  pixel BFS, 23x), a kernel the video never showed.
-- **Q7. Rendering.** The facts:
-  - Manim's Cairo renderer draws on the CPU only. The chain code depends
-    on Cairo behaviour (pixel arrays swapped under the render cache, PIL
-    warps for the floor planes), so the OpenGL renderer would be a port,
-    not a switch.
-  - The venv's ffmpeg (imageio-ffmpeg, static 7.0.2) has libx264 and
-    libx265, but no h264_nvenc. WSL does expose `libnvidia-encode.so.1`.
-  - NVENC could only replace `assemble.py`'s one libx264 (crf 18)
-    re-encode; Manim's partial movies go through PyAV.
+Answered on 2026-10-17 (see the decisions above): Q1 one session (now
+the like-for-like one with kept arrays), Q2 like-for-like CPUs in the
+rows, Q3 both sides spoken, Q4 the title, Q5 "once the frame is on the
+card", Q6 r06's kernel, Q7 Cairo on the CPU and the GPU for
+measurements, Q9 ch05 at full clocks, Q10 the drones without the dense
+path (now the first version), Q11 one orientation.
 
-  Proposal: Cairo frames in parallel jobs on the CPU, the GPU for every
-  measurement. If you want NVENC, a project-local ffmpeg with nvenc for
-  the final encode only (a small gain). Is that what "render with the
-  GPU" meant?
+Settled by the reviews: N1 (row 1 read 4.3× on both sides). It now reads
+CPU 4.3× at r02 and GPU 4.4× at r14, and the two-step flip puts a "?"
+between them.
+
+Still open:
 - **Q8. Where the time goes.** Add to r11: "Now the search is the small
   part: reading the image and painting it back take most of it." (about
   +4 s)? Default: off.
-- **Q9. Act 2's ch05 time.** Default: keep V5's 51.7 ms (memory at
-  7,001 MHz), disclosed, spoken "about fifty". Or re-time the frame
-  scene (CPU, ch05, tiles) in a second session at full clocks. That
-  would likely read about 47 ms and 25×. The CPU would be timed again
-  too, and "one point two seconds" could move (its rounds spread
-  1.05-1.24 s). The laptop's 40 W power cap may pick P3 again.
-- **Q10. The dense-tile share on the drones.** Default: keep ch08's
-  default engine (about 1% of the drone tiles), disclosed above. Or
-  re-time the drones with that path off, for a strictly piece-loop-only
-  number.
-- **Q11. The frame is transposed on screen.** To keep one orientation,
-  the 900 px frame appears mirrored across its diagonal compared with
-  the PNG. Nobody watching can tell; say if it matters (for example
-  next to the project page).
+- **N2. Act 2's seeds on the small blob.** They beat the 8-neighbour CPU
+  by 1.12x, unseen. Default: keep row 1 on r02's comparison and r14's
+  "now" (true for the kernels the video shows); disclosed above. Or drop
+  "now" ("In kernel time, the GPU; with the copy to the card, the
+  CPU."), which loses the callback to r02.
+- **N3. "as a thirty-two bit word" in r10.** Cut to keep r10's length
+  with the definitions. Default: cut. Restoring it costs about 1.9 s and
+  links back to r08's "the entry's word".
+- **N4. r03b's thin margin.** One block is 1.09x the CPU (1.02-1.17 over
+  its rounds). If a future re-run reads under 1, the line becomes "Now
+  one block keeps pace with the CPU." Default: "a little faster", as
+  this session measured.
 
 ---
 
 ## Build order (short)
 
-1. The user's answers; then `numbers.py` (done for the defaults) and
-   `script_chain.md` (done).
+1. The user's answers (done); `numbers.py` (done) and `script_chain.md`
+   (done).
 2. `state.picture()` transposed; `overlays.fmt_ms` / `fmt_x` from
-   `card_ms` / `card_x`.
+   `card_ms` / `card_x` (and `card_ms_note`), and every scene's factor
+   format through them.
 3. `machine.py`: `teams` up to 3, `token_kind`, `warp_closeup`; the
    gate's single flash and its held state; the gridless raster and the
-   raster primitives.
+   raster primitives; `dz.sm_detail` without "lanes".
 4. `state.py`: `BEATS`, `boundary(14..18)`, the new floors,
-   `score_rows(beat)`; `base.py` HOLD; `build/assemble.py` CHAIN;
-   `build/seam_check.py` FADES_OUT.
-5. Scenes: r02 ("GPU so far"), r03b (cue "beats", "1.5×"), r06 ("17×"),
-   r09 (row 3 fills after the needle), r10_tiles, r11_rounds, r12_pieces,
+   `score_rows(beat)` with the CPU tags and row 1's two steps;
+   `ov.score_card` draws the tags; `base.py` HOLD; `build/assemble.py`
+   CHAIN; `build/seam_check.py` FADES_OUT.
+5. Scenes: intro (stopwatch cue, the drone card with a GPU "?"), r02
+   ("1 block"), r03b (cue "faster", "1.1×"), r05 ("8.5×"), r06 ("11×",
+   "CPU: 8 neighbours too"), r08 (8-way fill, cues), r09 (row 3 at
+   "Faster", caption at "budget"), r10_tiles, r11_rounds, r12_pieces,
    r13_frame, r14_reveal (from r11_reveal).
 6. The drone footage from ch08 (`make_drone_frames.py` with TileWaves
    and `--tracker host`, under the GPU lock), compared with the old
