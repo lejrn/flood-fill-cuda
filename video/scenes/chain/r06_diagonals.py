@@ -205,7 +205,7 @@ class Diagonals(ChainScene):
         # result come in together (one text change), the stencil leaves. The
         # new strip fades in over the old one: its pills are opaque, so the
         # two that do not change never dip
-        small, huge, _ = score_rows()
+        small, huge, _ = score_rows("r06_diagonals")
         old = self.over["strip"]
         self.over["strip"] = self.strip((small, huge, "?"))
         anims = [FadeIn(self.over["strip"])] + self.over_anims("tag", ov.act_tag(self.G, "SIZE", True))

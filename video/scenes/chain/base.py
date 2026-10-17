@@ -46,7 +46,7 @@ EPS = 1e-6
 # (the zoom, the scoreboard card, the reveal's last look at the drones).
 BREATH = 0.75
 HOLD = {"r00_zoom": 1.5, "r02_one_block": 1.2, "r03b_one_sm": 0.8, "r06_diagonals": 1.2,
-        "r10_runs": 1.8, "r11_reveal": 3.5}
+        "r10_tiles": 1.0, "r11_rounds": 1.2, "r13_frame": 1.8, "r14_reveal": 3.5}
 # A caption stays at least this long before the next one replaces it.
 MIN_DWELL = 1.75
 # The gate's flashes (act 3: once per round) start at least this far apart:
