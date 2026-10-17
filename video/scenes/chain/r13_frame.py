@@ -2,13 +2,13 @@
 label wins"): the same tiles, pieces and waves run on the whole 81 Mpx
 frame.
 
-"On the big frame": the crop's hues blend back to red and its border
-fades. Then the crop gives way to the frame at the same window. The
-crop's pixels are the frame's (ch08 cut it out of the frame), so only
-its faint tile grid goes, and the frame around it comes in from the
-crop's edge outward: a blob the crop cut grows back out of its cut edge.
-The floor pulls back to the whole red frame: one zoom about a fixed
-point, geometric in the window's side.
+"On the big frame": the carried caption goes with the crop's hues, which
+blend back to red as its border fades. Then the crop gives way to the
+frame at the same window. The crop's pixels are the frame's (ch08 cut it
+out of the frame), so only its faint tile grid goes, and the frame around
+it comes in from the crop's edge outward: a blob the crop cut grows back
+out of its cut edge. The floor pulls back to the whole red frame: one
+zoom about a fixed point, geometric in the window's side.
 
 The zoom is drawn from every pixel of the frame (frame_mask, from
 assets/tiles/input_blobs_red.npz), never from the 900 px picture, whose
@@ -22,7 +22,7 @@ whole the frame blends into the 900 px floor (frame_red).
 by tile over the whole frame (state.frame_seed_dots: one dot per seed
 tile, 8,602 dots for the 11,609 seeds, no rings at this scale). Each
 seed's own piece takes its colour with its dot (round 0). Caption
-"11,609 seeds" / "6 rounds, 2,522 blobs", at "rounds".
+"11,609 seeds" / "6 rounds, 2,522 blobs", at "seeds".
 
 "six rounds": six gate flashes, GATE_GAP apart (the cubes and the gate
 only). The claims spread out from the seeds, a round per flash (WV's
@@ -35,10 +35,15 @@ labelled frame), so no waves meet on screen: at 900 px a piece is a few
 pixels, and r12 showed the meetings on the crop. The dots fade during the
 last two flashes: every blob counted, the floor is the labelled frame.
 
-"Two point two milliseconds": the needle slides from 53.9 ms past the
-33 ms line to 2.21 ms and turns teal; its value comes in with the carried
-caption ("2.21 ms / kernel time, no copies"). "inside the budget": the act
-tag turns "COUNT ✓" and row 3's pill turns from "GPU 3.8×" to "GPU 100×".
+"Two point two milliseconds": at "Two" the needle's old value goes. Once
+the last flash is over, the needle slides from 53.9 ms past the 33 ms
+line to 2.21 ms and turns teal. Its value comes in with the carried
+caption ("2.21 ms" / "kernel time, no copies") at "milliseconds".
+
+"inside the budget": out, then in. Row 3's old verdict and the act tag
+fade out; then the tag comes back as "COUNT ✓" and row 3 reads
+"GPU 100×" (the new strip fades in over the old one, whose other pills
+are the same opaque pixels).
 
 Starts on chain_state(17), ends on chain_state(18).
 """
@@ -66,6 +71,7 @@ ZOOM_S = 0.8            # the pull back, at least
 SMOOTH_S = 4 / 15       # the whole frame, drawn from every pixel, gives way to the 900 px floor
 ROUND_BLEND = 0.2       # s: a round's claims colour in
 DOTS_OUT = 0.6          # s: the seed dots fade once the last visible round has landed
+FLASH_S = 0.08 + 0.12 + 0.22    # a gate flash's length (gate_rounds' default up, top and down)
 
 MASK = nb.TILES / "input_blobs_red.npz"     # the frame's red mask, every pixel (assets/make_frame_mask.py)
 
@@ -109,12 +115,13 @@ def mask_window(rpx: int, r0: float, c0: float, side: float) -> np.ndarray:
 class BigFrame(ChainScene):
     k = 17
 
-    def needle_slide(self, spec: ov.GoalSpec, frames: int = 7):
+    def needle_slide(self, spec: ov.GoalSpec, slide_at: float, frames: int = 7):
         """The needle slides to `spec`'s value and takes its colour: the old
-        value fades out, the triangle slides along the track (and turns
-        teal). Returns (meter, value label): the label is not yet shown, the
-        caller fades it in with the caption. The meter's box, ticks and
-        labels are the same pixels before and after."""
+        value fades out now, the triangle slides along the track (and turns
+        teal) at scene time `slide_at`. Returns (meter, value label): the
+        label is not yet shown, the caller fades it in with the caption.
+        The meter's box, ticks and labels are the same pixels before and
+        after."""
         old = self.over["goal"]
         new = self.goal(spec)
         tri, val = new[-2], new[-1]
@@ -126,6 +133,7 @@ class BigFrame(ChainScene):
         self.remove(old)
         self.add(new, moving, old_val)
         self.play(FadeOut(old_val), run_time=fr(2))
+        self.until(slide_at)
         self.play(Transform(moving, tri), run_time=fr(frames))
         self.remove(moving)
         new.add(tri)
@@ -272,24 +280,37 @@ class BigFrame(ChainScene):
         self.run(step, total)
         self.gate_rounds(flashes=flashes)
 
-        # "six rounds": the first caption (the carried "min" goes)
-        self.say(f"{int(n['full_seeds']):,} seeds", f"{int(n['frame_rounds'])} rounds, {int(n['n_blobs']):,} blobs",
-                 at=self.cue("rounds"))
+        # "On the big frame": the carried "min" goes with the crop's hues
+        self.unsay(frames=round(HUE_S * 15))
 
-        # "Two point two milliseconds": the needle slides past the budget
-        # line and turns teal; its value comes in with the carried caption
+        # "seeds": the first caption
+        self.say(f"{int(n['full_seeds']):,} seeds", f"{int(n['frame_rounds'])} rounds, {int(n['n_blobs']):,} blobs",
+                 at=self.cue("seeds"))
+
+        # "Two point two milliseconds": at "Two" the old value goes; the
+        # needle slides past the budget line (and turns teal) once the last
+        # flash is over, and its value comes in with the carried caption
         self.until(max(self.cue("Two"), t_out1))
-        meter, val = self.needle_slide(end.goal)
+        meter, val = self.needle_slide(end.goal, slide_at=flashes[-1] + FLASH_S)
         self.say_last(at=self.cue("milliseconds"), extra=[FadeIn(val)])
         self.remove(val)
         meter.add(val)
 
-        # "inside the budget": COUNT is won and row 3 jumps. The new strip
-        # fades in over the old one: its pills are opaque, so the two that
-        # do not change never dip
+        # "inside the budget": COUNT is won and row 3 jumps; out, then in.
+        # Row 3's old verdict leaves from a stand-in copy of the strip (the
+        # strip itself leaves whole, so no group splits; see needle_slide),
+        # with the old tag; then the new strip fades in over the stand-in
+        # (its pills are opaque, so the two that do not change never dip)
+        # and the new tag comes in
         self.until(self.cue("budget"))
         old = self.over["strip"]
-        self.over["strip"] = self.strip(end.rows)
-        anims = [FadeIn(self.over["strip"])] + self.over_anims("tag", ov.act_tag(self.G, *end.tag))
-        self.play(*anims, run_time=fr(6))
+        stand = old.copy()
+        verdict = stand[-1][1][1]                    # row 3's pill: (box, (name, verdict))
+        stand[-1][1].remove(verdict)
         self.remove(old)
+        self.add(stand, verdict)
+        self.play(FadeOut(verdict), FadeOut(self.over["tag"]), run_time=fr(3))
+        self.over["strip"] = self.strip(end.rows)
+        self.over["tag"] = ov.act_tag(self.G, *end.tag)
+        self.play(FadeIn(self.over["strip"]), FadeIn(self.over["tag"]), run_time=fr(5))
+        self.remove(stand)

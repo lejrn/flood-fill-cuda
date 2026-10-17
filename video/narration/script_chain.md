@@ -392,14 +392,17 @@ On the big frame: over eleven thousand seeds, six rounds, every blob counted. Tw
   rings at this scale); six gate flashes, 0.5 s apart, as the rounds
   sweep out from them (real claim rounds, sampled at 900 px); the frame
   ends labelled.
-- At "milliseconds" the needle slides from 53.9 ms past the 33 ms line
-  to 2.21 ms (24× down) and turns teal. At "budget", COUNT is won and
-  scoreboard row 3 jumps from "GPU 3.8×" to "GPU 100×" (225 vs 2.21 ms;
-  the CPU's labels with their reset on the clock, as the waves set up
-  on theirs).
-- Captions (two: a third would come too soon after the first):
-  "11,609 seeds" / "6 rounds, 2,522 blobs"; carried "2.21 ms" /
-  "kernel time, no copies".
+- At "Two" the needle's old value goes; once the sixth flash is over,
+  the needle slides from 53.9 ms past the 33 ms line to 2.21 ms (24×
+  down) and turns teal. Its value lands with the carried caption at
+  "milliseconds". At "budget", out then in: row 3's old verdict and the
+  tag go, then COUNT is won and scoreboard row 3 reads "GPU 100×", up
+  from "GPU 3.8×" (225 vs 2.21 ms; the CPU's labels with their reset on
+  the clock, as the waves set up on theirs).
+- Captions (two: a third would come too soon after the first): r12's
+  carried "min" goes with the crop's hues; "11,609 seeds" / "6 rounds,
+  2,522 blobs" at "seeds"; carried "2.21 ms" / "kernel time, no
+  copies".
 
 ## beat r14_reveal
 
