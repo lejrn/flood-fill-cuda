@@ -13,8 +13,9 @@ goes amber and the gate rises. At "gate" the 47 idle cubes turn amber and
 stay amber (they were waiting at the gate all along); block 0's turns
 amber only at each flash. The panel gives way to a "grid.sync" tag; one
 more slow ring shows the new colours, then the rest race to the end with
-the gate up. As the last caption lands the gate comes down and the cubes
-go back to their hues.
+the gate up. The last caption lands on "each", under the line it
+captions; as the race ends, just after, the gate comes down with its tag
+and the cubes go back to their hues.
 
 Starts on chain_state(9) (all SMs lit, 48 cubes in their hues, the
 48-block owner mosaic), ends on chain_state(10) (the same machine, the
@@ -175,9 +176,8 @@ class Snake(ChainScene):
         # a photosensitivity limit; each stop eases in and out, capped at
         # 0.85). A ring starts just after the cubes turn amber at "gate", so
         # one whole slow ring shows them; then the rest race past with the
-        # gate up, and it comes down as the last caption lands (on "each",
-        # but never sooner than DWELL after the tag is fully in: the tag
-        # leaves with the old caption)
+        # gate up. The last caption lands on "each" (it captions that line);
+        # the gate comes down when the race ends, its tag with it
         amber = amber_overlay(full, pl)
         self.add(amber)
         t0, tg = self.cue("Why"), self.cue("gate")
@@ -191,13 +191,14 @@ class Snake(ChainScene):
             """The frame until(t) lands on."""
             return round(t * config.frame_rate) / config.frame_rate
 
-        t_tag = on_frame(tg) + fr(TURN)         # the tag fully in
-        t_cap = max(self.cue("each"), t_tag + DWELL)
-        # the old caption out (2 frames), the last one in (5): the race ends on
-        # the in-fade's last update, counted from the hooks' own start frame,
-        # so settle() needs no extra live frame
+        # the old caption out (2 frames) just before "each", the last one in (5)
+        # from it; the race runs at least 0.6 s after its slow rings, and no
+        # sooner than the in-fade's last update, counted from the hooks' own
+        # start frame, so settle() needs no extra live frame
+        t_cap = self.cue("each") - fr(2)
         t1 = on_frame(t_cap) + fr(2) + fr(4)
         fast_t = max(t1 - on_frame(t0) - slow_t, 0.6)
+        t_race = on_frame(t0) + slow_t + fast_t
         # a ring: work, then wait / gap / wait / gap (fractions of the ring); the
         # gap between the two waits is long enough to read as two stops
         cuts = (0.0, 0.22, 0.42, 0.6, 0.8, 1.0)
@@ -253,12 +254,13 @@ class Snake(ChainScene):
         self.extras.remove(panel)
         self.play(*self.cube_anims(wait, amber), FadeOut(panel), FadeIn(tag), run_time=fr(TURN))
 
-        # the last caption: the snake is done, the gate comes down and every
-        # cube goes back to its hue (all work, chain_state(10)). The tag leaves
-        # with the old caption, so the last caption is one text change (not a
-        # second one when the extras fade before the snap)
+        # the last caption, on "each"; the tag stays while the gate is up
         self.until(t_cap)
-        self.unsay(frames=2, extra=[FadeOut(tag)])
-        self.say_last(extra=self.cube_anims(full, amber))
+        self.unsay(frames=2)
+        self.say_last()
+        # the race ends: the snake is done, the gate comes down with its name,
+        # and every cube goes back to its hue (all work, chain_state(10))
+        self.until(t_race - fr(TURN))
+        self.play(*self.cube_anims(full, amber), FadeOut(tag), run_time=fr(TURN))
         self.settle()
         self.remove(amber)

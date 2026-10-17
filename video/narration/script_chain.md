@@ -232,7 +232,10 @@ So use every SM: forty-eight blocks, two on each. Eight and a half times the CPU
 But on a thin snake, forty-eight blocks lose to one. Why? Every ring, the chip stops twice at a gate, two microseconds each.
 ```
 
-- Unchanged.
+- Text unchanged. The carried caption "65,792 stops" / "~2 µs each"
+  lands on "each" (v4 waited a full dwell after the "grid.sync" tag, so
+  it came 1.4 s after the line). The tag stays while the gate is up and
+  leaves with it as the race ends.
 
 ## beat r06_diagonals
 
