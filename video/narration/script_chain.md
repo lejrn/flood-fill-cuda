@@ -1,64 +1,98 @@
-# Narration script: the chain cut, v4 ("size, then count": the memory story)
+# Narration script: the chain cut, v5 ("size, count, then tiles")
 
-Status 2026-10-14: v4 approved by the user. The full design, with every
-visual and source, is `narration/chain_v4_proposal.md`; the numbers and
-the claim checks are `scenes/chain/numbers.py`.
+Status 2026-10-17: v5 DRAFT, revised after review, for the user's
+answers. The full design, with every picture, number and source, is
+`narration/chain_v5_proposal.md`; the numbers and the claim checks are
+`scenes/chain/numbers.py`. v4 (approved 2026-10-14) is in git history.
 
-History: v1 (11 beats, "you build a machine") is in git history and in
-`out/chain_v1/`. v2 is the two-act ladder (`chain_v2_proposal.md`). v3
-is the hardware look with the same text (`chain_v3_plan.md`). v4 adds
-the memory story: shared memory, the spill, the global queue, the tag
-bit and the row read. It has 16 beats (v3 had 14): r03b_one_sm and
-r05b_snake are split from v3's r03 and r05.
+## v5's decisions
 
-The user's answers to the proposal's questions:
+The user, 2026-10-17:
 
-- Q1: run the owner map (real per-pixel block ownership on the 64 Mpx
-  square), not the schematic fallback.
-- Q2: add the one "1 SM, 2 blocks" measurement: ch02's pinned pair on
-  the 36 Mpx square, same SM vs two SMs, placement the only variable
-  (308.4 vs 183.8 ms, 1.68x). One short clause in r04; r04 keeps at
-  most three captions.
-- Q3: r10_runs captions the dense row read "coalesced" / "by design,
-  not profiled".
-- Q4: the owner-map lens in r05, if the owner crops exist.
-- Q5: no "sixty-four tags".
-- Q6: the cut may grow to five minutes. The pacing knobs were already
-  raised 25% (commit 3f88900).
-- Q7: 48 KB and 8 GB are device-dump constants in `numbers.py`, with
-  their source.
-- Q8: no separate r10_memory beat.
-- Q9: no ch01 thread-sweep caption.
-- Q10: no image lane before r08.
+- The run-based labelling beat (v4's r10_runs) is not relevant: the
+  video is about the BFS. It is gone, with every number that came from
+  it: the drone card's GPU time, the count row, the 2.96 ms, the frame
+  ratios. No "CCL", "runs", "spans" or "union-find", spoken or shown.
+- The tile BFS and the tile waves replace it, as a third act after
+  r09: first the thicker wave on the huge blob, then the same tiles on
+  the whole frame with labels, then the finale. Show the mechanism and
+  the numbers. The cut may run up to five minutes.
+- Voice: Kokoro `am_adam`, paced, as v4.
+
+This draft's defaults, each an open question in the proposal:
+
+- One session for every CPU-vs-GPU number: `v5_20261017T161122Z`. The
+  CPU there is faster than in July, so five phrases of acts 1 and 2
+  change: "one point three seconds" becomes "one point two", "over twice
+  the CPU" becomes "beats the CPU", "Eighteen times" becomes "Twelve
+  times", "about CPU speed" becomes "close to CPU speed", and "fifty-one
+  milliseconds" becomes "about fifty" (act 2's 51.7 ms ran at a lower
+  memory clock; at full clocks the same kernel took 47.1).
+- GPU-to-GPU ratios keep their July sessions (each within one session).
+  r07 and r08 are the one cross-session comparison: July GPU estimates
+  against today's CPU, and both claims also hold against July's CPU.
+- Row 3 ("many blobs") is the 81 Mpx frame, the one the meter shows. v4's
+  1 Mpx noise scene is dropped: on it, the tile waves send almost every
+  tile down the dense-tile path, which v5 leaves out.
+- The CPU column keeps v4's baselines (4-way BFS on one blob; labels
+  plus a fill per blob on many). The like-for-like twins are in the
+  proposal.
+- On-screen CPU-vs-GPU factors keep two significant figures (1.5×, 17×,
+  540×): the CPU's round medians spread by up to 9%.
+- The finale flips the small-blob row to the GPU in kernel time and says
+  aloud that with the copy the CPU still wins it.
+- One orientation for every floor: the 900 px frame is transposed at the
+  source, so a thread's row in act 3 is a screen row.
+
+v5 has 19 beats: v4's first 14 (i0 to r09), four new act-3 beats
+(r10_tiles, r11_rounds, r12_pieces, r13_frame) and a new finale
+(r14_reveal). About 273 s (4:33) with Kokoro, paced.
+
+History: v1 (11 beats, "you build a machine"), v2 (the two-act ladder,
+`chain_v2_proposal.md`), v3 (the hardware look, `chain_v3_plan.md`) and
+v4 (the memory story, `chain_v4_proposal.md`, 16 beats, 217.5 s) are in
+git history.
 
 ## The idea
 
 A drone show opens the video. On frames that small the compiled CPU
-keeps up, but at 81 Mpx it needs 1.3 s against a 33 ms budget. So where
-does the GPU win? Two places, and the video earns each one:
+keeps up, but at 81 Mpx it needs 1.2 s against a 33 ms budget. So where
+does the GPU win? The video earns each answer:
 
-- **Size** (act 1): one giant blob, the 64 Mpx test square. One block
-  on one SM with its queue in shared memory; the overflow spills to
-  global memory; a second block moves the whole queue there; then all
-  48 blocks, then diagonal steps. Each is a "But... So" rung.
-- **Count** (act 2): thousands of blobs at once. One launch per blob
-  loses to the CPU, then tags (one bit of each queue word), then seeds
-  found on the GPU, then runs read row by row.
+- **Size** (act 1): one giant blob, the 64 Mpx test square. One block,
+  its queue in shared memory, the spill, the global queue, 48 blocks,
+  the gate, diagonal steps.
+- **Count** (act 2): thousands of blobs at once. One launch per blob,
+  tags, seeds found on the GPU: about 50 ms, over budget, and every red
+  pixel still rides the queue.
+- **Tiles** (act 3): the queue carries 32 x 32 tiles, each closed by one
+  warp of 32 threads in registers. One gate per round: 127 rounds on the
+  giant square instead of 4,001 rings. Then every tile finds its blob
+  pieces, seeds send waves piece to piece, and the whole frame is
+  counted in 6 rounds: 2.2 ms once the frame is on the card, inside the
+  budget.
 
 A three-row "CPU vs GPU" scoreboard fills in as the acts are won: one
-small blob (the CPU), one huge blob (the GPU, by size), many blobs (the
-GPU, by count). The ending answers the opening question with it.
+small blob (the CPU, until the finale), one huge blob (the GPU, by
+size; it jumps with the tiles), many blobs (the frame: the GPU, by
+count; it jumps with the waves). The ending answers the opening
+question with it.
 
 Rules: every "So" fixes the "But" before it. Every failure is a visible
 event. Amber means someone is waiting. At most three captions per beat,
 a caption sub of at most four words. Every number comes from committed
 JSON through `numbers.py`; "~" marks estimates; "kernel time" where it
-applies. The name ("connected-component labelling") is on the title
-card, never spoken. No "chapter" anywhere.
+applies. No "chapter" anywhere. A flashing element flashes at most twice
+per second.
 
-In act 1 a hue is a block (block 0 blue, block 1 green, the rest a
-golden-angle walk); the floors are real owner maps. Act 2 goes back to
-one hue per blob.
+Vocabulary: acts 1 and 2 say ring, gate, queue, SM, block, thread, word,
+bit, seed, tag, label, shared memory and global memory. Act 3 adds warp
+("one warp, thirty-two threads", shown growing out of r02's SM close-up),
+registers ("closer than shared memory"), tile, round and piece. "Lane"
+is never spoken.
+
+In act 1 a hue is a block; act 2 goes back to one hue per blob. Act 3
+paints one blob in the act-1 blue, and many blobs one hue per label.
 
 ## beat i0_problem
 
@@ -66,18 +100,20 @@ one hue per blob.
 A camera films a drone show; a filter turns each drone into a white blob. Count them all, every frame: thirty-three milliseconds.
 ```
 
-- Reuses the three-pane intro's camera and filter panels; the budget line
-  is cued to "thirty-three milliseconds".
+- Unchanged (v4 take).
 
 ## beat i1_compare
 
 ```text
-On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixels, same thirty-three milliseconds. The CPU needs one point three seconds. Where does the GPU win? Two places: size and count.
+On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixels, same thirty-three milliseconds. The CPU needs one point two seconds. Where does the GPU win? Two places: size and count.
 ```
 
-- Drone card (measured, one session, 240 frames): CPU 3.1 ms, GPU 0.93 ms,
-  budget 33 ms. Then the 81 Mpx card: the CPU stopwatch runs past 33 ms to
-  1.3 s beside a GPU "?". The goal chip and the SIZE / COUNT chips appear.
+- One word changes: "three" becomes "two" (CPU 1,157 ms in the v5
+  session, 1,346 in July's).
+- Drone card (240 frames, one session): CPU 1.46 ms, GPU 0.11 ms,
+  budget 33 ms. The GPU time is the tile waves' (v4 showed the run-based
+  0.93 ms). Then the 81 Mpx card: the CPU stopwatch runs past 33 ms to
+  1.2 s beside a GPU "?".
 
 ## beat r00_zoom
 
@@ -85,8 +121,7 @@ On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixel
 Freeze. Zoom into one drone until its pixels show.
 ```
 
-- Frame 216 of the footage, push-in on one drone; its pixels become red
-  cells on the iso floor. Caption: the drone's pixel count.
+- Unchanged.
 
 ## beat r01_cpu
 
@@ -94,8 +129,7 @@ Freeze. Zoom into one drone until its pixels show.
 On the CPU: paint a pixel, queue its red neighbours, repeat. One pixel per step, on one core, while twenty-four GPU SMs sit idle.
 ```
 
-- One worker crawls the drone, one cell per step; the 24 SMs ripple and
-  stay dark. Captions "1 pixel", "1 core" (the i9 has 14), "24 SMs".
+- Unchanged.
 
 ## beat r02_one_block
 
@@ -103,12 +137,9 @@ On the CPU: paint a pixel, queue its red neighbours, repeat. One pixel per step,
 So move it onto one SM, its queue in the SM's shared memory: two hundred fifty-six threads paint a whole ring at once. But on one small blob, the CPU still wins. So: size first.
 ```
 
-- The SM close-up holds the queue strip in its shared-memory bar: red
-  tokens drop in at "queue", the bar's outline pulses at "shared memory".
-  It flies back before "paint"; SM 0's shelf stays "full".
-- Split floor, then the race on a 16 K px test blob: CPU 0.15 ms, best
-  GPU 0.37 ms. Scoreboard row 1: "one small blob: CPU 2.4x".
-- Captions (unchanged): "256 threads"; carried "CPU wins / one small blob".
+- Text unchanged. The race: CPU 0.12 ms against "GPU so far" 0.17 ms
+  (v5 session, CUDA events; the bar was "best GPU", which the tiles
+  later beat). Scoreboard row 1: "one small blob: CPU 1.4×".
 
 ## beat r03_giant
 
@@ -116,25 +147,16 @@ So move it onto one SM, its queue in the SM's shared memory: two hundred fifty-s
 On one giant blob, that queue overflows: a block gets only forty-eight kilobytes of shared memory, and this queue needs over a hundred. So the overflow spills to global memory: the card's eight gigabytes.
 ```
 
-- The drone swells into the 64 Mpx test square ("stress test"). The
-  shelf gauge grows out of SM 0: the box is 48 KB, the queue region two
-  thirds of it (8,192 slots), the bar the real two-ring load.
-- The sweep runs from "overflows" to "gigabytes". From real ring 1,024
-  red tokens pour from the region's end to VRAM chip 0; later rings
-  load some back. The four VRAM chips pulse at "eight gigabytes".
-- Captions: "48 KB" / "per block, by default"; "125 KB" / "two rings at
-  peak"; carried "spill" / "to global memory".
+- Unchanged.
 
 ## beat r03b_one_sm
 
 ```text
-Now one block is over twice the CPU. But that's one SM of twenty-four.
+Now one block beats the CPU. But that's one SM of twenty-four.
 ```
 
-- The painted square holds. The 23 other SMs come up idle in a wave and
-  go dark at "twenty-four". This one-block run is the shared ring plus
-  the global spill, as r03_giant shows. r03_giant's 0.8 s hold moves here.
-- Captions: "2.46x" / "vs the CPU, kernel time"; carried "1 of 24 SMs".
+- Changed: "is over twice the CPU" becomes "beats the CPU" (1.55 in the
+  v5 session). Caption "1.5×" / "vs CPU, kernel time", at "beats".
 
 ## beat r04_two_blocks
 
@@ -142,34 +164,16 @@ Now one block is over twice the CPU. But that's one SM of twenty-four.
 So add a second block on a second SM. Squeezed onto one SM, two blocks ran one point seven times slower. But shared memory is private to its block. So the whole queue moves to global memory: every new pixel's address is written there. On big blobs, measured, that's no slower. Two blocks are twice as fast. But twenty-two SMs stay dark.
 ```
 
-- Block 1's green cube drops onto SM 2 (measured placement, not SM 1).
-- "Squeezed onto one SM" (Q2): ch02's pinned pair on the 36 Mpx square,
-  308.4 vs 183.8 ms. Spoken only: r04 keeps its three captions.
-- The two shelf cards grow out of SM 0 (full) and SM 2 (empty) at
-  "private". At "the whole queue moves" SM 0's tokens drain to VRAM,
-  the label "queue" and the gate rail appear.
-- The refill paints the 2-block owner mosaic: blue and green dots,
-  mixed, never two halves. Loads come up from the VRAM queue, stores go
-  down to its rear.
-- Captions: "no slower" / "16 Mpx square" (cue the second "slower");
-  "2x again" / "kernel time"; carried "22 SMs idle".
+- Unchanged. "Twice as fast" is 2.03x in the v5 session (1,077 vs 530 ms).
 
 ## beat r05_all_blocks
 
 ```text
-So use every SM: forty-eight blocks, two on each. Eighteen times the CPU. Each colour is one block: they share one queue, so their pixels mix, and small rings keep only a few busy. We also tried other threads per block and block counts: on a smaller square, the best gained fifteen percent. We kept forty-eight by two hundred fifty-six.
+So use every SM: forty-eight blocks, two on each. Twelve times the CPU. Each colour is one block: they share one queue, so their pixels mix, and small rings keep only a few busy. We also tried other threads per block and block counts: on a smaller square, the best gained fifteen percent. We kept forty-eight by two hundred fifty-six.
 ```
 
-- The 22 dark SMs light out from SMs 0 and 2; 48 cubes land in the
-  measured order, each in its hue. The square refills with the 48-block
-  owner mosaic, then replays slowly over the small rings (few cubes
-  bright) and fast through the widest band.
-- Optional: a lens over the widest ring with a 64 x 64 crop of the real
-  owner map (Q4).
-- A small grid card shows the launch-shape sweep: a flat top, the
-  default 48 x 256 outlined, no numbers on it.
-- Captions: "18x" / "kernel time"; "few busy" / "on small rings";
-  carried "+15% at best" / "16 Mpx square".
+- Changed: "Eighteen" becomes "Twelve" (12.1 in the v5 session).
+  Caption "12×" / "kernel time".
 
 ## beat r05b_snake
 
@@ -177,10 +181,7 @@ So use every SM: forty-eight blocks, two on each. Eighteen times the CPU. Each c
 But on a thin snake, forty-eight blocks lose to one. Why? Every ring, the chip stops twice at a gate, two microseconds each.
 ```
 
-- The snake: 48 blocks 143 ms, 2 blocks 128 ms, 1 block (shared queue)
-  62 ms. Only block 0 ever has work; the 47 idle cubes are dim, then
-  amber from "gate" on. The gate flashes amber twice per ring.
-- Captions: "48 lose to 1"; carried "65,792 stops / ~2 µs each".
+- Unchanged.
 
 ## beat r06_diagonals
 
@@ -188,9 +189,9 @@ But on a thin snake, forty-eight blocks lose to one. Why? Every ring, the chip s
 So pass fewer gates: step diagonally too. On a square, half the rings, half the gates.
 ```
 
-- The stencil goes from 4 to 8 arrows; the diamond becomes a square;
-  8,001 -> 4,001 rings. The floor is the 8-way owner mosaic. Caption
-  "25.8x". Scoreboard row 2: "one huge blob: GPU 25.8x".
+- Text unchanged. Caption and scoreboard row 2: "one huge blob: GPU
+  17×" (CPU 1,666 ms, GPU 99.9 ms, v5 session). Caption sub "vs CPU,
+  kernel time".
 
 ## beat r07_real_frame
 
@@ -198,57 +199,132 @@ So pass fewer gates: step diagonally too. On a square, half the rings, half the 
 Size is won. Now count: twenty-five hundred blobs in the big frame, one launch each. Slower than the CPU: we built for size, not count.
 ```
 
-- Pull back to the 81 Mpx frame (2,522 blobs); the cubes turn plain
-  blue (act 2: one hue per blob). A launch counter races; the meter
-  swings past the CPU to ~2,181 ms (estimate).
+- Unchanged. The meter's needle swings past the CPU tick (now 1.2 s)
+  to ~2,181 ms (a July estimate; slower than both CPUs).
 
 ## beat r08_tags
 
 ```text
-So tag each queue entry with its blob: one spare bit of the entry's word, in global memory. Each new pixel inherits the tag, and the tag picks its colour: its label. One bit tells two blobs apart: two per launch, about CPU speed. But only two seeds, each handed in.
+So tag each queue entry with its blob: one spare bit of the entry's word, in global memory. Each new pixel inherits the tag, and the tag picks its colour: its label. One bit tells two blobs apart: two per launch, close to CPU speed. But only two seeds, each handed in.
 ```
 
-- The VRAM close-up grows out of the four chips: lanes image, visited,
-  queue. One queue entry opens into 32 bit cells, the last one the tag.
-- One slow step: a dense load of 32 entries, one lane paints its pixel
-  palette[tag], claims a neighbour, appends a new entry with the same
-  bit. The panel folds back; two blobs fill at once ("max, not sum");
-  ~1,368 ms (estimate). Two seeds run in over the PCIe link.
-- Captions: "1 spare bit" / "per queue entry"; "max, not sum"; carried
-  "2 seeds" / "per launch".
+- Changed: "about CPU speed" becomes "close to CPU speed" (~1,368 ms,
+  a July estimate: 18% slower than today's CPU, 2% slower than July's).
 
 ## beat r09_seeds
 
 ```text
-So the GPU finds its own seeds: every blob in one fill launch, fifty-one milliseconds. But every red pixel still rides the queue.
+So the GPU finds its own seeds: every blob in one fill launch, about fifty milliseconds. But every red pixel still rides the queue.
 ```
 
-- Seed sparks at corners and on a lattice; colliding waves keep the
-  smaller label ("min"). The meter stops at 51 ms, over 33. The queue
-  fills with 13,451,960 pixels.
+- Changed: "fifty-one" becomes "about fifty". The meter stops at 51.7
+  ms (v5 session, at a 7,001 MHz memory clock; 47.1 ms at full clocks in
+  the tile waves' own session), over 33.
+- New picture: about 0.6 s after the needle settles, before "But",
+  scoreboard row 3 fills: "many blobs: GPU 22×" (the same 81 Mpx frame,
+  2,522 blobs; CPU 1,157 ms, GPU 51.7 ms). The GPU already beats the
+  CPU on count; it misses the budget. COUNT is not won yet.
+- The queue counter still climbs to 13,451,960 red pixels. Its last
+  line is the bridge into act 3.
 
-## beat r10_runs
+## beat r10_tiles
 
 ```text
-Look at one row: in memory, it's one unbroken line, with its red pixels in spans. So link touching spans, not pixels: twenty-five times fewer. Warps read the image row by row: neighbouring threads, neighbouring bytes. No queue, no ring loop: six plain steps. About three milliseconds.
+So the queue carries tiles, not pixels: squares of thirty-two by thirty-two. One warp, thirty-two threads, takes a tile. Each thread holds one row as a thirty-two bit word, one bit per pixel, in registers, closer than shared memory. Fill along every row at once, step diagonally, fill along the columns, and repeat until nothing changes.
 ```
 
-- The VRAM close-up again: the image lane is the marked row (red spans,
-  white gaps), then a runs lane with five sub-cells per entry. The warp
-  strip, labelled "1 warp", reads 32 neighbouring pixels in one packet.
-- The panel folds back. Queue, gate and launches come off; six kernels
-  go on. The meter crosses 33 ms at 2.96 ms (1.46 ms from a packed
-  mask). Scoreboard row 3: "many blobs: GPU 35x" (1 Mpx, 47,655 blobs;
-  two sessions).
-- Captions: "25x fewer" / "runs than red pixels"; "coalesced" / "by
-  design, not profiled"; carried "2.96 ms" / "from the RGB image".
+- New (act 3). The labelled frame goes back to red. The queue's red
+  tokens turn into tile tokens, the launch pill fades, and each SM's
+  third cube lands (72 blocks: 3 per SM).
+- The floor zooms into the frame's largest blob (76,090 px); a 7 x 7
+  grid of real tiles lands on it. The tiles the search reached in its
+  first rounds are already blue; the centre tile, on the blob's edge,
+  is outlined.
+- SM 0's close-up opens as in r02; one "32 lanes" partition unfolds
+  into the warp card: 32 rows of 32 bit cells, the tile's real mask
+  (543 of 1,024 red). Its 17 entry bits light on the left edge.
+- The recorded sweeps play: row 86, diagonal 109, column 181, row 387,
+  diagonal 481, column 541, row 543, then one more trip with no change.
+  On "changes" the threads vote, the card folds back, and the centre
+  and the six tiles of its round turn blue together.
+- Captions: "1 tile, 1 warp" / "32 x 32 pixels"; "1 bit per pixel" /
+  "a row per thread"; carried "4 trips" / "then nothing changes".
 
-## beat r11_reveal
+## beat r11_rounds
 
 ```text
-One small blob: the CPU. One huge blob, or many at once: the GPU. Every drone, every frame.
+Only its border bits go out, into its neighbours, and those join the next round's queue. One gate per round, not two per ring. On the giant square, four thousand rings become a hundred twenty-seven rounds: from a hundred milliseconds to three. But that's one blob, from one seed.
 ```
 
-- The full scoreboard; then back out to the live drones ("drone frame:
-  GPU 0.93 ms, CPU 3.1 ms, budget 33 ms"). Title card: "connected-component
-  labelling / flood-fill-cuda".
+- New. The closed tile's border bits light (31, 26, 18 and 2) and
+  travel only into the 4 tiles they really open (above, right, and the
+  two upper corners); the others were open already. 4 tile tokens drop
+  into the queue. The gate flashes once per round, at most twice per
+  second, as the next rounds close.
+- The floor swells into the giant square, drawn from the real tile
+  rounds (250 x 250 tiles, about 12 shades): the seed tile, then 125
+  rings of tiles, one per round, then one round that only revisits. Two
+  slow rounds flash; then the gate holds amber while the counter runs
+  to 127. The inset says "stress test"; the tag stays COUNT.
+- "from a hundred milliseconds to three": scoreboard row 2 jumps from
+  "GPU 17×" to "GPU 540×" (kernel time, v5 session).
+- "But that's one blob": the floor pulls back to the 81 Mpx frame: one
+  blob blue, 2,521 still red.
+- Captions: "1 gate" / "per round"; "127 rounds" / "was 4,001 rings";
+  carried "1 blob" / "from 1 seed".
+
+## beat r12_pieces
+
+```text
+So first, every tile finds the blob pieces inside it, in registers, all at once. Some pieces are seeds: each seed sends a wave from piece to piece, one round at a time. Where two waves meet, the meeting is noted, and at the end each blob keeps its smallest label.
+```
+
+- New. A real 384 px piece of the frame, run as its own small image and
+  shown inside a border: 12 x 12 tiles, 8 blobs (6 of them cut by its
+  edge), 135 pieces (at most 4 per tile). The SMs pulse once; each piece
+  gets an outline and a dot at its first pixel; 36 seeds spark (11 only
+  because their tile is on the lattice).
+- Six rounds, one gate flash each, 0.5 s apart: pieces take their wave's
+  hue as they are claimed (50, 38, 7, 3, 1, then 0). Faint ticks mark
+  the 116 meetings and brighten once at "meet".
+- "at the end": the marks fade and every blob turns to one hue, its
+  smallest label.
+- Captions: "pieces" / "blobs cut by tiles"; "36 seeds" / "8 blobs";
+  carried "min" / "smallest label wins".
+
+## beat r13_frame
+
+```text
+On the big frame: over eleven thousand seeds, six rounds, every blob counted. Two point two milliseconds, once the frame is on the card: inside the budget.
+```
+
+- New. The crop goes back to red and its border fades; pull back to the
+  whole frame: 11,609 seeds spark; six gate flashes, 0.5 s apart, as the
+  rounds sweep out from them (real claim rounds, sampled at 900 px); the
+  frame ends labelled.
+- At "milliseconds" the needle slides from 51.7 ms past the 33 ms line
+  to 2.24 ms and turns teal. At "budget", COUNT is won and scoreboard
+  row 3 jumps from "GPU 22×" to "GPU 520×".
+- Captions (two: a third would come too soon after the first):
+  "11,609 seeds" / "6 rounds, 2,522 blobs"; carried "2.24 ms" /
+  "kernel time, no copies".
+- With the copies the frame takes 53 ms; the r14 card's footnote says
+  so.
+
+## beat r14_reveal
+
+```text
+One huge blob, or many at once: the GPU. And one small blob? In kernel time, the GPU now; with the copy, still the CPU. Every drone, every frame.
+```
+
+- New text (v4's r11_reveal). The full scoreboard opens; rows 2 and 3
+  are framed at "huge". At "now" row 1 flips from "CPU 1.4×" to "GPU
+  2.7×" (0.12 vs 0.045 ms); at "copy" the footnote's copy line lights
+  (GPU 0.60 ms with the copies, CPU 0.12).
+- Card rows: 0.12 / 0.045 ms GPU 2.7×; 1,666 / 3.10 ms GPU 540×; 1,157 /
+  2.24 ms GPU 520×; every tag "one session, kernel time".
+- Captions: "the GPU" / "huge or many blobs"; "small blob too" / "in
+  kernel time"; "every drone frame" / "kernel: 0.13 ms max".
+- Then the live drones (GPU 0.11 ms per frame, CPU 1.46 ms, budget 33
+  ms). The title card: "flood fill, from pixels to tiles" over
+  "flood-fill-cuda" (proposal Q4).
