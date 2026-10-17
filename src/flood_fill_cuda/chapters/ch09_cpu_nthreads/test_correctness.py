@@ -21,6 +21,7 @@ Run:
     uv run pytest src/flood_fill_cuda/chapters/ch09_cpu_nthreads/test_correctness.py -v
 """
 
+import inspect
 import os
 from pathlib import Path
 
@@ -394,6 +395,39 @@ def test_prange_schedule_is_static_and_contiguous():
     with ff.num_threads(16):
         got = _who_runs(17)
     assert list(got) == [0, 0] + list(range(1, 16))
+
+
+def test_every_parallel_loop_is_an_explicit_prange():
+    """Inside @njit(parallel=True), np.zeros, arr[:] = v and arr.sum()
+    become parallel loops too: each one a fork and a barrier on the
+    clock that the GPU pipelines do not pay. Every parallel loop of a
+    ch09 kernel must be one of its explicit pranges (checked on a
+    fresh, uncached compile at the signatures the engines use)."""
+    img, sx, sy = scenes.square_scene(200, 150, 90, 70)
+    for Eng in (ff.PixelBFS, ff.TileBFS):
+        eng = Eng(200, 150, threads=2)
+        eng.run(img.copy(), sx, sy)
+        eng.visited()
+    ff.TileBFS(200, 150).run(img.copy(), sx, sy)
+    eng = ff.TileLabels(200, 150, threads=2)
+    eng.run(img.copy())
+    eng.label_map()
+    ff.TileBFS(200, 150).filled()
+    bad = {}
+    for name, obj in vars(K).items():
+        if not (isinstance(obj, numba.core.registry.CPUDispatcher)
+                and obj.targetoptions.get("parallel")):
+            continue
+        assert obj.signatures, f"{name} never ran"
+        sig = obj.signatures[0]
+        fresh = njit(parallel=True)(obj.py_func)
+        fresh.compile(sig)
+        diag = fresh.get_metadata(sig)["parfor_diagnostics"]
+        n = len(diag.initial_parfors)
+        want = inspect.getsource(obj.py_func).count("prange(")
+        if n != want:
+            bad[name] = (n, want)
+    assert not bad, f"kernel: (parallel loops, pranges) {bad}"
 
 
 @pytest.mark.parametrize("threads", [2, 16])

@@ -328,6 +328,32 @@ def chunks_per_round(n_threads):
     return min(MAX_CHUNKS, max(n_threads, 1))
 
 
+# Inside @njit(parallel=True), np.zeros, a[:] = v and a.sum() become
+# parallel loops of their own: each a fork and a barrier on the clock.
+# The parallel kernels below allocate with np.empty and zero or sum
+# small per-chunk arrays with these serial loops instead (a test checks
+# that every parallel loop of a kernel is one of its explicit pranges).
+
+@njit(cache=True)
+def zero_i64(a):
+    """a[...] = 0 for a C-contiguous int64 array, serially."""
+    flat = a.reshape(a.size)
+    for i in range(flat.size):
+        flat[i] = 0
+
+
+@njit(cache=True)
+def column_sums(st):
+    """The per-chunk counters st (chunks x k) summed over chunks."""
+    out = np.empty(st.shape[1], np.int64)
+    for k in range(st.shape[1]):
+        s = 0
+        for c in range(st.shape[0]):
+            s += st[c, k]
+        out[k] = s
+    return out
+
+
 # ------------------------------------------------------------- pixel BFS
 #
 # ch03 on the CPU: a level-synchronous BFS. The frontier is an array of
@@ -433,10 +459,12 @@ def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
     height = img.shape[1]
     k = 8 if conn8 else 4
     max_chunks = chunks_per_round(n_threads)
-    counts = np.zeros(max_chunks, np.int64)
-    expd = np.zeros(max_chunks, np.int64)
-    drop = np.zeros(max_chunks, np.int64)
-    offs = np.zeros(max_chunks + 1, np.int64)
+    # per-chunk results: every slot a level reads is written in that
+    # level first (np.empty: np.zeros would be one more parallel loop)
+    counts = np.empty(max_chunks, np.int64)
+    expd = np.empty(max_chunks, np.int64)
+    drop = np.empty(max_chunks, np.int64)
+    offs = np.empty(max_chunks + 1, np.int64)
     visited[seed_x, seed_y] = 1
     front[0] = ((seed_x * height + seed_y) << 8) | 1
     n = 1
@@ -820,8 +848,10 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
     Returns (rounds, peak frontier, parallel rounds, peak chunks,
     counters summed over chunks: visits, idle visits, passes, sends)."""
     max_chunks = chunks_per_round(n_threads)
-    counts = np.zeros(max_chunks, np.int64)
-    st = np.zeros((max_chunks, N_TS), np.int64)
+    # np.empty and serial zeroing: np.zeros would be a parallel loop
+    counts = np.empty(max_chunks, np.int64)
+    st = np.empty((max_chunks, N_TS), np.int64)
+    zero_i64(st)
     t0 = (seed_x >> 6) * wpr + (seed_y >> 6)
     i0 = seed_x & 63
     reach[t0, i0] = row_fill(bit(seed_y & 63), mask[t0, i0])
@@ -870,11 +900,7 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
                     front[m] = t
                     m += 1
         n = m
-    tot = np.zeros(N_TS, np.int64)
-    for c in range(max_chunks):
-        for k in range(N_TS):
-            tot[k] += st[c, k]
-    return rounds, peak, par, peak_nch, tot
+    return rounds, peak, par, peak_nch, column_sums(st)
 
 
 # ------------------------------------------------------------ tile labels
@@ -1343,12 +1369,15 @@ def label_waves(ent_a, ent_w, n, lab, claimer, dirs, fmap, wpr, conn8,
     chunks, meetings, counters, meet_a, meet_b): the meeting arrays may
     have been grown."""
     max_chunks = chunks_per_round(n_threads)
-    st = np.zeros((max_chunks, N_LS), np.int64)
-    cc = np.zeros(max_chunks, np.int64)
-    rc = np.zeros(max_chunks, np.int64)
-    mc = np.zeros(max_chunks, np.int64)
-    co = np.zeros(max_chunks, np.int64)
-    mo = np.zeros(max_chunks, np.int64)
+    # np.empty and serial zeroing (np.zeros would be a parallel loop);
+    # cc .. mo are written for every chunk of a round before it reads
+    st = np.empty((max_chunks, N_LS), np.int64)
+    zero_i64(st)
+    cc = np.empty(max_chunks, np.int64)
+    rc = np.empty(max_chunks, np.int64)
+    mc = np.empty(max_chunks, np.int64)
+    co = np.empty(max_chunks, np.int64)
+    mo = np.empty(max_chunks, np.int64)
     n_meet = 0
     rounds = 0
     peak = 0
@@ -1422,11 +1451,8 @@ def label_waves(ent_a, ent_w, n, lab, claimer, dirs, fmap, wpr, conn8,
         ent_a = new_a
         ent_w = new_w
         n = tot
-    tots = np.zeros(N_LS, np.int64)
-    for c in range(max_chunks):
-        for k in range(N_LS):
-            tots[k] += st[c, k]
-    return rounds, peak, par, peak_nch, n_meet, tots, meet_a, meet_b
+    return (rounds, peak, par, peak_nch, n_meet, column_sums(st), meet_a,
+            meet_b)
 
 
 @njit(cache=True)
@@ -1543,7 +1569,7 @@ def paint_labels(img, labmap, to_img, mask, wpr, conn8, n_ring, n_int, lab,
     n_tiles = mask.shape[0]
     height = img.shape[1] if to_img else labmap.shape[1]
     nch = min(n_tiles, chunks_per_round(n_threads))
-    uni = np.zeros(nch, np.int64)
+    uni = np.empty(nch, np.int64)     # every chunk writes its slot
     for c in prange(nch):
         rem = np.empty(TILE, np.uint64)
         f = np.empty(TILE, np.uint64)
@@ -1554,7 +1580,10 @@ def paint_labels(img, labmap, to_img, mask, wpr, conn8, n_ring, n_int, lab,
             u += _paint_tile(t, wpr, height, mask, conn8, n_ring, n_int, lab,
                              anchor, seed_label, rem, f, img, labmap, to_img)
         uni[c] = u
-    return uni.sum()
+    total = 0
+    for c in range(nch):              # serial: uni.sum() would be a
+        total += uni[c]               # parallel loop
+    return total
 
 
 @njit(parallel=True, cache=True)

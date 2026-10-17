@@ -16,11 +16,15 @@ Public API:
     label(img, connectivity=8, lattice=8, threads=None, **engine_kw)
                                                -> LabelResult
 
-An engine owns its buffers for one image shape (allocated once, as the
-GPU sides allocate theirs) and resets them inside run(), on the clock,
-as ch07 and ch08 initialise theirs inside their timed pipelines. run()
-paints the image it is given in place; flood_fill() and label() copy
-it first.
+An engine owns its per-pixel and per-tile buffers for one image shape
+(allocated once, as the GPU sides allocate theirs) and resets them
+inside run(), on the clock, as ch07 and ch08 initialise theirs inside
+their timed pipelines. Two exceptions, both on the clock: the pixel
+BFS grows its frontier buffers when a level needs more (the engine
+keeps them, so only a first run grows them), and the wave rounds of
+TileLabels allocate their per-round scratch with np.empty (no zeroing;
+ch08 allocates nothing in run()). run() paints the image it is given
+in place; flood_fill() and label() copy it first.
 
 threads: numba.set_num_threads for the duration of the call (None: the
 current setting, by default every logical CPU). A prange splits its
