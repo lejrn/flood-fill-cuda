@@ -79,3 +79,59 @@ def test_unavailable_thread_counts_stop_the_run():
     with pytest.raises(SystemExit):
         B.select_threads([0, 1], limit=16)
     assert B.select_threads([16, 1, 2, 2], limit=16) == [1, 2, 16]
+
+
+def _leaves(d):
+    if isinstance(d, dict):
+        for v in d.values():
+            yield from _leaves(v)
+    elif isinstance(d, (list, tuple)):
+        for v in d:
+            yield from _leaves(v)
+    else:
+        yield d
+
+
+def test_runtime_is_recorded_without_paths():
+    """The session records how the CPU side was scheduled: the layer,
+    the chunk size, niceness, affinity, the OpenMP variables, the
+    kernel and the OpenMP runtime, and the CPU topology the guest sees.
+    No value may hold a path (results are committed)."""
+    info = B.runtime_info()
+    for k in ("threading_layer", "parallel_chunksize", "niceness",
+              "affinity_cpus", "numba_num_threads", "kernel", "wsl",
+              "openmp_env", "runtime_libs"):
+        assert k in info, k
+    for k in ("OMP_WAIT_POLICY", "GOMP_SPINCOUNT", "OMP_PROC_BIND",
+              "OMP_PLACES"):
+        assert k in info["openmp_env"], k
+    host = B._host_info()
+    for k in ("hypervisor", "cores_seen", "threads_per_core_seen",
+              "cpufreq_visible"):
+        assert k in host, k
+    assert not any("/" in str(v) for v in _leaves(info))
+    assert not any("/" in str(v) for v in _leaves(host))
+
+
+def test_timed_run_refuses_a_skewed_runtime():
+    """nice, a narrowed affinity or a preset OpenMP wait policy would
+    bias the 16-thread cells against the one-core ones: a timed run
+    stops unless a flag allows it; a smoke run only notes it."""
+    base = {"niceness": 0, "affinity_cpus": 16, "numba_num_threads": 16,
+            "openmp_env": {"OMP_WAIT_POLICY": "unset"}}
+    args = B.parse_args([])
+    assert B.check_runtime(args, base) == []
+    with pytest.raises(SystemExit, match="nice"):
+        B.check_runtime(args, {**base, "niceness": 10})
+    with pytest.raises(SystemExit, match="affinity"):
+        B.check_runtime(args, {**base, "affinity_cpus": 8})
+    with pytest.raises(SystemExit, match="OMP_WAIT_POLICY"):
+        B.check_runtime(args, {**base,
+                               "openmp_env": {"OMP_WAIT_POLICY": "PASSIVE"}})
+    allowed = B.parse_args(["--allow-nice", "--allow-openmp-env"])
+    notes = B.check_runtime(allowed, {
+        **base, "niceness": 10,
+        "openmp_env": {"OMP_WAIT_POLICY": "PASSIVE"}})
+    assert len(notes) == 2
+    smoke = B.parse_args(["--smoke"])
+    assert len(B.check_runtime(smoke, {**base, "niceness": 10})) == 1

@@ -59,6 +59,15 @@ Policy:
                   to QUIET_WAIT_*_S) until the rest of the machine is at
                   most QUIET_BUSY_PCT busy over one second; what was
                   seen is recorded with the round
+  runtime         Numba's threading layer is pinned (omp) before the
+                  first parallel call. Niceness, CPU affinity, the
+                  OpenMP and Numba variables, the chunk size, the
+                  kernel, the OpenMP runtime and the topology the guest
+                  sees are recorded. A timed run stops at nice > 0, on a
+                  CPU affinity narrower than the pool, or with an OpenMP
+                  wait, spin, bind or schedule variable set (flags turn
+                  these into recorded notes). Threads are not bound:
+                  under WSL2 a binding pins vCPUs, not P- or E-cores
   JIT warm-up     every engine and twin runs at every thread count on a
                   small scene first (compiles, thread pool start)
   CPU rounds      one untimed checked call per cell, one timed first
@@ -98,8 +107,8 @@ fall.
 Output: results/ch09_cpu_nthreads/benchmark_results/ch09_<stamp>.json
 and ch09_<stamp>.csv (files named, never paths).
 
-Run (on a quiet machine; the GPU part takes the GPU lock if one is
-used on this host):
+Run (on a quiet machine, never under nice; the GPU part takes the GPU
+lock if one is used on this host):
 
     PYTHONUNBUFFERED=1 uv run python -m \\
         flood_fill_cuda.chapters.ch09_cpu_nthreads.benchmarks.benchmark
@@ -423,19 +432,158 @@ def _git(*args):
 
 
 def _host_info():
+    """The CPU as this (possibly virtual) machine sees it. Under WSL2 the
+    guest sees vCPUs: a synthetic 8 cores x 2 threads, scheduled by
+    Windows over the real P- and E-cores, with no cpufreq and no hybrid
+    PMUs, so threads are not bound to cores (OMP_PROC_BIND unset)."""
     model = platform.machine()
+    flags, cores = set(), set()
+    phys = core = None
     try:
         with open("/proc/cpuinfo") as f:
             for line in f:
-                if line.startswith("model name"):
-                    model = line.split(":", 1)[1].strip()
-                    break
+                k, _, v = line.partition(":")
+                k, v = k.strip(), v.strip()
+                if k == "model name" and model == platform.machine():
+                    model = v
+                elif k == "flags" and not flags:
+                    flags = set(v.split())
+                elif k == "physical id":
+                    phys = v
+                elif k == "core id":
+                    core = v
+                elif not k and phys is not None:
+                    cores.add((phys, core))
+                    phys = core = None
+        if phys is not None:
+            cores.add((phys, core))
     except OSError:
         pass
-    return {"cpu": model, "logical_cpus": os.cpu_count(),
+    logical = os.cpu_count()
+    return {"cpu": model, "logical_cpus": logical,
+            "hypervisor": "hypervisor" in flags,
+            "cores_seen": len(cores) or None,
+            "threads_per_core_seen": (logical // len(cores)
+                                      if cores and logical else None),
+            "cpufreq_visible": os.path.isdir(
+                "/sys/devices/system/cpu/cpu0/cpufreq"),
+            "hybrid_pmus_visible": (os.path.isdir("/sys/devices/cpu_core")
+                                    or os.path.isdir("/sys/devices/cpu_atom")),
             "numba": numba.__version__,
             "numba_num_threads": numba.config.NUMBA_NUM_THREADS,
             "python": platform.python_version()}
+
+
+# OpenMP settings that change how the thread pool waits, binds or
+# schedules: recorded always, and a timed run refuses them unless
+# --allow-openmp-env (the session measures libgomp's defaults)
+OPENMP_SKEW_ENV = ("OMP_WAIT_POLICY", "GOMP_SPINCOUNT", "OMP_PROC_BIND",
+                   "OMP_PLACES", "OMP_SCHEDULE", "OMP_DYNAMIC",
+                   "KMP_BLOCKTIME")
+RUNTIME_ENV_PREFIXES = ("OMP_", "GOMP_", "KMP_", "NUMBA_")
+RUNTIME_LIBS = ("libgomp", "libiomp", "libomp", "libtbb")
+
+
+def _runtime_libs():
+    """The OpenMP / TBB libraries this process has loaded: basenames and
+    the GCC version string found in each (paths are never recorded)."""
+    import re
+    found = {}
+    try:
+        with open("/proc/self/maps") as f:
+            for line in f:
+                path = line.split()[-1] if len(line.split()) >= 6 else ""
+                base = os.path.basename(path)
+                if base.startswith(RUNTIME_LIBS) and base not in found:
+                    found[base] = path
+    except OSError:
+        return {}
+    out = {}
+    for base, path in sorted(found.items()):
+        version = None
+        try:
+            with open(path, "rb") as f:
+                m = re.search(rb"GCC: \(([^)]{0,80})\) ([0-9][0-9.]*)",
+                              f.read())
+            if m:
+                version = (f"GCC {m.group(2).decode()} "
+                           f"({m.group(1).decode(errors='replace')})")
+        except OSError:
+            pass
+        if version is None and base.startswith("libgomp"):
+            version = _dpkg_version("libgomp1")
+        out[base] = version if version and "/" not in version else None
+    return out
+
+
+def _dpkg_version(package):
+    """The Debian package's version, or None (no dpkg, no package)."""
+    try:
+        r = subprocess.run(["dpkg-query", "-W", "-f=${Version}", package],
+                           capture_output=True, text=True, timeout=10)
+        v = r.stdout.strip()
+        return f"{package} {v}" if r.returncode == 0 and v else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def runtime_info():
+    """How the CPU side is scheduled in this process (recorded in the
+    session): Numba's threading layer and chunk size, the niceness, the
+    CPU affinity, the OpenMP and Numba variables (a value that holds a
+    path is replaced), the kernel and the OpenMP runtime loaded."""
+    try:
+        layer = numba.threading_layer()
+    except ValueError:
+        layer = "not started"
+    env = {}
+    for k, v in sorted(os.environ.items()):
+        if k.startswith(RUNTIME_ENV_PREFIXES):
+            env[k] = "<path>" if "/" in v else v
+    for k in ("OMP_WAIT_POLICY", "GOMP_SPINCOUNT", "OMP_PROC_BIND",
+              "OMP_PLACES"):
+        env.setdefault(k, "unset")
+    try:
+        affinity = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        affinity = os.cpu_count()
+    release = platform.release()
+    return {"threading_layer": layer,
+            "parallel_chunksize": numba.get_parallel_chunksize(),
+            "niceness": os.getpriority(os.PRIO_PROCESS, 0),
+            "affinity_cpus": affinity,
+            "numba_num_threads": numba.config.NUMBA_NUM_THREADS,
+            "kernel": release, "wsl": "microsoft" in release.lower(),
+            "openmp_env": env, "runtime_libs": _runtime_libs()}
+
+
+def check_runtime(args, info):
+    """Settings that would bias the all-core cells against the one-core
+    ones. A timed run stops on any of them unless a flag allows it; a
+    smoke run, or an allowed one, gets notes (recorded). Returns the
+    notes."""
+    notes, stop = [], []
+    if info["niceness"] > 0:
+        msg = (f"the process runs at nice {info['niceness']}: a 16-thread "
+               "barrier waits for its slowest thread, and a low-priority "
+               "thread that shares a CPU loses far more than a lone one")
+        (notes if args.smoke or args.allow_nice else stop).append(msg)
+    if info["affinity_cpus"] < info["numba_num_threads"]:
+        msg = (f"the CPU affinity has {info['affinity_cpus']} CPUs for "
+               f"{info['numba_num_threads']} threads")
+        (notes if args.smoke or args.allow_nice else stop).append(msg)
+    preset = {k: v for k, v in info["openmp_env"].items()
+              if k in OPENMP_SKEW_ENV and v != "unset"}
+    if preset:
+        msg = (f"OpenMP settings are preset ({preset}); the session "
+               "measures libgomp's defaults")
+        (notes if args.smoke or args.allow_openmp_env else stop).append(msg)
+    if stop:
+        raise SystemExit(
+            "Not a fair timed run: " + "; ".join(stop) + ". Rerun without "
+            "nice and with those variables unset, or pass --allow-nice / "
+            "--allow-openmp-env to record them as notes.")
+    return notes
 
 
 def _cpu_busy():
@@ -1324,6 +1472,17 @@ def build_parser():
                          "check: its timings mean nothing)")
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--threading-layer", default="omp",
+                    help="pinned before the first parallel call (the "
+                         "default layer would switch to TBB if a newer TBB "
+                         "appeared)")
+    ap.add_argument("--allow-nice", action="store_true",
+                    help="run timed even at nice > 0 or with a CPU affinity "
+                         "narrower than the thread pool (recorded as a "
+                         "note)")
+    ap.add_argument("--allow-openmp-env", action="store_true",
+                    help="run timed even with OMP_WAIT_POLICY, "
+                         "GOMP_SPINCOUNT, OMP_PROC_BIND ... set (recorded)")
     return ap
 
 
@@ -1367,13 +1526,22 @@ def main(argv=None):
           f"{' (SMOKE: timings mean nothing)' if args.smoke else ''}",
           flush=True)
 
+    runtime_notes = check_runtime(args, runtime_info())
+    for n in runtime_notes:
+        print(f"NOTE: {n}", flush=True)
+    numba.config.THREADING_LAYER = args.threading_layer
     scenes = build_scenes(args)
     frames = load_drones(args)
     print("Warming up (JIT, thread pool)...", flush=True)
     t_w = time.perf_counter()
     warm_up(args)
+    runtime = runtime_info()
+    if runtime["threading_layer"] != args.threading_layer:
+        raise SystemExit(f"threading layer {runtime['threading_layer']}, "
+                         f"asked for {args.threading_layer}")
     print(f"  done in {time.perf_counter() - t_w:.1f} s, threading layer "
-          f"{numba.threading_layer()}", flush=True)
+          f"{runtime['threading_layer']}, libs {runtime['runtime_libs']}",
+          flush=True)
 
     rows = []
     for name, kind, img, seed, conns in scenes:
@@ -1455,6 +1623,9 @@ def main(argv=None):
         "session": f"ch09_{stamp}", "smoke": bool(args.smoke),
         "host": _host_info(),
         "threading_layer": numba.threading_layer(),
+        "runtime": {**runtime,
+                    "requested_threading_layer": args.threading_layer,
+                    "notes": runtime_notes},
         "git": {"commit": _git("rev-parse", "--short", "HEAD"),
                 "dirty": bool(_git("status", "--porcelain"))},
         "settings": {
