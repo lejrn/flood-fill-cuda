@@ -202,7 +202,9 @@ class RealFrame(ChainScene):
         # one at a time: a dot over PCIe, its blob fills, the SMs drain amber
         # until the next. The rest stream past, and the needle rides the summed
         # launch time past the CPU tick as "CPU" is said
-        S, P, T = 3, 0.42, 0.3                      # one at a time: count, period, travel
+        # one at a time: count, period, travel. The cubes leave amber once per
+        # launch, so P >= 0.5: at most twice a second (the cut's rule, v5)
+        S, P, T = 3, 0.5, 0.3
         TS, DE = 0.5, 0.16                          # the stream: travel, gap between launches
         # the first launch leaves once the core is lit, and lands (the pill
         # comes in) no sooner than MIN_DWELL after the caption
