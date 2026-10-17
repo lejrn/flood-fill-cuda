@@ -239,3 +239,31 @@ def test_a_loaded_round_is_run_again(monkeypatch):
     # every round starts with the probe, relative to the session's first
     assert all(r["probe"]["serial_ms"] > 0 for r in rounds)
     assert "parallel_rel" in rounds[-1]["probe"]
+
+
+def test_gpu_part_stops_its_sampler(monkeypatch):
+    """nvidia-smi samples about 7 times a second and wakes a reader
+    thread each time: it must be stopped when the GPU blocks end, not
+    run through the CPU passes, where each sample preempts a worker of
+    a 16-thread cell."""
+    events = []
+
+    class FakeGpu:
+        device, sm_count = "fake", 1
+
+    class FakeSampler:
+        def stop(self):
+            events.append("stop")
+    monkeypatch.setattr(B, "Gpu", FakeGpu)
+    monkeypatch.setattr(B, "Sampler", FakeSampler)
+    monkeypatch.setattr(B, "gpu_scene", lambda *a, **k: ({}, {}))
+    monkeypatch.setattr(B, "reference", lambda *a, **k: {})
+    monkeypatch.setattr(B, "gpu_identity", lambda gpu: {}, raising=False)
+    monkeypatch.setattr(B, "gpu_clocks", lambda: {}, raising=False)
+    monkeypatch.setattr(B.time, "sleep", lambda s: events.append("cooldown"))
+    args = _args("--cooldown", "1")
+    args.no_gpu = False
+    img, seed, conns = _scene("one")
+    B.run_gpu_blocks([{"scene": "t", "gpu": {}}],
+                     [("t", "one", img, seed, conns)], [], args)
+    assert events == ["stop", "cooldown"]

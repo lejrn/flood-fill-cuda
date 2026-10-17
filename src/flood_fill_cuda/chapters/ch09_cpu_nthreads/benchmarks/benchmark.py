@@ -1713,6 +1713,39 @@ def warm_up(args):
             _probe_all(10, nt)
 
 
+def run_gpu_blocks(rows, scenes, frames, args):
+    """Every GPU block (scenes, then the drones), then the cooldown.
+    The nvidia-smi sampler lives only as long as the GPU blocks: it is
+    stopped before the cooldown, so it never runs beside a CPU pass.
+    Fills rows[i]["gpu"]; returns (gpu_blocks, drones)."""
+    gpu_blocks, drones = {}, None
+    gpu = Gpu()
+    sampler = Sampler()
+    try:
+        print(f"GPU: {gpu.device} ({gpu.sm_count} SMs)", flush=True)
+        for row, (name, kind, img, seed, conns) in zip(rows, scenes):
+            print(f"  GPU {name}", flush=True)
+            ref = reference(kind, img, seed, conns)
+            row["gpu"], gpu_blocks[name] = gpu_scene(
+                gpu, sampler, name, kind, img, seed, conns, ref, args)
+            for k, c in row["gpu"].items():
+                print(f"    {k}: {c['ms']:.4f} ms, checks "
+                      f"{'OK' if c['checks_ok'] else 'MISMATCH'}", flush=True)
+            del ref
+            gc.collect()
+        if frames:
+            print("  GPU drones", flush=True)
+            dg, gpu_blocks["drones"] = gpu_drones(gpu, sampler, frames, args)
+            drones = {"gpu": dg}
+    finally:
+        sampler.stop()
+    if args.cooldown:
+        print(f"Cooldown {args.cooldown:.0f} s before the CPU passes",
+              flush=True)
+        time.sleep(args.cooldown)
+    return gpu_blocks, drones
+
+
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--scenes", nargs="*", default=None,
@@ -1823,29 +1856,8 @@ def main(argv=None):
 
     # -- GPU blocks first
     gpu_blocks, drones = {}, None
-    sampler = None
     if not args.no_gpu:
-        gpu = Gpu()
-        sampler = Sampler()
-        print(f"GPU: {gpu.device} ({gpu.sm_count} SMs)", flush=True)
-        for row, (name, kind, img, seed, conns) in zip(rows, scenes):
-            print(f"  GPU {name}", flush=True)
-            ref = reference(kind, img, seed, conns)
-            row["gpu"], gpu_blocks[name] = gpu_scene(
-                gpu, sampler, name, kind, img, seed, conns, ref, args)
-            for k, c in row["gpu"].items():
-                print(f"    {k}: {c['ms']:.4f} ms, checks "
-                      f"{'OK' if c['checks_ok'] else 'MISMATCH'}", flush=True)
-            del ref
-            gc.collect()
-        if frames:
-            print("  GPU drones", flush=True)
-            dg, gpu_blocks["drones"] = gpu_drones(gpu, sampler, frames, args)
-            drones = {"gpu": dg}
-        if args.cooldown:
-            print(f"Cooldown {args.cooldown:.0f} s before the CPU passes",
-                  flush=True)
-            time.sleep(args.cooldown)
+        gpu_blocks, drones = run_gpu_blocks(rows, scenes, frames, args)
 
     # -- CPU passes, scene by scene
     cpu_rounds = {}
@@ -1877,8 +1889,6 @@ def main(argv=None):
                                "n_blobs": f["ref"]["n_blobs"]}
                               for f in frames])
         print(f"    checks {'OK' if dok else 'MISMATCH'}", flush=True)
-    if sampler is not None:
-        sampler.stop()
 
     ok = all(r["all_checks_ok"] for r in rows) and (
         drones is None or (drones.get("cpu_checks_ok", True) and all(
