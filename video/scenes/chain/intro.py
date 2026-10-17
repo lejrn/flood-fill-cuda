@@ -1,23 +1,27 @@
-"""The chain cut's intro clip: beats i0_problem and i1_compare in one clip (v3).
+"""The chain cut's intro clip: beats i0_problem and i1_compare in one clip (v5).
 
 i0: four panels of the drone footage (`scenes/s_intro.py`'s grid): the
 camera, the filter, then at "Count them all, every frame" the GPU
 labelling every frame (a blob counter under it), and at "thirty-three"
 the chain's goal meter ("budget 33 ms"), which stays for the whole cut.
-i1: on a drone frame the compiled CPU code keeps up (a measured card:
-CPU vs GPU against the 33 ms line). "Scale up" freezes and dims the
-drone panels; at "eighty-one" the card swaps to the 81 Mpx test frame;
-"same thirty-three" pulses the meter and the card's line together; a CPU
-stopwatch runs in real time past 33 ms to the @njit time beside "GPU ?",
-and its end flies onto the meter as the grey CPU tick. "Two places"
-clears the stage and brings the scoreboard strip's two open pills; the
-clip ends on exactly `chain_state(2)` (goal meter + strip), the first
-picture of r00_zoom, after a BREATH. The assembly places the i1 wav at
-len(i0) + 0.4 s.
+i1: on a drone frame the compiled CPU code keeps up: a measured card
+with the CPU's bar (labels only, `drone_cpu_ms`) against the 33 ms line
+and the GPU as "?", as on the 81 Mpx card (v5: no kernel-time GPU win
+on small frames before r02's "the CPU still wins"). "Scale up" freezes
+and dims the drone panels; at "eighty-one" the card swaps to the 81 Mpx
+test frame (transposed, as every frame floor from r07 on); "same
+thirty-three" pulses the meter and the card's line together; a CPU
+stopwatch runs in real time past 33 ms to the CPU's labels-only time
+(`njit_ms`, 225 ms) beside "GPU ?", stopping at "second", and its end
+flies onto the meter as the grey CPU tick. "Two places" clears the stage
+and brings the scoreboard strip's two open pills; the clip ends on
+exactly `chain_state(2)` (goal meter + strip), the first picture of
+r00_zoom, after a BREATH. The assembly places the i1 wav at len(i0) +
+0.4 s.
 
-Text (v3): no title and no sub-labels; one short label per panel; the
-drone card keeps its honesty note and the 81 Mpx card says it is a test
-frame. Every number comes from `scenes.chain.numbers` (or the assets).
+Text: no title and no sub-labels; one short label per panel; the drone
+card keeps its honesty note and the 81 Mpx card says it is a test frame.
+Every number comes from `scenes.chain.numbers` (or the assets).
 """
 from __future__ import annotations
 
@@ -34,14 +38,14 @@ from scenes.chain import geo
 from scenes.chain import numbers as nb
 from scenes.chain import overlays as ov
 from scenes.chain.base import BREATH
-from scenes.chain.state import chain_state, nums
+from scenes.chain.state import chain_state, nums, picture
 from scenes.panes.geometry import Box
 from scenes.panes.middle_strip import load_image
 from scenes.s_intro import CAP_FONT, FPS_CAMERA, PH, PW, BlobCounter
 from scenes.s_intro import CENTRES as CENTRES_V
 from scenes.stage import EPS, Replay, fr
 from scenes.style import (ASSETS, BG, GREY, GRID, INK, INK_SOFT, OUT, RED_PX, TEAL, BeatScene, beat_seconds,
-                          is_vertical, label, voice)
+                          is_vertical, voice)
 
 GAP = 0.4               # silence between the two beats inside this clip (assembly)
 DIM_TO = 0.4            # the drone panels' brightness after "Scale up"
@@ -79,7 +83,7 @@ class Readout(VGroup):
         self.add(self.value)
 
     def _make(self, text: str, color: str):
-        return label(text, size=self.size, color=color, mono=True).move_to(self.anchor, aligned_edge=RIGHT)
+        return ov.lbl(text, self.size, color, mono=True).move_to(self.anchor, aligned_edge=RIGHT)
 
     def set(self, text: str, color: str) -> None:
         if (text, color) == self.key:
@@ -117,7 +121,7 @@ class MsCard(VGroup):
         self.budget = VGroup(*[
             DashedLine([xb, y - 0.14, 0], [xb, y - 0.30, 0], dash_length=0.04, stroke_color=TEAL, stroke_width=2)
             for y in y_rows],
-            label(f"{budget_ms:.0f} ms", 12, TEAL, mono=True))
+            ov.lbl(f"{budget_ms:.0f} ms", 12, TEAL, mono=True))
         lab = self.budget[-1]
         lab.move_to([xb, y_rows[-1] - 0.46, 0])
         # keep the label inside the card (the line may sit near an edge)
@@ -127,7 +131,7 @@ class MsCard(VGroup):
             lab.shift(LEFT * (lab.get_right()[0] - self.x1))
         self.names, self.values, self.bars = VGroup(), [], []
         for (name, ms), y in zip(rows, y_rows):
-            nm = label(name, 13, INK_SOFT).move_to([self.x0, y, 0], aligned_edge=LEFT)
+            nm = ov.lbl(name, 13, INK_SOFT).move_to([self.x0, y, 0], aligned_edge=LEFT)
             val = Readout("?" if ms is None else ms_text(ms), 13, INK_SOFT if ms is None else INK,
                           np.array([self.x1, y, 0]))
             self.names.add(nm)
@@ -199,9 +203,9 @@ class Intro(BeatScene):
     def caption(self, text: str, col: int, sub: str | None = None, color=INK_SOFT) -> VGroup:
         """A panel's label under it, and a small honesty note under that."""
         x, y = CENTRES[col][0], CENTRES[col][1] - PH / 2 - 0.2
-        g = VGroup(label(text, size=CAP_FONT, color=color).move_to([x, y, 0]))
+        g = VGroup(ov.lbl(text, CAP_FONT, color).move_to([x, y, 0]))
         if sub:
-            g.add(label(sub, size=CAP_FONT - 3, color=INK_SOFT).move_to([x, y - 0.24, 0]))
+            g.add(ov.lbl(sub, CAP_FONT - 3, INK_SOFT).move_to([x, y - 0.24, 0]))
         for m in g:
             if m.width > PW:
                 m.scale_to_fit_width(PW)
@@ -278,18 +282,18 @@ class Intro(BeatScene):
         box3 = self.frame_box(CARD)
         fh, fw = gpu.frame(0).shape[:2]
         cap3 = self.caption(f"{fh * fw / 1e6:.2f} Mpx", CARD, sub=f"{int(n['drone_frames'])} frames, one session")
+        # v5: the CPU (labels only) against the budget, the GPU a "?" as on
+        # the 81 Mpx card; no GPU drone time is shown anywhere in the cut
         dcard = MsCard(self.card_centre(CARD, 2), PW - 0.12, budget * 1.2,
-                       [("CPU", n["drone_cpu_ms"]), ("GPU", n["drone_gpu_ms"])], budget)
-        dbars = dcard.bars
-        dcard.remove(*dbars, *dcard.values)        # bars and values arrive at "CPU"
+                       [("CPU", n["drone_cpu_ms"]), ("GPU", None)], budget)
+        cpu_bar, cpu_ms = dcard.bars[0], dcard.values[0]
+        dcard.remove(cpu_bar, cpu_ms)              # the CPU's bar and value arrive at "CPU"
         self.play(FadeIn(box3), FadeIn(drone_img), FadeIn(cap3), FadeIn(dcard), run_time=fr(9))
 
         self.until(cue("i1_compare", "CPU"))
-        dbars[0].set_fill(GREY, 1)
-        dbars[1].set_fill(TEAL, 1)
-        dcard.add(*dbars, *dcard.values)
-        self.play(GrowFromEdge(dbars[0], LEFT), GrowFromEdge(dbars[1], LEFT),
-                  FadeIn(dcard.values[0]), FadeIn(dcard.values[1]), run_time=fr(8))
+        cpu_bar.set_fill(GREY, 1)
+        dcard.add(cpu_bar, cpu_ms)
+        self.play(GrowFromEdge(cpu_bar, LEFT), FadeIn(cpu_ms), run_time=fr(8))
 
         # ================= "Scale up": the drone panels freeze and dim =================
         self.until(cue("i1_compare", "Scale"))
@@ -302,7 +306,9 @@ class Intro(BeatScene):
 
         # ================= "eighty-one megapixels": the test frame card =================
         self.until(cue("i1_compare", "eighty-one"))
-        red = load_image(ASSETS / "ch05_input_blobs" / "frame_000.png")
+        # the 900 px frame transposed (state.picture): the orientation of
+        # every frame floor from r07 on
+        red = load_image(picture("red"))
         red.scale_to_fit_width(PW)
         red.move_to(self.centre(CARD) + np.array([0, PH / 2 - PW / 2, 0]))
         cap3b = self.caption(f"{n['n_pixels'] / 1e6:.0f} Mpx", CARD, sub=f"test frame, {int(n['n_blobs']):,} blobs")
@@ -320,8 +326,9 @@ class Intro(BeatScene):
         self.play(Indicate(meter[1], color=TEAL, scale_factor=1.12),
                   Indicate(bcard.budget[-1], color=TEAL, scale_factor=1.3), run_time=fr(9))
 
-        # ================= the CPU stopwatch, real time, to the @njit time =================
-        t_stop = cue("i1_compare", "seconds")
+        # ================= the CPU stopwatch, real time, to the CPU's labels-only time =================
+        # it stops as "second" starts ("over a fifth of a second": 225 ms)
+        t_stop = cue("i1_compare", "second")
         t_go = max(self.elapsed() + 0.1, t_stop - njit / 1000)
 
         def watch(m, dt, scene=self, card=bcard, t_go=t_go):
