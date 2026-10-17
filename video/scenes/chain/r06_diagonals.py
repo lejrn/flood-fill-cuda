@@ -16,8 +16,13 @@ gate, amber (r05b named the gate). The diamond's small rings at both ends
 keep most cubes amber; the square's only at its start, and it ends with
 all 48 busy.
 
+Like for like (v5), the CPU steps diagonally too from here: the
+8-neighbour BFS with its depth map (ch03 keeps one), 1,126 ms against
+101 ms. The carried caption and row 2's pill read "11×" (v4: 25.8×), the
+caption's sub "CPU: 8 neighbours too".
+
 Starts on chain_state(10) (the snake painted, "65,792 stops"), ends on
-chain_state(11) (the square's 8-way owner mosaic, row 2 filled, "25.8×").
+chain_state(11) (the square's 8-way owner mosaic, row 2 filled, "11×").
 """
 from __future__ import annotations
 

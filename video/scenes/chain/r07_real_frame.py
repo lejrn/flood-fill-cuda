@@ -8,9 +8,16 @@ The act changes here (D4): in act 1 a hue was a block, in act 2 a hue is
 a blob. So on "count", while the floor pulls back, the 48 cubes drop
 their block hues and turn plain blue.
 
+v5: the frame is transposed at the source (one orientation for every
+floor), and the estimate is re-made in the one session at 8 neighbours:
+~1,462 ms, against the labels-only CPU's 202 ms (its label map reset
+before the clock, as act 2's loops reset theirs): the CPU wins by 7.2x.
+The meter's CPU tick is the same CPU with its reset on the clock (225
+ms); the needle swings far past either.
+
 Starts on chain_state(11) (the 8-way owner mosaic, cubes in block hues,
-"25.8×"), ends on chain_state(12) (the filled frame, plain blue cubes,
-2,522 launches, "~2,181 ms").
+"11×"), ends on chain_state(12) (the filled frame, plain blue cubes,
+2,522 launches, "~1,462 ms").
 """
 from __future__ import annotations
 
