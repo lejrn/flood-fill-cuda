@@ -166,3 +166,76 @@ def test_every_cell_batch_starts_on_a_parked_pool(monkeypatch):
     B.cpu_pass(cells, args)
     # the first timed call, and every batch of every round
     assert len(seen) >= len(cells) * (1 + args.cpu_rounds)
+
+
+class _FakeProc:
+    """/proc/stat and this process's CPU time, advanced one second per
+    read pair: `others` and `own` CPUs busy out of 16."""
+
+    def __init__(self, others, own):
+        self.others, self.own = others, own
+        self.busy = self.total = 0
+        self.own_s = 0.0
+        self.n = 0
+
+    def cpu_busy(self):
+        self.n += 1
+        if self.n % 2 == 0:              # the second read of a window
+            self.busy += int(100 * (self.others + self.own))
+            self.total += 1600
+            self.own_s += self.own
+        return self.busy, self.total
+
+    def own_cpu_s(self):
+        return self.own_s
+
+
+@pytest.mark.parametrize("others,own,threshold,quiet", [
+    (0.2, 0.0, 3.0, True),
+    (1.5, 0.0, 3.0, False),       # 9.4%: passed the old 10% gate
+    (1.5, 0.0, 10.0, True),
+    (0.2, 12.0, 3.0, True),       # this process's own threads don't count
+])
+def test_gate_counts_only_the_rest_of_the_machine(monkeypatch, others, own,
+                                                  threshold, quiet):
+    fake = _FakeProc(others, own)
+    monkeypatch.setattr(B, "_cpu_busy", fake.cpu_busy)
+    monkeypatch.setattr(B, "_own_cpu_s", fake.own_cpu_s)
+    monkeypatch.setattr(B.time, "sleep", lambda s: None)
+    got = B.wait_quiet(0, True, threshold)
+    assert got["quiet"] is quiet
+    assert got["others_pct"] == pytest.approx(100 * others / 16, abs=0.1)
+
+
+def test_cpu_rounds_hold_8_threads_to_the_strict_gate():
+    assert B.gate_threshold(16) == B.QUIET_BUSY_PCT_PARALLEL <= 3.0
+    assert B.gate_threshold(1) == B.QUIET_BUSY_PCT
+
+
+def test_a_loaded_round_is_run_again(monkeypatch):
+    """A round whose others' share went over the threshold is discarded
+    and run again (up to MAX_ROUND_REDOS times), so its samples never
+    reach the medians; the discarded attempts are recorded."""
+    args = _args("--cpu-rounds", "2", "--max-calls", "2", "--round-s", "5")
+    args.gate = True
+    cells, _ = _cells("one", args)
+    script = [20.0, 0.0, 0.0]           # round 0 loaded once, then quiet
+
+    class Meter:
+        def __init__(self, kind="batch"):
+            self.kind = kind
+
+        def read(self):
+            pct = script.pop(0) if self.kind == "round" else 0.0
+            return {"others_pct": pct, "machine_pct": pct}
+    monkeypatch.setattr(B, "LoadMeter", Meter)
+    monkeypatch.setattr(B, "wait_quiet", lambda *a, **k: {"quiet": True})
+    rounds = B.cpu_pass(cells, args)
+    assert [len(r["discarded_attempts"]) for r in rounds] == [1, 0]
+    assert not any(r["loaded"] for r in rounds)
+    for c in cells:
+        assert len(c["times"]) == 2 * c["calls"]
+        assert len(c["round_medians"]) == 2
+    # every round starts with the probe, relative to the session's first
+    assert all(r["probe"]["serial_ms"] > 0 for r in rounds)
+    assert "parallel_rel" in rounds[-1]["probe"]

@@ -56,9 +56,22 @@ Policy:
                   clock fall), then CPU_COOLDOWN_S of idle, then the CPU
                   passes, scene by scene
   idle gate       before every CPU round and every GPU attempt, wait (up
-                  to QUIET_WAIT_*_S) until the rest of the machine is at
-                  most QUIET_BUSY_PCT busy over one second; what was
-                  seen is recorded with the round
+                  to QUIET_WAIT_*_S) until the REST of the machine
+                  (/proc/stat's busy time minus this process's own CPU
+                  time, all its threads) is at most QUIET_BUSY_PCT_
+                  PARALLEL (3%) busy over one second for rounds with
+                  cells of 8 threads or more, QUIET_BUSY_PCT (10%) for
+                  the GPU attempts. The same share is measured over
+                  every CPU round and every cell's batch; a round above
+                  its threshold is run again (up to MAX_ROUND_REDOS
+                  times, the discarded attempts recorded), then kept and
+                  flagged "loaded". WSL2 shows no steal time: load on
+                  the Windows side is invisible to the gate, so
+  probe           every CPU round starts with a fixed integer chain on
+                  one thread and the same chain on every thread at once,
+                  timed, each time also relative to the session's first
+                  probe: Windows-side load or a throttled package shows
+                  as a ratio above 1 (recorded, not a redo criterion)
   runtime         Numba's threading layer is pinned (omp) before the
                   first parallel call. Niceness, CPU affinity, the
                   OpenMP and Numba variables, the chunk size, the
@@ -142,6 +155,7 @@ import hashlib
 import json
 import math
 import platform
+import resource
 import statistics
 import subprocess
 import threading
@@ -150,7 +164,7 @@ from datetime import datetime, timezone
 
 import numba
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 from ....shared import results_paths
 from ....shared import scenes as shared_scenes
@@ -174,7 +188,12 @@ CPU_ROUNDS = 5
 CPU_ROUND_S = 0.4
 CPU_MAX_CALLS = 101
 CPU_COOLDOWN_S = 60
-QUIET_BUSY_PCT = 10.0       # the rest of the host, at most (1.6 of 16)
+QUIET_BUSY_PCT = 10.0       # the rest of the host, at most (1.6 of 16):
+                            # GPU attempts, rounds of fewer than 8 threads
+QUIET_BUSY_PCT_PARALLEL = 3.0   # the same for rounds with 8+ threads: one
+                                # other runnable thread stalls a barrier
+MAX_ROUND_REDOS = 2
+PROBE_N = 20_000_000        # the calibration chain (about 20 ms per core)
 QUIET_WAIT_CPU_S = 600
 QUIET_WAIT_GPU_S = 120
 GPU_ROUNDS = 9
@@ -654,23 +673,115 @@ def settle_workers(max_s=SETTLE_MAX_S):
         prev = cur
 
 
-def wait_quiet(max_wait_s, enabled=True):
-    """Until the rest of the machine is nearly idle (its busy share over
-    1 s, this process asleep, at most QUIET_BUSY_PCT) or max_wait_s
-    passed. Returns what it saw."""
+CLK_TCK = os.sysconf("SC_CLK_TCK")
+
+
+def _own_cpu_s():
+    """CPU seconds of this process, every thread (its OpenMP workers
+    too)."""
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+    return ru.ru_utime + ru.ru_stime
+
+
+class LoadMeter:
+    """The machine's busy share over a window, and the share of the REST
+    of the machine: /proc/stat's busy jiffies (all CPUs) minus this
+    process's own CPU time, over all CPUs' jiffies. WSL2 reports no
+    steal time, so load on the Windows side is invisible here: the
+    calibration probe is what shows it."""
+
+    def __init__(self, kind="batch"):
+        self.kind = kind
+        self.b0, self.j0 = _cpu_busy()
+        self.o0 = _own_cpu_s()
+
+    def read(self):
+        b1, j1 = _cpu_busy()
+        o1 = _own_cpu_s()
+        dj = j1 - self.j0
+        if dj <= 0:
+            return {"others_pct": None, "machine_pct": None}
+        busy = b1 - self.b0
+        own = (o1 - self.o0) * CLK_TCK
+        return {"machine_pct": round(100.0 * busy / dj, 1),
+                "others_pct": round(max(0.0, 100.0 * (busy - own) / dj), 1)}
+
+
+def gate_threshold(max_threads):
+    """The others' share a round may see: strict when it has cells of 8
+    threads or more (a barrier waits for any preempted thread)."""
+    return QUIET_BUSY_PCT_PARALLEL if max_threads >= 8 else QUIET_BUSY_PCT
+
+
+def wait_quiet(max_wait_s, enabled=True, threshold=QUIET_BUSY_PCT):
+    """Until the rest of the machine (not this process) is at most
+    `threshold` busy over 1 s, or max_wait_s passed. Returns what it
+    saw."""
     if not enabled:
-        return {"quiet": None, "busy_pct": None, "waited_s": 0.0,
+        return {"quiet": None, "others_pct": None, "waited_s": 0.0,
                 "gate": "off"}
     t0 = time.time()
     while True:
-        b0, j0 = _cpu_busy()
+        meter = LoadMeter("gate")
         time.sleep(1.0)
-        b1, j1 = _cpu_busy()
-        busy = 100.0 * (b1 - b0) / (j1 - j0) if j1 > j0 else 0.0
+        load = meter.read()
+        others = load["others_pct"] or 0.0
         waited = time.time() - t0
-        if busy <= QUIET_BUSY_PCT or waited >= max_wait_s:
-            return {"quiet": busy <= QUIET_BUSY_PCT,
-                    "busy_pct": round(busy, 1), "waited_s": round(waited, 1)}
+        if others <= threshold or waited >= max_wait_s:
+            return {"quiet": others <= threshold, "others_pct": others,
+                    "machine_pct": load["machine_pct"],
+                    "threshold_pct": threshold, "waited_s": round(waited, 1)}
+
+
+@njit(cache=True)
+def _probe_chain(n):
+    """A fixed dependent integer chain: n multiply-adds."""
+    x = np.int64(1)
+    for _ in range(n):
+        x = x * np.int64(6364136223846793005) + np.int64(1442695040888963407)
+    return x
+
+
+@njit(parallel=True, cache=True)
+def _probe_all(n, nt):
+    """The chain on every thread at once."""
+    out = np.empty(nt, np.int64)
+    for c in prange(nt):
+        out[c] = _probe_chain(n)
+    return out
+
+
+class Calibration:
+    """A fixed amount of work at the start of every round: the chain on
+    one thread, then on every thread at once. Each time is also given
+    relative to the session's first probe: Windows-side load (which the
+    gate cannot see) or a throttled package shows as a ratio above 1."""
+
+    def __init__(self, n=PROBE_N):
+        self.n = n
+        self.base = None
+
+    def warm(self, nt):
+        """One untimed probe (compiled, the clock ramped): the next probe
+        is the session's baseline."""
+        self.probe(nt)
+        self.base = None
+
+    def probe(self, nt):
+        t0 = time.perf_counter()
+        _probe_chain(self.n)
+        serial = (time.perf_counter() - t0) * 1000
+        with ff.num_threads(nt):
+            t0 = time.perf_counter()
+            _probe_all(self.n, nt)
+            par = (time.perf_counter() - t0) * 1000
+        settle_workers()
+        if self.base is None:
+            self.base = (serial, par)
+        return {"threads": nt, "serial_ms": round(serial, 3),
+                "parallel_ms": round(par, 3),
+                "serial_rel": round(serial / self.base[0], 3),
+                "parallel_rel": round(par / self.base[1], 3)}
 
 
 # ---------------------------------------------------------------- scenes
@@ -979,38 +1090,73 @@ def cpu_pass(cells, args):
                                 int(args.round_s / max(first, 1e-6))))
         c["times"], c["round_medians"] = [], []
     gc.collect()
+    calib = _calibration(args)
+    max_nt = max(c["meta"].get("threads", 1) for c in cells)
+    threshold = gate_threshold(max_nt)
+    for c in cells:
+        c["others_pct_batches"] = []
     rounds = []
     for r in range(args.cpu_rounds):
-        gate = wait_quiet(QUIET_WAIT_CPU_S, args.gate)
-        b0, j0 = _cpu_busy()
-        w0 = time.time()
         final = r == args.cpu_rounds - 1
-        for c in (cells if r % 2 == 0 else cells[::-1]):
-            ts = []
-            c["prep"]()
-            settle(c)
-            for i in range(c["calls"]):
-                if i:
-                    c["prep"]()
-                t0 = time.perf_counter()
-                c["fn"]()
-                ts.append((time.perf_counter() - t0) * 1000)
-                check_call(c, f"round {r} call {i}")
+        order = cells if r % 2 == 0 else cells[::-1]
+        discarded = []
+        for attempt in range(MAX_ROUND_REDOS + 1):
+            gate = wait_quiet(QUIET_WAIT_CPU_S, args.gate, threshold)
+            probe = calib.probe(max_nt)
+            meter = LoadMeter("round")
+            w0 = time.time()
+            got = {}
+            for c in order:
+                ts = []
+                c["prep"]()
+                settle(c)
+                bm = LoadMeter("batch")
+                for i in range(c["calls"]):
+                    if i:
+                        c["prep"]()
+                    t0 = time.perf_counter()
+                    c["fn"]()
+                    ts.append((time.perf_counter() - t0) * 1000)
+                    check_call(c, f"round {r} attempt {attempt} call {i}")
+                got[c["key"]] = (ts, bm.read()["others_pct"])
+                if final:
+                    with ff.num_threads(1):
+                        c["check_last"] = c["verify"]()
+            load = meter.read()
+            rec = {"round": r, "attempt": attempt,
+                   "seconds": round(time.time() - w0, 2),
+                   "loadavg": list(os.getloadavg()),
+                   "machine_busy_pct": load["machine_pct"],
+                   "others_busy_pct": load["others_pct"],
+                   "threshold_pct": threshold, "quiet_gate": gate,
+                   "probe": probe}
+            loaded = (load["others_pct"] is not None
+                      and load["others_pct"] > threshold)
+            print(f"    CPU round {r}.{attempt}: {rec['seconds']:.1f} s, "
+                  f"others {load['others_pct']}% (machine "
+                  f"{load['machine_pct']}%), probe x{probe['serial_rel']} / "
+                  f"x{probe['parallel_rel']}"
+                  f"{', LOADED' if loaded else ''}", flush=True)
+            if loaded and args.gate and attempt < MAX_ROUND_REDOS:
+                discarded.append(rec)
+                continue
+            break
+        for c in cells:
+            ts, others = got[c["key"]]
             c["times"] += ts
             c["round_medians"].append(statistics.median(ts))
-            if final:
-                with ff.num_threads(1):
-                    c["check_last"] = c["verify"]()
-        b1, j1 = _cpu_busy()
-        rounds.append({"round": r, "seconds": round(time.time() - w0, 2),
-                       "loadavg": list(os.getloadavg()),
-                       "machine_busy_pct": (round(100 * (b1 - b0) / (j1 - j0),
-                                                  1) if j1 > j0 else None),
-                       "quiet_gate": gate})
-        print(f"    CPU round {r}: {rounds[-1]['seconds']:.1f} s, load "
-              f"{rounds[-1]['loadavg'][0]:.2f}, busy "
-              f"{rounds[-1]['machine_busy_pct']}% (gate {gate})", flush=True)
+            c["others_pct_batches"].append(others)
+        rec["loaded"] = loaded
+        rec["discarded_attempts"] = discarded
+        rounds.append(rec)
     return rounds
+
+
+def _calibration(args):
+    """The session's calibration (its first probe is the baseline)."""
+    if getattr(args, "calib", None) is None:
+        args.calib = Calibration()
+    return args.calib
 
 
 def cpu_record(c):
@@ -1024,6 +1170,7 @@ def cpu_record(c):
     out["calls_checked"] = c["calls_checked"]
     out["call_mismatches"] = c["call_mismatches"]
     out["batches_started_unsettled"] = c["unsettled"]
+    out["others_pct_batches"] = c["others_pct_batches"]
     out["mismatch_at"] = c["mismatch_at"][:20]
     out["checks_ok"] = bool(chk["ok"] and last["ok"]
                             and c["call_mismatches"] == 0)
@@ -1395,18 +1542,48 @@ def cpu_drones(frames, args):
     samples = {k: [[] for _ in frames] for k in keys}
     rounds = []
     idx = list(range(len(frames)))
+    calib = _calibration(args)
+    max_nt = max(args.threads)
+    threshold = gate_threshold(max_nt)
     for r in range(args.cpu_rounds):
-        gate = wait_quiet(QUIET_WAIT_CPU_S, args.gate)
-        w0 = time.time()
-        for j in (idx if r % 2 == 0 else idx[::-1]):
-            for k in (keys if r % 2 == 0 else keys[::-1]):
-                ms, ok = call(k, frames[j])
-                samples[k][j].append(ms)
-                ok_all &= ok
-        rounds.append({"round": r, "seconds": round(time.time() - w0, 2),
-                       "loadavg": list(os.getloadavg()), "quiet_gate": gate,
-                       "calls_started_unsettled": state["unsettled"]})
-        state["unsettled"] = 0
+        discarded = []
+        for attempt in range(MAX_ROUND_REDOS + 1):
+            gate = wait_quiet(QUIET_WAIT_CPU_S, args.gate, threshold)
+            probe = calib.probe(max_nt)
+            state["prev_nt"] = max_nt     # the probe used every thread
+            meter = LoadMeter("round")
+            w0 = time.time()
+            got = {k: [None] * len(frames) for k in keys}
+            for j in (idx if r % 2 == 0 else idx[::-1]):
+                for k in (keys if r % 2 == 0 else keys[::-1]):
+                    ms, ok = call(k, frames[j])
+                    got[k][j] = ms
+                    ok_all &= ok
+            load = meter.read()
+            loaded = (load["others_pct"] is not None
+                      and load["others_pct"] > threshold)
+            rec = {"round": r, "attempt": attempt,
+                   "seconds": round(time.time() - w0, 2),
+                   "loadavg": list(os.getloadavg()),
+                   "machine_busy_pct": load["machine_pct"],
+                   "others_busy_pct": load["others_pct"],
+                   "threshold_pct": threshold, "quiet_gate": gate,
+                   "probe": probe,
+                   "calls_started_unsettled": state["unsettled"]}
+            state["unsettled"] = 0
+            print(f"    drones round {r}.{attempt}: {rec['seconds']:.1f} s, "
+                  f"others {load['others_pct']}%"
+                  f"{', LOADED' if loaded else ''}", flush=True)
+            if loaded and args.gate and attempt < MAX_ROUND_REDOS:
+                discarded.append(rec)
+                continue
+            break
+        for k in keys:
+            for j in idx:
+                samples[k][j].append(got[k][j])
+        rec["loaded"] = loaded
+        rec["discarded_attempts"] = discarded
+        rounds.append(rec)
     out = {}
     for k in keys:
         per = [statistics.median(s) for s in samples[k]]
@@ -1530,6 +1707,10 @@ def warm_up(args):
     cpu_label_components(many)
     same(img, img)
     same(onel.label, onel.label)
+    _probe_chain(10)
+    for nt in args.threads:
+        with ff.num_threads(nt):
+            _probe_all(10, nt)
 
 
 def build_parser():
@@ -1620,6 +1801,7 @@ def main(argv=None):
     print("Warming up (JIT, thread pool)...", flush=True)
     t_w = time.perf_counter()
     warm_up(args)
+    _calibration(args).warm(max(args.threads))
     runtime = runtime_info()
     if runtime["threading_layer"] != args.threading_layer:
         raise SystemExit(f"threading layer {runtime['threading_layer']}, "
