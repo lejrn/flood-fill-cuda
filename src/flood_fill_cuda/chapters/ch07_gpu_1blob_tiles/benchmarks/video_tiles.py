@@ -48,6 +48,9 @@ Checks (the script stops on any failure):
   sweep. Its last words must equal the twin's closed words of that
   visit, its trip count the twin's, and (the chosen tile is visited
   once) the chapter kernel's final reached words for that tile.
+  Whether a tile is visited once is a timing effect, so the close-up's
+  twin run is repeated (up to CLOSEUP_ATTEMPTS times) until the pinned
+  tile is; the JSON records the attempts.
 
 Visits and per-round frontier sizes depend on timing (a neighbour's
 export may land after a tile's closure and queue it again), so they are
@@ -107,6 +110,7 @@ PNG_MD5 = "47639eb37f973b5092ec2c4db86f45a4"   # = ch08's pinned input_blobs
 # 541, 543 reached). The entry bits are this run's, so they may differ.
 CLOSEUP_BLOB_RANK = 0
 CLOSEUP_TILE = "176,142"
+CLOSEUP_ATTEMPTS = 50
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                     *[os.pardir] * 5))
 OUT_DIR = os.path.join(REPO, "video", "assets", "tiles")
@@ -505,45 +509,50 @@ def closeup_export(png_path, checks, blob_rank=0, quick=False, tile=None):
     tx_all = np.unique(np.stack([xs // TILE, ys // TILE], 1), axis=0)
     probes = [int(a * eng.words_per_row + b) for a, b in tx_all]
     bufs = ExportBuffers(eng, probes=probes)
-    d_img.copy_to_device(d_pristine)
-    r = run_twin(eng, d_img, sx, sy, bufs)
-    check(np.array_equal(r["reached"], chap_reached),
-          "close-up blob: twin fill == chapter kernel's", checks)
-    check(r["counters"]["rounds"] == chap_c["rounds"],
-          "close-up blob: twin rounds == chapter kernel's", checks)
-    mask_words = eng.mask.copy_to_host()
+    mask_words = None
     red_all = (img[..., 0] == 255) & (img[..., 1] == 0) & (img[..., 2] == 0)
     seed_tile = eng.seed_args(sx, sy)[2]
-    scored = []
-    for s, t in enumerate(probes):
-        if t == seed_tile:
-            continue
-        tx, ty = divmod(t, eng.words_per_row)
-        visits = int(r["visit_count"].ravel()[t])
-        p = r["probe"][s, 0]
-        m, f0, f, trips = p[:, 0], p[:, 1], p[:, 2], int(p[0, 3])
-        x0, y0 = tx * TILE, ty * TILE
-        sub_lab = lab[x0:x0 + TILE, y0:y0 + TILE]
-        other = bool(((sub_lab >= 0) & (sub_lab != blob)).any())
-        sc = score_probe(m, f0, f, trips, visits,
-                         tile_words(chap_reached, tx, ty, width), other)
-        if sc is not None:
-            scored.append((sc, s, t, trips, int(_bits(m).sum()),
-                           int(_bits(f0).sum())))
-    scored.sort(reverse=True)
+    want = None if tile is None else int(tile[0] * eng.words_per_row
+                                         + tile[1])
+    # A pinned tile qualifies only on runs where it is visited once (a
+    # timing effect), so the twin run is repeated until it does.
+    for attempt in range(1, CLOSEUP_ATTEMPTS + 1):
+        d_img.copy_to_device(d_pristine)
+        r = run_twin(eng, d_img, sx, sy, bufs)
+        check(np.array_equal(r["reached"], chap_reached),
+              "close-up blob: twin fill == chapter kernel's", checks)
+        check(r["counters"]["rounds"] == chap_c["rounds"],
+              "close-up blob: twin rounds == chapter kernel's", checks)
+        if mask_words is None:
+            mask_words = eng.mask.copy_to_host()
+        scored = []
+        for s, t in enumerate(probes):
+            if t == seed_tile:
+                continue
+            tx, ty = divmod(t, eng.words_per_row)
+            visits = int(r["visit_count"].ravel()[t])
+            p = r["probe"][s, 0]
+            m, f0, f, trips = p[:, 0], p[:, 1], p[:, 2], int(p[0, 3])
+            x0, y0 = tx * TILE, ty * TILE
+            sub_lab = lab[x0:x0 + TILE, y0:y0 + TILE]
+            other = bool(((sub_lab >= 0) & (sub_lab != blob)).any())
+            sc = score_probe(m, f0, f, trips, visits,
+                             tile_words(chap_reached, tx, ty, width), other)
+            if sc is not None:
+                scored.append((sc, s, t, trips, int(_bits(m).sum()),
+                               int(_bits(f0).sum())))
+        scored.sort(reverse=True)
+        hit = [c for c in scored if c[2] == want] if want is not None \
+            else scored[:1]
+        if hit:
+            break
+    else:
+        raise RuntimeError(f"tile {tile} was no close-up candidate in "
+                           f"{CLOSEUP_ATTEMPTS} runs")
     for sc, s, t, trips, red, ent in scored[:12]:
         print(f"    candidate tile {divmod(t, eng.words_per_row)}: {trips} "
               f"trips, {red} red px, {ent} entry px", flush=True)
-    if tile is not None:
-        t = int(tile[0] * eng.words_per_row + tile[1])
-        hit = [c for c in scored if c[2] == t]
-        if not hit:
-            raise RuntimeError(f"tile {tile} is not a close-up candidate")
-        s = hit[0][1]
-    elif scored:
-        s, t = scored[0][1], scored[0][2]
-    else:
-        raise RuntimeError("no close-up candidate in this blob")
+    s, t = hit[0][1], hit[0][2]
     tx, ty = divmod(t, eng.words_per_row)
     p = r["probe"][s, 0]
     m, f0, f, trips = (p[:, 0].copy(), p[:, 1].copy(), p[:, 2].copy(),
@@ -599,6 +608,7 @@ def closeup_export(png_path, checks, blob_rank=0, quick=False, tile=None):
         "context_origin": [cx0, cy0], "context_size": [cx1 - cx0, cy1 - cy0],
         "candidates_probed": len(probes) - 1,
         "candidates_kept": len(scored),
+        "twin_attempts": attempt,
         "tile_picked_by": "--tile" if tile is not None else "score",
         "chapter_kernel": chap_c,
     }
