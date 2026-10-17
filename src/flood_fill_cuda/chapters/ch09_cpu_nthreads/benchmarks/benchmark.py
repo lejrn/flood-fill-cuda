@@ -1,0 +1,1391 @@
+"""ch09: every CPU core against one core and the GPU, in one session.
+
+The question this session answers: the video compares the GPU with ONE
+CPU core doing the same work. What do ALL the cores do, with the same
+work and the same ideas (ch09's pixel BFS, tile BFS and tile labels),
+and where does the GPU stand against that?
+
+Scenes (bench_v5's, plus the serpentine):
+
+  sq_256           a 128 x 128 square in a 256 x 256 image, centre seed
+  sq_8000_center   8000 x 8000, all red, centre seed (64 Mpx)
+  serpentine_256   ch03's serpentine, 256 x 256: 32,641 one-pixel levels
+                   at 8-conn, a one-tile front
+                   (each of these at 8-conn and at 4-conn)
+  input_blobs      the 81 Mpx frame (md5 checked), 2,522 blobs, 8-conn
+  drones           the 240 masks of video/assets/drones_mask, if present
+                   (--drones-dir), 8-conn labels per frame
+
+CPU cells (one blob; "on" = reset on the clock, like ch07 and ch08):
+
+  ch09_pixel_t{n}        PixelBFS, paint=True (fill + paint), n threads
+  ch09_tile_t{n}         TileBFS, paint=True (pack + rounds + paint)
+  ch09_pixel_fill_t{n}   the same without the paint (n = 1 and 16 only)
+  ch09_tile_fill_t{n}    the same without the paint (n = 1 and 16 only)
+  one_fill               ONE core: the oracle's loop without its depth
+                         map, buffers kept, reset on the clock (v5's
+                         cpu_fill8 twin, at this cell's connectivity)
+  one_fill_paint         the same plus a serial paint: the one-core twin
+                         of the full pipelines above (like for like)
+  one_bfs                ONE core with the depth map, reset before the
+                         clock (v5's cpu_bfs twin): reference
+  oracle_bfs             the oracle as called (fresh arrays): reference
+
+CPU cells (many blobs):
+
+  ch09_labels_t{n}       TileLabels, lattice 8, paint=True
+  ch09_labels_nopaint_t{n}   labels only (n = 1 and 16)
+  ch09_labels_L0_t16     lattice 0 (no lattice seeds), paint=True
+  one_label              ONE core: ch05's labels-only loop, buffers
+                         kept, reset on the clock (v5's cpu_label)
+  one_label_paint        the same plus a serial palette paint (like for
+                         like with the paint=True cells)
+  oracle_label           cpu_label_components as called: reference
+
+GPU cells (CUDA events, the image restored and L2 flushed off the
+clock, bench_v5's gap before every timed launch):
+
+  ch07_conn{4,8}   ch07's default TileFill (one_sync + tile_paint),
+                   bare, 128 threads per block, at its own grid
+  ch08_old         ch08's first version (flood_fill.OLD_PATH), rgb
+  ch08             ch08's default engine (the dense-tile path), rgb
+
+Policy:
+
+  one session     GPU blocks first (a CPU pass between them lets the GPU
+                  clock fall), then CPU_COOLDOWN_S of idle, then the CPU
+                  passes, scene by scene
+  idle gate       before every CPU round and every GPU attempt, wait (up
+                  to QUIET_WAIT_*_S) until the rest of the machine is at
+                  most QUIET_BUSY_PCT busy over one second; what was
+                  seen is recorded with the round
+  JIT warm-up     every engine and twin runs at every thread count on a
+                  small scene first (compiles, thread pool start)
+  CPU rounds      one untimed checked call per cell, one timed first
+                  call (sets the calls per round: a cell under
+                  CPU_ROUND_S repeats, at most CPU_MAX_CALLS), then
+                  CPU_ROUNDS rounds over every cell of the scene, the
+                  order reversed on odd rounds. Before every call the
+                  work image is restored from a pristine copy, off the
+                  clock, for every cell alike (one-core twins too)
+  GPU blocks      bench_v5's: a 4 s ramp of the block's own runs, then
+                  rounds (order reversed on odd rounds) spanning at
+                  least MIN_TIMED_S; a block is at full clocks if every
+                  nvidia-smi sample of its window is P0, the memory clock
+                  at its maximum and the SM median at least
+                  SM_MEDIAN_MIN; otherwise it runs again (up to
+                  MAX_ATTEMPTS, with more light load between runs)
+  stats           medians, min, max, stdev, every sample; per-round
+                  medians; speedups and CPU-vs-GPU factors with their
+                  range over the CPU rounds
+
+Checks (every output): each cell's untimed call and its LAST timed call
+(in the final round) are checked: a painted image must equal the one
+built from the oracle (blue on the fill set, palette[label % 6] on red),
+fill counts and levels (pixel BFS) the oracle's, label maps (ch09, and
+ch08's off-clock map) the oracle's, blob counts the oracle's. A twin's
+arrays must equal its oracle's.
+
+Output: results/ch09_cpu_nthreads/benchmark_results/ch09_<stamp>.json
+and ch09_<stamp>.csv (files named, never paths).
+
+Run (on a quiet machine; the GPU part takes the GPU lock if one is
+used on this host):
+
+    PYTHONUNBUFFERED=1 uv run python -m \\
+        flood_fill_cuda.chapters.ch09_cpu_nthreads.benchmarks.benchmark
+
+Smoke (small sizes, no gate, nothing written):
+
+    ... benchmark --smoke --no-save [--drones-dir DIR] [--no-gpu]
+
+Budget: about 15-25 min. Peak host memory about 3.5 GB (one scene's
+buffers at a time: the oracles' arrays and the one-core twins' buffers
+of the 64 Mpx square and of the 81 Mpx frame are the largest).
+"""
+
+import os
+
+os.environ.setdefault('NUMBA_CUDA_USE_NVIDIA_BINDING', '1')
+
+import argparse
+import csv
+import gc
+import hashlib
+import json
+import math
+import platform
+import statistics
+import subprocess
+import threading
+import time
+from datetime import datetime, timezone
+
+import numba
+import numpy as np
+from numba import njit
+
+from ....shared import results_paths
+from ....shared import scenes as shared_scenes
+from ...ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill, cpu_flood_fill_8
+from ...ch05_gpu_nblob_nblock import scenes as ch05_scenes
+from ...ch05_gpu_nblob_nblock.cpu_oracle import cpu_label_components
+from .. import flood_fill as ff
+from .. import kernels as K
+
+CHAPTER = "ch09_cpu_nthreads"
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    *[".."] * 5))
+PNG_NAME = "input_blobs.png"
+PNG_PATH = os.path.join(REPO, "images", "input", PNG_NAME)
+PNG_MD5 = "47639eb37f973b5092ec2c4db86f45a4"     # ch08's benchmark PNG_MD5
+MASK_DIR = os.path.join(REPO, "video", "assets", "drones_mask")
+
+THREADS = (1, 2, 4, 8, 16)
+NOPAINT_THREADS = (1, 16)
+CPU_ROUNDS = 5
+CPU_ROUND_S = 0.4
+CPU_MAX_CALLS = 101
+CPU_COOLDOWN_S = 60
+QUIET_BUSY_PCT = 10.0       # the rest of the host, at most (1.6 of 16)
+QUIET_WAIT_CPU_S = 600
+QUIET_WAIT_GPU_S = 120
+GPU_ROUNDS = 9
+WARM_SECONDS = 4.0
+MIN_TIMED_S = 1.5
+MAX_ROUNDS = 300
+MAX_ATTEMPTS = 4
+SPACING_S = (0.0, 0.1, 0.25, 0.5)
+SM_MEDIAN_MIN = 2040
+SMI_PERIOD_MS = 100
+FLUSH_READS = 2
+GAP_NAPS = 15
+L2_FLUSH_BYTES = 96 << 20
+RED = np.array([255, 0, 0], np.uint8)
+BLUE = np.array([0, 0, 255], np.uint8)
+
+EVENT_REASONS = {0x1: "gpu_idle", 0x2: "app_clocks", 0x4: "sw_power_cap",
+                 0x8: "hw_slowdown", 0x10: "sync_boost",
+                 0x20: "sw_thermal", 0x40: "hw_thermal",
+                 0x80: "hw_power_brake", 0x100: "display_clock"}
+
+# which one-core cell is each ch09 / GPU cell's like-for-like twin
+TWIN_FULL = {"one": "one_fill_paint", "many": "one_label_paint"}
+TWIN_NOPAINT = {"one": "one_fill", "many": "one_label"}
+
+
+# ------------------------------------------------------------ one core
+
+@njit(cache=True)
+def _reset_i32(a, value):
+    flat = a.reshape(a.size)
+    for i in range(flat.size):
+        flat[i] = value
+
+
+@njit(cache=True)
+def fill_into(img, seed_x, seed_y, visited, queue, conn8):
+    """The oracles' BFS loop (ch01's 4-conn, shared/'s 8-conn, their
+    neighbour orders) without the depth map: visited only."""
+    width, height = img.shape[0], img.shape[1]
+    nd = 8 if conn8 else 4
+    visited[seed_x, seed_y] = 1
+    queue[0] = seed_x * height + seed_y
+    front, rear = 0, 1
+    level = 0
+    while front < rear:
+        level_end = rear
+        for i in range(front, level_end):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+            for d in range(nd):
+                if conn8:
+                    nx = x + K.DX8[d]
+                    ny = y + K.DY8[d]
+                else:
+                    nx = x + K.DX4[d]
+                    ny = y + K.DY4[d]
+                if 0 <= nx < width and 0 <= ny < height and visited[nx, ny] == 0:
+                    if img[nx, ny, 0] == 255 and img[nx, ny, 1] == 0 and img[nx, ny, 2] == 0:
+                        visited[nx, ny] = 1
+                        queue[rear] = nx * height + ny
+                        rear += 1
+        front = level_end
+        level += 1
+    return level, rear
+
+
+@njit(cache=True)
+def bfs_into(img, seed_x, seed_y, visited, depth, queue, conn8):
+    """The same loop with the oracles' depth map."""
+    width, height = img.shape[0], img.shape[1]
+    nd = 8 if conn8 else 4
+    visited[seed_x, seed_y] = 1
+    queue[0] = seed_x * height + seed_y
+    front, rear = 0, 1
+    level = 0
+    while front < rear:
+        level_end = rear
+        for i in range(front, level_end):
+            pixel = queue[i]
+            x = pixel // height
+            y = pixel % height
+            depth[x, y] = level
+            for d in range(nd):
+                if conn8:
+                    nx = x + K.DX8[d]
+                    ny = y + K.DY8[d]
+                else:
+                    nx = x + K.DX4[d]
+                    ny = y + K.DY4[d]
+                if 0 <= nx < width and 0 <= ny < height and visited[nx, ny] == 0:
+                    if img[nx, ny, 0] == 255 and img[nx, ny, 1] == 0 and img[nx, ny, 2] == 0:
+                        visited[nx, ny] = 1
+                        queue[rear] = nx * height + ny
+                        rear += 1
+        front = level_end
+        level += 1
+    return level, rear
+
+
+@njit(cache=True)
+def label_into(img, label, queue):
+    """ch05's cpu_label_components loop (8-conn, canonical labels) on
+    given buffers; label must be -1 everywhere. Returns n_blobs."""
+    width, height = img.shape[0], img.shape[1]
+    n_blobs = 0
+    for x in range(width):
+        for y in range(height):
+            if not (img[x, y, 0] == 255 and img[x, y, 1] == 0
+                    and img[x, y, 2] == 0) or label[x, y] >= 0:
+                continue
+            n_blobs += 1
+            root = x * height + y
+            label[x, y] = root
+            queue[0] = root
+            front, rear = 0, 1
+            while front < rear:
+                pixel = queue[front]
+                front += 1
+                px = pixel // height
+                py = pixel % height
+                for d in range(8):
+                    nx = px + K.DX8[d]
+                    ny = py + K.DY8[d]
+                    if (0 <= nx < width and 0 <= ny < height
+                            and label[nx, ny] < 0
+                            and img[nx, ny, 0] == 255 and img[nx, ny, 1] == 0
+                            and img[nx, ny, 2] == 0):
+                        label[nx, ny] = root
+                        queue[rear] = nx * height + ny
+                        rear += 1
+    return n_blobs
+
+
+@njit(cache=True)
+def paint_blue_serial(img, visited):
+    for x in range(img.shape[0]):
+        for y in range(img.shape[1]):
+            if visited[x, y] != 0:
+                img[x, y, 0] = 0
+                img[x, y, 1] = 0
+                img[x, y, 2] = 255
+
+
+@njit(cache=True)
+def paint_palette_serial(img, label):
+    for x in range(img.shape[0]):
+        for y in range(img.shape[1]):
+            lb = label[x, y]
+            if lb >= 0:
+                c = lb % K.N_PALETTE
+                img[x, y, 0] = K.PALETTE[c, 0]
+                img[x, y, 1] = K.PALETTE[c, 1]
+                img[x, y, 2] = K.PALETTE[c, 2]
+
+
+class OneCore:
+    """The one-core twins of one image shape, buffers allocated once."""
+
+    def __init__(self, width, height, kind):
+        self.kind = kind
+        self.queue = np.zeros(width * height, np.int64)
+        if kind == "one":
+            self.visited = np.zeros((width, height), np.int32)
+            self.depth = np.full((width, height), -1, np.int32)
+        else:
+            self.label = np.full((width, height), -1, np.int32)
+
+    def fill(self, img, sx, sy, conn8, paint):
+        _reset_i32(self.visited, 0)                 # on the clock
+        res = fill_into(img, sx, sy, self.visited, self.queue, conn8)
+        if paint:
+            paint_blue_serial(img, self.visited)
+        return res
+
+    def bfs_prep(self):
+        _reset_i32(self.visited, 0)                 # before the clock
+        _reset_i32(self.depth, -1)
+
+    def bfs(self, img, sx, sy, conn8):
+        return bfs_into(img, sx, sy, self.visited, self.depth, self.queue,
+                        conn8)
+
+    def labels(self, img, paint):
+        _reset_i32(self.label, -1)                  # on the clock
+        n = label_into(img, self.label, self.queue)
+        if paint:
+            paint_palette_serial(img, self.label)
+        return n
+
+
+# ------------------------------------------------------------ helpers
+
+def _stats(vals):
+    v = list(vals)
+    return {"ms": statistics.median(v), "ms_min": min(v), "ms_max": max(v),
+            "ms_stdev": statistics.stdev(v) if len(v) > 1 else 0.0,
+            "n": len(v)}
+
+
+def _md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sha1(path):
+    with open(path, "rb") as f:
+        return hashlib.sha1(f.read()).hexdigest()
+
+
+def mask_image(path):
+    """A drone mask as a seedless scene, img[x, y], blobs pure red on
+    white (bench_drones.mask_image / bench_v5's)."""
+    from PIL import Image
+    m = np.array(Image.open(path).convert("L"))              # [y, x]
+    img = np.full(m.shape + (3,), 255, dtype=np.uint8)
+    img[m > 127] = RED
+    return np.ascontiguousarray(np.transpose(img, (1, 0, 2)))
+
+
+def blue_image(img, visited):
+    out = img.copy()
+    out[visited.astype(bool)] = BLUE
+    return out
+
+
+def palette_image(img, label):
+    out = img.copy()
+    m = label >= 0
+    out[m] = K.PALETTE[label[m] % K.N_PALETTE]
+    return out
+
+
+def _git(*args):
+    try:
+        return subprocess.run(["git", *args], capture_output=True, text=True,
+                              timeout=10, cwd=REPO).stdout.strip()
+    except Exception:
+        return ""
+
+
+def _host_info():
+    model = platform.machine()
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    model = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    return {"cpu": model, "logical_cpus": os.cpu_count(),
+            "numba": numba.__version__,
+            "numba_num_threads": numba.config.NUMBA_NUM_THREADS,
+            "python": platform.python_version()}
+
+
+def _cpu_busy():
+    """(busy, total) jiffies of the whole machine, from /proc/stat."""
+    try:
+        with open("/proc/stat") as f:
+            v = [int(x) for x in f.readline().split()[1:9]]
+        return sum(v) - v[3] - v[4], sum(v)
+    except (OSError, ValueError):
+        return 0, 0
+
+
+def wait_quiet(max_wait_s, enabled=True):
+    """Until the rest of the machine is nearly idle (its busy share over
+    1 s, this process asleep, at most QUIET_BUSY_PCT) or max_wait_s
+    passed. Returns what it saw."""
+    if not enabled:
+        return {"quiet": None, "busy_pct": None, "waited_s": 0.0,
+                "gate": "off"}
+    t0 = time.time()
+    while True:
+        b0, j0 = _cpu_busy()
+        time.sleep(1.0)
+        b1, j1 = _cpu_busy()
+        busy = 100.0 * (b1 - b0) / (j1 - j0) if j1 > j0 else 0.0
+        waited = time.time() - t0
+        if busy <= QUIET_BUSY_PCT or waited >= max_wait_s:
+            return {"quiet": busy <= QUIET_BUSY_PCT,
+                    "busy_pct": round(busy, 1), "waited_s": round(waited, 1)}
+
+
+# ---------------------------------------------------------------- scenes
+
+def build_scenes(args):
+    """[(name, kind, img, seed or None, connectivities)]; kind "one"
+    (one blob, a seed) or "many" (labels)."""
+    want = (lambda s: args.scenes is None or s in args.scenes)
+    out = []
+    if want("sq_256"):
+        img, sx, sy = shared_scenes.square_scene(256, 256, 128, 128)
+        out.append(("sq_256", "one", img, (sx, sy), (8, 4)))
+    if want("sq_8000_center"):
+        n = args.sq_size
+        img, sx, sy = shared_scenes.square_scene(n, n, n, n)
+        name = "sq_8000_center" if n == 8000 else f"sq_{n}_center"
+        out.append((name, "one", img, (sx, sy), (8, 4)))
+    if want("serpentine_256"):
+        img, sx, sy = shared_scenes.serpentine_scene(256, 256)
+        out.append(("serpentine_256", "one", img, (sx, sy), (8, 4)))
+    if want("input_blobs"):
+        md5 = _md5(PNG_PATH)
+        if md5 != PNG_MD5:
+            raise RuntimeError(f"{PNG_NAME}: md5 {md5}, expected {PNG_MD5}")
+        img, _ = ch05_scenes.png_scene(PNG_PATH)
+        name = "input_blobs"
+        if args.crop:
+            w, h = args.crop
+            img = np.ascontiguousarray(img[:w, :h])
+            name = f"input_blobs_crop_{w}x{h}"
+        out.append((name, "many", img, None, (8,)))
+    return out
+
+
+def load_drones(args):
+    if not (args.scenes is None or "drones" in args.scenes):
+        return []
+    d = args.drones_dir or MASK_DIR
+    if not os.path.isdir(d):
+        print("drones: no mask folder, skipped", flush=True)
+        return []
+    names = sorted(n for n in os.listdir(d)
+                   if n.startswith("frame_") and n.endswith(".png"))
+    frames = []
+    for n in names[::args.drone_step]:
+        p = os.path.join(d, n)
+        frames.append({"key": n[:-4], "file": n, "sha1": _sha1(p),
+                       "img": mask_image(p)})
+    print(f"drones: {len(frames)} frames", flush=True)
+    return frames
+
+
+def reference(kind, img, seed, conns):
+    """The oracle results every output is checked against (untimed)."""
+    ref = {"red_px": int(np.count_nonzero(
+        (img[..., 0] == 255) & (img[..., 1] == 0) & (img[..., 2] == 0)))}
+    if kind == "one":
+        sx, sy = seed
+        for conn in conns:
+            fn = cpu_flood_fill_8 if conn == 8 else cpu_flood_fill
+            v, _, lv, f = fn(img, sx, sy)
+            ref[conn] = {"visited": v.astype(bool), "levels": int(lv),
+                         "filled": int(f), "blue": blue_image(img, v)}
+    else:
+        lab, nb = cpu_label_components(img)
+        ref.update(label=lab, n_blobs=int(nb),
+                   palette=palette_image(img, lab))
+    return ref
+
+
+# ------------------------------------------------------------ CPU cells
+
+def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
+    """Every CPU cell of a scene: {key, fn (timed), prep (untimed),
+    verify (the output of the last call, untimed), meta}."""
+    pristine = img
+    cells = []
+
+    def restore():
+        np.copyto(work, pristine)
+
+    def cell(key, fn, verify, prep=None, **meta):
+        def pre(prep=prep):
+            restore()
+            if prep is not None:
+                prep()
+        cells.append({"key": key, "fn": fn, "prep": pre, "verify": verify,
+                      "meta": meta})
+
+    if kind == "one":
+        sx, sy = seed
+        for conn in conns:
+            r = ref[conn]
+            c8 = conn == 8
+            sfx = f"_c{conn}"
+            for method, Eng in (("pixel", ff.PixelBFS), ("tile", ff.TileBFS)):
+                # one engine per method and connectivity (the cells run one
+                # at a time): its thread count is set before every call
+                eng = Eng(img.shape[0], img.shape[1], connectivity=conn)
+                for nt in args.threads:
+                    for paint in (True, False):
+                        if not paint and nt not in NOPAINT_THREADS:
+                            continue
+                        key = (f"ch09_{method}_t{nt}{sfx}" if paint
+                               else f"ch09_{method}_fill_t{nt}{sfx}")
+                        last = {}
+
+                        def fn(eng=eng, paint=paint, last=last, nt=nt):
+                            eng.threads = nt
+                            last["st"] = eng.run(work, sx, sy, paint=paint)
+
+                        def verify(eng=eng, paint=paint, r=r, last=last,
+                                   method=method):
+                            st = last["st"]
+                            vis = eng.visited()
+                            ok = {"visited": bool(np.array_equal(
+                                vis, r["visited"]))}
+                            if paint:
+                                ok["image"] = bool(np.array_equal(
+                                    work, r["blue"]))
+                            if method == "pixel":
+                                ok["filled"] = st["filled"] == r["filled"]
+                                ok["levels"] = st["levels"] == r["levels"]
+                            else:
+                                ok["filled"] = eng.filled() == r["filled"]
+                            return {"ok": all(ok.values()), **ok,
+                                    "work": st}
+                        cell(key, fn, verify, variant=method, threads=nt,
+                             paint=paint, connectivity=conn, side="ch09")
+            for paint in (False, True):
+                key = f"one_fill_paint{sfx}" if paint else f"one_fill{sfx}"
+                last = {}
+
+                def fn(paint=paint, c8=c8, last=last):
+                    last["res"] = one.fill(work, sx, sy, c8, paint)
+
+                def verify(paint=paint, r=r, last=last):
+                    lv, f = last["res"]
+                    ok = {"visited": bool(np.array_equal(
+                        one.visited != 0, r["visited"])),
+                        "filled": int(f) == r["filled"],
+                        "levels": int(lv) == r["levels"]}
+                    if paint:
+                        ok["image"] = bool(np.array_equal(work, r["blue"]))
+                    return {"ok": all(ok.values()), **ok}
+                cell(key, fn, verify, variant="one_core", threads=1,
+                     paint=paint, connectivity=conn, side="one_core",
+                     reset="on the clock")
+            last = {}
+
+            def fn_bfs(c8=c8, last=last):
+                last["res"] = one.bfs(work, sx, sy, c8)
+
+            def verify_bfs(r=r, last=last, conn=conn):
+                lv, f = last["res"]
+                ok = {"visited": bool(np.array_equal(one.visited != 0,
+                                                     r["visited"])),
+                      "filled": int(f) == r["filled"],
+                      "levels": int(lv) == r["levels"]}
+                return {"ok": all(ok.values()), **ok}
+            cell(f"one_bfs{sfx}", fn_bfs, verify_bfs, prep=one.bfs_prep,
+                 variant="one_core_depth", threads=1, paint=False,
+                 connectivity=conn, side="one_core", reset="before the clock",
+                 reference_only=True)
+            last = {}
+            oracle = cpu_flood_fill_8 if c8 else cpu_flood_fill
+
+            def fn_or(oracle=oracle, last=last):
+                last["res"] = oracle(work, sx, sy)
+
+            def verify_or(r=r, last=last):
+                v, _, lv, f = last["res"]
+                ok = {"filled": int(f) == r["filled"],
+                      "levels": int(lv) == r["levels"]}
+                return {"ok": all(ok.values()), **ok}
+            cell(f"oracle_bfs{sfx}", fn_or, verify_or, variant="oracle",
+                 threads=1, paint=False, connectivity=conn, side="oracle",
+                 reference_only=True)
+    else:
+        variants = [(nt, True, 8) for nt in args.threads]
+        variants += [(nt, False, 8) for nt in NOPAINT_THREADS
+                     if nt in args.threads]
+        variants.append((max(args.threads), True, 0))   # no lattice seeds
+        engs = {}
+        for nt, paint, lat in variants:
+            if lat not in engs:
+                engs[lat] = ff.TileLabels(img.shape[0], img.shape[1],
+                                          lattice=lat)
+            eng = engs[lat]
+            if lat == 0:
+                key = f"ch09_labels_L0_t{nt}"
+            elif paint:
+                key = f"ch09_labels_t{nt}"
+            else:
+                key = f"ch09_labels_nopaint_t{nt}"
+            last = {}
+
+            def fn(eng=eng, paint=paint, last=last, nt=nt):
+                eng.threads = nt
+                last["st"] = eng.run(work, paint=paint)
+
+            def verify(eng=eng, paint=paint, last=last):
+                st = last["st"]
+                ok = {"labels": bool(np.array_equal(eng.label_map(),
+                                                    ref["label"])),
+                      "n_blobs": st["n_blobs"] == ref["n_blobs"]}
+                if paint:
+                    ok["image"] = bool(np.array_equal(work, ref["palette"]))
+                return {"ok": all(ok.values()), **ok, "work": st}
+            cell(key, fn, verify, variant="labels", threads=nt, paint=paint,
+                 lattice=lat, connectivity=8, side="ch09")
+        for paint in (False, True):
+            key = "one_label_paint" if paint else "one_label"
+            last = {}
+
+            def fn(paint=paint, last=last):
+                last["n"] = one.labels(work, paint)
+
+            def verify(paint=paint, last=last):
+                ok = {"labels": bool(np.array_equal(one.label, ref["label"])),
+                      "n_blobs": int(last["n"]) == ref["n_blobs"]}
+                if paint:
+                    ok["image"] = bool(np.array_equal(work, ref["palette"]))
+                return {"ok": all(ok.values()), **ok}
+            cell(key, fn, verify, variant="one_core", threads=1, paint=paint,
+                 connectivity=8, side="one_core", reset="on the clock")
+        last = {}
+
+        def fn_or(last=last):
+            last["res"] = cpu_label_components(work)
+
+        def verify_or(last=last):
+            lab, nb = last["res"]
+            ok = {"labels": bool(np.array_equal(lab, ref["label"])),
+                  "n_blobs": int(nb) == ref["n_blobs"]}
+            return {"ok": all(ok.values()), **ok}
+        cell("oracle_label", fn_or, verify_or, variant="oracle", threads=1,
+             paint=False, connectivity=8, side="oracle", reference_only=True)
+    return cells
+
+
+def cpu_pass(cells, args):
+    """One untimed checked call per cell, a timed first call (it sets
+    the calls per round), then the interleaved rounds; the final round
+    checks every cell's last timed output. Returns the rounds' records."""
+    for c in cells:
+        c["prep"]()
+        c["fn"]()
+        c["check"] = c["verify"]()
+        c["prep"]()
+        t0 = time.perf_counter()
+        c["fn"]()
+        first = time.perf_counter() - t0
+        c["calls"] = max(1, min(args.max_calls,
+                                int(args.round_s / max(first, 1e-6))))
+        c["times"], c["round_medians"] = [], []
+    gc.collect()
+    rounds = []
+    for r in range(args.cpu_rounds):
+        gate = wait_quiet(QUIET_WAIT_CPU_S, args.gate)
+        b0, j0 = _cpu_busy()
+        w0 = time.time()
+        final = r == args.cpu_rounds - 1
+        for c in (cells if r % 2 == 0 else cells[::-1]):
+            ts = []
+            for _ in range(c["calls"]):
+                c["prep"]()
+                t0 = time.perf_counter()
+                c["fn"]()
+                ts.append((time.perf_counter() - t0) * 1000)
+            c["times"] += ts
+            c["round_medians"].append(statistics.median(ts))
+            if final:
+                c["check_last"] = c["verify"]()
+        b1, j1 = _cpu_busy()
+        rounds.append({"round": r, "seconds": round(time.time() - w0, 2),
+                       "loadavg": list(os.getloadavg()),
+                       "machine_busy_pct": (round(100 * (b1 - b0) / (j1 - j0),
+                                                  1) if j1 > j0 else None),
+                       "quiet_gate": gate})
+        print(f"    CPU round {r}: {rounds[-1]['seconds']:.1f} s, load "
+              f"{rounds[-1]['loadavg'][0]:.2f}, busy "
+              f"{rounds[-1]['machine_busy_pct']}% (gate {gate})", flush=True)
+    return rounds
+
+
+def cpu_record(c):
+    out = {**_stats(c["times"]), **c["meta"], "calls_per_round": c["calls"],
+           "round_medians": c["round_medians"], "samples": c["times"]}
+    chk, last = dict(c["check"]), dict(c["check_last"])
+    out["work"] = chk.pop("work", None)
+    last.pop("work", None)
+    out["check"] = chk
+    out["check_last_timed"] = last
+    out["checks_ok"] = bool(chk["ok"] and last["ok"])
+    return out
+
+
+# ------------------------------------------------------------------ GPU
+
+class Sampler:
+    """`nvidia-smi -lms` in the background (bench_v5's): (t, SM MHz,
+    memory MHz, P-state, power W, clock event reasons)."""
+
+    QUERY = ("timestamp,clocks.sm,clocks.mem,pstate,power.draw,"
+             "clocks_event_reasons.active")
+
+    def __init__(self, period_ms=SMI_PERIOD_MS):
+        self.samples = []
+        self.t0 = time.time()
+        self.proc = None
+        try:
+            self.proc = subprocess.Popen(
+                ["nvidia-smi", f"--query-gpu={self.QUERY}",
+                 "--format=csv,noheader,nounits", f"-lms={period_ms}"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, bufsize=1)
+        except Exception:
+            return
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+
+    def _read(self):
+        for line in self.proc.stdout:
+            try:
+                ts, sm, mem, ps, pw, rs = [x.strip() for x in line.split(",")]
+                t = datetime.strptime(ts, "%Y/%m/%d %H:%M:%S.%f").timestamp()
+                try:
+                    pw = float(pw)
+                except ValueError:
+                    pw = None
+                try:
+                    rs = int(rs, 16)
+                except ValueError:
+                    rs = None
+                self.samples.append((t, int(float(sm)), int(float(mem)), ps,
+                                     pw, rs))
+            except ValueError:
+                continue
+
+    def window(self, t0, t1):
+        if self.proc is None:
+            return {"clk_samples": 0}
+        t_end = time.time() + 5.0
+        while time.time() < t_end and not (self.samples
+                                            and self.samples[-1][0] > t1):
+            time.sleep(0.05)
+        pad = 0.0
+        while True:
+            s = [x for x in list(self.samples)
+                 if t0 - pad <= x[0] <= t1 + pad]
+            if s or pad >= 2.0:
+                break
+            pad += 0.25
+        if not s:
+            return {"clk_samples": 0}
+        rs = 0
+        for x in s:
+            rs |= x[5] or 0
+        pw = [x[4] for x in s if x[4] is not None]
+        out = {"clk_samples": len(s), "clk_window_padding_s": pad,
+               "clk_sm_min": min(x[1] for x in s),
+               "clk_sm_median": statistics.median(x[1] for x in s),
+               "clk_mem_min": min(x[2] for x in s),
+               "clk_pstates": sorted({x[3] for x in s}),
+               "clk_event_reasons": [n for b, n in EVENT_REASONS.items()
+                                     if rs & b]}
+        if pw:
+            out["power_w_median"] = statistics.median(pw)
+        return out
+
+    def stop(self):
+        if self.proc is not None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except Exception:
+                self.proc.kill()
+
+
+class Gpu:
+    """The GPU side: ch07's and ch08's engines, the L2 flush, the gap."""
+
+    def __init__(self):
+        from numba import cuda
+        from ...ch07_gpu_1blob_tiles import flood_fill as ff7
+        from ...ch07_gpu_1blob_tiles.kernels import gpu_sleep_kernel
+        from ...ch07_gpu_1blob_tiles.benchmarks.benchmark import _l2_flush
+        from ...ch08_gpu_nblob_tiles import flood_fill as ff8
+        self.cuda, self.ff7, self.ff8 = cuda, ff7, ff8
+        self.sleep, self.l2 = gpu_sleep_kernel, _l2_flush
+        self.flush = cuda.to_device(np.zeros(L2_FLUSH_BYTES // 4, np.uint32))
+        self.sink = cuda.device_array(1, np.uint32)
+        dev = cuda.get_current_device()
+        name = dev.name.decode() if isinstance(dev.name, bytes) else str(
+            dev.name)
+        self.device = name.replace("\x00", "").strip()
+        self.sm_count = int(dev.MULTIPROCESSOR_COUNT)
+        self.mem_full_mhz = 8001
+        try:
+            mx = subprocess.run(
+                ["nvidia-smi", "--query-gpu=clocks.max.sm,clocks.max.mem",
+                 "--format=csv,noheader,nounits"], capture_output=True,
+                text=True, timeout=10).stdout.strip().split(",")
+            self.mem_full_mhz = int(float(mx[1]))
+        except Exception:
+            pass
+
+    def gap(self):
+        for _ in range(FLUSH_READS):
+            self.l2[512, 256](self.flush, self.sink)
+        self.cuda.synchronize()
+        self.sleep[1, 32](GAP_NAPS)
+
+    def filler(self, seconds):
+        t_end = time.time() + seconds
+        while time.time() < t_end:
+            self.gap()
+            self.cuda.synchronize()
+
+    def full_clocks(self, w):
+        return bool(w.get("clk_samples") and w["clk_pstates"] == ["P0"]
+                    and w["clk_mem_min"] >= self.mem_full_mhz
+                    and w["clk_sm_median"] >= SM_MEDIAN_MIN
+                    and w.get("clk_window_padding_s", 0.0) == 0.0)
+
+
+class GpuCell:
+    """One GPU config on one image: restore (off the clock), the gap,
+    then the timed pipeline between CUDA events."""
+
+    def __init__(self, gpu, key, img, seed=None, conn=8, ch08_kw=None):
+        cuda = gpu.cuda
+        self.gpu, self.key, self.seed, self.conn = gpu, key, seed, conn
+        self.w, self.h = img.shape[0], img.shape[1]
+        self.d_pristine = cuda.to_device(img)
+        self.d_img = cuda.device_array_like(img)
+        if ch08_kw is None:
+            cfg = dict(connectivity=conn, threads_per_block=128, bare=True,
+                       **{k: gpu.ff7.DEFAULT_SWITCHES[k]
+                          for k in gpu.ff7.SWITCHES})
+            self.eng = gpu.ff7.TileFill(self.w, self.h, **cfg)
+            self.meta = {"chapter": "ch07", "connectivity": conn,
+                         "engine": "TileFill default switches, bare",
+                         "tpb": 128, "blocks": self.eng.blocks}
+        else:
+            self.eng = gpu.ff8.TileWaves(self.w, self.h, **ch08_kw)
+            self.meta = {"chapter": "ch08", "connectivity": 8,
+                         "contract": "rgb",
+                         "engine": ("first version (flood_fill.OLD_PATH)"
+                                    if ch08_kw else "default engine")}
+
+    def run_timed(self):
+        cuda = self.gpu.cuda
+        self.d_img.copy_to_device(self.d_pristine)
+        self.gpu.gap()
+        if self.meta["chapter"] == "ch07":
+            _, ev = self.eng.run(self.d_img, *self.seed)
+            ev[-1].synchronize()
+            return self.gpu.ff7.phase_times(ev)[1]
+        stages = self.eng.stages(self.d_img, "rgb")
+        e0 = cuda.event(timing=True)
+        e1 = cuda.event(timing=True)
+        e0.record()
+        for _, go in stages:
+            go()
+        e1.record()
+        e1.synchronize()
+        return cuda.event_elapsed_time(e0, e1)
+
+    def verify(self, ref):
+        out = self.d_img.copy_to_host()
+        if self.meta["chapter"] == "ch07":
+            r = ref[self.conn]
+            ok = {"image": bool(np.array_equal(out, r["blue"])),
+                  "filled": self.eng.filled() == r["filled"]}
+            info = {"rounds": self.eng.read_counters()["rounds"]}
+        else:
+            lab = self.gpu.cuda.device_array((self.w, self.h), np.int32)
+            self.eng.emit_label_map(lab)
+            c = self.eng.read_counters()
+            ok = {"image": bool(np.array_equal(out, ref["palette"])),
+                  "labels": bool(np.array_equal(lab.copy_to_host(),
+                                                ref["label"])),
+                  "n_blobs": c["n_blobs"] == ref["n_blobs"]}
+            info = {"rounds": c["rounds"], "n_blobs": c["n_blobs"]}
+            del lab
+        return {"ok": all(ok.values()), **ok, "info": info}
+
+
+def timed_block(gpu, sampler, label, run_round, warm_round, args):
+    """bench_v5's attempts: a ramp, then rounds spanning MIN_TIMED_S,
+    again (with light load between runs) until full clocks."""
+    attempts, n_rounds, data = [], None, None
+    for a in range(args.max_attempts):
+        spacing = SPACING_S[min(a, len(SPACING_S) - 1)]
+        gate = wait_quiet(QUIET_WAIT_GPU_S, args.gate)
+        t0 = time.time()
+        n_w = 0
+        while True:
+            warm_round(spacing)
+            n_w += 1
+            if time.time() - t0 >= args.warm_seconds:
+                break
+        if n_rounds is None:
+            per = (time.time() - t0) / max(n_w, 1)
+            n_rounds = max(args.gpu_rounds,
+                           min(MAX_ROUNDS, math.ceil(MIN_TIMED_S / per)))
+        t1 = time.time()
+        data = [run_round(i, spacing) for i in range(n_rounds)]
+        t2 = time.time()
+        w = sampler.window(t1, t2)
+        ok = gpu.full_clocks(w)
+        attempts.append({"attempt": a, "spacing_s": spacing,
+                         "rounds": n_rounds, "quiet_gate": gate, **w,
+                         "full_clocks": ok})
+        print(f"    {label} attempt {a}: {n_rounds} rounds, sm "
+              f"{w.get('clk_sm_min', '?')}-{w.get('clk_sm_median', '?')}, "
+              f"mem {w.get('clk_mem_min', '?')}, {w.get('clk_pstates')}: "
+              f"{'full clocks' if ok else 'NOT full clocks'}", flush=True)
+        if ok:
+            break
+    return data, attempts
+
+
+def gpu_scene(gpu, sampler, name, kind, img, seed, conns, ref, args):
+    """The GPU cells of one scene, timed as one block."""
+    if kind == "one":
+        cells = [GpuCell(gpu, f"ch07_c{c}", img, seed, conn=c) for c in conns]
+    else:
+        cells = [GpuCell(gpu, "ch08_old", img, ch08_kw=dict(gpu.ff8.OLD_PATH)),
+                 GpuCell(gpu, "ch08", img, ch08_kw={})]
+    checks = {}
+    for c in cells:
+        c.run_timed()
+        checks[c.key] = c.verify(ref)
+
+    def run_round(i, spacing):
+        out = {}
+        for c in (cells if i % 2 == 0 else cells[::-1]):
+            out[c.key] = c.run_timed()
+            if spacing:
+                gpu.filler(spacing)
+        return out
+
+    def warm_round(spacing):
+        run_round(0, spacing)
+
+    data, attempts = timed_block(gpu, sampler, name, run_round, warm_round,
+                                 args)
+    res = {}
+    for c in cells:
+        samples = [r[c.key] for r in data]
+        last = c.verify(ref)      # the last timed run's output
+        res[c.key] = {**_stats(samples), "samples": samples, **c.meta,
+                      "side": "gpu", "check": checks[c.key],
+                      "check_last_timed": last,
+                      "checks_ok": bool(checks[c.key]["ok"] and last["ok"]),
+                      "full_clocks": attempts[-1]["full_clocks"]}
+    block = {"attempts": attempts}
+    del cells
+    gpu.cuda.current_context().deallocations.clear()
+    return res, block
+
+
+def gpu_drones(gpu, sampler, frames, args):
+    """ch08_old and ch08 on every frame: rounds over all frames."""
+    w, h = frames[0]["img"].shape[:2]
+    cells = [GpuCell(gpu, "ch08_old", frames[0]["img"],
+                     ch08_kw=dict(gpu.ff8.OLD_PATH)),
+             GpuCell(gpu, "ch08", frames[0]["img"], ch08_kw={})]
+    pristine = [gpu.cuda.to_device(f["img"]) for f in frames]
+    ok_all = True
+    for f, dp in zip(frames, pristine):
+        for c in cells:
+            c.d_pristine = dp
+            c.run_timed()
+            chk = c.verify(f["ref"])
+            f.setdefault("gpu_check", {})[c.key] = chk["ok"]
+            ok_all &= chk["ok"]
+    idx = list(range(len(frames)))
+
+    def run_round(i, spacing):
+        out = {c.key: [None] * len(frames) for c in cells}
+        for j in (idx if i % 2 == 0 else idx[::-1]):
+            for c in cells:
+                c.d_pristine = pristine[j]
+                out[c.key][j] = c.run_timed()
+        if spacing:
+            gpu.filler(spacing)
+        return out
+
+    def warm_round(spacing):
+        run_round(0, spacing)
+
+    data, attempts = timed_block(gpu, sampler, "drones", run_round,
+                                 warm_round, args)
+    last_j = idx[-1] if (len(data) - 1) % 2 == 0 else idx[0]
+    last_ok = all(c.verify(frames[last_j]["ref"])["ok"] for c in cells)
+    res = {}
+    for c in cells:
+        per = [statistics.median(r[c.key][j] for r in data) for j in idx]
+        res[c.key] = {"per_frame_median_ms": per,
+                      "median_of_frame_medians_ms": statistics.median(per),
+                      "max_frame_median_ms": max(per), **c.meta,
+                      "side": "gpu", "checks_ok": bool(ok_all and last_ok),
+                      "full_clocks": attempts[-1]["full_clocks"]}
+    del cells, pristine
+    gpu.cuda.current_context().deallocations.clear()
+    return res, {"attempts": attempts}
+
+
+# --------------------------------------------------------------- drones CPU
+
+def cpu_drones(frames, args):
+    """Per frame: the one-core twins and ch09's labels at every thread
+    count, rounds over all frames (order reversed on odd rounds)."""
+    w, h = frames[0]["img"].shape[:2]
+    work = np.empty_like(frames[0]["img"])
+    one = OneCore(w, h, "many")
+    eng = ff.TileLabels(w, h)
+    engs = {f"ch09_labels_t{nt}": nt for nt in args.threads}
+    keys = list(engs) + ["one_label", "one_label_paint"]
+
+    def call(key, f):
+        np.copyto(work, f["img"])
+        if key in engs:
+            eng.threads = engs[key]
+        t0 = time.perf_counter()
+        if key in engs:
+            st = eng.run(work)
+            n = st["n_blobs"]
+        else:
+            n = one.labels(work, key == "one_label_paint")
+        ms = (time.perf_counter() - t0) * 1000
+        ok = int(n) == f["ref"]["n_blobs"]
+        if key != "one_label":
+            ok &= bool(np.array_equal(work, f["ref"]["palette"]))
+        if key in engs:
+            ok &= bool(np.array_equal(eng.label_map(), f["ref"]["label"]))
+        else:
+            ok &= bool(np.array_equal(one.label, f["ref"]["label"]))
+        return ms, ok
+
+    ok_all = True
+    for f in frames:                      # untimed check pass
+        for k in keys:
+            ok_all &= call(k, f)[1]
+    samples = {k: [[] for _ in frames] for k in keys}
+    rounds = []
+    idx = list(range(len(frames)))
+    for r in range(args.cpu_rounds):
+        gate = wait_quiet(QUIET_WAIT_CPU_S, args.gate)
+        w0 = time.time()
+        for j in (idx if r % 2 == 0 else idx[::-1]):
+            for k in (keys if r % 2 == 0 else keys[::-1]):
+                ms, ok = call(k, frames[j])
+                samples[k][j].append(ms)
+                ok_all &= ok
+        rounds.append({"round": r, "seconds": round(time.time() - w0, 2),
+                       "loadavg": list(os.getloadavg()), "quiet_gate": gate})
+    out = {}
+    for k in keys:
+        per = [statistics.median(s) for s in samples[k]]
+        out[k] = {"per_frame_median_ms": per,
+                  "median_of_frame_medians_ms": statistics.median(per),
+                  "max_frame_median_ms": max(per), "side": (
+                      "ch09" if k in engs else "one_core")}
+    return out, rounds, bool(ok_all)
+
+
+# ---------------------------------------------------------------- summary
+
+def _json_default(o):
+    if isinstance(o, np.bool_):
+        return bool(o)
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(f"not JSON serializable: {type(o)}")
+
+
+def summarize(row, kind, threads):
+    """Scaling and the like-for-like factors of one scene (and one
+    connectivity for one-blob scenes)."""
+    cells = row["cells"]
+    out = {}
+    variants = ((("pixel", "ch09_pixel_t{}", "ch09_pixel_fill_t{}"),
+                 ("tile", "ch09_tile_t{}", "ch09_tile_fill_t{}"))
+                if kind == "one" else
+                (("labels", "ch09_labels_t{}", "ch09_labels_nopaint_t{}"),))
+    for conn in row["connectivities"]:
+        sfx = f"_c{conn}" if kind == "one" else ""
+        twin = cells.get(TWIN_FULL[kind] + sfx)
+        twin_np = cells.get(TWIN_NOPAINT[kind] + sfx)
+        gpu = (row["gpu"].get(f"ch07_c{conn}") if kind == "one"
+               else row["gpu"].get("ch08_old"))
+        for name, fmt, fmt_np in variants:
+            base = cells.get(fmt.format(1) + sfx)
+            sc = {}
+            for nt in threads:
+                c = cells.get(fmt.format(nt) + sfx)
+                if c is None:
+                    continue
+                e = {"ms": c["ms"]}
+                if base:
+                    rr = [a / b for a, b in zip(base["round_medians"],
+                                                c["round_medians"])]
+                    e.update(speedup_vs_t1=statistics.median(rr),
+                             speedup_range=[min(rr), max(rr)],
+                             efficiency=statistics.median(rr) / nt)
+                if twin:
+                    rr = [a / b for a, b in zip(twin["round_medians"],
+                                                c["round_medians"])]
+                    e.update(x_vs_one_core=statistics.median(rr),
+                             x_vs_one_core_range=[min(rr), max(rr)])
+                if gpu:
+                    e.update(gpu_x=c["ms"] / gpu["ms"],
+                             gpu_x_range_cpu_rounds=[
+                                 min(c["round_medians"]) / gpu["ms"],
+                                 max(c["round_medians"]) / gpu["ms"]])
+                sc[nt] = e
+            for nt in NOPAINT_THREADS:
+                c = cells.get(fmt_np.format(nt) + sfx)
+                if c is not None and twin_np:
+                    rr = [a / b for a, b in zip(twin_np["round_medians"],
+                                                c["round_medians"])]
+                    sc[f"no_paint_t{nt}"] = {
+                        "ms": c["ms"], "x_vs_one_core_no_paint":
+                            statistics.median(rr)}
+            out[f"{name}{sfx}"] = sc
+        if kind == "many":
+            nt = max(threads)
+            l0, l8 = cells.get(f"ch09_labels_L0_t{nt}"), cells.get(
+                f"ch09_labels_t{nt}")
+            if l0 and l8:
+                rr = [a / b for a, b in zip(l0["round_medians"],
+                                            l8["round_medians"])]
+                out["lattice_0_over_8"] = {
+                    "threads": nt, "ratio": statistics.median(rr),
+                    "range": [min(rr), max(rr)],
+                    "rounds": [l0["work"]["rounds"], l8["work"]["rounds"]],
+                    "meetings": [l0["work"]["meetings"],
+                                 l8["work"]["meetings"]]}
+        if gpu and twin:
+            out[f"gpu{sfx}"] = {"gpu": gpu["ms"], "one_core_like_for_like":
+                                twin["ms"], "x_gpu_vs_one_core":
+                                twin["ms"] / gpu["ms"]}
+    return out
+
+
+# ------------------------------------------------------------------ main
+
+def warm_up(args):
+    """Compile and start the thread pool: every engine and twin at every
+    thread count on small scenes."""
+    img, sx, sy = shared_scenes.square_scene(200, 150, 90, 70)
+    many, _ = ch05_scenes.random_blobs_scene(300, 200, 0.3, 1)
+    for conn in (4, 8):
+        for nt in args.threads:
+            for Eng in (ff.PixelBFS, ff.TileBFS):
+                e = Eng(200, 150, connectivity=conn, threads=nt)
+                for paint in (True, False):
+                    e.run(img.copy(), sx, sy, paint=paint)
+                e.visited()
+    for nt in args.threads:
+        e = ff.TileLabels(300, 200, threads=nt)
+        e.run(many.copy())
+        e.label_map()
+    one = OneCore(200, 150, "one")
+    for c8 in (True, False):
+        one.fill(img.copy(), sx, sy, c8, True)
+        one.bfs_prep()
+        one.bfs(img.copy(), sx, sy, c8)
+    onel = OneCore(300, 200, "many")
+    onel.labels(many.copy(), True)
+    cpu_flood_fill(img, sx, sy)
+    cpu_flood_fill_8(img, sx, sy)
+    cpu_label_components(many)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--scenes", nargs="*", default=None,
+                    help="only these (sq_256 sq_8000_center serpentine_256 "
+                         "input_blobs drones)")
+    ap.add_argument("--threads", nargs="*", type=int, default=list(THREADS))
+    ap.add_argument("--sq-size", type=int, default=8000)
+    ap.add_argument("--crop", nargs=2, type=int, default=None,
+                    help="label a W x H crop of input_blobs instead")
+    ap.add_argument("--drones-dir", default=None)
+    ap.add_argument("--drone-step", type=int, default=1)
+    ap.add_argument("--cpu-rounds", type=int, default=CPU_ROUNDS)
+    ap.add_argument("--round-s", type=float, default=CPU_ROUND_S)
+    ap.add_argument("--max-calls", type=int, default=CPU_MAX_CALLS)
+    ap.add_argument("--gpu-rounds", type=int, default=GPU_ROUNDS)
+    ap.add_argument("--warm-seconds", type=float, default=WARM_SECONDS)
+    ap.add_argument("--max-attempts", type=int, default=MAX_ATTEMPTS)
+    ap.add_argument("--cooldown", type=float, default=CPU_COOLDOWN_S)
+    ap.add_argument("--no-gate", dest="gate", action="store_false")
+    ap.add_argument("--no-gpu", action="store_true")
+    ap.add_argument("--smoke", action="store_true",
+                    help="small sizes, short rounds, no gate (a harness "
+                         "check: its timings mean nothing)")
+    ap.add_argument("--no-save", action="store_true")
+    ap.add_argument("--out-dir", default=None)
+    args = ap.parse_args()
+    if args.smoke:
+        args.sq_size = min(args.sq_size, 1000)
+        args.crop = args.crop or (1024, 1024)
+        args.drone_step = max(args.drone_step, 60)
+        args.threads = [t for t in args.threads if t in (1, 2, 16)]
+        args.cpu_rounds, args.round_s, args.max_calls = 1, 0.02, 3
+        args.gpu_rounds, args.warm_seconds, args.max_attempts = 2, 0.3, 1
+        args.cooldown, args.gate = 0.0, False
+    args.threads = sorted(t for t in set(args.threads)
+                          if 1 <= t <= numba.config.NUMBA_NUM_THREADS)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    print(f"ch09 session {stamp}: threads {args.threads}"
+          f"{' (SMOKE: timings mean nothing)' if args.smoke else ''}",
+          flush=True)
+
+    scenes = build_scenes(args)
+    frames = load_drones(args)
+    print("Warming up (JIT, thread pool)...", flush=True)
+    t_w = time.perf_counter()
+    warm_up(args)
+    print(f"  done in {time.perf_counter() - t_w:.1f} s, threading layer "
+          f"{numba.threading_layer()}", flush=True)
+
+    rows = []
+    for name, kind, img, seed, conns in scenes:
+        rows.append({"scene": name, "kind": kind,
+                     "shape": [int(img.shape[0]), int(img.shape[1])],
+                     "seed": None if seed is None else [int(v) for v in seed],
+                     "connectivities": list(conns), "cells": {}, "gpu": {}})
+    for f in frames:
+        lab, nb = cpu_label_components(f["img"])
+        f["ref"] = {"label": lab, "n_blobs": int(nb),
+                    "palette": palette_image(f["img"], lab)}
+
+    # -- GPU blocks first
+    gpu_blocks, drones = {}, None
+    sampler = None
+    if not args.no_gpu:
+        gpu = Gpu()
+        sampler = Sampler()
+        print(f"GPU: {gpu.device} ({gpu.sm_count} SMs)", flush=True)
+        for row, (name, kind, img, seed, conns) in zip(rows, scenes):
+            print(f"  GPU {name}", flush=True)
+            ref = reference(kind, img, seed, conns)
+            row["gpu"], gpu_blocks[name] = gpu_scene(
+                gpu, sampler, name, kind, img, seed, conns, ref, args)
+            for k, c in row["gpu"].items():
+                print(f"    {k}: {c['ms']:.4f} ms, checks "
+                      f"{'OK' if c['checks_ok'] else 'MISMATCH'}", flush=True)
+            del ref
+            gc.collect()
+        if frames:
+            print("  GPU drones", flush=True)
+            dg, gpu_blocks["drones"] = gpu_drones(gpu, sampler, frames, args)
+            drones = {"gpu": dg}
+        if args.cooldown:
+            print(f"Cooldown {args.cooldown:.0f} s before the CPU passes",
+                  flush=True)
+            time.sleep(args.cooldown)
+
+    # -- CPU passes, scene by scene
+    cpu_rounds = {}
+    for row, (name, kind, img, seed, conns) in zip(rows, scenes):
+        print(f"  CPU {name}", flush=True)
+        ref = reference(kind, img, seed, conns)
+        work = np.empty_like(img)
+        one = OneCore(img.shape[0], img.shape[1], kind)
+        cells = cpu_cells(name, kind, img, seed, conns, ref, args, work, one)
+        cpu_rounds[name] = cpu_pass(cells, args)
+        for c in cells:
+            row["cells"][c["key"]] = cpu_record(c)
+        row["all_checks_ok"] = all(c["checks_ok"] for c in
+                                   list(row["cells"].values())
+                                   + list(row["gpu"].values()))
+        row["summary"] = summarize(row, kind, args.threads)
+        for c in cells:
+            rc = row["cells"][c["key"]]
+            print(f"    {c['key']:26s} {rc['ms']:10.3f} ms  "
+                  f"{'OK' if rc['checks_ok'] else 'MISMATCH'}", flush=True)
+        del cells, one, work, ref
+        gc.collect()
+    if frames:
+        print("  CPU drones", flush=True)
+        dc, dr, dok = cpu_drones(frames, args)
+        drones = drones or {}
+        drones.update(cpu=dc, cpu_rounds=dr, cpu_checks_ok=dok,
+                      frames=[{"key": f["key"], "sha1": f["sha1"],
+                               "n_blobs": f["ref"]["n_blobs"]}
+                              for f in frames])
+        print(f"    checks {'OK' if dok else 'MISMATCH'}", flush=True)
+    if sampler is not None:
+        sampler.stop()
+
+    ok = all(r["all_checks_ok"] for r in rows) and (
+        drones is None or (drones.get("cpu_checks_ok", True) and all(
+            c["checks_ok"] for c in drones.get("gpu", {}).values())))
+    print(f"\nAll outputs {'match' if ok else 'DO NOT match'} the oracles",
+          flush=True)
+    session = {
+        "session": f"ch09_{stamp}", "smoke": bool(args.smoke),
+        "host": _host_info(),
+        "threading_layer": numba.threading_layer(),
+        "git": {"commit": _git("rev-parse", "--short", "HEAD"),
+                "dirty": bool(_git("status", "--porcelain"))},
+        "settings": {
+            "threads": args.threads, "cpu_rounds": args.cpu_rounds,
+            "round_s": args.round_s, "max_calls": args.max_calls,
+            "gpu_rounds_min": args.gpu_rounds, "gate": args.gate,
+            "quiet_busy_pct": QUIET_BUSY_PCT, "cooldown_s": args.cooldown,
+            "pixel_serial_below": ff.PIXEL_SERIAL_BELOW,
+            "pixel_min_chunk": ff.PIXEL_MIN_CHUNK,
+            "tile_serial_below": ff.TILE_SERIAL_BELOW,
+            "label_serial_below": ff.LABEL_SERIAL_BELOW,
+            "lattice": ff.DEFAULT_LATTICE, "tile": K.TILE,
+            "png": PNG_NAME, "png_md5": PNG_MD5},
+        "rows": rows, "cpu_rounds": cpu_rounds, "gpu_blocks": gpu_blocks,
+        "drones": drones, "all_checks_ok": bool(ok)}
+    if args.no_save:
+        return
+    out_dir = args.out_dir or results_paths.results_dir(CHAPTER,
+                                                        "benchmark_results")
+    os.makedirs(out_dir, exist_ok=True)
+    jpath = os.path.join(out_dir, f"ch09_{stamp}.json")
+    with open(jpath, "w") as f:
+        json.dump(session, f, indent=1, default=_json_default)
+    cpath = os.path.join(out_dir, f"ch09_{stamp}.csv")
+    with open(cpath, "w", newline="") as f:
+        wr = csv.writer(f)
+        wr.writerow(["scene", "cell", "side", "variant", "threads",
+                     "connectivity", "paint", "ms", "ms_min", "ms_max", "n",
+                     "checks_ok"])
+        for r in rows:
+            for k, c in list(r["cells"].items()) + list(r["gpu"].items()):
+                wr.writerow([r["scene"], k, c.get("side"), c.get("variant"),
+                             c.get("threads"), c.get("connectivity"),
+                             c.get("paint"), c["ms"], c["ms_min"],
+                             c["ms_max"], c["n"], c["checks_ok"]])
+    print(f"wrote {os.path.basename(jpath)} and {os.path.basename(cpath)}",
+          flush=True)
+
+
+if __name__ == "__main__":
+    main()
