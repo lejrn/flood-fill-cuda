@@ -20,25 +20,30 @@ red pixel still rides the queue".
   the tile's real mask (543 of 1,024 red) and its 17 entry bits on the
   left edge, where the round-3 tile beside it handed them over.
 - "Each thread holds one row": the rows light top to bottom, then one
-  row (the first with an entry bit) gets a bracket; caption 2 at "pixel".
-- "The row sits in registers": the card's frame pulses white (the
-  new-part convention). At "shared memory" the close-up's shared-memory
-  strip gets a soft outline for a moment: what the registers are closer
-  than.
+  row (the first with an entry bit) gets a bracket, kept through "the
+  thread's own memory"; caption 2 at "pixel".
+- "The row sits in registers": the card's frame and the lit partition's
+  register-file strip pulse white together (the new-part convention: the
+  two pictures of the same registers). At "shared memory" the close-up's
+  shared-memory strip gets a soft outline for a moment: what the
+  registers are closer than.
 - "Fill along every row at once, step diagonally, fill along the
   columns": the recorded sweeps play, the first trip on its words with a
-  direction arrow under the grid (along, diagonal, down; no words), then
-  "and repeat": the other three trips faster under a loop arrow (an arrow
-  switching five times a second would read as jitter). A sweep turns red
-  cells blue at about the same brightness, so nothing flashes. Trip 4
-  changes nothing.
-- "until nothing changes": after the last sweep the 32 vote dots dim;
-  at "changes" the card and the close-up fold back into SM 0 while each
-  SM's third cube lands (72 blocks, 3 per SM: the two cubes slide apart,
-  the third drops between them) and the 7 round-4 tiles on the floor
-  turn blue together. Caption 2 goes as the fold starts and caption 3
-  comes in once the flight has passed the caption band (in 9:16 it
-  crosses it).
+  two-headed glyph under the grid (no words): along the rows both ways,
+  a cross of both diagonals, along the columns both ways, as ch07's
+  kernels fill. Then each later trip starts on its own word under one
+  steady loop arrow (an arrow switching five times a second would read
+  as jitter): trip 2 on "and", trip 3 on "until" (it adds the last 2
+  cells), trip 4 on "nothing" (it changes nothing). A tally mark beside
+  the glyph lights as each trip starts. A sweep turns red cells blue at
+  about the same brightness, so nothing flashes.
+- "nothing changes": after trip 4 the 32 vote dots dim; then, during
+  "changes", the card and the close-up fold back into SM 0, the 7
+  round-4 tiles on the floor turn blue together, and each SM gets its
+  third cube (72 blocks, 3 per SM): the two cubes slide apart during the
+  flight, the third drops between them once the card is home. Caption 2
+  goes as the fold starts; caption 3 comes in at once in 16:9 and once
+  the flight has passed the caption band in 9:16 (where it crosses it).
 
 Starts on chain_state(14), ends on chain_state(15).
 """
@@ -47,10 +52,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import (DOWN, PI, Arc, FadeIn, FadeOut, Group, Rectangle, Transform, UpdateFromAlphaFunc, smooth,
-                   there_and_back)
+from manim import (DOWN, PI, Arc, FadeIn, FadeOut, Group, Line, Rectangle, Transform, UpdateFromAlphaFunc, VGroup,
+                   smooth, there_and_back)
 from manim.mobject.geometry.tips import ArrowTip
 
+from scenes.chain import die as dz
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import state as st
@@ -62,9 +68,10 @@ Q = 2                   # the partition the warp card unfolds from: right column
 ZOOM_STEPS = 60         # distinct zoom frames (one per frame at 30 fps over ~2 s)
 ZOOM_BLEND = 0.15       # the zoom's first share blends from the picture floor (resized by PIL) into its own sampling
 BAND = 3.0              # "the rows light top to bottom": the lit band's half width, in rows
-FAST_MIN = 0.18         # "and repeat": the fastest sweep spacing, s (3 frames at 15 fps)
-VOTE_S = 0.4            # the vote: the dots dim top to bottom over this long
-FOLD = 13               # the fold's frames: the flight in the first 8, caption 3 in the last 5
+FAST_MIN = 0.13         # "and repeat": the closest two sweeps that change cells may be, s (2 frames at 15 fps)
+TICK_IN = 2             # a trip's tally mark fades in over this many frames (15 fps)
+VOTE_S = 0.35           # the vote after trip 4: the dots dim top to bottom over this long
+FOLD = 14               # the fold's frames: the flight in 0-8, the two cubes slide apart in 0-5, the third drops in 8-13
 WARP_N = mc.WARP_N
 
 
@@ -128,6 +135,29 @@ def loop_glyph(card: mc.WarpCard, color: str = INK_SOFT):
     return _z(arc, card.z + 1)
 
 
+def tally(card: mc.WarpCard, n: int, color: str = INK_SOFT) -> VGroup:
+    """n tally marks right of the glyph slot, one per trip (no words), all
+    hidden: each trip lights its mark as it starts, so the trips can be
+    counted before caption 3 says "4 trips"."""
+    h = card.glyph_h
+    x0, y = card.glyph_c[0] + 1.15 * h, card.glyph_c[1]       # clear of the widest glyph (the row's, 1.5 h)
+    marks = VGroup(*[Line([x0 + i * 0.32 * h, y - 0.3 * h, 0], [x0 + i * 0.32 * h, y + 0.3 * h, 0], color=color,
+                          stroke_width=3.5) for i in range(n)])
+    marks.set_stroke(opacity=0)
+    return _z(marks, card.z + 1)
+
+
+def regs_rect(q: int) -> dz.R:
+    """Partition q's register file in one SM (world units from its
+    front-left corner): the strip under the partition's scheduler, by the
+    arithmetic of die._sm, worked back from die.sm_parts().lanes[q]."""
+    ln = dz.sm_parts().lanes[q]
+    pd = (ln.d + 0.012) / (1 - 0.13 - 0.16 - 0.12)          # the partition's depth
+    sd, rd, ld = pd * 0.13, pd * 0.16, pd * 0.12            # scheduler, registers, load/store
+    top = ln.y - ld - 0.004 + pd
+    return dz.R(ln.x, top - sd - rd - 0.004, ln.w / 0.6, rd)
+
+
 def pulse_ring(target, color: str, width: float, pad: float, z: float) -> Rectangle:
     """An outline round `target`'s bounding box, hidden (stroke opacity 0)."""
     r = Rectangle(width=target.width + pad, height=target.height + pad, stroke_color=color,
@@ -139,17 +169,17 @@ def pulse_ring(target, color: str, width: float, pad: float, z: float) -> Rectan
 class Tiles(ChainScene):
     k = 14
 
-    def pulse(self, ring: Rectangle, seconds: float) -> None:
-        """Fade `ring` in and out over `seconds` (there and back), then remove it."""
-        self.add(ring)
-        self.play(UpdateFromAlphaFunc(ring, lambda m, a: m.set_stroke(opacity=there_and_back(a))),
+    def pulse(self, *rings: Rectangle, seconds: float) -> None:
+        """Fade `rings` in and out together over `seconds` (there and back), then remove them."""
+        self.add(*rings)
+        self.play(*[UpdateFromAlphaFunc(r, lambda m, a: m.set_stroke(opacity=there_and_back(a))) for r in rings],
                   run_time=seconds)
-        self.remove(ring)
+        self.remove(*rings)
 
-    def third_cubes(self, spec: mc.Spec) -> tuple[list, callable]:
+    def third_cubes(self, spec: mc.Spec) -> tuple[list, FadeIn, callable]:
         """Animations from two cubes per SM to `spec`'s three: the two slide to
         the outer places (a morph of each face), the third drops in between.
-        Returns (animations, done); call done() after the play: it swaps in
+        Returns (slides, drop, done); call done() after the play: it swaps in
         `spec`'s own cubes and makes `spec` the machine."""
         pl = self.Lay.machine_pl
         new = mc.build(spec, pl, z0=st.Z_MACHINE)
@@ -166,7 +196,6 @@ class Tiles(ChainScene):
                     anims.append(Transform(no[(i * 2 + jo) * nf + f], nn[(i * 3 + jn) * nf + f].copy()))
             drop += [m.copy() for m in nn[(i * 3 + 1) * nf:(i * 3 + 2) * nf]]
         landing = Group(*drop)
-        anims.append(FadeIn(landing, shift=DOWN * 0.3))
 
         def done() -> None:
             self.remove(old_t, landing)
@@ -177,7 +206,7 @@ class Tiles(ChainScene):
             assert all(self.machine.keys[k] == new.keys[k] for k in new.parts if k != "teams")
             self.machine = mc.Machine(spec, {k: parts[k] for k in new.parts}, dict(new.keys))
 
-        return anims, done
+        return anims, FadeIn(landing, shift=DOWN * 0.3), done
 
     def beat_anim(self) -> None:
         a = st.a3()
@@ -278,12 +307,19 @@ class Tiles(ChainScene):
         # ---- "one bit per pixel": caption 2
         self.say("1 bit per pixel", "a row per thread", at=self.cue("pixel"))
 
-        # ---- "The row sits in registers": the card's frame pulses (a new part)
+        # ---- "The row sits in registers": the card's frame and the lit
+        # partition's register file pulse together (a new part): the two
+        # pictures of the same registers. The bracket stays on its row through
+        # "the thread's own memory" and goes at "closer"
         t_reg = self.cue("registers")
+        rc, rw, rh = mc.closeup_rect(sm, regs_rect(Q))
+        regs = _z(Rectangle(width=rw + 0.04, height=rh + 0.02, stroke_color=INK, stroke_width=3.0).move_to(rc),
+                  sm[1].z_index + 2)
+        regs.set_stroke(opacity=0)
         self.until(t_reg)
-        self.pulse(pulse_ring(card.frame, INK, 3.5, 0.1, card.z + 2),
-                   min(max(self.cue("registers", end=True) - t_reg, fr(10)), fr(14)))
-        self.until(max(self.cue("thread's", after=t_reg), self.elapsed()))
+        self.pulse(pulse_ring(card.frame, INK, 3.5, 0.1, card.z + 2), regs,
+                   seconds=min(max(self.cue("registers", end=True) - t_reg, fr(10)), fr(14)))
+        self.until(max(self.cue("closer", after=t_reg), self.elapsed()))
         self.play(FadeOut(bracket), run_time=fr(5))
 
         # ---- "closer than shared memory": a soft outline on the close-up's
@@ -294,32 +330,46 @@ class Tiles(ChainScene):
         strip.set_stroke(opacity=0)
         t_sh = self.cue("shared", after=t_reg)
         self.until(max(t_sh, self.elapsed()))
-        self.pulse(strip, fr(16))
+        self.pulse(strip, seconds=fr(16))
 
         # ---- "Fill along every row at once, step diagonally, fill along the
-        # columns, and repeat": the recorded sweeps. The first trip on its
-        # words, each with its direction arrow; then "and repeat": the other
-        # three trips faster under a loop arrow, the last one ending well
-        # before "changes"
+        # columns, and repeat until nothing changes": the recorded sweeps,
+        # one trip (row, diagonal, column) per word. Trip 1 on its words,
+        # each sweep with its two-way glyph; then each later trip starts on
+        # its own word under one loop arrow: trip 2 on "and", trip 3 on
+        # "until" (its row sweep adds the last 2 cells), trip 4 on "nothing"
+        # (it changes nothing). A tally mark lights as each trip starts.
+        # trip 3's row sweep (sweep 7) adds the last cells; nothing after it changes
+        assert trips == 4, trips
+        same = [np.array_equal(np.asarray(sweeps[i]), np.asarray(sweeps[7])) for i in range(8, len(sweeps))]
+        assert all(same) and not np.array_equal(np.asarray(sweeps[7]), np.asarray(sweeps[6])), same
         t1 = self.cue("along", after=t_sh)
         t2 = self.cue("step", after=t1)
         t3 = self.cue("fill", after=t2)
-        t_ch = self.cue("changes", after=t3)
-        t_last = t_ch - 0.25
-        rest = len(kinds) - 4                                 # sweeps 4..12
-        t4 = t3 + 0.4
-        dt = (t_last - t4) / (rest - 1)
-        assert dt >= FAST_MIN, f"{self.beat}: the repeated sweeps {dt:.3f} s apart"
-        times = [t1, t2, t3] + [t4 + j * dt for j in range(rest)]
+        t_and = self.cue("and", after=t3)
+        t_until = self.cue("until", after=t_and)
+        t_none = self.cue("nothing", after=t_until)
+        t_ch = self.cue("changes", after=t_none)
+        starts = [t1, t_and, t_until, t_none]                # where each trip starts (its tally mark lights)
+        d2 = (t_until - t_and) / 3                           # trip 2: three sweeps that all add cells
+        d34 = (t_none - t_until) / 3                         # trips 3 and 4: only trip 3's first sweep adds any
+        assert d2 >= FAST_MIN, f"{self.beat}: trip 2's sweeps {d2:.3f} s apart"
+        times = [t1, t2, t3] + [t_and + j * d2 for j in range(3)] + [t + j * d34 for t in (t_until, t_none)
+                                                                      for j in range(3)]
+        assert len(times) == len(kinds) - 1 and all(np.diff(times) > 0), times
         glyphs = {kind: card.glyph(kind) for kind in ("row", "diag", "col")}
         glyphs["loop"] = loop_glyph(card)
         for g in glyphs.values():
             glyph_alpha(g, 0.0)
-        self.add(*glyphs.values())
+        marks = tally(card, trips)
+        self.add(*glyphs.values(), marks)
         shown = {"k": 0}
+        t_swept = times[-1] + fr(1)
 
         def sweep(p: float) -> None:
-            t = t1 + p * (times[-1] + fr(1) - t1)
+            t = t1 + p * (t_swept - t1)
+            for j, m in enumerate(marks):
+                m.set_stroke(opacity=float(np.clip((t - starts[j]) / fr(TICK_IN), 0.0, 1.0)))
             k = sum(1 for x in times if x <= t + 1e-6)
             if k == shown["k"]:
                 return
@@ -330,33 +380,39 @@ class Tiles(ChainScene):
                 glyph_alpha(g, 1.0 if kind == on else 0.0)
 
         self.until(t1)
-        self.run(sweep, times[-1] + fr(1) - t1)
+        self.run(sweep, t_swept - t1)
 
-        # ---- "until nothing changes": after the last sweep the 32 threads
-        # vote (the dots dim, top to bottom)
+        # ---- "nothing changes": at the end of trip 4 the 32 threads vote
+        # that nothing changed (the dots dim, top to bottom), seen whole
+        # before the fold
         def vote(p: float) -> None:
             for i, d in enumerate(card.votes):
                 q = np.clip((p - 0.5 * i / WARP_N) / 0.5, 0, 1)
                 d.set_fill(opacity=1.0 - 0.75 * q)
 
-        t_vote = times[-1] + 0.1
+        t_vote = times[-1] + d34
         self.run(vote, VOTE_S, start=t_vote)
 
-        # ---- "changes": the card and the close-up fold back into SM 0 while
-        # each SM's third cube lands and the 7 round-4 tiles turn blue
-        # together. One play: caption 2 goes as the flight starts, caption 3
-        # (carried over the cut) comes in once the flight has passed the
-        # caption band (in 9:16 it crosses it, as r02's does)
-        self.until(max(self.elapsed(), t_ch, t_vote + VOTE_S * 0.5))
+        # ---- "changes": the card and the close-up fold back into SM 0, the 7
+        # round-4 tiles turn blue together, and each SM gets its third cube:
+        # the two cubes slide apart during the flight, the third drops in
+        # once the card is home (so the chip is never busy under the card).
+        # One play: caption 2 goes as the flight starts and caption 3
+        # (carried over the cut) comes in; in 9:16 the flight crosses the
+        # caption band, so there it comes in once the flight has passed (as
+        # r02's does), in 16:9 at once
+        self.until(max(self.elapsed(), t_ch, t_vote + VOTE_S + fr(1)))
         self.floor_blend(opened, st.floor_raster("tile_ctx", rpx), frames=10)
-        cubes, done = self.third_cubes(end.machine)
-        for anim in cubes:
-            anim.set_rate_func(span(0.0, 9 / FOLD))
+        slides, drop, done = self.third_cubes(end.machine)
+        for anim in slides:
+            anim.set_rate_func(span(0.0, 5 / FOLD))
+        drop.set_rate_func(span(8 / FOLD, 13 / FOLD))
         cap = caption_group(G, *st.carry_caption(self.k + 1))
-        self.play(FadeOut(Group(card, *glyphs.values(), light, sm), target_position=home, scale=0.08,
+        cap_in = span(9 / FOLD, 1.0) if G.vertical else span(2 / FOLD, 7 / FOLD)
+        self.play(FadeOut(Group(card, *glyphs.values(), marks, light, sm), target_position=home, scale=0.08,
                           rate_func=span(0.0, 8 / FOLD)),
-                  FadeOut(self.cap, rate_func=span(0.0, 2 / FOLD)), *cubes,
-                  FadeIn(cap, scale=1.06, rate_func=span(1 - 5 / FOLD, 1.0)), run_time=fr(FOLD))
+                  FadeOut(self.cap, rate_func=span(0.0, 2 / FOLD)), *slides, drop,
+                  FadeIn(cap, scale=1.06, rate_func=cap_in), run_time=fr(FOLD))
         self.cap, self._cap_t = cap, self.elapsed()
         done()
         assert self.machine.spec == end.machine, (self.machine.spec, end.machine)

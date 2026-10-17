@@ -73,7 +73,7 @@ def frame() -> Frame:
             cards=(((-2.70, -3.15), (-2.70, -2.25)), (2.3, 0.8)),
             vram=((0.0, 1.65), (6.8, 3.9)),           # over the floor area, under the inset and the act tag
             side_card=((-3.5, -0.3), (3.5, 3.6)),     # r05's sweep card, over the floor area
-            warp=((1.3, 1.45), 3.9),
+            warp=((1.3, 1.65), 3.9),                  # its bottom 0.2 clear of the caption band
             sm_side=((-2.55, 1.4), 2.9),
         )
     top = h / 2
@@ -92,5 +92,5 @@ def frame() -> Frame:
         vram=((-2.75, -0.45), (5.1, 3.9)),       # over the floor area, clear of the inset
         side_card=((-5.3, -2.4), (-0.2, 1.5)),     # r05's sweep card, over the floor area
         warp=((-1.75, -0.55), 3.6),
-        sm_side=((-4.7, -0.95), 2.4),
+        sm_side=((-4.7, -1.07), 2.4),            # its top clear of the inset's label
     )
