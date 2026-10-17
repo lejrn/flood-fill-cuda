@@ -2,8 +2,11 @@
 
 i0: four panels of the drone footage (`scenes/s_intro.py`'s grid): the
 camera, the filter, then at "Count them all, every frame" the GPU
-labelling every frame (a blob counter under it), and at "thirty-three"
-the chain's goal meter ("budget 33 ms"), which stays for the whole cut.
+labelling every frame (ch08's first version, `assets/drones_labels`; a
+blob counter under it), and at "thirty-three" the chain's goal meter
+("budget 33 ms"), which stays for the whole cut. The footage starts at
+frame START, so its one loop (frame 239 to 0) lands in the quiet between
+the meter and the drone card.
 i1: on a drone frame the compiled CPU code keeps up: a measured card
 with the CPU's bar (labels only, `drone_cpu_ms`) against the 33 ms line
 and the GPU as "?", as on the 81 Mpx card (v5: no kernel-time GPU win
@@ -50,6 +53,7 @@ from scenes.style import (ASSETS, BG, GREY, GRID, INK, INK_SOFT, OUT, RED_PX, TE
 
 GAP = 0.4               # silence between the two beats inside this clip (assembly)
 DIM_TO = 0.4            # the drone panels' brightness after "Scale up"
+START = 18              # the footage's first frame: its loop then falls at about 8.5 s, not at "On"
 CAMERA, FILTER, COUNT, CARD = 0, 1, 2, 3     # panel slots, in reading order
 
 if is_vertical():
@@ -239,10 +243,13 @@ class Intro(BeatScene):
 
         # ================= i0: camera, filter =================
         sky = self.panel("drones_sky", CAMERA)
+        sky.show(START)                     # fades in on the frame it starts from
         box0 = self.frame_box(CAMERA)
         cap0 = self.caption(f"camera, {FPS_CAMERA} fps", CAMERA)
         self.play(FadeIn(box0), FadeIn(sky), FadeIn(cap0), run_time=fr(9))
         sky.start(FPS_CAMERA)
+        sky.t = START / FPS_CAMERA          # the panels synced to it and the counter follow
+        sky.show(START)
 
         self.until(cue("i0_problem", "filter"))
         mask = self.panel("drones_mask", FILTER)
