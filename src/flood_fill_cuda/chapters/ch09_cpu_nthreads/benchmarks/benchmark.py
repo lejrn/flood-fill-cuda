@@ -205,7 +205,7 @@ QUIET_BUSY_PCT = 10.0       # the rest of the host, at most (1.6 of 16):
 QUIET_BUSY_PCT_PARALLEL = 3.0   # the same for rounds with 8+ threads: one
                                 # other runnable thread stalls a barrier
 MAX_ROUND_REDOS = 2
-PROBE_N = 20_000_000        # the calibration chain (about 20 ms per core)
+PROBE_N = 8_000_000         # the calibration chain (about 10 ms per core)
 QUIET_WAIT_CPU_S = 600
 QUIET_WAIT_GPU_S = 120
 GPU_ROUNDS = 9
@@ -750,20 +750,24 @@ def wait_quiet(max_wait_s, enabled=True, threshold=QUIET_BUSY_PCT):
 
 
 @njit(cache=True)
-def _probe_chain(n):
-    """A fixed dependent integer chain: n multiply-adds."""
-    x = np.int64(1)
+def _probe_chain(n, seed):
+    """A fixed dependent chain of n xorshift64 steps (shifts and xors do
+    not reassociate, so the compiler cannot shorten it)."""
+    x = np.uint64(seed) | np.uint64(1)
     for _ in range(n):
-        x = x * np.int64(6364136223846793005) + np.int64(1442695040888963407)
+        x ^= x >> np.uint64(12)
+        x ^= x << np.uint64(25)
+        x ^= x >> np.uint64(27)
     return x
 
 
 @njit(parallel=True, cache=True)
 def _probe_all(n, nt):
-    """The chain on every thread at once."""
-    out = np.empty(nt, np.int64)
+    """The chain on every thread at once, each from its own seed (so no
+    call is loop-invariant)."""
+    out = np.empty(nt, np.uint64)
     for c in prange(nt):
-        out[c] = _probe_chain(n)
+        out[c] = _probe_chain(n, c + 1)
     return out
 
 
@@ -785,7 +789,7 @@ class Calibration:
 
     def probe(self, nt):
         t0 = time.perf_counter()
-        _probe_chain(self.n)
+        _probe_chain(self.n, 1)
         serial = (time.perf_counter() - t0) * 1000
         with ff.num_threads(nt):
             t0 = time.perf_counter()
@@ -1841,7 +1845,7 @@ def warm_up(args):
     cpu_label_components(many)
     same(img, img)
     same(onel.label, onel.label)
-    _probe_chain(10)
+    _probe_chain(10, 1)
     for nt in args.threads:
         with ff.num_threads(nt):
             _probe_all(10, nt)

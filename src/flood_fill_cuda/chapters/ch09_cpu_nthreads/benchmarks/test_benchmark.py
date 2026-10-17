@@ -325,3 +325,27 @@ def test_each_variant_is_paired_with_its_own_gpu_chapter():
     lb = B.summarize(many, "many", [16])["labels"][16]
     assert lb["gpu_cell"] == "ch08_old"
     assert lb["gpu_x_other"] == {"ch08": pytest.approx(20.0 / 1.9)}
+
+
+def test_probe_chain_is_real_work():
+    """The calibration probe must cost the time of its steps, or its
+    ratios mean nothing: a multiply-add chain was reassociated (0.1 ns a
+    step) and, in the prange, ran 1M steps in 0.014 ms. A xorshift step
+    is six dependent operations: at least about 1 ns on any current
+    core, so 0.5 ns is a safe floor."""
+    import time
+    from .. import flood_fill as ff
+
+    def best(fn, *a):
+        ts = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            fn(*a)
+            ts.append(time.perf_counter() - t0)
+        return min(ts)
+    n = 2_000_000
+    B._probe_chain(10, 1)
+    assert best(B._probe_chain, n, 1) > 0.5e-9 * n
+    with ff.num_threads(2):
+        B._probe_all(10, 2)
+        assert best(B._probe_all, n, 2) > 0.5e-9 * n
