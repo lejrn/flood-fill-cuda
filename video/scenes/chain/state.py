@@ -412,15 +412,49 @@ def one_blob_picture() -> np.ndarray:
     return p
 
 
+@lru_cache(maxsize=1)
+def frame_round_map() -> np.ndarray:
+    """(900, 900) int: WV's full_round_900 with the picture's blob edges
+    filled in. WV samples each 900 px pixel at one point (10 i + 5, 10 j +
+    5), so a pixel on a blob's anti-aliased edge often samples off red (-1)
+    although the labelled picture paints it (16,589 such pixels). Each takes
+    the earliest round among its 8 neighbours inside the blobs, repeated
+    until all have one (an interior piece, -2, is the earliest); a blob no
+    sample hit is round 0 (it fits in a tile: its own seed). So the last
+    round paints exactly the labelled picture; -1 stays only off the blobs."""
+    r9 = a3()["full_round_900"].astype(np.int32)
+    blob = picture("labels").min(axis=2) < 250
+    BIG = 1 << 20
+    t = np.full(r9.shape, BIG, np.int32)
+    t[r9 >= 0] = r9[r9 >= 0]
+    t[r9 == -2] = -1                                      # labelled from the start
+    todo = blob & (t == BIG)
+    while todo.any():
+        p = np.pad(t, 1, constant_values=BIG)
+        H, W = t.shape
+        nbr = np.min([p[1 + dr:1 + dr + H, 1 + dc:1 + dc + W] for dr in (-1, 0, 1) for dc in (-1, 0, 1)
+                      if dr or dc], axis=0)
+        grow = todo & (nbr < BIG)
+        if not grow.any():
+            t[todo] = 0                                   # blobs no sample hit
+            break
+        t[grow] = nbr[grow]
+        todo &= ~grow
+    out = np.where(t == -1, -2, t)
+    out[~blob] = -1
+    out.setflags(write=False)
+    return out
+
+
 def frame_rounds_picture(upto: int) -> np.ndarray:
-    """(900, 900, 3): r13's claims spreading out. A sample whose piece is
-    claimed by round `upto` (WV full_round_900; seeds are round 0) takes its
-    final label colour from the labelled picture; interior samples are
-    labelled from the start; the rest stay as the red frame."""
-    r9 = a3()["full_round_900"]
+    """(900, 900, 3): r13's claims spreading out. A pixel whose piece is
+    claimed by round `upto` (frame_round_map; seeds are round 0) takes its
+    final label colour from the labelled picture; interior pieces are
+    labelled from the start; the rest stay as the red frame. At the last
+    round (int(frame_round_map().max())) it is the labelled picture."""
+    r = frame_round_map()
     red, lab = picture("red"), picture("labels")
-    sel = ((r9 >= 0) & (r9 <= upto)) | (r9 == -2)
-    sel &= lab.min(axis=2) < 250
+    sel = ((r >= 0) & (r <= upto)) | (r == -2)
     out = red.copy()
     out[sel] = lab[sel]
     return out
@@ -863,7 +897,7 @@ def floor_raster(name: str, rpx: int) -> np.ndarray:
     if name == "frame_one_blob":               # k = 16
         return fl.picture_raster(one_blob_picture(), rpx)
     if name == "frame_rounds":                 # r13: every claim (rounds 0-4 at 900 px)
-        return fl.picture_raster(frame_rounds_picture(int(a3()["full_round_900"].max())), rpx)
+        return fl.picture_raster(frame_rounds_picture(int(frame_round_map().max())), rpx)
     if name == "crop_red":                     # r12, after the zoom lands
         return crop_raster(rpx)
     if name == "crop_labels":                  # k = 17
