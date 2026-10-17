@@ -571,6 +571,53 @@ def test_tile_bfs_every_round_parallel(name, connectivity):
         assert st["tile_visits"] >= st["idle_visits"]
 
 
+TILE_COUNTERS = ("rounds", "peak_round_tiles", "tile_visits", "idle_visits",
+                 "closure_passes", "sends")
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", ["full_red_512", "noise_0.62_big",
+                                  "maze_255", "tile_zigzags"])
+def test_tile_bfs_counters_do_not_depend_on_threads(name, connectivity):
+    """A round has no dependency inside it (a tile reads only what was
+    sent the round before, and the next frontier keeps the serial
+    order), so the tile BFS's counters are a function of the image, the
+    connectivity and the seed alone: any inbox race would move them."""
+    img, sx, sy = {
+        "full_red_512": lambda: (scenes.full_red_scene(512, 512)[0], 256,
+                                 256),
+        "noise_0.62_big": lambda: _noise(500, 400, 0.62, 9),
+        "maze_255": lambda: worst_cases.maze_scene(cells=128, rng_seed=5),
+        "tile_zigzags": lambda: tile_border_zigzag_scene(700, 520),
+    }[name]()
+    seen = set()
+    for threads in THREADS:
+        for serial_below in (1, ff.TILE_SERIAL_BELOW):
+            eng = ff.TileBFS(img.shape[0], img.shape[1],
+                             connectivity=connectivity, threads=threads,
+                             serial_below=serial_below)
+            st = eng.run(img.copy(), sx, sy)
+            seen.add(tuple(st[k] for k in TILE_COUNTERS))
+    assert len(seen) == 1, seen
+
+
+def test_pixel_bfs_race_amplifier():
+    """A 65 x 65 full-red square at 16 threads, every level of two
+    entries or more split into one chunk per thread: the threads start
+    together on neighbouring slices, so claims race in a few runs out of
+    a hundred. Every run must equal the oracle."""
+    img, _, _ = scenes.full_red_scene(65, 65)
+    want_img, want_vis, want_levels, want_filled = expected_fill(
+        img, 32, 32, 8)
+    eng = ff.PixelBFS(65, 65, threads=16, serial_below=1, min_chunk=1)
+    work = np.empty_like(img)
+    for _ in range(1000):
+        np.copyto(work, img)
+        st = eng.run(work, 32, 32)
+        assert (st["levels"], st["filled"]) == (want_levels, want_filled)
+        np.testing.assert_array_equal(work, want_img)
+
+
 def test_tile_bfs_rounds_on_a_solid_square():
     """A center-seeded full square: the 8-conn tile graph's BFS from the
     seed tile reaches the farthest tile in max(|dtx|, |dty|) rounds, plus
@@ -862,6 +909,33 @@ def test_labels_repeatable_and_reusable():
         key = (j, st["rounds"], st["seeds"], st["ring_pieces"])
         seen.setdefault(j, key)
         assert seen[j] == key
+
+
+def duel_scene():
+    """32 bars (rows 0, 2, .., 62 of a 64 x 192 image) across three
+    tiles A | Q | B. With lattice 2, every bar's pieces in A and B are
+    seeds and its piece in Q is not. Round 1 lists all of A's seeds,
+    then all of B's, so at 16 threads A_i and B_i start together on
+    threads i // 4 and 8 + i // 4 and race for Q_i with different
+    waves: the lost-claim path of the label protocol."""
+    img = _white(64, 192)
+    img[0::2, :] = RED
+    return img
+
+
+def test_labels_duel_race_amplifier():
+    img = duel_scene()
+    want_img, want_lab, want_n = expected_labels(img, 8)
+    eng = ff.TileLabels(64, 192, lattice=2, threads=16, serial_below=1)
+    work = np.empty_like(img)
+    for _ in range(1000):
+        np.copyto(work, img)
+        st = eng.run(work)
+        np.testing.assert_array_equal(work, want_img)
+        np.testing.assert_array_equal(eng.label_map(), want_lab)
+        assert st["n_blobs"] == want_n == 32
+        assert st["expanded"] == st["ring_pieces"] == 96
+        assert st["claims"] == st["ring_pieces"] - st["seeds"] + st["dropped"]
 
 
 def test_labels_bad_inputs():
