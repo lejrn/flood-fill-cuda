@@ -12,8 +12,9 @@ and dims the drone panels; at "eighty-one" the card swaps to the 81 Mpx
 test frame (transposed, as every frame floor from r07 on); "same
 thirty-three" pulses the meter and the card's line together; a CPU
 stopwatch runs in real time past 33 ms to the CPU's labels-only time
-(`njit_ms`, 225 ms) beside "GPU ?", stopping at "second", and its end
-flies onto the meter as the grey CPU tick. "Two places" clears the stage
+(`njit_ms`, 225 ms) beside "GPU ?", stopping at "second", where the
+card's budget label pulses red (over budget); then its end flies onto
+the meter as the grey CPU tick. "Two places" clears the stage
 and brings the scoreboard strip's two open pills; the clip ends on
 exactly `chain_state(2)` (goal meter + strip), the first picture of
 r00_zoom, after a BREATH. The assembly places the i1 wav at len(i0) +
@@ -337,17 +338,21 @@ class Intro(BeatScene):
             card.values[0].set(ms_text(ms), col)
             card.set_bar(0, ms, col)
 
-        # the clock appears at zero just before it starts
+        # the clock appears at zero just before it starts; it turns red as
+        # it passes 33 ms
         self.until(t_go - fr(2))
         bcard.add(cpu_val)
         self.play(FadeIn(cpu_val), run_time=fr(2))
         cpu_val.add_updater(watch)
-        # the moment it passes the budget: the budget label flashes red
-        self.until(t_go + budget / 1000 + fr(1))
-        self.play(Indicate(bcard.budget[-1], color=RED_PX, scale_factor=1.2), run_time=fr(6))
-        self.until(t_stop + 0.15)
+        # it stops at "second": the budget label pulses red, over budget
+        self.until(t_stop)
         cpu_val.clear_updaters()
-        watch(None, 0)
+        # the last reading is the measured time, even when the whole-frame
+        # wait lands a little before the cue
+        end_col = RED_PX if njit > budget else INK
+        bcard.values[0].set(ms_text(njit), end_col)
+        bcard.set_bar(0, njit, end_col)
+        self.play(Indicate(bcard.budget[-1], color=RED_PX, scale_factor=1.2), run_time=fr(6))
         # the bar's end flies up onto the meter and becomes the grey CPU tick
         bar = bcard.bars[0]
         mark = Line(bar.get_corner(UR) + UP * 0.05, bar.get_corner(DR) + DOWN * 0.05,
