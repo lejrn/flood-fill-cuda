@@ -21,10 +21,21 @@ Run:
     uv run pytest src/flood_fill_cuda/chapters/ch09_cpu_nthreads/test_correctness.py -v
 """
 
+import numba
 import numpy as np
 import pytest
 
 from . import kernels as K
+from . import flood_fill as ff
+from ..ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill, cpu_flood_fill_8
+from ..ch03_gpu_1blob_nblock import scenes
+from ..ch07_gpu_1blob_tiles.benchmarks import worst_cases
+from ..ch08_gpu_nblob_tiles import scenes as scenes8
+
+BLUE = np.array([0, 0, 255], dtype=np.uint8)
+RED = scenes.RED
+THREADS = (1, 2, 16)
+FILL_METHODS = ("pixel",)
 
 RNG_SEEDS = (0, 1, 2, 3)
 
@@ -218,3 +229,187 @@ def test_close_tile_serpentine_needs_many_passes():
     f = np.zeros(64, np.uint64)
     passes, _, _ = K.close_from(f, m, True, 62, np.uint64(1))
     assert [int(w) for w in f] == mw
+
+
+# ------------------------------------------------------------ one blob
+
+def expected_fill(img, sx, sy, connectivity):
+    ref = cpu_flood_fill_8 if connectivity == 8 else cpu_flood_fill
+    visited, _, levels, filled = ref(img, sx, sy)
+    out = img.copy()
+    out[visited == 1] = BLUE
+    return out, visited, int(levels), int(filled)
+
+
+def _white(w, h):
+    return np.full((w, h, 3), 255, dtype=np.uint8)
+
+
+def checkerboard_scene(w, h):
+    img = _white(w, h)
+    xs, ys = np.meshgrid(np.arange(w), np.arange(h), indexing="ij")
+    img[(xs + ys) % 2 == 0] = RED
+    return img, 0, 0
+
+
+def tile_border_zigzag_scene(w=320, h=300, tile=64):
+    """Zigzags along y on every x tile border (rows 64k+63 | 64k+64) and
+    along x on every y border, joined: rounds == levels for a 64-tile
+    BFS (ch07's zz_lattice at this chapter's tile size)."""
+    img = _white(w, h)
+    ys = np.arange(h)
+    for k in range(w // tile):
+        if tile * k + tile < w:
+            img[tile * k + tile - 1 + (ys % 2), ys] = RED
+    xs = np.arange(w)
+    for j in range(h // tile):
+        if tile * j + tile < h:
+            img[xs, tile * j + tile - 1 + (xs % 2)] = RED
+    red = np.argwhere((img[..., 0] == 255) & (img[..., 1] == 0))
+    return img, int(red[0][0]), int(red[0][1])
+
+
+def corner_pixels_scene(w=193, h=130, tile=64):
+    """Single pixels and 2x2 blocks on the 64-tile corners, joined only
+    diagonally across the corner, plus the image corners."""
+    img = _white(w, h)
+    for x in range(tile, w, tile):
+        for y in range(tile, h, tile):
+            img[x - 1, y - 1] = RED
+            img[x, y] = RED
+    for x, y in ((0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)):
+        img[x, y] = RED
+    return img, tile - 1, tile - 1
+
+
+def _noise(w, h, density, seed):
+    return scenes.random_scene(w, h, density, rng_seed=seed)
+
+
+ONE_BLOB = {
+    "square_off64": lambda: scenes.square_scene(300, 200, 150, 101),
+    "corner_square": lambda: scenes.square_scene(130, 70, 130, 70,
+                                                 corner=True),
+    "disk_257": lambda: scenes.disk_scene(257, 257, 100),
+    "serpentine_64": lambda: scenes.serpentine_scene(64, 64),
+    "serpentine_100x37": lambda: scenes.serpentine_scene(100, 37),
+    "full_red_130x70": lambda: scenes.full_red_scene(130, 70),
+    "single_px": lambda: scenes.single_pixel_scene(65, 129),
+    "one_by_one": lambda: scenes.full_red_scene(1, 1),
+    "one_row": lambda: scenes.full_red_scene(1, 200),
+    "one_col": lambda: scenes.full_red_scene(200, 1),
+    "noise_0.40": lambda: _noise(200, 170, 0.40, 1),
+    "noise_0.45": lambda: _noise(200, 170, 0.45, 2),
+    "noise_0.59": lambda: _noise(160, 200, 0.59, 3),
+    "noise_0.62": lambda: _noise(160, 200, 0.62, 4),
+    "checkerboard": lambda: checkerboard_scene(130, 67),
+    "spiral": lambda: (lambda im: (im, int(np.argwhere(
+        im[..., 1] == 0)[0][0]), int(np.argwhere(im[..., 1] == 0)[0][1])))(
+            scenes8.spiral_scene(128, 2)),
+    "maze_63": lambda: worst_cases.maze_scene(cells=32, rng_seed=3),
+    "zz_serp": lambda: worst_cases.zz_serpentine_scene(256, 200),
+    "tile_zigzags": tile_border_zigzag_scene,
+    "tile_corners": corner_pixels_scene,
+}
+
+
+@pytest.mark.parametrize("threads", THREADS)
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", list(ONE_BLOB))
+def test_pixel_bfs_matches_oracle(name, connectivity, threads):
+    img, sx, sy = ONE_BLOB[name]()
+    want_img, want_vis, want_levels, want_filled = expected_fill(
+        img, sx, sy, connectivity)
+    res = ff.flood_fill(img, sx, sy, connectivity=connectivity,
+                        method="pixel", threads=threads)
+    np.testing.assert_array_equal(res.visited, want_vis)
+    np.testing.assert_array_equal(res.img, want_img)
+    assert res.filled == want_filled
+    assert res.steps == want_levels
+    assert res.threads == threads
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", ["full_red_512", "noise_0.62_big",
+                                  "disk_400"])
+def test_pixel_bfs_forced_races(name, connectivity):
+    """Every level split into as many chunks as allowed (serial_below=1,
+    min_chunk=1, 16 threads): races between chunks are as frequent as
+    they get, and the output must not move."""
+    img, sx, sy = {
+        "full_red_512": lambda: scenes.full_red_scene(512, 512),
+        "noise_0.62_big": lambda: _noise(500, 400, 0.62, 9),
+        "disk_400": lambda: scenes.disk_scene(400, 400, 190),
+    }[name]()
+    if name == "full_red_512":
+        sx, sy = 256, 256
+    want_img, want_vis, want_levels, want_filled = expected_fill(
+        img, sx, sy, connectivity)
+    eng = ff.PixelBFS(img.shape[0], img.shape[1], connectivity=connectivity,
+                      threads=16, serial_below=1, min_chunk=1)
+    for _ in range(3):
+        work = img.copy()
+        st = eng.run(work, sx, sy)
+        np.testing.assert_array_equal(eng.visited(), want_vis == 1)
+        np.testing.assert_array_equal(work, want_img)
+        assert st["filled"] == want_filled
+        assert st["levels"] == want_levels
+        assert st["parallel_levels"] > 0
+        # duplicates never multiply: at most one copy per racing chunk
+        assert st["duplicates"] < want_filled
+
+
+def test_pixel_bfs_repeatable_and_reusable():
+    """One engine, many runs, alternating seeds and thread counts: every
+    output equals the oracle's (the buffers are reset on the clock)."""
+    img, _, _ = scenes.square_scene(300, 260, 200, 150)
+    img[0:20, 0:20] = RED
+    seeds = [(150, 130), (5, 5), (150, 130)]
+    eng = ff.PixelBFS(300, 260, connectivity=8, serial_below=1, min_chunk=8)
+    for i in range(6):
+        sx, sy = seeds[i % 3]
+        want_img, want_vis, want_levels, want_filled = expected_fill(
+            img, sx, sy, 8)
+        work = img.copy()
+        with ff.num_threads(THREADS[i % 3]):
+            st = eng.run(work, sx, sy)
+        np.testing.assert_array_equal(work, want_img)
+        assert (st["levels"], st["filled"]) == (want_levels, want_filled)
+
+
+@pytest.mark.parametrize("method", FILL_METHODS)
+def test_non_red_seed_raises(method):
+    img, _, _ = scenes.square_scene(64, 64, 10, 10)
+    with pytest.raises(ValueError, match="not red"):
+        ff.flood_fill(img, 0, 0, method=method)
+    blank = _white(40, 30)
+    with pytest.raises(ValueError, match="not red"):
+        ff.flood_fill(blank, 3, 3, method=method)
+    with pytest.raises(ValueError, match="outside"):
+        ff.flood_fill(img, 64, 0, method=method)
+
+
+@pytest.mark.parametrize("method", FILL_METHODS)
+def test_bad_inputs(method):
+    img, sx, sy = scenes.square_scene(64, 64, 10, 10)
+    with pytest.raises(ValueError):
+        ff.flood_fill(img, sx, sy, connectivity=6, method=method)
+    with pytest.raises(ValueError):
+        ff.flood_fill(img, sx, sy, method="queue")
+    with pytest.raises(ValueError):
+        ff.flood_fill(img[..., :2], sx, sy, method=method)
+    with pytest.raises(ValueError):
+        ff.flood_fill(img, sx, sy, method=method,
+                      threads=numba.config.NUMBA_NUM_THREADS + 1)
+    eng = ff.ENGINES[method](64, 64)
+    with pytest.raises(ValueError):
+        eng.run(np.full((64, 65, 3), 255, np.uint8), 0, 0)
+
+
+def test_input_layouts_and_seed_dtypes():
+    img, sx, sy = scenes.disk_scene(150, 120, 50)
+    want_img, _, _, _ = expected_fill(img, sx, sy, 8)
+    f_order = np.asfortranarray(img)
+    res = ff.flood_fill(f_order, np.int16(sx), np.uint8(sy), method="pixel")
+    np.testing.assert_array_equal(res.img, want_img)
+    np.testing.assert_array_equal(img, scenes.disk_scene(150, 120, 50)[0])

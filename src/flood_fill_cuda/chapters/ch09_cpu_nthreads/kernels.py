@@ -44,7 +44,7 @@ THE CLOSURE (bit helpers below)
 """
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 from numba.cpython.unsafe.numbers import trailing_zeros
 
 TILE = 64
@@ -276,3 +276,202 @@ def close_from(f, m, conn8, i, s):
     close it. Returns (passes, lo, hi)."""
     f[i] = row_fill(s, m[i])
     return close_tile(f, m, conn8, bit(i), i, i)
+
+
+# ------------------------------------------------------------- shared
+
+@njit(cache=True)
+def is_red(img, x, y):
+    return img[x, y, 0] == 255 and img[x, y, 1] == 0 and img[x, y, 2] == 0
+
+
+@njit(parallel=True, cache=True)
+def reset_u8(a):
+    """a[...] = 0 for a C-contiguous (W, H) uint8 array, rows in
+    parallel."""
+    for x in prange(a.shape[0]):
+        for y in range(a.shape[1]):
+            a[x, y] = 0
+
+
+@njit(parallel=True, cache=True)
+def paint_visited(img, visited):
+    """Reached pixels (visited != 0) become (0, 0, 255), rows in
+    parallel; every row is written by one thread."""
+    for x in prange(img.shape[0]):
+        for y in range(img.shape[1]):
+            if visited[x, y] != 0:
+                img[x, y, 0] = 0
+                img[x, y, 1] = 0
+                img[x, y, 2] = 255
+
+
+def chunk_bounds(n, nch, c):
+    """Chunk c of n entries split into nch contiguous chunks."""
+    return n * c // nch, n * (c + 1) // nch
+
+
+# ------------------------------------------------------------- pixel BFS
+#
+# ch03 on the CPU: a level-synchronous BFS. The frontier is an array of
+# entries (z << 8) | stamp, z = x * height + y. A level splits it into
+# nch contiguous chunks; chunk c (one prange iteration, so one thread)
+# expands its slice and writes what it discovers into its own region of
+# `raw`, [K * a, K * b) for its slice [a, b) (K = 4 or 8 neighbours, so
+# the region cannot overflow). After the prange (the barrier) the
+# regions are concatenated into the next frontier, in parallel, at
+# offsets from a serial prefix sum over the nch counts.
+#
+# The visited flag is one uint8 per pixel, 0 = not reached, written
+# WITHOUT atomics: chunk c stores its stamp c + 1 (1..255) when it
+# claims a pixel. Why the fill set is still exact:
+#
+# (1) Nothing outside the blob is reached. A pixel is flagged only by
+#     the expansion of a frontier pixel next to it, and only if it is
+#     red; by induction from the seed, every flagged pixel is in the
+#     seed's component.
+# (2) Nothing inside is missed. A flag goes from 0 to a stamp and never
+#     back during the fill, and a one-byte store is one instruction, so
+#     any read returns 0 or a stamp some chunk stored. The chunk that
+#     stores a stamp appends the pixel to its own region in the same
+#     iteration, and every region is copied into the next frontier
+#     after the barrier. So when an expansion reads a non-zero flag on
+#     a red neighbour, that neighbour is (or was) in some frontier
+#     already. Every red neighbour of every expanded pixel is therefore
+#     expanded at some level, and the component is closed under that.
+# (3) Every pixel is expanded exactly once. Two chunks can both read 0
+#     and both flag and append the same pixel: the race. After the
+#     barrier its byte holds exactly one of their stamps (the last
+#     store wins). A frontier entry is expanded only if the byte equals
+#     its own stamp, so one copy is expanded and the others are dropped
+#     (counted as duplicates). One chunk never appends a pixel twice:
+#     its second read sees its own store. So a duplicate never claims
+#     anything and duplicates cannot grow from level to level; the
+#     frontier holds at most one copy per racing chunk.
+# (4) Levels are exact. A pixel is flagged only while its first
+#     neighbour is being expanded, all at one level L, so it enters the
+#     frontier of level L + 1: the same partition into levels as the
+#     sequential oracle's. The level count and the expanded count (the
+#     fill count) equal the oracle's.
+#
+# Stamps are unique within a level (nch <= 255), and a pixel is flagged
+# in one level only (the barrier makes the level's stores visible to
+# the next), so stamps can be reused from level to level.
+
+MAX_CHUNKS = 255
+
+# neighbour orders as the oracles (ch01's 4-conn, shared/'s 8-conn)
+DX4 = np.array([1, 0, -1, 0], dtype=np.int64)
+DY4 = np.array([0, 1, 0, -1], dtype=np.int64)
+DX8 = np.array([1, 1, 0, -1, -1, -1, 0, 1], dtype=np.int64)
+DY8 = np.array([0, 1, 1, 1, 0, -1, -1, -1], dtype=np.int64)
+
+
+@njit(cache=True)
+def _expand_pixels(img, visited, front, a, b, raw, base, stamp, conn8):
+    """Expand frontier entries [a, b) as chunk `stamp` - 1: appends to
+    raw[base:]. Returns (appended, expanded, dropped duplicates)."""
+    width, height = img.shape[0], img.shape[1]
+    nd = 8 if conn8 else 4
+    st = np.uint8(stamp)
+    cnt = 0
+    expanded = 0
+    dropped = 0
+    for j in range(a, b):
+        e = front[j]
+        z = e >> 8
+        x = z // height
+        y = z - x * height
+        if visited[x, y] != (e & 255):
+            dropped += 1
+            continue
+        expanded += 1
+        for d in range(nd):
+            if conn8:
+                nx = x + DX8[d]
+                ny = y + DY8[d]
+            else:
+                nx = x + DX4[d]
+                ny = y + DY4[d]
+            if 0 <= nx < width and 0 <= ny < height and visited[nx, ny] == 0:
+                if (img[nx, ny, 0] == 255 and img[nx, ny, 1] == 0
+                        and img[nx, ny, 2] == 0):
+                    visited[nx, ny] = st
+                    raw[base + cnt] = ((nx * height + ny) << 8) | stamp
+                    cnt += 1
+    return cnt, expanded, dropped
+
+
+@njit(parallel=True, cache=True)
+def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
+              serial_below, n_threads):
+    """Level-synchronous BFS from (seed_x, seed_y), a red pixel; visited
+    must be all 0. Levels with fewer than serial_below entries run on
+    the calling thread (a prange costs a fork and a barrier); larger
+    ones use up to 4 chunks per thread (n_threads: numba's current
+    setting, passed in so the function can be cached), at least
+    min_chunk entries each.
+
+    Returns (levels, filled, duplicates, peak frontier, parallel levels,
+    front, raw): front and raw may have been grown."""
+    height = img.shape[1]
+    k = 8 if conn8 else 4
+    max_chunks = min(MAX_CHUNKS, 4 * max(n_threads, 1))
+    counts = np.zeros(max_chunks, np.int64)
+    expd = np.zeros(max_chunks, np.int64)
+    drop = np.zeros(max_chunks, np.int64)
+    offs = np.zeros(max_chunks + 1, np.int64)
+    visited[seed_x, seed_y] = 1
+    front[0] = ((seed_x * height + seed_y) << 8) | 1
+    n = 1
+    levels = 0
+    filled = 0
+    dups = 0
+    peak = 0
+    par_levels = 0
+    while n > 0:
+        levels += 1
+        if n > peak:
+            peak = n
+        nch = n // max(min_chunk, 1)
+        if nch > max_chunks:
+            nch = max_chunks
+        if n < serial_below or nch < 2:
+            nch = 1
+        if raw.size < k * n:
+            raw = np.empty(2 * k * n, np.int64)
+        if nch == 1:
+            r = _expand_pixels(img, visited, front, 0, n, raw, 0, 1, conn8)
+            counts[0] = r[0]
+            expd[0] = r[1]
+            drop[0] = r[2]
+        else:
+            par_levels += 1
+            for c in prange(nch):
+                a = n * c // nch
+                b = n * (c + 1) // nch
+                r = _expand_pixels(img, visited, front, a, b, raw, k * a,
+                                   c + 1, conn8)
+                counts[c] = r[0]
+                expd[c] = r[1]
+                drop[c] = r[2]
+        total = 0
+        for c in range(nch):
+            offs[c] = total
+            total += counts[c]
+            filled += expd[c]
+            dups += drop[c]
+        if front.size < total:
+            front = np.empty(2 * total, np.int64)
+        if nch == 1:
+            for j in range(total):
+                front[j] = raw[j]
+        else:
+            for c in prange(nch):
+                a = n * c // nch
+                src = k * a
+                dst = offs[c]
+                for j in range(counts[c]):
+                    front[dst + j] = raw[src + j]
+        n = total
+    return levels, filled, dups, peak, par_levels, front, raw
