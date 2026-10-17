@@ -374,7 +374,7 @@ v1's four in `out/chain_v1/`.
 |---|---|---|---|---|
 | `final_chain_iso_vertical_kokoro_paced.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam`, paced | 278.4 s |
 | `final_chain_iso_landscape_kokoro_paced.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam`, paced | 278.4 s |
-| `share/chain_v5_iso_vertical_kokoro_small.mp4` | 1080x1920 | 2.5D | the same, phone copy (22.1 MB) | 278.4 s |
+| `share/chain_v5_iso_vertical_kokoro_small.mp4` | 1080x1920 | 2.5D | the same, phone copy (22.2 MB) | 278.4 s |
 | `share/chain_v5_iso_landscape_kokoro_small.mp4` | 1920x1080 | 2.5D | the same, phone copy (19.7 MB) | 278.4 s |
 
 ### v5: tiles, like for like (278.4 s)
@@ -441,14 +441,14 @@ both at the committed HEAD (`script_matches_head`).
 | beat | start, s | length, s | the link |
 |---|---|---|---|
 | intro (i0, i1) | 0.00 | 26.73 | drones, 33 ms; drone card CPU 0.679 ms, GPU "?"; 81 Mpx: the CPU needs 225 ms; "size and count" |
-| r00 zoom | 26.73 | 5.73 | one drone |
-| r01 CPU | 32.47 | 9.73 | one pixel per step, one core, 24 SMs idle |
+| r00 zoom | 26.73 | 5.73 | one drone; "Freeze" is a white outline pulse round the floor, not a flash |
+| r01 CPU | 32.47 | 9.73 | one pixel per step, one core, 24 SMs idle (two captions) |
 | r02 one block | 42.20 | 15.73 | threads and block defined; on one small blob the CPU wins, 4.3x (0.121 vs 0.520 ms); row 1 |
 | r03 giant | 57.93 | 13.70 | 48 KB per block, the queue needs 125 KB: it spills to global memory |
 | r03b one SM | 71.63 | 6.53 | one block a little faster than the CPU, 1.1x; 1 of 24 SMs |
 | r04 two blocks | 78.17 | 24.93 | the queue moves to global memory; twice as fast (GPU vs GPU); 22 SMs dark |
 | r05 all blocks | 103.10 | 23.60 | 48 blocks, 8.5x; their pixels mix; the launch-shape sweep, +15% at best |
-| r05b snake | 126.70 | 9.37 | 48 blocks lose to one: the gate, twice per ring, ~2 us |
+| r05b snake | 126.70 | 9.37 | 48 blocks lose to one: the gate, twice per ring, ~2 us (the caption on "each") |
 | r06 diagonals | 136.07 | 7.53 | half the rings; 11x against the 8-neighbour CPU; row 2 |
 | r07 real frame | 143.60 | 11.33 | 2,522 launches, ~1,462 ms (estimate): the CPU (202 ms) wins by 7.2x |
 | r08 tags | 154.93 | 20.40 | two per launch, ~850 ms: faster, but the CPU still wins by 4.2x |
@@ -457,7 +457,7 @@ both at the committed HEAD (`script_matches_head`).
 | r11 rounds | 212.47 | 19.53 | border bits join the next round; one gate per round; 4,001 rings -> 127 rounds, 101 -> 3.12 ms; row 2 340x |
 | r12 pieces | 232.00 | 17.17 | a 384 px crop as its own image: 135 pieces, 36 seeds, 8 blobs; waves meet, the smallest label wins |
 | r13 frame | 249.17 | 12.00 | 11,609 seeds, 6 rounds, 2,522 blobs: 2.21 ms once the frame is on the card; row 3 100x |
-| r14 reveal | 261.17 | 17.27 | the card (0.192 / 0.044 ms GPU 4.4x, 1,065 / 3.12 ms 340x, 225 / 2.21 ms 100x), copies in its footnote; the drones; the title card |
+| r14 reveal | 261.17 | 17.27 | the card (0.192 / 0.044 ms GPU 4.4x, 1,065 / 3.12 ms 340x, 225 / 2.21 ms 100x), copies in its footnote; from "CPU" a note under the small-blob pill, "with the copy" / "CPU 3.5x", to the end; the drones ("GPU + copies: 1.26 ms"); the title card |
 
 Files:
 - Narration: `narration/script_chain.md` (v5, 19 beats, k = 0..18) and
@@ -495,7 +495,7 @@ lets at most 3 renders run at once (memory), one layout after the other.
   `work_chain_iso_*_kokoro_paced` folders were overwritten.
 
 Checks:
-- `numbers.py`: 115 claim checks, all ok. `build/audit_numbers.py` has
+- `numbers.py`: 116 claim checks, all ok. `build/audit_numbers.py` has
   no chain mode (it audits the three-pane cut, and still passes), so
   `numbers.py` is the chain cut's audit. Every on-screen number is a
   `numbers.py` value, and `STORY_SHOWN` ties every shown CPU-vs-GPU
@@ -517,6 +517,28 @@ Checks:
   s; the proposal's model said 286.9 s.
 - Contact sheets of 20 frames per layout; the title card is up at
   277.5 s.
+
+The final check (2026-10-18) found four problems, all in the picture; no
+word changed. Only those four clips were re-rendered, in both layouts,
+then muxed again. The seams and snaps read as before, and the three
+flagged seams flag to the same figure. The phone copies were rebuilt
+with the same settings.
+- F1, r14: the closing strip read as a GPU win on every row, drones
+  included. The CPU's side ("with the copy, still the CPU") lived only
+  in the footnote, which leaves with the card. Now, from "CPU", a grey
+  note pill hangs under the small-blob pill: "with the copy" / "CPU
+  3.5x" (`small_e2e_cpu_x`, checked against V5's own `twin.x_e2e`). It
+  stays to the end, where the inset was. Caption 3's sub names whose
+  time it is: "GPU + copies: 1.26 ms".
+- F2, r01: three captions in a 4.5 s sentence. The SMs' caption landed
+  after the line and stood 1.2 s. Now there are two: "1 pixel per step"
+  / "1 core of 14", then "24 SMs" on "SMs" (up 2.1 s).
+- F3, r05b: the last caption waited a full dwell after the "grid.sync"
+  tag, so it came 1.4 s after its line. Now it lands on "each" (up
+  2.6 s). The gate comes down with its tag as the race ends, just after.
+- F4, r00: "Freeze" was a two-frame white flash over the whole floor
+  (12.6% / 17.4% of the frame). Now it is a white outline pulse round
+  the floor, so no large area flashes.
 
 Gotchas found in v5:
 - The 900 px frame PNGs are in PNG order, act 3's arrays [x, y]:

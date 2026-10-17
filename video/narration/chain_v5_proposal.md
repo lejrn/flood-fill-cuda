@@ -248,6 +248,10 @@ teal frame.
 
 i0_problem, r00_zoom, r01_cpu, r03_giant, r04_two_blocks, r05b_snake,
 r06_diagonals and r07_real_frame: same text, same takes, same pictures.
+The final check (2026-10-18) changed three of those pictures, never a
+word: r00's "Freeze" is a white outline pulse round the floor, not a
+flash of it; r01 has two captions, not three; r05b's last caption lands
+on "each".
 
 Their numbers that come from GPU-only comparisons keep their July
 sessions, each within one session: 48 KB and 125 KB (r03), SM 2, 1.7x
