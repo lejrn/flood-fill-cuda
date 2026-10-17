@@ -21,9 +21,12 @@ cores. None of them is a result, and none is quoted here.
    for ch08. `sq_256`: 0.19 ms, 0.044 ms for ch07.
 2. **The CPU has 16 logical CPUs.** An i9-13900H: 8 cores seen as 16
    threads, a mix of P- and E-cores. One core is a sixteenth of it.
-3. **Numba has no CPU atomics.** Every GPU chapter leans on atomic
-   (אטומית) operations: CAS claims, atomic OR, atomicMin. On the CPU
-   each claim must be safe by construction, or harmless when it races.
+3. **Numba's API exposes no CPU atomics.** Every GPU chapter leans on
+   atomic (אטומית) operations: CAS claims, atomic OR, atomicMin. A
+   dozen lines of `numba.extending.intrinsic` would emit LLVM's
+   `cmpxchg` on the CPU too, and it works inside a `prange`. This
+   chapter takes the other route: each claim is safe by construction,
+   or harmless when it races, and costs no locked instruction.
 
 ## The three variants
 

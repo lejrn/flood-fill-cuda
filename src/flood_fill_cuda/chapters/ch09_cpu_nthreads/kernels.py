@@ -13,15 +13,30 @@ chunks with prange:
                  from piece to piece, unions applied at the end
 
 NO ATOMICS
-Numba has no CPU atomics. Every parallel loop here is a prange over
-CHUNKS, and every chunk owns the memory it writes: its own slice of an
-output buffer, its own counters, its own tiles. Where two chunks can
-still touch one location (a pixel claimed from two sides, a piece
-claimed by two waves), the location only ever receives whole aligned
-values (one byte, or one 4-byte int32), the value read back after the
-barrier is one of the values written, and the protocol is built so
-that ANY of them gives the same final answer. Each variant's comment
-says why.
+Numba's API exposes no atomic operations for CPU code. They can be had
+(an @numba.extending.intrinsic of about a dozen lines emits LLVM's
+cmpxchg or atomicrmw, and works inside a prange), but this chapter
+avoids them by construction instead. Every parallel loop here is a
+prange over CHUNKS, and every chunk owns the memory it writes: its own
+slice of an output buffer, its own counters, its own tiles. Where two
+chunks can still touch one location (a pixel claimed from two sides, a
+piece claimed by two waves), the location only ever receives whole
+aligned values (one byte, or one 4-byte int32), the value read back
+after the barrier is one of the values written, and the protocol is
+built so that ANY of them gives the same final answer. Each variant's
+comment says why.
+
+BENIGN RACES
+Those few locations (the pixel BFS's visited byte, the labels' lab and
+claimer) are read and written with plain loads and stores while other
+threads may store to them. The hardware side is sound: an aligned
+store of one byte or four is one instruction on x86-64 and is never
+torn. The compiler side is an assumption: LLVM's memory model calls a
+racing plain load undefined, and the protocols rely on every such
+access compiling to one load or one store, as it does here. Relaxed
+(monotonic) atomic loads and stores through an @intrinsic would make
+them formally defined at no cost on x86-64 (they compile to the same
+mov instructions); that change is left open.
 
 THE TILE (tile BFS and tile labels)
 A tile is 64 consecutive rows (x0 .. x0+63) times one 64-bit word
@@ -947,7 +962,8 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
 # (aligned 4-byte and 1-byte stores are never torn), not necessarily
 # the same racer's. In the next round each listed entry of Q:
 #   - records the meeting (its wave, lab[Q]) if they differ, so every
-#     wave that ever touched Q is joined with Q's final wave;
+#     wave that ever touched Q is joined with Q's final wave (a safety
+#     net, see below: the argument does not need it);
 #   - expands Q only if claimer[Q] equals its stamp: exactly one entry,
 #     and it expands Q with lab[Q] (Q's final wave), not its own.
 # A reader that sees a wave being overwritten records a meeting with
@@ -958,6 +974,13 @@ def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
 # or joins the two waves. Labels, paint and blob counts are therefore
 # deterministic; which wave wins a race, and how many meetings are
 # recorded, are not.
+#
+# The lost-claim meeting is redundant: an entry (Q, w) exists because a
+# piece R of final wave w touched Q, and Q's one expansion touches R in
+# turn (dirs and the frame maps are symmetric), sees lab[R] = w and
+# records the same pair. A fuzz with that meeting removed stayed exact
+# in every run, races included. It is kept as a safety net: one entry
+# per lost race, and the argument for each round stays local.
 #
 # BOUNDED BUFFERS. A chunk writes its claims, its meetings and its
 # requeued entries into its own regions, sized per entry plus one worst
@@ -1275,6 +1298,8 @@ def _expand_pieces(ent_a, ent_w, a, b, lab, claimer, dirs, fmap, wpr, conn8,
         wq = lab[p]
         last_m = -1
         if wq != we:
+            # lost race: a safety net (Q's own expansion records the
+            # same pair; see CLAIMS WITHOUT ATOMICS above)
             ma[mpos] = we
             mb[mpos] = wq
             mpos += 1
