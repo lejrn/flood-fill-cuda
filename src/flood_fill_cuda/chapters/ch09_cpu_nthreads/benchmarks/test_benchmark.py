@@ -249,7 +249,7 @@ def test_gpu_part_stops_its_sampler(monkeypatch):
     events = []
 
     class FakeGpu:
-        device, sm_count = "fake", 1
+        device, sm_count, cc = "fake", 1, (8, 9)
 
     class FakeSampler:
         def stop(self):
@@ -258,8 +258,7 @@ def test_gpu_part_stops_its_sampler(monkeypatch):
     monkeypatch.setattr(B, "Sampler", FakeSampler)
     monkeypatch.setattr(B, "gpu_scene", lambda *a, **k: ({}, {}))
     monkeypatch.setattr(B, "reference", lambda *a, **k: {})
-    monkeypatch.setattr(B, "gpu_identity", lambda gpu: {}, raising=False)
-    monkeypatch.setattr(B, "gpu_clocks", lambda: {}, raising=False)
+    monkeypatch.setattr(B, "_smi", lambda q: None)
     monkeypatch.setattr(B.time, "sleep", lambda s: events.append("cooldown"))
     args = _args("--cooldown", "1")
     args.no_gpu = False
@@ -267,3 +266,27 @@ def test_gpu_part_stops_its_sampler(monkeypatch):
     B.run_gpu_blocks([{"scene": "t", "gpu": {}}],
                      [("t", "one", img, seed, conns)], [], args)
     assert events == ["stop", "cooldown"]
+
+
+def test_session_names_the_gpu(monkeypatch):
+    """The GPU numbers must say which GPU and driver made them: the
+    device, its SMs, the driver, the max clocks, and the clocks at the
+    start and the end of the GPU blocks."""
+    answers = {
+        "driver_version,clocks.max.sm,clocks.max.mem": ["610.62", "3105",
+                                                        "8001"],
+        "clocks.sm,clocks.mem,pstate,temperature.gpu,power.draw": [
+            "210", "405", "P8", "41", "3.2"]}
+    monkeypatch.setattr(B, "_smi", lambda q: answers[q])
+
+    class FakeGpu:
+        device, sm_count, cc = "Some GPU", 24, (8, 9)
+    info = B.gpu_identity(FakeGpu())
+    assert info == {"device": "Some GPU", "sm_count": 24,
+                    "compute_capability": "8.9", "driver": "610.62",
+                    "max_sm_mhz": 3105, "max_mem_mhz": 8001}
+    clk = B.gpu_clocks()
+    assert clk == {"sm_mhz": 210, "mem_mhz": 405, "pstate": "P8",
+                   "temperature_c": 41, "power_w": 3.2}
+    monkeypatch.setattr(B, "_smi", lambda q: None)
+    assert B.gpu_clocks() == {}

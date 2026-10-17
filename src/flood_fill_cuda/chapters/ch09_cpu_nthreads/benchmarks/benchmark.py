@@ -1259,6 +1259,47 @@ class Sampler:
                 self.proc.kill()
 
 
+def _smi(query):
+    """nvidia-smi --query-gpu=<query> for GPU 0: the fields as strings,
+    or None (no nvidia-smi, an error)."""
+    try:
+        r = subprocess.run(["nvidia-smi", f"--query-gpu={query}",
+                            "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode != 0 or not r.stdout.strip():
+            return None
+        return [x.strip() for x in r.stdout.strip().splitlines()[0].split(",")]
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _num(x, kind=int):
+    try:
+        return kind(float(x)) if kind is int else kind(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def gpu_identity(gpu):
+    """Which GPU and driver made the GPU numbers (saved in the session)."""
+    out = {"device": gpu.device, "sm_count": gpu.sm_count,
+           "compute_capability": ".".join(str(v) for v in gpu.cc)}
+    v = _smi("driver_version,clocks.max.sm,clocks.max.mem")
+    if v:
+        out.update(driver=v[0], max_sm_mhz=_num(v[1]),
+                   max_mem_mhz=_num(v[2]))
+    return out
+
+
+def gpu_clocks():
+    """A snapshot of the GPU's clocks, P-state, temperature and power."""
+    v = _smi("clocks.sm,clocks.mem,pstate,temperature.gpu,power.draw")
+    if not v:
+        return {}
+    return {"sm_mhz": _num(v[0]), "mem_mhz": _num(v[1]), "pstate": v[2],
+            "temperature_c": _num(v[3]), "power_w": _num(v[4], float)}
+
+
 class Gpu:
     """The GPU side: ch07's and ch08's engines, the L2 flush, the gap."""
 
@@ -1277,15 +1318,14 @@ class Gpu:
             dev.name)
         self.device = name.replace("\x00", "").strip()
         self.sm_count = int(dev.MULTIPROCESSOR_COUNT)
+        self.cc = tuple(dev.compute_capability)
         self.mem_full_mhz = 8001
-        try:
-            mx = subprocess.run(
-                ["nvidia-smi", "--query-gpu=clocks.max.sm,clocks.max.mem",
-                 "--format=csv,noheader,nounits"], capture_output=True,
-                text=True, timeout=10).stdout.strip().split(",")
-            self.mem_full_mhz = int(float(mx[1]))
-        except Exception:
-            pass
+        mx = _smi("clocks.max.mem")
+        if mx:
+            try:
+                self.mem_full_mhz = int(float(mx[0]))
+            except ValueError:
+                pass
 
     def gap(self):
         for _ in range(FLUSH_READS):
@@ -1717,9 +1757,11 @@ def run_gpu_blocks(rows, scenes, frames, args):
     """Every GPU block (scenes, then the drones), then the cooldown.
     The nvidia-smi sampler lives only as long as the GPU blocks: it is
     stopped before the cooldown, so it never runs beside a CPU pass.
-    Fills rows[i]["gpu"]; returns (gpu_blocks, drones)."""
+    Fills rows[i]["gpu"]; returns (gpu_blocks, drones, the GPU's
+    identity and its clocks at the start and the end)."""
     gpu_blocks, drones = {}, None
     gpu = Gpu()
+    info = {**gpu_identity(gpu), "clocks_start": gpu_clocks()}
     sampler = Sampler()
     try:
         print(f"GPU: {gpu.device} ({gpu.sm_count} SMs)", flush=True)
@@ -1739,11 +1781,12 @@ def run_gpu_blocks(rows, scenes, frames, args):
             drones = {"gpu": dg}
     finally:
         sampler.stop()
+    info["clocks_end"] = gpu_clocks()
     if args.cooldown:
         print(f"Cooldown {args.cooldown:.0f} s before the CPU passes",
               flush=True)
         time.sleep(args.cooldown)
-    return gpu_blocks, drones
+    return gpu_blocks, drones, info
 
 
 def build_parser():
@@ -1855,9 +1898,10 @@ def main(argv=None):
                     "palette": palette_image(f["img"], lab)}
 
     # -- GPU blocks first
-    gpu_blocks, drones = {}, None
+    gpu_blocks, drones, gpu_info = {}, None, None
     if not args.no_gpu:
-        gpu_blocks, drones = run_gpu_blocks(rows, scenes, frames, args)
+        gpu_blocks, drones, gpu_info = run_gpu_blocks(rows, scenes, frames,
+                                                      args)
 
     # -- CPU passes, scene by scene
     cpu_rounds = {}
@@ -1903,6 +1947,7 @@ def main(argv=None):
         "runtime": {**runtime,
                     "requested_threading_layer": args.threading_layer,
                     "notes": runtime_notes},
+        "gpu": gpu_info,
         "git": {"commit": _git("rev-parse", "--short", "HEAD"),
                 "dirty": bool(_git("status", "--porcelain"))},
         "settings": {
