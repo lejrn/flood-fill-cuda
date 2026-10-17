@@ -35,6 +35,8 @@ Checks (the script stops on any failure):
 - The twin's fill equals the chapter kernel's fill, bit for bit, and
   both equal the @njit oracle's visited set (cpu_flood_fill_8).
 - Rounds equal the chapter kernel's on every run (127 on sq_8000).
+  On the close-up's irregular blob they may not (see closeup_export),
+  so there they are recorded per run instead.
 - sum(round_size) == the TILE_VISITS counter == sum(visit_count), and
   max(round_size) == the PEAK_ROUND counter.
 - first_open is set on every tile, never exceeds the stamp of the same
@@ -499,6 +501,17 @@ def closeup_export(png_path, checks, blob_rank=0, quick=False, tile=None):
     d_img = cuda.to_device(img)
     d_pristine = cuda.to_device(img)
     chap_c, chap_reached, _ = run_chapter(eng, d_img, sx, sy)
+    # On an irregular blob the rounds move with timing (an export that
+    # lands before a tile's read lets its closure, and the wave, run
+    # ahead); the fill does not. So rounds are recorded, not compared.
+    chap_rounds = [chap_c["rounds"]]
+    for _ in range(N_RUNS - 1):
+        d_img.copy_to_device(d_pristine)
+        c2, w2, _ = run_chapter(eng, d_img, sx, sy)
+        check(np.array_equal(w2, chap_reached),
+              "close-up blob: chapter fill equal on every run", checks)
+        chap_rounds.append(c2["rounds"])
+    twin_rounds = []
     o_words, o_levels, o_filled = oracle_words(img, sx, sy,
                                                eng.words_per_row)
     check(np.array_equal(chap_reached, o_words),
@@ -521,8 +534,7 @@ def closeup_export(png_path, checks, blob_rank=0, quick=False, tile=None):
         r = run_twin(eng, d_img, sx, sy, bufs)
         check(np.array_equal(r["reached"], chap_reached),
               "close-up blob: twin fill == chapter kernel's", checks)
-        check(r["counters"]["rounds"] == chap_c["rounds"],
-              "close-up blob: twin rounds == chapter kernel's", checks)
+        twin_rounds.append(r["counters"]["rounds"])
         if mask_words is None:
             mask_words = eng.mask.copy_to_host()
         scored = []
@@ -595,7 +607,10 @@ def closeup_export(png_path, checks, blob_rank=0, quick=False, tile=None):
         "blobs": n_blobs, "blob_label": blob, "blob_rank_by_size": blob_rank,
         "blob_px": blob_px, "seed": [sx, sy],
         "seed_tile": list(divmod(seed_tile, eng.words_per_row)),
-        "blob_rounds": chap_c["rounds"], "blob_oracle_levels": o_levels,
+        "blob_rounds_chapter_runs": chap_rounds,
+        "blob_rounds_twin_attempts": twin_rounds,
+        "blob_rounds_picked_run": twin_rounds[-1],
+        "blob_oracle_levels": o_levels,
         "tile": [tx, ty], "tile_origin": [tx * TILE, ty * TILE],
         "tile_first_round": int(r["probe_round"][s, 0]),
         "tile_visits": int(r["visit_count"].ravel()[t]),
