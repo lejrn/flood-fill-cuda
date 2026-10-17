@@ -68,3 +68,14 @@ def test_every_timed_output_is_checked(kind, key):
     assert rec[key]["call_mismatches"] == 1
     assert all(r["checks_ok"] for k, r in rec.items() if k != key)
     assert all(r["calls_checked"] == 7 for r in rec.values())
+
+
+def test_unavailable_thread_counts_stop_the_run():
+    """A process that starts with a narrower CPU affinity sees fewer
+    threads (NUMBA_NUM_THREADS is fixed at start-up): the run must stop
+    before warming up, not drop the 16-thread cells and go on."""
+    with pytest.raises(SystemExit, match="16"):
+        B.select_threads([1, 2, 4, 8, 16], limit=8)
+    with pytest.raises(SystemExit):
+        B.select_threads([0, 1], limit=16)
+    assert B.select_threads([16, 1, 2, 2], limit=16) == [1, 2, 16]

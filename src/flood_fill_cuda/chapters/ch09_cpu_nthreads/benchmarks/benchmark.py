@@ -1341,10 +1341,27 @@ def parse_args(argv=None):
     return args
 
 
+def select_threads(threads, limit):
+    """The thread counts to run, sorted, each once. Stops the run (before
+    anything is warmed up) if one is below 1 or above `limit`, the
+    threads Numba can use: NUMBA_NUM_THREADS is fixed when the process
+    starts, from its CPU affinity mask (or the variable itself), so a
+    narrower mask would otherwise drop the 16-thread cells silently."""
+    want = sorted(set(int(t) for t in threads))
+    bad = [t for t in want if not 1 <= t <= limit]
+    if bad:
+        raise SystemExit(
+            f"threads {bad} are not available: Numba can use 1-{limit} "
+            f"threads in this process (NUMBA_NUM_THREADS, set at start-up "
+            f"from the CPU affinity mask; check taskset and the "
+            f"NUMBA_NUM_THREADS variable). Nothing was run.")
+    return want
+
+
 def main(argv=None):
     args = parse_args(argv)
-    args.threads = sorted(t for t in set(args.threads)
-                          if 1 <= t <= numba.config.NUMBA_NUM_THREADS)
+    args.threads = select_threads(args.threads,
+                                  numba.config.NUMBA_NUM_THREADS)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     print(f"ch09 session {stamp}: threads {args.threads}"
           f"{' (SMOKE: timings mean nothing)' if args.smoke else ''}",
