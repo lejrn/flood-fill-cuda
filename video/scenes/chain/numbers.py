@@ -178,8 +178,8 @@ def card_ms_note(ms: float) -> str:
 
 
 def card_x(x: float) -> str:
-    """An on-screen CPU-vs-GPU factor, two significant figures (4.3×, 14×,
-    450×): the CPU's round medians spread by up to about 8%."""
+    """An on-screen CPU-vs-GPU factor, two significant figures (4.4×, 11×,
+    340×): the CPU's round medians spread by up to 19% in V5."""
     if x < 10:
         return f"{x:.1f}×"
     if x < 100:
