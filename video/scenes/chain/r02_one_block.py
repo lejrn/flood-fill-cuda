@@ -2,24 +2,28 @@
 the floor splits into two half floors, the same red drone on each; at
 "onto" a block (the blue cube) drops onto SM 0, which lights; at "SM"
 that SM grows out of the chip over the idle split floor, drawn large
-like NVIDIA's SM figure (`sm_closeup`: 4 x 32 lanes, the shared-memory
-strip "full", the queue's red). At "queue" a few red entries drop from
-the lanes into the strip; at "shared memory" the strip gets the white
-outline pulse (a new part). Just before "paint" it flies back into SM 0,
-whose shelf is "full" from then on (the queue lives there). The caption
-"256 threads" and the race's floor labels ("CPU", "GPU", a step counter
-each) land together during that flight, one text change: the floor
-labels at "So" would sit under a second of the close-up's text. Text
-lands at least MIN_DWELL apart. The race in steps starts at "paint", on
-one clock: the CPU paints one pixel per step (left), the
+like NVIDIA's SM figure (`sm_closeup`: "32" on each of its 4 partitions,
+the shared-memory strip "full", the queue's red). At "queue" a few red
+entries drop from the partitions into the strip; at "shared memory" the
+strip gets the white outline pulse (a new part). Just before "paint" it
+flies back into SM 0, whose shelf is "full" from then on (the queue
+lives there). The caption "256 threads" and the race's floor labels
+("CPU", "GPU", a step counter each) land together during that flight,
+one text change: the floor labels at "So" would sit under a second of
+the close-up's text. At "block" (v5: "workers, called threads, in one
+block") the cube on SM 0 gets the white outline pulse: that cube is the
+block. Text lands at least MIN_DWELL apart. The race in steps starts at
+"paint", on one clock: the CPU paints one pixel per step (left), the
 block one whole 4-way ring per step (right). The right side finishes at
 its ring count; the left side then speeds up and finishes too.
 
 Then the race in time, short, on a 16 K px test blob: a small card
-between the strip and the split floor, CPU and best GPU bars on one
-scale growing at one speed, so the CPU stops first. "CPU wins" lands,
-the card folds into the strip's first pill, the floor labels fade, and
-at "size" an outline marks the next pill ("huge blob"), the next fix.
+between the strip and the split floor, the CPU's bar (its 4-neighbour
+BFS) and the "1 block" bar (this very kernel, one block, its ring in
+shared memory) on one scale, growing at one speed, so the CPU stops
+first. "CPU wins" lands, the card folds into the strip's first pill
+("CPU 4.3×"), the floor labels fade, and at "size" an outline marks the
+next pill ("huge blob"), the next fix.
 """
 from __future__ import annotations
 
@@ -27,7 +31,8 @@ from dataclasses import replace
 
 import numpy as np
 from manim import (DL, DOWN, LEFT, UP, FadeIn, FadeOut, GrowFromEdge, Group, LaggedStart, Rectangle, RoundedRectangle,
-                   SurroundingRectangle, UpdateFromAlphaFunc, VGroup, linear, rush_into, smooth, there_and_back)
+                   SurroundingRectangle, UpdateFromAlphaFunc, VGroup, VMobject, linear, rush_into, smooth,
+                   there_and_back)
 
 from scenes.chain import die as dz
 from scenes.chain import floor as fl
@@ -44,6 +49,7 @@ from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT, RED_PX, label
 CLOSEUP = {True: 3.7, False: 3.5}          # the close-up's height, 9:16 and 16:9
 ENTRIES = 4                                # queue entries that drop into the strip (schematic, no number)
 CARD = "#0f141a"                           # the close-up's card: the gaps between entries
+PULSE = 12                                 # frames of the block's outline pulse at "block"
 
 
 class Counter(VGroup):
@@ -89,7 +95,7 @@ def span(a: float, b: float):
 
 def sm_callout(L) -> Group:
     """mc.sm_closeup over the floor area (the split floors are still at step
-    0): SM 0 drawn large, with its 4 x 32 lanes and shared memory labelled,
+    0): SM 0 drawn large, its 4 partitions ("32") and shared memory labelled,
     the strip "full" (the queue's red: the queue lives there)."""
     h = CLOSEUP[L.G.vertical]
     return mc.sm_closeup(L.machine_pl, L.G.floor_c, h, i=0, shelf="full")
@@ -127,7 +133,7 @@ def strip_entries(sm: Group, z: float) -> VGroup:
 
 
 def fall(entry, rise: float) -> UpdateFromAlphaFunc:
-    """An entry appears `rise` above its place, over the lanes (a thread
+    """An entry appears `rise` above its place, over the partitions (a thread
     writes it), and falls into the strip, speeding up."""
     end = entry.get_center().copy()
 
@@ -139,6 +145,15 @@ def fall(entry, rise: float) -> UpdateFromAlphaFunc:
     return UpdateFromAlphaFunc(entry, step, rate_func=linear)
 
 
+def block_edge(cube: Group) -> VGroup:
+    """The block's cube outlined in white (its faces' edges), hidden: the
+    pulse at "block" fades it in and out."""
+    faces = [f for f in cube.submobjects if isinstance(f, VMobject)]
+    z = max(f.z_index for f in faces) + 0.5
+    g = VGroup(*[f.copy().set_fill(opacity=0).set_stroke(INK, 2.5, opacity=0) for f in faces])
+    return _z(g, z)
+
+
 def strip_outline(sm: Group, z: float) -> Rectangle:
     """The white outline round the strip (the new-part pulse), hidden."""
     c, w, h, _ = strip_rect(sm)
@@ -148,10 +163,12 @@ def strip_outline(sm: Group, z: float) -> Rectangle:
 
 
 def time_card(n: dict, halves: list, ins, strip):
-    """The race in time on the 16 K px test blob: CPU and best GPU bars on one
-    scale (the best GPU bar is full width). Placed between the inset and the
-    floor's right edge, the split floor and the strip. Returns (card, bars)."""
-    rows = [("CPU", n["small_cpu_ms"], GREY), ("best GPU", n["small_gpu_ms"], BLUE)]
+    """The race in time on the 16 K px test blob, like for like: the CPU's
+    4-neighbour BFS and "1 block" (r02's own kernel: one block, its ring in
+    shared memory) on one scale (the block's bar is full width). Placed
+    between the inset and the floor's right edge, the split floor and the
+    strip. Returns (card, bars)."""
+    rows = [("CPU", n["small_cpu_ms"], GREY), ("1 block", n["small_gpu_ms"], BLUE)]
     vmax = n["small_gpu_ms"]
     bw = 1.6
     lines, bars = VGroup(), []
@@ -234,7 +251,7 @@ class OneBlock(ChainScene):
         self.until(t_sm)
         self.play(FadeIn(sm, target_position=home, scale=0.08), run_time=fr(8))
 
-        # ---- "queue": a few entries drop from the lanes into the strip
+        # ---- "queue": a few entries drop from the partitions into the strip
         z_sm = sm[1].z_index
         entries = strip_entries(sm, z_sm + 1)
         self.until(max(self.cue("queue"), self.elapsed()))
@@ -271,6 +288,14 @@ class OneBlock(ChainScene):
                   *[FadeIn(m, rate_func=span(a_cap, 1.0)) for m in notes],
                   run_time=fr(frames))
         self.cap, self._cap_t = cap, self.elapsed()
+
+        # ---- "block": the cube on SM 0 gets the white outline pulse (the
+        # new-part convention): that cube is the block the words define. A
+        # hook, so the race still starts on "paint"
+        edge = block_edge(self.machine.parts["teams"])
+        self.add(edge)                  # after the floors: redrawn every frame
+        self.run(lambda p: edge.set_stroke(opacity=there_and_back(p)), fr(PULSE),
+                 start=max(self.cue("block"), self.elapsed()))
 
         # ---- the race in steps, on one clock
         t_r0 = max(self.cue("paint"), self.elapsed())
