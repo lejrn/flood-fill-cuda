@@ -1,9 +1,10 @@
 """r03b: one SM of twenty-four (v3 r03's tail, its own beat in v4). The
 painted square holds: the one block on SM 0, its shared ring plus the
-global spill, as r03_giant left it. At "twice" the speed-up lands ("2.46×",
-kernel time); at "SM" the carried "1 of 24 SMs"; at "twenty-four" the 23
-other SMs come up idle in a wave across the die, left to right, and go
-dark again just after the word ends.
+global spill, as r03_giant left it. At "faster" (v5: "a little faster
+than the CPU", 1,195 vs 1,097 ms against the 4-neighbour CPU) the
+speed-up lands ("1.1×", kernel time); at "SM" the carried "1 of 24 SMs";
+at "twenty-four" the 23 other SMs come up idle in a wave across the die,
+left to right, and go dark again just after the word ends.
 
 Starts on chain_state(6) and ends on chain_state(7): the same picture,
 with the carried caption.
@@ -13,6 +14,7 @@ from __future__ import annotations
 from manim import AnimationGroup
 
 from scenes.chain import machine as mc
+from scenes.chain import overlays as ov
 from scenes.chain.base import ChainScene, fr
 from scenes.chain.state import boundary
 
@@ -41,8 +43,8 @@ class OneSm(ChainScene):
     def beat_anim(self) -> None:
         one = boundary(self.k + 1).machine          # the machine holds: SM 0, its shelf, fence and spill
 
-        # ---- "twice": the speed-up, in as the word starts (the carried "spill" goes out first)
-        self.say(f"{self.der['big_1block_x']:.2f}×", "vs the CPU, kernel time", at=self.cue("twice") - fr(2))
+        # ---- "faster": the speed-up, in as the word starts (the carried "spill" goes out first)
+        self.say(ov.fmt_x(self.der["big_1block_x"]), "vs CPU, kernel time", at=self.cue("faster") - fr(2))
 
         # ---- "one SM of twenty-four": the caption on "SM"; on "twenty-four" the
         # other 23 SMs come up idle in a wave, hold a moment after the word, and go
