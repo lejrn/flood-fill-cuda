@@ -16,12 +16,15 @@ times, and its rows are framed as they are named.
 - "CPU": P-core 0 lights.
 - "Every drone": the card closes onto the live drone footage (labels from
   the GPU, 30 fps), P-core 0 goes dark, the hidden overlays come back,
-  caption 3 (the worst drone frame with the copies). The title card fades
-  in over the drones for the last seconds; base.construct fades
+  caption 3 (the worst drone frame with the copies). The meter's needle
+  parks: its 2.21 ms is the big frame's kernel time, and the drones'
+  time is the caption's. The title card fades in over the drones once
+  the speech and caption 3's dwell are done; base.construct fades
   everything out (no snap: nothing follows).
 
 Row 1 never changes shape: every card is the flip-2 card with row 1's
-cells swapped in at the same left edges, so a "?" never moves a column.
+cells swapped in at the same left edges and the same scale, so a "?"
+never moves a column.
 """
 from __future__ import annotations
 
@@ -29,13 +32,13 @@ from dataclasses import replace
 from functools import lru_cache
 
 import numpy as np
-from manim import DOWN, UP, AnimationGroup, FadeIn, FadeOut, RoundedRectangle, Text, VGroup, config
+from manim import DOWN, LEFT, UP, AnimationGroup, FadeIn, FadeOut, RoundedRectangle, Text, VGroup, config
 from PIL import Image
 
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
-from scenes.chain.base import MIN_DWELL, ChainScene, fr
+from scenes.chain.base import MIN_DWELL, ChainScene, caption_group, fr
 from scenes.chain.state import Z_MACHINE, Z_OVER, card_footnote, floor_raster, score_rows
 from scenes.style import ASSETS, GREY, GRID, INK, INK_SOFT, TEAL, label
 
@@ -44,6 +47,7 @@ N_FRAMES = 240
 TITLE = "flood fill, from pixels to tiles"
 REPO = "flood-fill-cuda"
 FRAME_BUFF = 0.08            # a row frame's margin round its cells
+CAP_GAP = 0.12               # the card's clearance over the tallest caption's top
 
 
 @lru_cache(maxsize=1)
@@ -81,6 +85,11 @@ def _z(mob, z: float):
 class Reveal(ChainScene):
     k = 18
 
+    def captions(self) -> tuple:
+        """The beat's three captions, (text, sub) each, in order."""
+        return (("the GPU", "huge or many blobs"), ("small blob too", "in kernel time"),
+                ("every drone frame", f"with copies: {ov.fmt_ms(self.num['drone_e2e_max_ms'])}"))
+
     # ---- the card
     def card(self, flip: int, lit: tuple) -> VGroup:
         """ov.score_card at row 1's flip step `flip` (score_rows), the names
@@ -93,9 +102,13 @@ class Reveal(ChainScene):
         c = ov.score_card(G, score_rows(self.beat, 2), highlight=lit, footnote=foot)
         if flip != 2:
             alt = ov.score_card(G, score_rows(self.beat, flip), highlight=lit, footnote=foot)
+            # 9:16 shrinks each body to the frame's width, and alt's (narrower
+            # "?" cells) less: its cells come back to c's scale first
+            k = c[1][0][0].height / alt[1][0][0].height          # the titles: the same text in both
             row, new = c[1][1][1], alt[1][1][1]          # box, body -> (top, lines, foot); lines[0] is the head
             for j in range(4):
                 m, ref = new[j], row[j]
+                m.scale(k, about_edge=LEFT)
                 m.shift([ref.get_left()[0] - m.get_left()[0], ref.get_center()[1] - m.get_center()[1], 0])
             row.submobjects = list(new.submobjects)
         self.place(c)
@@ -109,7 +122,7 @@ class Reveal(ChainScene):
         if getattr(self, "_place", None) is None:
             G = self.G
             w, h = config.frame_width, config.frame_height
-            y0 = G.caption_c[1] + (0.6 if G.vertical else 0.5)          # the caption's top, with a gap
+            y0 = max(caption_group(G, *cap).get_top()[1] for cap in self.captions()) + CAP_GAP
             if G.vertical:
                 x0, x1 = -w / 2 + 0.15, w / 2 - 0.15
                 inset = self.over.get("inset")
@@ -224,8 +237,8 @@ class Reveal(ChainScene):
         return _z(g, Z_OVER + 30)
 
     def beat_anim(self) -> None:
-        n = self.num
         G = self.G
+        cap1, cap2, cap3 = self.captions()
         end = self.target_seconds() + 0.4 - 0.5          # base fades out over the last 0.5 s
         m18 = self.machine.spec
 
@@ -244,7 +257,7 @@ class Reveal(ChainScene):
         # the blocks land again, column by column: the GPU's two rows
         self.until(max(self.cue("huge"), self.elapsed()))
         self.reland(frames=12)
-        self.say("the GPU", "huge or many blobs", at=self.cue("GPU"))
+        self.say(*cap1, at=self.cue("GPU"))
 
         # "And one small blob?": row 1's first step. Only the CPU cell (and its
         # tag) and the "?"s change; the pill turns to "?" with it
@@ -260,7 +273,7 @@ class Reveal(ChainScene):
         rows2 = score_rows(self.beat, 2)
         c2 = self.card(2, lit=(0,))
         anims = self.swap_anims(c2, self.frame_round(c2, (0,), TEAL))
-        self.say("small blob too", "in kernel time", at=self.cue("now"), frames=6,
+        self.say(*cap2, at=self.cue("now"), frames=6,
                  extra=anims + self.over_anims("strip", ov.score_strip(G, rows2)))
         self.done_swap()
 
@@ -275,7 +288,8 @@ class Reveal(ChainScene):
         self.machine_to(replace(m18, cpu="lit"), frames=6, slide=0)
 
         # "Every drone, every frame." - one change: the card closes onto the
-        # live drones as the caption turns, P-core 0 goes dark
+        # live drones as the caption turns, P-core 0 goes dark, the needle
+        # parks (2.21 ms is the big frame's kernel time, not a drone frame's)
         self.until(max(self.cue("Every"), self._cap_t + MIN_DWELL))
         t0 = self.elapsed()                  # the drones still end on time if the cue was reached late
         rpx = self.floor.rpx
@@ -297,9 +311,11 @@ class Reveal(ChainScene):
 
         self.floor_play(key, render, seconds)
         closing = [FadeOut(self.cur_card), FadeOut(self.cur_frame), FadeOut(lit_line)]
-        self.say("every drone frame", f"with copies: {ov.fmt_ms(n['drone_e2e_max_ms'])}", frames=6,
-                 extra=closing + [FadeIn(m) for m in hidden] + self.machine_anims(m18, slide=0))
+        self.say(*cap3, frames=6,
+                 extra=closing + [FadeIn(m) for m in hidden] + self.machine_anims(m18, slide=0)
+                 + self.over_anims("goal", self.goal(ov.GoalSpec(cpu_tick=True))))
 
-        # the title card, never spoken, over the drones for the last seconds
-        self.until(max(end - 2.0, self._cap_t + MIN_DWELL))
+        # the title card, never spoken, over the drones once the speech is
+        # over and caption 3 has been up its dwell
+        self.until(max(self.speech_end(), self._cap_t + MIN_DWELL))
         self.play(FadeIn(self.title_card(), scale=1.04), run_time=fr(8))
