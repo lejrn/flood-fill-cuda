@@ -8,8 +8,14 @@ inside the fill launch, not handed over the link. As they spark, the
 caption goes and the thin tag stripes lift off the queue: ch05 keeps
 labels in a per-pixel label map, not in a bit of the entry. Waves start
 from every seed at once; where two meet, both keep the smaller label (the
-colours merge). The counter shows 3 launches, the needle stops at 51 ms.
-But the queue in VRAM still carries every red pixel.
+colours merge). The counter shows 3 launches. At "fifty" (v5: "about fifty
+milliseconds") the floor becomes the real labelled frame and the needle
+slides to 53.9 ms (full clocks), left of the CPU tick, still right of the
+33 ms line. At "Faster than the CPU" one text change: the needle's value
+and row 3's pill ("many blobs: GPU 3.8×", 202 vs 53.9 ms against the
+labels-only CPU, its reset before the clock). At "budget" the carried
+caption, "53.9 ms" / "still over 33 ms". But the queue in VRAM still
+carries every red pixel: a counter climbs to all 13,451,960 of them.
 
 Starts on chain_state(13), ends on chain_state(14).
 """
@@ -25,7 +31,7 @@ from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
 from scenes.chain import toy
-from scenes.chain.base import ChainScene, fr
+from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import BLOB_HUES, Z_MACHINE, Z_OVER, boundary, label_colors, picture, toys
 from scenes.style import GOLD, INK, RED_PX, label
 
@@ -237,18 +243,29 @@ class Seeds(ChainScene):
 
         self.until(t_every)
         self.remove(*sm_dots, *pulses)
-        t_fifty = self.cue("fifty-one")
+        t_fifty = self.cue("fifty")
         self.floor_play(lambda p: min(nf - 1, int(p * nf)), waves, max(t_fifty - self.elapsed() - fr(2), fr(10)))
 
-        # "fifty-one milliseconds": the real picture, every blob labelled; the
-        # needle slides to 51 ms, then its value comes in on the same frames
-        # as the caption (one text change, as r07 and r10 do)
+        # "about fifty milliseconds": the real picture, every blob labelled;
+        # the needle slides to 53.9 ms, left of the CPU tick, still right of
+        # the 33 ms line. Its value waits for the next text change
         self.until(t_fifty)
         self.floor_blend(waves(nf - 1), self.pic(picture("labels")), frames=8)
         meter, val = self.needle_slide(end.goal)
-        self.say_last(at=self.cue("milliseconds"), extra=[FadeIn(val)])
-        self.remove(val)
+
+        # "Faster than the CPU": one text change, the needle's value and row
+        # 3's pill ("many blobs: GPU 3.8×"). The new strip fades in over the
+        # old one: its pills are opaque, so the two that do not change never dip
+        old = self.over["strip"]
+        self.over["strip"] = self.strip(end.rows)
+        self.until(max(self.cue("Faster") - fr(1), self.elapsed()))
+        self.play(FadeIn(val), FadeIn(self.over["strip"]), run_time=fr(5))
+        self.remove(val, old)
         meter.add(val)
+        t_pill = self.elapsed()
+
+        # "But over budget": the carried caption, "53.9 ms" / "still over 33 ms"
+        self.say_last(at=max(self.cue("budget") - fr(2), t_pill + MIN_DWELL - fr(7)))
 
         # "every red pixel still rides the queue": a counter in front of the
         # queue's VRAM climbs to every red pixel of the real picture, and at
