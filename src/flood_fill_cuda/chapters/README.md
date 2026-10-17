@@ -25,6 +25,10 @@ step: a tile, not a pixel. Chapter 8 takes that BFS back to many blobs,
 with a tile's local component as the node, and beats ch06 on the
 81 Mpx image.
 
+Chapter 9 (`ch09_cpu_nthreads/`) asks the fair CPU question: chapters
+3, 7 and 8 on every core, with `prange` and no atomics, against one
+core and the GPU in one session. Results: pending a quiet machine.
+
 ---
 
 ## Chapter 0 - the baselines and the broken prototype
