@@ -3,25 +3,32 @@
 Each value names its file and key; files are pinned by name, so a later
 benchmark run cannot change the video silently. Sessions:
 
-- V5  v5_20261017T161122Z.json (Oct 17): every CPU-vs-GPU number of v5,
-      in one session: the small blob (sq_256, row 1), the huge blob
-      (sq_8000_center: act 1's cells and the tiles, row 2), the 81 Mpx
-      frame (input_blobs: act 2's seeds and the waves, the meter and row
-      3) and the 240 drone frames. GPU: kernel-only CUDA events, the SM
-      clock's median 2,070 MHz in every timed block; the memory clock
-      8,001 MHz in P0 except three blocks, listed in the clock fact (the
-      frame's ch05 block among them: 7,001 MHz). CPU: @njit on one core, 5
-      interleaved rounds behind a quiet-host gate. Its "njit" cell is v4's
-      own CPU baseline for each scene; its "njit8" / "njit_label" cells
-      are the like-for-like twins. v4's count row (random_1000, 1 Mpx
-      noise) is not used: ch08's default sends almost all of its tiles
-      down the dense-tile path, which v5 leaves out.
-- OV  overview_20260724T234423Z.json (Jul 24): act 2's estimates on the
-      81 Mpx frame (one launch per blob, two per launch), the 256 threads,
-      and which GPU cell before the tiles was fastest on the small blob
-      (host clock). r07 and r08 set these July GPU estimates against V5's
-      CPU: the one cross-session comparison, checked against OV's own CPU
-      too.
+- V5  v5_20261017T192640Z.json (Oct 17, night): every CPU-vs-GPU number
+      of v5, in one session, like for like: each GPU cell against its CPU
+      twin, which takes the same steps, keeps no output its GPU side does
+      not, and resets in the same scope, on buffers allocated once (the
+      session's rules.cpu_twin, cpu_meta, gpu_outputs). The twins: the
+      4-neighbour BFS with depth (cpu_bfs4: one block, two blocks, 48
+      blocks), the 8-neighbour BFS with depth (cpu_bfs8: the diagonals),
+      the 8-neighbour BFS without depth, reset on the clock (cpu_fill8: the
+      tiles), and labels only, reset on the clock (cpu_label: the waves,
+      the drones) or before it (cpu_label_pre: act 2). Every twin equals
+      its oracle array for array. The oracles as called (fresh arrays on
+      every call) and cpu_fill_canonical (v4's frame baseline) are
+      reference only. Scenes: the small blob (sq_256, row 1), the huge
+      blob (sq_8000_center: act 1 and the tiles, row 2), the 81 Mpx frame
+      (input_blobs: act 2's two estimates, re-made here with v4's method
+      at 8 neighbours, the seeds and the waves; the meter and row 3) and
+      the 240 drone frames. Every ch08 number is ch08's first version
+      (OLD_PATH: no dense-tile path); the default engine is timed beside
+      it on the frame, reference only. GPU: kernel-only CUDA events; every
+      timed block at full clocks (P0 only, memory 8,001 MHz, SM median at
+      least 2,040; ch05 on the frame on its second attempt). CPU: @njit on
+      one core, after all GPU work and 60 s of idle, 5 interleaved rounds
+      behind a quiet-host gate. The evening session
+      (v5_20261017T182449Z, the oracles as called, so the CPU paid its
+      allocations), the morning one and July's overview session are no
+      longer read.
 - CH01 single_block_shared_20260719T041848Z.json (Jul 19): the shared ring
       (its capacity, its measured peak, what spilled).
 - DB2 dual_block_20260719T163033Z.json (Jul 19): two blocks; where the
@@ -38,7 +45,8 @@ benchmark run cannot change the video silently. Sessions:
       (rounds, pixel levels, the default switches) on the 64 Mpx square.
 - D8  dense_20261016T054922Z.json (Oct 16): the tile waves' final session
       on the 81 Mpx frame (seeds, pieces, rounds, blobs, the dense-tile
-      counters), and ch05 on the frame at full clocks (47.1 ms).
+      counters), the default engine and the first version (old_path, the
+      engine V5 times for the story): their counters are equal.
 - W8  waves_20261015T183401Z.json (Oct 15): the tile waves' first-version
       session; its deterministic counters must equal D8's.
 - TL  assets/tiles/ch07_tiles_20261017T160022Z.json + .npz (Oct 17): act
@@ -52,9 +60,12 @@ benchmark run cannot change the video silently. Sessions:
       orientation fact reads it.
 
 v5 drops v4's r10 numbers and their sessions (C6, R61, DR). The drone
-card, the scoreboard rows and the frame's red-pixel count now come from
-V5. `floors()` computes the act-3 floor facts from TL's and WV's arrays;
-`card_ms` / `card_x` are the on-screen number formats the facts check.
+card, the scoreboard rows, act 2's estimates and the frame's red-pixel
+count come from V5. `floors()` computes the act-3 floor facts from TL's
+and WV's arrays; `card_ms` / `card_x` are the on-screen number formats the
+facts check (`card_ms_note` for the r14 footnote's unspoken times, rounded
+where `card_ms` truncates). `STORY_SHOWN` ties every shown CPU-vs-GPU ratio to V5's own
+story entry, so a ratio built from the wrong CPU twin fails.
 
 Most values are floats; level sizes, SM ids and per-round counts are
 tuples of ints.
@@ -75,8 +86,7 @@ from scenes.panes import data
 
 R = data.RESULTS
 OVD = R / "overview" / "benchmark_results"
-V5 = OVD / "v5_20261017T161122Z.json"
-OV = OVD / "overview_20260724T234423Z.json"
+V5 = OVD / "v5_20261017T192640Z.json"
 CH01 = R / "ch01_gpu_1blob_1block" / "benchmark_results" / "single_block_shared_20260719T041848Z.json"
 DB2 = R / "ch02_gpu_1blob_2block" / "benchmark_results" / "dual_block_20260719T163033Z.json"
 CH03 = R / "ch03_gpu_1blob_nblock" / "benchmark_results" / "multi_block_20260720T012243Z.json"
@@ -92,14 +102,22 @@ WV = TILES / "ch08_waves_20261017T160051Z.json"
 DRONE_META = VIDEO / "assets" / "drones_labels" / "meta.json"
 PICTURE = VIDEO / "assets" / "ch05_input_blobs" / "frame_000.png"
 
-# The small blob's GPU time before the tiles ("GPU so far" in r02's race):
-# v4's best GPU cell on sq_256 (OV ranked every ch01-ch05 cell by the host
-# clock; this one was fastest), timed again in V5 by events.
-SMALL_PRE_TILES = "ch05_fused_L8"
-
-# V5's timed blocks whose memory clock was not 8,001 MHz in P0 (the clock
-# fact checks that these, and only these, are the exceptions).
-V5_CLOCK_EXCEPTIONS = ("drones", "input_blobs.ch05", "sq_256.interleaved")
+# Every CPU-vs-GPU ratio the video shows or says, and V5's story entry it
+# must equal: (derived key, story key, True when the derived key is
+# GPU / CPU, i.e. the CPU wins and the story's x is inverted).
+STORY_SHOWN = (
+    ("small_cpu_x", "small_pixel_bfs", True),             # r02: CPU 4.3×, row 1
+    ("big_1block_x", "big_1block", False),                # r03b: 1.1× ("a little faster")
+    ("big_2blocks_x", "big_2blocks", False),              # r04 (not shown; twice as fast is GPU-GPU)
+    ("big_48_x", "big_48blocks", False),                  # r05: eight and a half times
+    ("big_8ways_x", "big_8ways", False),                  # r06: 11×, row 2
+    ("est_ch03_cpu_x", "frame_one_launch_per_blob", True),    # r07: slower than the CPU
+    ("est_ch04_cpu_x", "frame_two_per_launch", True),     # r08: still slower than the CPU
+    ("count_ch05_x", "frame_seeds", False),               # r09: faster than the CPU, 3.8×, row 3
+    ("big_tiles_x", "big_tiles", False),                  # r11: 340×, row 2
+    ("count_x", "frame_waves", False),                    # r13: 100×, row 3
+    ("small_tiles_x", "small_tiles", False),              # r14: 4.4×, row 1
+)
 
 # Not in any benchmark JSON: the host CPU's core count, from Intel's spec
 # for the model lscpu reports ("13th Gen Intel(R) Core(TM) i9-13900H":
@@ -137,20 +155,30 @@ def sweep_bin(ms: float, best_ms: float) -> int:
 
 
 def card_ms(ms: float) -> str:
-    """An on-screen time: overlays.fmt_ms (1,666 ms / 51.7 ms / 3.10 ms),
-    plus three decimals under 0.1 ms (0.045 ms, not 0.05)."""
+    """An on-screen time: overlays.fmt_ms (1,065 ms / 53.9 ms / 3.12 ms),
+    plus three decimals under 1 ms (0.192 ms, 0.044 ms): with two, the
+    r14 card's 0.19 / 0.044 would read 4.3x against a true 4.4x."""
     if ms >= 100:
         return f"{ms:,.0f} ms"
     if ms >= 10:
         return f"{int(ms * 10) / 10:.1f} ms"
-    if ms >= 0.1:
+    if ms >= 1:
         return f"{ms:.2f} ms"
     return f"{ms:.3f} ms"
 
 
+def card_ms_note(ms: float) -> str:
+    """An on-screen time nobody speaks (the r14 card's footnote): as
+    card_ms, but rounded where card_ms truncates (10-100 ms), so a cost is
+    never shown below its measured value."""
+    if 10 <= ms < 100:
+        return f"{ms:.1f} ms"
+    return card_ms(ms)
+
+
 def card_x(x: float) -> str:
-    """An on-screen CPU-vs-GPU factor, two significant figures (1.4×, 17×,
-    540×): the CPU's round medians spread by up to about 9%."""
+    """An on-screen CPU-vs-GPU factor, two significant figures (4.3×, 14×,
+    450×): the CPU's round medians spread by up to about 8%."""
     if x < 10:
         return f"{x:.1f}×"
     if x < 100:
@@ -175,10 +203,6 @@ class Num:
 
 def _load(p: Path) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
-
-
-def _row(d: dict, name: str) -> dict:
-    return next(r for r in d["rows"] if r.get("row", r.get("key")) == name)
 
 
 def _scene(d: dict, name: str) -> dict:
@@ -221,7 +245,7 @@ def _two_ring(level_sizes) -> list[int]:
 @lru_cache(maxsize=1)
 def load() -> dict[str, Num]:
     n: dict[str, Num] = {}
-    ov, v5 = _load(OV), _load(V5)
+    v5 = _load(V5)
 
     def put(key, value, source):
         n[key] = Num(float(value), source)
@@ -229,85 +253,185 @@ def load() -> dict[str, Num]:
     def put_list(key, values, source):
         n[key] = Num(tuple(values), source)
 
-    # ================= V5 (Oct 17): every CPU-vs-GPU number =================
+    # ================= V5 (Oct 17): every CPU-vs-GPU number, like for like =================
     f5 = V5.name
     put("v5_ok", v5["all_checks_ok"], f"{f5}:all_checks_ok")
     put("v5_script_at_head", v5["script_matches_head"], f"{f5}:script_matches_head")
-    # every timed block: each scene's interleaved rounds, each ch05 block, the drones
+    put("v5_all_full_clocks", v5["all_blocks_full_clocks"], f"{f5}:all_blocks_full_clocks")
+    # every timed block: each scene's blocks (interleaved rounds, ch05, the
+    # estimates, the loops) and the drones
     win = {f"{s['scene']}.{b}": blk for s in v5["scenes"] for b, blk in s["blocks"].items()}
     win["drones"] = v5["drones"]
+    rule = v5["rules"]["full_clocks"]
+    put("v5_blocks", len(win), f"{f5}:scenes[].blocks.*, drones (timed blocks)")
+    put("v5_sm_median_rule", rule["sm_median_min_mhz"], f"{f5}:rules.full_clocks.sm_median_min_mhz")
     put("v5_sm_clock_median", min(w["clk_sm_median"] for w in win.values()),
         f"{f5}:scenes[].blocks.*.clk_sm_median, drones.clk_sm_median (the lowest)")
-    put("v5_sm_clock_min", min(w["clk_sm_min"] for w in win.values()),
-        f"{f5}:scenes[].blocks.*.clk_sm_min, drones.clk_sm_min (the lowest)")
-    put_list("v5_clock_exceptions",
-             sorted(k for k, w in win.items() if not (w["clk_mem_median"] == 8001 and w["clk_pstates"] == ["P0"])),
-             f"{f5}:blocks not at a memory clock median of 8,001 MHz in P0 alone")
-    put("v5_frame_ch05_mem_mhz", win["input_blobs.ch05"]["clk_mem_median"],
-        f"{f5}:input_blobs.blocks.ch05.clk_mem_median ({'/'.join(win['input_blobs.ch05']['clk_pstates'])})")
-    q = win["sq_8000_center.interleaved"]
-    lo, hi = q["timed_window_s"]
-    pad = q["clk_window_padding_s"]
-    sm = [t[1] for t in v5["clock_trace"] if lo - pad <= t[0] <= hi + pad]
-    put("v5_sq8000_clk_samples", len(sm), f"{f5}:clock_trace in sq_8000_center's timed window")
-    put_list("v5_sq8000_clk_under", sorted(x for x in sm if x < 2070),
-             f"{f5}:clock_trace in sq_8000_center's timed window, SM MHz under 2,070")
-    put("v5_sm_count", v5["sm_count"], f"{f5}:sm_count")
+    put("v5_mem_clock_min", min(w["clk_mem_min"] for w in win.values()),
+        f"{f5}:scenes[].blocks.*.clk_mem_min, drones.clk_mem_min (the lowest)")
+    put("v5_p0_only", all(w["clk_pstates"] == ["P0"] and w["clk_p0_share"] == 1.0 for w in win.values()),
+        f"{f5}:every block's clk_pstates == [P0], clk_p0_share == 1")
+    put("v5_full_clocks_used", all(w["full_clocks"] and w["attempts"][w["used_attempt"]]["full_clocks"]
+                                   and w["used_attempt"] == len(w["attempts"]) - 1 for w in win.values()),
+        f"{f5}:every block's used attempt at full clocks, and the last one run")
+    put("v5_first_attempt_blocks", sum(w["used_attempt"] == 0 for w in win.values()),
+        f"{f5}:blocks at full clocks on their first attempt")
+    retried = [k for k, w in win.items() if w["used_attempt"] > 0]
+    put("v5_retried_is_ch05", retried == ["input_blobs.ch05"]
+        and win["input_blobs.ch05"]["attempts"][0]["clk_pstates"] == ["P3"]
+        and "sw_power_cap" in win["input_blobs.ch05"]["attempts"][0]["clk_event_reasons"],
+        f"{f5}:input_blobs.blocks.ch05.attempts (the only block retried; attempt 0 in P3, sw_power_cap)")
+    put("v5_power_capped_blocks", sum("sw_power_cap" in w["clk_event_reasons"] for w in win.values()),
+        f"{f5}:blocks whose used attempt logged sw_power_cap")
+    put("sm", v5["sm_count"], f"{f5}:sm_count")
 
-    # the 81 Mpx frame: the CPU (v4's baseline and the labels-only twin),
-    # act 2's seeds (ch05 split_L8) and act 3's waves (ch08 default)
+    # like for like: every GPU cell's CPU twin is the session's rule; the
+    # twin keeps no output its GPU side does not (outputs), takes the same
+    # steps (4 or 8 neighbours; labels are 8-neighbour), resets in the same
+    # scope (before the clock or on it), equals its oracle array for array,
+    # and its twin.x is the two medians' ratio
+    twin_rule = v5["rules"]["cpu_twin"]
+    ok = True
+    for s in v5["scenes"]:
+        for name, cell in s["cells"].items():
+            if cell["side"] != "gpu":
+                continue
+            t = cell["twin"]
+            cpu = s["cells"][t["cpu"]]
+            ok &= (t["cpu"] == twin_rule[name] and set(cpu["outputs"]) <= set(cell["outputs"])
+                   and cpu["connectivity"] == cell["config"]["connectivity"] and cpu["reset"] == cell["reset"]
+                   and cpu["check_ok"] and cpu["same_as_oracle"] and t["like_for_like"]
+                   and t["cpu_ms"] == cpu["ms"] and math.isclose(t["x"], t["cpu_ms"] / cell["ms"]))
+    dr = v5["drones"]
+    dm = dr["cpu_twin_meta"]
+    ok &= (twin_rule[dr["gpu_cell"]] == dr["twin"] == "cpu_label" and set(dm["outputs"]) <= set(dr["outputs"])
+           and dm["connectivity"] == dr["config"]["connectivity"] and dm["reset"] == dr["reset"]
+           and dr["like_for_like"] and all(fm["cpu_label"]["same_as_oracle"] for fm in dr["frames"]))
+    put("v5_twins_ok", ok, f"{f5}:scenes[].cells[gpu].twin == rules.cpu_twin; the twin's outputs within the GPU "
+        "cell's, same connectivity, same reset; the twin equals its oracle; x = cpu_ms / ms; drones alike")
+    put("v5_all_like_for_like", v5["all_like_for_like"], f"{f5}:all_like_for_like")
+    story = {e["key"]: e for e in v5["story"]}
+    for k, e in story.items():
+        if "x" in e:
+            put(f"story_{k}_x", e["x"], f"{f5}:story[{k}].x ({e['gpu']} vs {e['cpu']})")
+    put("story_full_clocks", all(e.get("gpu_block_full_clocks", True) for e in story.values()),
+        f"{f5}:story[].gpu_block_full_clocks")
+
+    # the 81 Mpx frame: the CPU (labels only: reset on the clock, the twin of
+    # the waves; reset before it, the twin of act 2; the oracle as called and
+    # v4's labels-plus-fill baseline for reference), act 2's estimates (v4's
+    # method, 8 neighbours), the seeds (ch05 split_L8) and the waves (ch08's
+    # first version; the default engine for reference)
     fr = _scene(v5, "input_blobs")
     c, f = fr["cells"], f"{f5}:input_blobs"
-    put("njit_ms", c["njit"]["ms"], f + ".njit.ms (labels + fill per blob, v4's baseline)")
-    put("njit_label_ms", c["njit_label"]["ms"], f + ".njit_label.ms (labels only, the twin)")
+    put("njit_ms", c["cpu_label"]["ms"],
+        f + ".cpu_label.ms (labels only, reset on the clock: i1's stopwatch, the meter's CPU tick, row 3 from r13)")
+    put_list("njit_round_ms", c["cpu_label"]["round_medians"], f + ".cpu_label.round_medians")
+    put("count_cpu_pre_ms", c["cpu_label_pre"]["ms"],
+        f + ".cpu_label_pre.ms (labels only, reset before the clock: the twin of r07, r08, r09)")
+    put_list("count_cpu_pre_round_ms", c["cpu_label_pre"]["round_medians"], f + ".cpu_label_pre.round_medians")
+    put("frame_oracle_ms", c["oracle_label"]["ms"],
+        f + ".oracle_label.ms (cpu_label_components as called, fresh arrays: reference only)")
+    put("frame_cpu_v4_ms", c["cpu_fill_canonical"]["ms"],
+        f + ".cpu_fill_canonical.ms (v4's baseline, labels + a fill per blob: reference only)")
     put("n_pixels", fr["width"] * fr["height"], f + ".width*height")
     put("red_px", fr["red_px"], f + ".red_px")
-    put("n_blobs", c["ch08"]["info"]["n_blobs"], f + ".ch08.info.n_blobs")
-    put("ch05_ms", c["ch05_split_L8"]["ms"], f + ".ch05_split_L8.ms (in its own block, memory clock 7,001 MHz)")
-    put("frame_ms", c["ch08"]["ms"], f + ".ch08.ms (kernel only)")
-    put("frame_rounds", c["ch08"]["info"]["rounds"], f + ".ch08.info.rounds")
-    put("frame_e2e_ms", c["ch08"]["e2e"]["ms"], f + ".ch08.e2e.ms (with the copies, context only)")
-    put("frame_ch05_over_ch08", fr["ratio_of_medians"]["ch05_split_L8/ch08"],
-        f + ".ratio_of_medians[ch05_split_L8/ch08]")
-    put("frame_labels_ok", c["ch08"]["check"]["labels_match_cpu"], f + ".ch08.check.labels_match_cpu")
+    put("n_blobs", fr["n_blobs"], f + ".n_blobs")
+    put("n_blobs_agree", fr["n_blobs"] == c["cpu_label"]["n_blobs"] == c["cpu_label_pre"]["n_blobs"]
+        == c["ch08_old"]["info"]["n_blobs"] == c["ch08"]["info"]["n_blobs"],
+        f + ".n_blobs == cpu_label(_pre).n_blobs == ch08_old.info.n_blobs == ch08.info.n_blobs")
+    put("ch05_ms", c["ch05_split_L8"]["ms"], f + ".ch05_split_L8.ms (its own block)")
+    put_list("ch05_x_range", c["ch05_split_L8"]["twin"]["x_range_cpu_rounds"],
+             f + ".ch05_split_L8.twin.x_range_cpu_rounds")
+    put("frame_ms", c["ch08_old"]["ms"], f + ".ch08_old.ms (kernel only, ch08's first version)")
+    put_list("frame_x_range", c["ch08_old"]["twin"]["x_range_cpu_rounds"], f + ".ch08_old.twin.x_range_cpu_rounds")
+    put("frame_default_ms", c["ch08"]["ms"], f + ".ch08.ms (the default engine, the dense-tile path: reference only)")
+    put("frame_default_over_old_paired", fr["paired"]["ch08/ch08_old"]["median"],
+        f + ".paired[ch08/ch08_old].median")
+    put("frame_rounds", c["ch08_old"]["info"]["rounds"], f + ".ch08_old.info.rounds")
+    put("frame_e2e_ms", c["ch08_old"]["e2e"]["ms"], f + ".ch08_old.e2e.ms (with the copies, context only)")
+    put("frame_ch05_over_ch08", fr["ratio_of_medians"]["ch05_split_L8/ch08_old"],
+        f + ".ratio_of_medians[ch05_split_L8/ch08_old]")
+    put("frame_labels_ok", c["ch08_old"]["check"]["labels_match_cpu"] and c["ch08"]["check"]["labels_match_cpu"],
+        f + ".ch08_old.check.labels_match_cpu, ch08.check.labels_match_cpu")
+    put("frame_dense_tiles", sum(c[k]["info"]["dense_label_tiles"] + c[k]["info"]["dense_paint_tiles"]
+                                 for k in ("ch08_old", "ch08")),
+        f + ".ch08_old/ch08.info.dense_label_tiles + dense_paint_tiles")
     put("frame_ok", _cells_ok(fr), f + ": every cell's check")
-    cfg8 = c["ch08"]["config"]
-    put("frame_waves_blocks", cfg8["waves_blocks"], f + ".ch08.config.waves_blocks")
-    put("frame_waves_tpb", cfg8["waves_tpb"], f + ".ch08.config.waves_tpb")
+    cfg8 = c["ch08_old"]["config"]
+    put("frame_waves_blocks", cfg8["waves_blocks"], f + ".ch08_old.config.waves_blocks")
+    put("frame_waves_tpb", cfg8["waves_tpb"], f + ".ch08_old.config.waves_tpb")
+    old = v5["rules"]["ch08_old_path"]
+    put("frame_first_version", old == {"dense": False, "lookup": "hybrid", "fit_grids": False}
+        and all(cfg8[k] == v for k, v in old.items()) and c["ch08"]["reference_only"]
+        and not c["ch08_old"]["reference_only"],
+        f + ".ch08_old.config.{dense, lookup, fit_grids} == rules.ch08_old_path (OLD_PATH); ch08 reference only")
+    for key, col in (("est_ch03", "est_ch03_conn8"), ("est_ch04", "est_ch04_multi8")):
+        e = c[col]
+        assert e["est"] is True, col
+        put(key + "_ms", e["ms"], f + f".{col}.ms (estimate: median sampled call x calls, v4's method)")
+        put(key + "_calls", e["calls"], f + f".{col}.calls")
+        put(key + "_mean_ms", e["est_mean_based_ms"], f + f".{col}.est_mean_based_ms")
+        put(key + "_host_ms", e["host_clock_est_ms"], f + f".{col}.host_clock_est_ms (v4's clock, same calls)")
+        put(key + "_conn", e["config"]["connectivity"], f + f".{col}.config.connectivity")
+    put("loop_ch03_ms", c["loop_ch03_conn8"]["ms"], f + ".loop_ch03_conn8.ms (the full loop, reference)")
+    put("loop_ch04_ms", c["loop_ch04_multi8"]["ms"], f + ".loop_ch04_multi8.ms (the full loop, reference)")
+    put("est_ch03_over_ch04_paired", fr["paired"]["est_ch03_conn8/est_ch04_multi8"]["median"],
+        f + ".paired[est_ch03_conn8/est_ch04_multi8].median")
 
-    # row 3, many blobs: the same frame (the meter's), one session. The
-    # keys keep v4's names; v4's 1 Mpx noise scene is gone (see the docstring).
-    for key, same in (("count_cpu_ms", "njit_ms"), ("count_label_ms", "njit_label_ms"), ("count_ch05_ms", "ch05_ms"),
-                      ("count_gpu_ms", "frame_ms"), ("count_px", "n_pixels"), ("count_blobs", "n_blobs")):
+    # row 3, many blobs: the same frame (the meter's). Until r13 its CPU is
+    # the labels reset before the clock (count_cpu_pre_ms, against ch05);
+    # from r13 the labels reset on it (count_cpu_ms, against the waves).
+    # The keys keep v4's names, so score_rows() keeps working.
+    for key, same in (("count_cpu_ms", "njit_ms"), ("count_ch05_ms", "ch05_ms"), ("count_gpu_ms", "frame_ms"),
+                      ("count_px", "n_pixels"), ("count_blobs", "n_blobs")):
         n[key] = n[same]
 
-    # row 1, one small blob: the CPU, the GPU so far (before the tiles), the tiles
+    # row 1, one small blob: r02's one block against the 4-neighbour CPU,
+    # r14's tiles against the 8-neighbour CPU without depth (ch07 keeps none)
     sq = _scene(v5, "sq_256")
     c, f = sq["cells"], f"{f5}:sq_256"
     put("small_px", sq["red_px"], f + ".red_px")
-    put("small_cpu_ms", c["njit"]["ms"], f + ".njit.ms (4-conn BFS, v4's baseline)")
-    put("small_cpu8_ms", c["njit8"]["ms"], f + ".njit8.ms (8-conn BFS, the twin)")
-    put("small_gpu_ms", c[SMALL_PRE_TILES]["ms"], f + f".{SMALL_PRE_TILES}.ms (the GPU so far: OV's fastest cell before the tiles)")
+    put("small_cpu_ms", c["cpu_bfs4"]["ms"], f + ".cpu_bfs4.ms (4 neighbours, depth, reset before: r02's twin)")
+    put("small_cpu8_ms", c["cpu_fill8"]["ms"],
+        f + ".cpu_fill8.ms (8 neighbours, no depth, reset on the clock: r14's twin)")
+    put("small_cpu8_depth_ms", c["cpu_bfs8"]["ms"], f + ".cpu_bfs8.ms (8 neighbours, depth: ch05_fused_L8's twin)")
+    put("small_oracle4_ms", c["oracle_bfs4"]["ms"], f + ".oracle_bfs4.ms (as called: reference)")
+    g = c["ch01_ring"]
+    put("small_gpu_ms", g["ms"], f + ".ch01_ring.ms (r02's one block, its queue a ring in shared memory)")
+    put_list("small_gpu_x_range", g["twin"]["x_range_cpu_rounds"], f + ".ch01_ring.twin.x_range_cpu_rounds")
+    put("small_tpb", g["config"]["tpb"], f + ".ch01_ring.config.tpb")
+    put("small_gpu_blocks", g["config"]["blocks"], f + ".ch01_ring.config.blocks")
+    put("small_ch05_ms", c["ch05_fused_L8"]["ms"], f + ".ch05_fused_L8.ms (reference only: act 2's seeds, not shown here)")
+    put_list("small_ch05_x_range", c["ch05_fused_L8"]["twin"]["x_range_cpu_rounds"],
+             f + ".ch05_fused_L8.twin.x_range_cpu_rounds")
     put("small_tiles_ms", c["ch07"]["ms"], f + ".ch07.ms (kernel only)")
+    put_list("small_tiles_x_range", c["ch07"]["twin"]["x_range_cpu_rounds"], f + ".ch07.twin.x_range_cpu_rounds")
     put("small_tiles_e2e_ms", c["ch07"]["e2e"]["ms"], f + ".ch07.e2e.ms (with the copies)")
     put("small_tiles_rounds", c["ch07"]["info"]["rounds"], f + ".ch07.info.rounds")
     put("small_tiles_blocks", c["ch07"]["config"]["blocks"], f + ".ch07.config.blocks")
     put("small_ok", _cells_ok(sq), f + ": every cell's check")
-    cells = {k: v["ms"] for k, v in _row(ov, "sq_256")["cells"].items()
-             if k not in ("njit", "pure_python") and v.get("skip") is None and not v.get("est") and v.get("ms")}
-    best = min(cells, key=cells.get)
-    put("ov_small_best_is_pin", best == SMALL_PRE_TILES, f"{OV.name}:sq_256 fastest GPU cell by the host clock ({best})")
 
-    # row 2, one huge blob: act 1's cells (v4's 1 block, 2 blocks, 48 blocks,
-    # 8 ways) and act 3's tiles, one session
+    # row 2, one huge blob: act 1's cells (1 block, 2 blocks, 48 blocks
+    # against the 4-neighbour CPU; the diagonals against the 8-neighbour
+    # CPU with depth, as ch03 keeps it) and act 3's tiles (the 8-neighbour
+    # CPU without depth, reset on the clock), one session
     q5 = _scene(v5, "sq_8000_center")
     c, f = q5["cells"], f"{f5}:sq_8000_center"
-    put("big_cpu_ms", c["njit"]["ms"], f + ".njit.ms (4-conn BFS, v4's baseline)")
-    put("big_cpu8_ms", c["njit8"]["ms"], f + ".njit8.ms (8-conn BFS, the twin)")
+    put("big_cpu4_ms", c["cpu_bfs4"]["ms"], f + ".cpu_bfs4.ms (4 neighbours: the twin of r03b, r04, r05)")
+    put("big_cpu8_ms", c["cpu_bfs8"]["ms"], f + ".cpu_bfs8.ms (8 neighbours, depth: the twin of r06)")
+    put("big_cpu_fill_ms", c["cpu_fill8"]["ms"],
+        f + ".cpu_fill8.ms (8 neighbours, no depth, reset on the clock: the twin of r11, the r14 card's row 2)")
+    put("big_oracle4_ms", c["oracle_bfs4"]["ms"], f + ".oracle_bfs4.ms (as called, fresh arrays: reference)")
+    put("big_oracle8_ms", c["oracle_bfs8"]["ms"], f + ".oracle_bfs8.ms (as called, fresh arrays: reference)")
+    n["big_cpu_ms"] = n["big_cpu8_ms"]     # row 2's CPU until r11 (score_rows(beat) moves to big_cpu_fill_ms)
     for key, cfg in (("big_1block_ms", "ch01_spill"), ("big_2blocks_ms", "ch02_global"),
                      ("big_48blocks_ms", "ch03_conn4"), ("big_8ways_ms", "ch03_conn8"),
                      ("big_tuned_ms", "ch03_wc_bare"), ("big_tiles_ms", "ch07")):
         put(key, c[cfg]["ms"], f + f".{cfg}.ms")
+    for key, cfg in (("big_1block_x_range", "ch01_spill"), ("big_48_x_range", "ch03_conn4"),
+                     ("big_8ways_x_range", "ch03_conn8"), ("big_tiles_x_range", "ch07")):
+        put_list(key, c[cfg]["twin"]["x_range_cpu_rounds"], f + f".{cfg}.twin.x_range_cpu_rounds")
     put("big_tiles_e2e_ms", c["ch07"]["e2e"]["ms"], f + ".ch07.e2e.ms (with the copies)")
     put("big_tiles_rounds", c["ch07"]["info"]["rounds"], f + ".ch07.info.rounds")
     put("big_levels4_v5", c["ch03_conn4"]["info"]["levels"], f + ".ch03_conn4.info.levels")
@@ -324,37 +448,36 @@ def load() -> dict[str, Num]:
     put("big_tuned_over_tiles_paired", p["ch03_wc_bare/ch07"]["median"], f + ".paired[ch03_wc_bare/ch07].median")
     put("big_ok", _cells_ok(q5), f + ": every cell's check")
 
-    # the 240 drone frames
-    dr = v5["drones"]
+    # the 240 drone frames: ch08's first version (no dense-tile path),
+    # against the labels-only CPU (reset on the clock, as ch08 initialises)
     s, f = dr["summary"], f"{f5}:drones.summary"
-    put("drone_cpu_ms", s["njit"]["median_ms"], f + ".njit.median_ms")
-    put("drone_cpu_max_ms", s["njit"]["max_ms"], f + ".njit.max_ms")
-    put("drone_label_ms", s["njit_label"]["median_ms"], f + ".njit_label.median_ms (labels only, the twin)")
-    put("drone_gpu_ms", s["ch08"]["median_ms"], f + ".ch08.median_ms")
-    put("drone_gpu_max_ms", s["ch08"]["max_ms"], f + ".ch08.max_ms")
-    put("drone_e2e_ms", s["ch08_e2e"]["median_ms"], f + ".ch08_e2e.median_ms (with the copies)")
-    put("drone_e2e_max_ms", s["ch08_e2e"]["max_ms"], f + ".ch08_e2e.max_ms")
-    put("drone_frames", s["ch08"]["n"], f + ".ch08.n")
-    put("drone_ok", dr["checks_ok"] and dr["cpu_checks_ok"] and dr["e2e_matches_cpu"]
-        and all(fm["ch08_check"]["ok"] for fm in dr["frames"]) and dr["frames_sha1_equal_to_v4"] == len(dr["frames"]),
-        f"{f5}:drones.checks_ok, cpu_checks_ok, e2e_matches_cpu, frames[].ch08_check.ok, frames_sha1_equal_to_v4")
+    put("drone_cpu_ms", s["cpu_label"]["median_ms"], f + ".cpu_label.median_ms (labels only)")
+    put("drone_cpu_max_ms", s["cpu_label"]["max_ms"], f + ".cpu_label.max_ms")
+    put("drone_gpu_ms", s["gpu"]["median_ms"], f + ".gpu.median_ms (per-frame medians)")
+    put("drone_gpu_max_ms", s["gpu"]["max_ms"], f + ".gpu.max_ms (the worst frame's median)")
+    put("drone_gpu_worst_run_ms", s["gpu_worst_run_ms"], f + ".gpu_worst_run_ms (the worst single run)")
+    put("drone_e2e_ms", s["gpu_e2e"]["median_ms"], f + ".gpu_e2e.median_ms (with the copies)")
+    put("drone_e2e_max_ms", s["gpu_e2e"]["max_ms"], f + ".gpu_e2e.max_ms (the worst frame's median)")
+    put("drone_x_json", s["cpu_over_gpu_median"], f + ".cpu_over_gpu_median")
+    put("drone_frames", s["gpu"]["n"], f + ".gpu.n")
+    fd = f"{f5}:drones"
+    put("drone_first_version", all(dr["config"][k] == v for k, v in old.items()) and dr["gpu_cell"] == "ch08_old",
+        fd + ".config.{dense, lookup, fit_grids} == rules.ch08_old_path (OLD_PATH)")
+    put("drone_dense_tiles", sum(fm["gpu_info"]["dense_label_tiles"] + fm["gpu_info"]["dense_paint_tiles"]
+                                 for fm in dr["frames"]), fd + ".frames[].gpu_info.dense_*_tiles (summed)")
+    cen = dr["default_engine_dense_census"]
+    put("drone_census_tiles", cen["tiles_touched"], fd + ".default_engine_dense_census.tiles_touched (untimed)")
+    put("drone_census_label", cen["ccl_tiles"], fd + ".default_engine_dense_census.ccl_tiles")
+    put("drone_census_paint", cen["paint_ccl_tiles"], fd + ".default_engine_dense_census.paint_ccl_tiles")
+    put("drone_ok", dr["checks_ok"] and dr["cpu_checks_ok"] and dr["e2e_matches_cpu"] and dr["last_timed_run_matches_cpu"]
+        and all(fm["gpu_check"]["ok"] and fm["gpu_check"]["labels_match_cpu"] for fm in dr["frames"])
+        and dr["frames_sha1_equal_to_v4"] == len(dr["frames"]),
+        fd + ".checks_ok, cpu_checks_ok, e2e_matches_cpu, last_timed_run_matches_cpu, frames[].gpu_check, "
+        "frames_sha1_equal_to_v4")
     meta = _load(DRONE_META)
     put("drone_blobs_median", sorted(meta["blobs_per_frame"])[len(meta["blobs_per_frame"]) // 2],
         "assets/drones_labels/meta.json:blobs_per_frame (median)")
     put("cpu_cores", CPU_CORES, CPU_CORES_SOURCE)
-
-    # ================= OV (Jul 24): act 2's estimates, the 256 threads =================
-    png = _row(ov, "png_blobs")
-    c = png["cells"]
-    put("pure_ms", c["pure_python"]["ms"], f"{OV.name}:png_blobs.pure_python.ms")
-    put("ov_njit_ms", c["njit"]["ms"], f"{OV.name}:png_blobs.njit.ms (July's CPU, for r07-r08's estimates)")
-    put("ov_n_blobs", png["n_blobs"], f"{OV.name}:png_blobs.n_blobs")
-    for key, col in (("est_ch03_ms", "ch03_conn8"), ("est_ch04_ms", "ch04_multi")):
-        assert c[col].get("est") is True, col
-        put(key, c[col]["ms"], f"{OV.name}:png_blobs.{col}.ms (est)")
-        put(key.replace("_ms", "_calls"), c[col]["calls"], f"{OV.name}:png_blobs.{col}.calls")
-    put("sm", ov["sm_count"], f"{OV.name}:sm_count")
-    put("small_tpb", ov["tpb"], f"{OV.name}:tpb")
 
     # ================= act 1's mechanism (Jul 19-20): GPU only =================
     d3 = _load(CH03)
@@ -464,17 +587,25 @@ def load() -> dict[str, Num]:
     put("t7_rounds", s7[cfg + "_rounds"], f + f".{cfg}_rounds (the default)")
     put("t7_levels8", s7["levels8"], f + ".levels8")
     put("t7_one_sync", t7["default_switches"]["one_sync"], f"{T7.name}:default_switches.one_sync")
-    d8, w8 = _scene(_load(D8), "input_blobs"), _scene(_load(W8), "input_blobs")
+    d8full = _load(D8)
+    d8, w8 = _scene(d8full, "input_blobs"), _scene(_load(W8), "input_blobs")
     f = f"{D8.name}:input_blobs.ch08_L8"
     for key in ("rounds", "seeds", "seeds_lattice", "comps", "interior_comps", "n_blobs", "links", "roots",
                 "claims", "ccl_tiles", "paint_ccl_tiles", "valve_round"):
         put(f"d8_{key}", d8["ch08_L8_" + key], f + "_" + key)
     put_list("d8_frontier", d8["ch08_L8_frontier_comps"], f + "_frontier_comps")
-    put("d8_ch05_ms", d8["ch05_ms"], f"{D8.name}:input_blobs.ch05_ms (events; memory clock median 8,001 MHz)")
     same = ("rounds", "seeds", "seeds_lattice", "comps", "interior_comps", "n_blobs", "links", "roots", "claims",
             "frontier_comps")
     put("w8_same_as_d8", all(w8["ch08_L8_" + k] == d8["ch08_L8_" + k] for k in same),
         f"{W8.name}:input_blobs.ch08_L8_{{{', '.join(same)}}} == D8's")
+    # D8 timed ch08's first version (its old_path, OLD_PATH) beside the
+    # default on the frame: the same counters, so the default's floors
+    # (WV) and counters (D8) describe the first version's run, V5's r13
+    same_old = same + ("ccl_tiles", "paint_ccl_tiles")
+    put("d8_old_same_as_default", all(d8["ch08_old_" + k] == d8["ch08_L8_" + k] for k in same_old),
+        f"{D8.name}:input_blobs.ch08_old_{{{', '.join(same_old)}}} == ch08_L8's")
+    put("d8_old_is_v5_engine", d8full["old_path"] == v5["rules"]["ch08_old_path"],
+        f"{D8.name}:old_path == {V5.name}:rules.ch08_old_path")
 
     # ================= act 3: the floors, recorded from the kernels (Oct 17) =================
     tl = _load(TL)
@@ -524,14 +655,20 @@ def load() -> dict[str, Num]:
     put_list("full_frontier", fu["frontier_pieces_per_round"], f + ".frontier_pieces_per_round")
     put("full_ccl_tiles", fu["counters"]["ccl_tiles"], f + ".counters.ccl_tiles (tiles off the warp's piece loop)")
     put("full_paint_ccl_tiles", fu["counters"]["paint_ccl_tiles"], f + ".counters.paint_ccl_tiles (tiles painted off it)")
-    # V5's timed engine on the frame is the one WV recorded, so WV's counters
-    # (and D8's) describe the run behind row 3
-    e, c8 = fu["engine"], _scene(v5, "input_blobs")["cells"]["ch08"]
+    # WV recorded the default engine, which V5 timed for reference (ch08);
+    # V5's r13 is the first version (ch08_old), whose counters D8 found
+    # equal to the default's (d8_old_same_as_default). Both V5 runs give
+    # WV's rounds and blobs
+    e, cf = fu["engine"], _scene(v5, "input_blobs")["cells"]
     same = ("dense", "lookup", "lattice", "waves_blocks", "waves_tpb")
-    put("wv_engine_is_v5", all(e[k] == c8["config"][k] for k in same)
-        and wv["config"]["connectivity"] == c8["config"]["connectivity"]
-        and (fu["rounds"], fu["blobs"]) == (c8["info"]["rounds"], c8["info"]["n_blobs"]),
-        f"{WV.name}:full.engine.{{{', '.join(same)}}}, config.connectivity, rounds, blobs == V5's input_blobs.ch08")
+    put("wv_engine_is_v5", all(e[k] == cf["ch08"]["config"][k] for k in same)
+        and wv["config"]["connectivity"] == cf["ch08"]["config"]["connectivity"]
+        and all((fu["rounds"], fu["blobs"]) == (cf[k]["info"]["rounds"], cf[k]["info"]["n_blobs"])
+                for k in ("ch08", "ch08_old"))
+        and cf["ch08_old"]["config"]["lattice"] == e["lattice"]
+        and cf["ch08_old"]["config"]["waves_tpb"] == e["waves_tpb"],
+        f"{WV.name}:full.engine.{{{', '.join(same)}}} == V5's input_blobs.ch08 (reference); rounds, blobs == "
+        "ch08's and ch08_old's; ch08_old's lattice and waves_tpb the same")
     put("wv_ok", all(wv["checks"].values()), f"{WV.name}:checks (all true)")
     return n
 
@@ -677,35 +814,48 @@ def derived() -> dict[str, float]:
     reached = n["cu_reached"]
     return {
         "budget_ms": 1000 / 30,
-        # row 1, one small blob (V5)
-        "small_cpu_x": n["small_gpu_ms"] / n["small_cpu_ms"],          # 1.42: the CPU wins by, before the tiles
-        "small_tiles_x": n["small_cpu_ms"] / n["small_tiles_ms"],      # 2.68: the GPU wins by, kernel time
-        "small_tiles_twin_x": n["small_cpu8_ms"] / n["small_tiles_ms"],    # 4.15
-        "small_e2e_cpu_x": n["small_tiles_e2e_ms"] / n["small_cpu_ms"],    # 4.96: the CPU wins by, with the copies
-        # row 2, one huge blob (V5): act 1, then the tiles
-        "big_1block_x": n["big_cpu_ms"] / n["big_1block_ms"],          # 1.55
-        "big_2v1_x": n["big_1block_ms"] / n["big_2blocks_ms"],         # 2.03 (paired: big_2v1_paired)
-        "big_2blocks_x": n["big_cpu_ms"] / n["big_2blocks_ms"],        # 3.1
-        "big_48_x": n["big_cpu_ms"] / n["big_48blocks_ms"],            # 12.1
-        "big_8ways_x": n["big_cpu_ms"] / n["big_8ways_ms"],            # 16.7
-        "big_tiles_x": n["big_cpu_ms"] / n["big_tiles_ms"],            # 537
-        "big_tiles_twin_x": n["big_cpu8_ms"] / n["big_tiles_ms"],      # 475
-        "big_tiles_e2e_x": n["big_cpu_ms"] / n["big_tiles_e2e_ms"],    # 37: with the copies
-        "big_8_over_tiles": n["big_8ways_ms"] / n["big_tiles_ms"],     # 32.2 (paired 32.2)
-        "big_stops_8ways": 2 * n["big_levels8_v5"],                    # 8,002: two gates per ring
-        "big_stops_tiles": n["big_tiles_rounds"],                      # 127: one gate per round
-        "rings_per_round": n["big_levels8_v5"] / n["big_tiles_rounds"],    # 31.5
-        "big_tiles_search_share": n["big_tiles_rounds_ms"] / n["big_tiles_ms"],    # 0.36: the rounds' share
-        # row 3, many blobs: the 81 Mpx frame (V5): act 2's seeds, then the waves
-        "count_ch05_x": n["count_cpu_ms"] / n["count_ch05_ms"],        # 22.4
-        "count_x": n["count_cpu_ms"] / n["count_gpu_ms"],              # 517
-        "count_twin_x": n["count_label_ms"] / n["count_gpu_ms"],       # 126
-        "count_e2e_x": n["count_cpu_ms"] / n["frame_e2e_ms"],          # 22: with the copies
-        "frame_ch05_over_ch08": n["ch05_ms"] / n["frame_ms"],          # 23.1
-        "frame_ch05_full_clocks_over_ch08": n["d8_ch05_ms"] / n["frame_ms"],   # 21.0: D8's ch05 at 8,001 MHz
-        # the drones (V5)
-        "drone_x": n["drone_cpu_ms"] / n["drone_gpu_ms"],              # 12.7
-        "drone_twin_x": n["drone_label_ms"] / n["drone_gpu_ms"],       # 5.6
+        # i1: the CPU on the 81 Mpx frame (labels only, its reset on the clock) against the budget
+        "frame_cpu_over_budget": n["njit_ms"] * 30 / 1000,
+        # row 1, one small blob: r02's one block (4 neighbours), r14's tiles (8 neighbours, no depth)
+        "small_cpu_x": n["small_gpu_ms"] / n["small_cpu_ms"],          # the CPU wins by (r02)
+        "small_tiles_x": n["small_cpu8_ms"] / n["small_tiles_ms"],     # the GPU wins by, kernel time (r14)
+        "small_e2e_cpu_x": n["small_tiles_e2e_ms"] / n["small_cpu8_ms"],   # the CPU wins by, with the copy
+        "small_ch05_x": n["small_cpu8_depth_ms"] / n["small_ch05_ms"],     # act 2's seeds here (not shown)
+        # row 2, one huge blob: act 1 (4 neighbours, then 8 with depth), then the tiles (8, no depth)
+        "big_1block_x": n["big_cpu4_ms"] / n["big_1block_ms"],
+        "big_2v1_x": n["big_1block_ms"] / n["big_2blocks_ms"],         # paired: big_2v1_paired
+        "big_2blocks_x": n["big_cpu4_ms"] / n["big_2blocks_ms"],
+        "big_48_x": n["big_cpu4_ms"] / n["big_48blocks_ms"],
+        "big_8ways_x": n["big_cpu8_ms"] / n["big_8ways_ms"],
+        "big_tiles_x": n["big_cpu_fill_ms"] / n["big_tiles_ms"],
+        "big_tiles_e2e_x": n["big_cpu_fill_ms"] / n["big_tiles_e2e_ms"],   # with the copies
+        "big_8_over_tiles": n["big_8ways_ms"] / n["big_tiles_ms"],     # GPU against GPU (paired too)
+        "big_tuned_over_tiles": n["big_tuned_ms"] / n["big_tiles_ms"],
+        "big_stops_8ways": 2 * n["big_levels8_v5"],                    # two gates per ring
+        "big_stops_tiles": n["big_tiles_rounds"],                      # one gate per round
+        "rings_per_round": n["big_levels8_v5"] / n["big_tiles_rounds"],
+        "big_tiles_search_share": n["big_tiles_rounds_ms"] / n["big_tiles_ms"],    # the rounds' share
+        # what the per-call allocation cost the oracles (reference: v5's earlier CPU)
+        "big_oracle4_over_twin": n["big_oracle4_ms"] / n["big_cpu4_ms"],
+        "big_oracle8_over_twin": n["big_oracle8_ms"] / n["big_cpu8_ms"],
+        "frame_oracle_over_twin": n["frame_oracle_ms"] / n["njit_ms"],
+        "big_depth_share": 1 - n["big_cpu_fill_ms"] / n["big_cpu8_ms"],    # no depth, reset on vs depth, before
+        "frame_reset_share": 1 - n["count_cpu_pre_ms"] / n["njit_ms"],     # the label map's reset, on the clock
+        # row 3, many blobs: the 81 Mpx frame, labels only: act 2 (reset before), then the waves (reset on)
+        "est_ch03_cpu_x": n["est_ch03_ms"] / n["count_cpu_pre_ms"],    # the CPU wins by (r07, estimate)
+        "est_ch04_cpu_x": n["est_ch04_ms"] / n["count_cpu_pre_ms"],    # the CPU wins by (r08, estimate)
+        "est_ch03_over_ch04": n["est_ch03_ms"] / n["est_ch04_ms"],     # two per launch is faster
+        "loop_ch03_over_est": n["loop_ch03_ms"] / n["est_ch03_ms"],    # the estimate runs low
+        "loop_ch04_over_est": n["loop_ch04_ms"] / n["est_ch04_ms"],
+        "est_host_cpu_x": max(n["est_ch03_host_ms"], n["est_ch04_host_ms"]) / n["count_cpu_pre_ms"],
+        "count_ch05_x": n["count_cpu_pre_ms"] / n["count_ch05_ms"],
+        "count_x": n["count_cpu_ms"] / n["count_gpu_ms"],
+        "count_e2e_x": n["count_cpu_ms"] / n["frame_e2e_ms"],          # with the copies
+        "frame_ch05_over_ch08": n["ch05_ms"] / n["frame_ms"],
+        "frame_v4_over_label": n["frame_cpu_v4_ms"] / n["njit_ms"],    # v4's CPU baseline did more work
+        # the drones
+        "drone_x": n["drone_cpu_ms"] / n["drone_gpu_ms"],              # kernel time (not shown)
+        "drone_e2e_cpu_x": n["drone_e2e_ms"] / n["drone_cpu_ms"],      # the CPU wins by, with the copies
         # act 1's GPU-only numbers (CH03, DB2)
         "sm_pct_1": 100 / n["sm"],
         "sm_pct_2": 200 / n["sm"],
@@ -744,39 +894,57 @@ def facts() -> list[tuple[str, bool]]:
     run = [ms for ms in n["sweep_grid_ms"] if ms is not None and ms == ms]   # the grid's measured cells
     reached, trips = n["cu_reached"], int(n["cu_trips"])
     claimed = n["crop_claimed_per_round"]
+    rng = {k: n[k] for k in ("small_gpu_x_range", "small_tiles_x_range", "big_1block_x_range", "big_48_x_range",
+                             "big_8ways_x_range", "big_tiles_x_range", "ch05_x_range", "frame_x_range")}
     return [
         # ---- the sessions themselves
-        ("V5: every check passed, the script was the committed one",
+        ("V5: every check passed; bench_v5.py and cpu_twins.py were the committed ones",
          n["v5_ok"] == 1 and n["v5_script_at_head"] == 1 and n["frame_ok"] == 1 and n["small_ok"] == 1
          and n["big_ok"] == 1 and n["drone_ok"] == 1),
-        ("V5: SM clock median 2,070 MHz in every timed block; the huge blob's window has 9 of 177 samples "
-         "under it (5 at 1,995, 4 at 2,055)",
-         n["v5_sm_clock_median"] == 2070 and n["v5_sm_clock_min"] == 1995 and n["v5_sq8000_clk_samples"] == 177
-         and n["v5_sq8000_clk_under"] == (1995,) * 5 + (2055,) * 4),
-        ("V5: memory 8,001 MHz in P0 in every timed block but three (the drones' median 7,001; the frame's ch05 "
-         "block, P3 at 7,001; the small blob's tiles block, P3 in 5 of 6 samples at 8,001)",
-         n["v5_clock_exceptions"] == V5_CLOCK_EXCEPTIONS and n["v5_frame_ch05_mem_mhz"] == 7001),
-        ("V5 and OV agree on the GPU (24 SMs) and the frame (2,522 blobs)",
-         n["v5_sm_count"] == n["sm"] and n["ov_n_blobs"] == n["n_blobs"]),
+        ("V5: all 8 timed blocks at full clocks: P0 only, memory 8,001 MHz, SM median 2,070 in every block; 7 on "
+         "their first attempt, ch05 on the frame on its second (its first sat in P3 under the power cap)",
+         n["v5_all_full_clocks"] == 1 and n["v5_full_clocks_used"] == 1 and n["v5_p0_only"] == 1
+         and n["v5_blocks"] == 8 and n["v5_first_attempt_blocks"] == 7 and n["v5_retried_is_ch05"] == 1
+         and n["v5_mem_clock_min"] == 8001 and n["v5_sm_clock_median"] >= n["v5_sm_median_rule"] == 2040
+         and n["v5_sm_clock_median"] == 2070 and n["story_full_clocks"] == 1),
+        ("V5: three blocks logged the software power cap (the huge blob's, the waves', ch05's); all at full clocks",
+         n["v5_power_capped_blocks"] == 3),
+        ("V5 like for like: every GPU cell's twin is the session's rule, keeps no output its GPU side does not, "
+         "takes the same neighbours, resets in the same scope, and equals its oracle; twin.x = CPU / GPU",
+         n["v5_twins_ok"] == 1 and n["v5_all_like_for_like"] == 1),
+        ("V5 like for like: every shown CPU-vs-GPU ratio is V5's own story entry (STORY_SHOWN)",
+         all(math.isclose(d[k], 1 / n[f"story_{s}_x"] if inv else n[f"story_{s}_x"], rel_tol=1e-9)
+             for k, s, inv in STORY_SHOWN)),
+        ("V5 reference: the oracles as called (fresh arrays every call) took 1.5x and 1.4x their twins "
+         "(4 neighbours on the square, labels on the frame): the allocations v5's evening session timed",
+         round(d["big_oracle4_over_twin"], 1) == 1.5 and round(d["frame_oracle_over_twin"], 1) == 1.4),
+        ("V5 reference: the label map's reset is 10% of the CPU's frame time (on the clock 225 ms, before it 202)",
+         round(100 * d["frame_reset_share"]) == 10),
         ("act 1's levels: V5's kernels ran CH03's rings (8,001 at 4 ways, 4,001 at 8 ways)",
          n["big_levels4_v5"] == n["big_rings4"] and n["big_levels8_v5"] == n["big_rings8"]),
+        ("V5's frame: 2,522 blobs in the scene, the CPU's labels and both wave engines", n["n_blobs_agree"] == 1),
         # ---- intro
         ("i0 thirty-three milliseconds", round(d["budget_ms"]) == 33),
-        ("i1 on frames this small, compiled CPU code keeps up (drone frames, worst frame)",
+        ("i1 on frames this small, compiled CPU code keeps up (drone frames, labels only, worst frame 0.88 ms)",
          n["drone_cpu_max_ms"] < d["budget_ms"] and n["drone_ok"] == 1),
-        ("i1 drone card: CPU 1.46 ms, GPU 0.11 ms (kernel time): the GPU is faster per frame too",
-         n["drone_gpu_ms"] < n["drone_cpu_ms"] and card_ms(n["drone_cpu_ms"]) == "1.46 ms"
-         and card_ms(n["drone_gpu_ms"]) == "0.11 ms"),
+        ("i1 drone card: CPU 0.679 ms against the 33 ms budget, the GPU a '?' (as the 81 Mpx card): no GPU drone "
+         "time in kernel time anywhere in the cut",
+         card_ms(n["drone_cpu_ms"]) == "0.679 ms" and n["drone_cpu_ms"] < d["budget_ms"]),
         ("i1 eighty-one megapixels", round(n["n_pixels"] / 1e6) == 81),
-        ("i1 the CPU needs one point two seconds", round(n["njit_ms"] / 1000, 1) == 1.2),
+        ("i1 the CPU needs over a fifth of a second (labels only, the reset on the clock: every round 214-238 ms; "
+         "stopwatch 225 ms; not a quarter)",
+         200 < min(n["njit_round_ms"]) and max(n["njit_round_ms"]) < 250 and card_ms(n["njit_ms"]) == "225 ms"),
+        ("i1 ... against the same thirty-three: nearly seven times over (not spoken)",
+         6.5 < d["frame_cpu_over_budget"] < 7),
         # ---- act 1
         ("r01 twenty-four SMs", n["sm"] == 24),
-        ("r02 two hundred fifty-six threads", n["small_tpb"] == 256),
-        ("r02 on one small blob, the CPU still wins (the race's 'GPU so far': OV's fastest cell before the "
-         "tiles, by the host clock)",
-         n["small_cpu_ms"] < n["small_gpu_ms"] and n["ov_small_best_is_pin"] == 1),
-        ("r02 scoreboard row 1: CPU 1.4x (0.12 vs 0.17 ms, the card reads true)",
-         card_x(d["small_cpu_x"]) == "1.4×" and card_row_ok(n["small_gpu_ms"], n["small_cpu_ms"])),
+        ("r02 two hundred fifty-six workers, called threads, in one block", n["small_tpb"] == 256
+         and n["small_gpu_blocks"] == 1),
+        ("r02 on one small blob, the CPU still wins: one block against the 4-neighbour CPU, in every CPU round",
+         n["small_cpu_ms"] < n["small_gpu_ms"] and max(rng["small_gpu_x_range"]) < 1),
+        ("r02 race and scoreboard row 1: CPU 4.3x (0.121 vs 0.520 ms, the card reads true)",
+         card_x(d["small_cpu_x"]) == "4.3×" and card_row_ok(n["small_gpu_ms"], n["small_cpu_ms"])
+         and card_ms(n["small_cpu_ms"]) == "0.121 ms" and card_ms(n["small_gpu_ms"]) == "0.520 ms"),
         ("r03 the rings: 8,001 levels, every pixel once",
          len(levels) == n["big_rings4"] and sum(levels) == n["big_filled"]),
         ("r03 the queue holds two rings (the shared ring's measured peak on 36 Mpx = its widest pair)",
@@ -791,8 +959,10 @@ def facts() -> list[tuple[str, bool]]:
          d["first_spill_ring"] == 1024 and d["last_spill_ring"] == 6975
          and d["spill_rings"] == d["last_spill_ring"] - d["first_spill_ring"] + 1),
         ("r03 the card's eight gigabytes", round(n["vram_gb"]) == 8),
-        ("r03b now one block beats the CPU (caption 1.5x)", 1.0 < d["big_1block_x"] < 2.0
-         and card_x(d["big_1block_x"]) == "1.5×"),
+        ("r03b now one block is a little faster than the 4-neighbour CPU: 1.09x, above 1 in every CPU round "
+         "(1.02-1.17), under 1.2 (caption 1.1x)",
+         1.0 < min(rng["big_1block_x_range"]) and max(rng["big_1block_x_range"]) < 1.2
+         and card_x(d["big_1block_x"]) == "1.1×"),
         ("r03b one SM of twenty-four", n["sm"] == 24),
         ("r04 a second SM: block 1 ran on SM 2, in every two-block scene",
          n["two_sm_ids"] == (0, 2) and n["two_sm_ids_all"] == 1),
@@ -803,7 +973,7 @@ def facts() -> list[tuple[str, bool]]:
          n["q1_global_ms"] <= n["q1_shared_ms"] and round(n["q1_px"] / 1e6) == 16),
         ("r04 ... a clean test: the shared ring never spilled there",
          n["q1_ring_peak"] <= n["ring_slots"] and n["q1_spilled_px"] == 0),
-        ("r04 twice as fast (caption 2x again; medians and paired rounds agree)",
+        ("r04 twice as fast (GPU against GPU, caption 2x again; medians and paired rounds agree)",
          1.9 <= d["big_2v1_x"] < 2.5 and 1.9 <= n["big_2v1_paired"] < 2.5 and round(d["big_2v1_x"]) == 2),
         ("r04 twenty-two SMs stay dark", n["sm"] - 2 == 22),
         ("r05 forty-eight blocks", n["big_blocks"] == 48),
@@ -811,7 +981,8 @@ def facts() -> list[tuple[str, bool]]:
          len(ids) == n["big_blocks"] and sorted(ids) == sorted(list(range(24)) * 2)),
         ("r05 the measured order: blocks 0-11 on SMs 0, 2, .., 22, blocks 12-23 on 1, 3, .., 23, then again",
          ids == (tuple(range(0, 24, 2)) + tuple(range(1, 24, 2))) * 2),
-        ("r05 twelve times the CPU (caption 12x)", card_x(d["big_48_x"]) == "12×"),
+        ("r05 eight and a half times the 4-neighbour CPU (caption 8.5x; the CPU's rounds give 8.0-9.1, within 8%)",
+         card_x(d["big_48_x"]) == "8.5×" and all(abs(x / 8.5 - 1) < 0.08 for x in rng["big_48_x_range"])),
         ("r05 busy blocks: the grid-stride rule gives every block's measured total",
          grid_stride_totals(levels, blocks, tpb) == list(n["big_processed_per_block"])),
         ("r05 small rings keep only a few busy: rings 0-64 are block 0's alone", d["block0_only_rings"] == 65),
@@ -844,30 +1015,52 @@ def facts() -> list[tuple[str, bool]]:
         ("r06 the 8-way rings: 4,001 levels, every pixel once",
          len(n["big8_level_sizes"]) == n["big_rings8"] and sum(n["big8_level_sizes"]) == n["big_filled"]),
         ("r06 on a square, half the rings", abs(n["big_rings8"] / n["big_rings4"] - 0.5) < 0.01),
-        ("r06 caption and scoreboard row 2: GPU 17x (1,666 vs 99.9 ms, the card reads true)",
-         card_x(d["big_8ways_x"]) == "17×" and card_row_ok(n["big_cpu_ms"], n["big_8ways_ms"])),
-        # ---- act 2 (r07-r08: July's GPU estimates against V5's CPU, and against July's own CPU)
+        ("r06 caption and scoreboard row 2: GPU 11x against the 8-neighbour CPU with depth (1,126 vs 101 ms, the "
+         "card reads true; 9.9-11.7 over the CPU's rounds)",
+         card_x(d["big_8ways_x"]) == "11×" and card_row_ok(n["big_cpu8_ms"], n["big_8ways_ms"])
+         and card_ms(n["big_cpu8_ms"]) == "1,126 ms" and card_ms(n["big_8ways_ms"]) == "101 ms"
+         and n["big_cpu_ms"] == n["big_cpu8_ms"] and min(rng["big_8ways_x_range"]) > 9),
+        # ---- act 2 (V5: v4's estimates re-made at 8 neighbours, against the labels-only CPU, reset before the
+        # clock as act 2's loops and ch05 reset theirs)
         ("r07 twenty-five hundred blobs", 2400 <= n["n_blobs"] <= 2600),
-        ("r07 one launch each", n["est_ch03_calls"] == n["n_blobs"]),
-        ("r07 slower than the CPU (estimate; against V5's CPU and OV's own)",
-         n["est_ch03_ms"] > n["njit_ms"] and n["est_ch03_ms"] > n["ov_njit_ms"]),
-        ("r08 two per launch", n["est_ch04_calls"] * 2 == n["n_blobs"]),
-        ("r08 close to CPU speed (estimate): still slower, by under a quarter, against V5's CPU and OV's own",
-         1.0 < n["est_ch04_ms"] / n["njit_ms"] < 1.25 and 1.0 < n["est_ch04_ms"] / n["ov_njit_ms"] < 1.25),
-        ("r09 about fifty milliseconds (V5 51.7 at a 7,001 MHz memory clock; D8 47.1 at 8,001)",
-         round(n["ch05_ms"], -1) == 50 and round(n["d8_ch05_ms"], -1) == 50 and card_ms(n["ch05_ms"]) == "51.7 ms"),
-        ("r09 still over one frame", n["ch05_ms"] > d["budget_ms"] and n["d8_ch05_ms"] > d["budget_ms"]),
+        ("r07 one launch each, 8 neighbours (as the CPU's labels)",
+         n["est_ch03_calls"] == n["n_blobs"] and n["est_ch03_conn"] == 8),
+        ("r07 slower than the CPU by every measure: the estimate, its mean-based form, v4's host clock and the "
+         "full loop, each over the CPU's slowest round (caption ~1,462 ms; the CPU by 7.2x)",
+         min(n["est_ch03_ms"], n["est_ch03_mean_ms"], n["est_ch03_host_ms"], n["loop_ch03_ms"])
+         > max(n["count_cpu_pre_round_ms"]) and card_x(d["est_ch03_cpu_x"]) == "7.2×"
+         and "~" + card_ms(n["est_ch03_ms"]) == "~1,462 ms"),
+        ("r08 two per launch, 8 neighbours", n["est_ch04_calls"] * 2 == n["n_blobs"] and n["est_ch04_conn"] == 8),
+        ("r08 faster (than one per launch) by every measure, paired 1.72x",
+         n["est_ch04_ms"] < n["est_ch03_ms"] and n["est_ch04_mean_ms"] < n["est_ch03_mean_ms"]
+         and n["est_ch04_host_ms"] < n["est_ch03_host_ms"] and n["loop_ch04_ms"] < n["loop_ch03_ms"]
+         and n["est_ch03_over_ch04_paired"] > 1.5),
+        ("r08 but still slower than the CPU, by every measure, over the CPU's slowest round (caption ~850 ms; the "
+         "CPU by 4.2x)",
+         min(n["est_ch04_ms"], n["est_ch04_mean_ms"], n["est_ch04_host_ms"], n["loop_ch04_ms"])
+         > max(n["count_cpu_pre_round_ms"]) and card_x(d["est_ch04_cpu_x"]) == "4.2×"
+         and "~" + card_ms(n["est_ch04_ms"]) == "~850 ms"),
+        ("r07-r08 the estimates run low (the full loops take 1.13x and 1.35x): the direction is safe; every form "
+         "is 4.2-9.5x the CPU",
+         1 < d["loop_ch03_over_est"] < 1.15 and 1.3 < d["loop_ch04_over_est"] < 1.4
+         and round(d["est_ch04_cpu_x"], 1) == 4.2 and round(d["est_host_cpu_x"], 1) == 9.5),
+        ("r09 about fifty milliseconds (53.9 ms, full clocks on the block's second attempt; caption 53.9 ms)",
+         round(n["ch05_ms"], -1) == 50 and card_ms(n["ch05_ms"]) == "53.9 ms"),
+        ("r09 faster than the CPU, in every CPU round (3.5-4.2x)", min(rng["ch05_x_range"]) > 1),
+        ("r09 but over budget", n["ch05_ms"] > d["budget_ms"]),
         ("r09 the queue's counter: every red pixel of the frame (13,451,960)",
          n["red_px"] == n["full_red_px"] == 13_451_960),
-        ("r09 scoreboard row 3 fills: GPU 22x (the same 81 Mpx frame, one session; the card reads true)",
-         card_x(d["count_ch05_x"]) == "22×" and round(n["count_px"] / 1e6) == 81
-         and card_row_ok(n["count_cpu_ms"], n["count_ch05_ms"])),
+        ("r09 scoreboard row 3 fills: GPU 3.8x against the labels-only CPU, reset before the clock (202 vs 53.9 "
+         "ms, the same 81 Mpx frame; the strip shows the factor only)",
+         card_x(d["count_ch05_x"]) == "3.8×" and round(n["count_px"] / 1e6) == 81
+         and card_ms(n["count_cpu_pre_ms"]) == "202 ms"),
         # ---- act 3: the tile (r10)
         ("r10 squares of thirty-two by thirty-two (on the square and on the crop)",
          n["tile_px"] == 32 and n["crop_side"] / n["crop_tiles_side"] == 32),
-        ("r10 one warp, thirty-two threads, takes a tile: a thread per row (32 threads, 32 rows)",
-         WARP_LANES == n["tile_px"]),
-        ("r10 three blocks per SM in act 3: both kernels launch 72 cooperative blocks (tiles 72 x 128, waves 72 x 256)",
+        ("r10 one warp, thirty-two threads that run in step, takes a tile; each thread holds one row (32 threads, "
+         "32 rows)", WARP_LANES == n["tile_px"]),
+        ("r10 three blocks per SM in act 3: both kernels launch 72 cooperative blocks (tiles 72 x 128, waves 72 x "
+         "256, the first version's)",
          n["big_tiles_blocks"] == n["small_tiles_blocks"] == n["frame_waves_blocks"] == 3 * n["sm"]
          and n["big_tiles_tpb"] == 128 and n["frame_waves_tpb"] == 256),
         ("r10 the close-up tile is one blob's: the frame's largest, its fill = its red pixels",
@@ -882,15 +1075,15 @@ def facts() -> list[tuple[str, bool]]:
          n["cu_sweeps_named"] == 1 and len(reached) == 1 + 3 * trips),
         ("r10 every sweep of the first two trips adds pixels",
          all(reached[i] > reached[i - 1] for i in range(1, 7))),
-        ("r10 until nothing changes: the last trip adds nothing (caption 4 trips)",
+        ("r10 until nothing changes: the last trip adds nothing (caption 4 trips / the last changes nothing)",
          trips == 4 and d["cu_last_growth_trip"] == trips - 1 and len(set(reached[-3:])) == 1
          and reached[-3] == reached[-4]),
         ("r10 the tile was visited once, in its round", n["cu_tile_visits"] == 1 and n["cu_tile_round"] >= 1),
         # ---- act 3: the rounds (r11)
-        ("r11 only its border bits go out: 31 / 26 / 18 / 2 (top, left, right, bottom)",
+        ("r11 only the tile's border bits go out: 31 / 26 / 18 / 2 (top, left, right, bottom)",
          fl["cu_border_bits"] == (31, 26, 18, 2)),
-        ("r11 ... into its neighbours: 4 tiles not yet open (32, 18, 1, 1 px), all opened in round 5; the others "
-         "they touch were open by round 4",
+        ("r11 ... into the tiles around it: 4 tiles not yet open (32, 18, 1, 1 px), all opened in round 5; the "
+         "others they touch were open by round 4",
          fl["cu_targets_new"] == 4 and fl["cu_targets_new_px"] == (1, 1, 18, 32)
          and fl["cu_targets_new_rounds"] == (n["cu_tile_round"] + 1,)
          and fl["cu_targets_old_rounds_max"] <= n["cu_tile_round"]),
@@ -906,18 +1099,20 @@ def facts() -> list[tuple[str, bool]]:
          n["tl_chebyshev"] == 1 and n["tl_seed_tile_centre"] == 1 and n["tl_first_open_max"] == 125
          and len(n["tl_opened_per_round"]) == n["tl_rounds"] and n["tl_opened_per_round"][-1] == 0
          and sum(n["tl_opened_per_round"]) == n["tl_n_tiles"] and n["tl_n_tiles"] == n["tl_tiles_side"] ** 2),
-        ("r11 from a hundred milliseconds to three (r06's kernel, then the tiles; paired 32x)",
+        ("r11 from a hundred milliseconds to three (r06's kernel, 101 ms, then the tiles, 3.12; paired 32x)",
          round(n["big_8ways_ms"], -1) == 100 and round(n["big_tiles_ms"]) == 3
-         and 30 < n["big_8_over_tiles_paired"] < 35),
-        ("r11 scoreboard row 2 jumps: GPU 540x (1,666 vs 3.10 ms, the card reads true)",
-         card_x(d["big_tiles_x"]) == "540×" and card_ms(n["big_tiles_ms"]) == "3.10 ms"
-         and card_row_ok(n["big_cpu_ms"], n["big_tiles_ms"])),
+         and 30 < n["big_8_over_tiles_paired"] < 35 and round(d["big_8_over_tiles"]) == 32),
+        ("r11 scoreboard row 2 jumps: GPU 340x against the 8-neighbour CPU without depth, reset on the clock "
+         "(1,065 vs 3.12 ms, the card reads true; 311-345 over the CPU's rounds)",
+         card_x(d["big_tiles_x"]) == "340×" and card_ms(n["big_tiles_ms"]) == "3.12 ms"
+         and card_ms(n["big_cpu_fill_ms"]) == "1,065 ms" and card_row_ok(n["big_cpu_fill_ms"], n["big_tiles_ms"])
+         and min(rng["big_tiles_x_range"]) > 300),
         ("r11 but that's one blob, from one seed", len(n["big_seed"]) == 2),
         # ---- act 3: the pieces (r12, the crop)
         ("r12 every tile finds its pieces with its own warp: no tile of the frame or the crop takes the "
-         "dense-tile path, in labelling or paint (WV, D8)",
+         "dense-tile path, in labelling or paint (WV, D8, and V5's timed frame, both engines, and drones)",
          n["full_ccl_tiles"] == n["full_paint_ccl_tiles"] == 0 and n["d8_ccl_tiles"] == n["d8_paint_ccl_tiles"] == 0
-         and n["crop_dense_tiles"] == 0),
+         and n["crop_dense_tiles"] == 0 and n["frame_dense_tiles"] == 0 and n["drone_dense_tiles"] == 0),
         ("r12 the crop: 8 blobs, 135 pieces, at most 4 per tile, none interior",
          (n["crop_blobs"], n["crop_pieces"], n["crop_max_pieces_per_tile"], n["crop_interior_pieces"]) == (8, 135, 4, 0)),
         ("r12 some pieces are seeds (caption 36 seeds / 8 blobs; 11 from the lattice)",
@@ -938,38 +1133,55 @@ def facts() -> list[tuple[str, bool]]:
         # ---- act 3: the frame (r13)
         ("r13 the frame floors: act 3's [x, y] arrays match the 900 px picture only transposed",
          fl["picture_iou_transposed"] > 0.7 and fl["picture_iou_as_is"] < 0.2),
+        ("r13 V5 timed ch08's first version (OLD_PATH, D8's old_path), whose counters D8 found equal to the "
+         "default's; WV recorded the default, which V5 timed beside it (2.25 ms, reference)",
+         n["frame_first_version"] == 1 and n["d8_old_same_as_default"] == 1 and n["d8_old_is_v5_engine"] == 1
+         and n["wv_engine_is_v5"] == 1 and n["drone_first_version"] == 1),
         ("r13 over eleven thousand seeds (the export, the waves' sessions agree)",
          11_000 < n["full_seeds"] < 12_000 and n["full_seeds"] == n["d8_seeds"] and n["w8_same_as_d8"] == 1),
         ("r13 six rounds (V5, the export, the waves' session)",
          n["frame_rounds"] == n["full_rounds"] == n["d8_rounds"] == 6 and len(n["full_frontier"]) == 6
-         and n["full_frontier"] == n["d8_frontier"] and n["wv_engine_is_v5"] == 1),
+         and n["full_frontier"] == n["d8_frontier"]),
         ("r13 floor: at 900 px only rounds 0-4 show (rounds 5 and 6 claim 6 and 0 pieces); 94 samples interior",
          fl["full900_last_round"] == 4 and fl["full900_interior"] == 94),
         ("r13 every blob counted: 2,522 blobs, labels equal the CPU's",
          n["frame_labels_ok"] == 1 and n["full_blobs"] == n["d8_n_blobs"] == n["n_blobs"] == 2522),
-        ("r13 two point two milliseconds (caption 2.24 ms)",
-         round(n["frame_ms"], 1) == 2.2 and card_ms(n["frame_ms"]) == "2.24 ms"),
-        ("r13 once the frame is on the card: inside the budget (kernel time; with the copies, over it)",
-         n["frame_ms"] < d["budget_ms"] < n["frame_e2e_ms"]),
-        ("r13 the needle from act 2's 51.7 ms: 23x in V5, 21x against D8's full-clock ch05",
-         round(d["frame_ch05_over_ch08"]) == 23 and round(d["frame_ch05_full_clocks_over_ch08"]) == 21),
-        ("r13 scoreboard row 3 jumps: GPU 520x (1,157 vs 2.24 ms, the card reads true)",
-         card_x(d["count_x"]) == "520×" and card_row_ok(n["count_cpu_ms"], n["count_gpu_ms"])),
+        ("r13 two point two milliseconds (caption 2.21 ms)",
+         round(n["frame_ms"], 1) == 2.2 and card_ms(n["frame_ms"]) == "2.21 ms"),
+        ("r13 once the frame is on the card: inside the budget (kernel time; with the copies, 54.8 ms, over it)",
+         n["frame_ms"] < d["budget_ms"] < n["frame_e2e_ms"] and card_ms_note(n["frame_e2e_ms"]) == "54.8 ms"),
+        ("r13 the needle from act 2's 53.9 ms to 2.21 ms: 24x (V5's ratio of medians, 24.3)",
+         round(d["frame_ch05_over_ch08"]) == 24 and math.isclose(d["frame_ch05_over_ch08"], n["frame_ch05_over_ch08"])),
+        ("r13 scoreboard row 3 jumps: GPU 100x against the labels-only CPU, reset on the clock (225 vs 2.21 ms, the "
+         "card reads true; 97-107 over the CPU's rounds)",
+         card_x(d["count_x"]) == "100×" and card_row_ok(n["count_cpu_ms"], n["count_gpu_ms"])
+         and min(rng["frame_x_range"]) > 90),
         # ---- the finale (r14)
-        ("r14 one huge blob, or many at once: the GPU (kernel time, and with the copies too)",
+        ("r14 one huge blob, or many at once: the GPU (kernel time, and with the copies too: 24x and 4.1x)",
          d["big_tiles_x"] > 1 and d["count_x"] > 1
-         and n["big_tiles_e2e_ms"] < n["big_cpu_ms"] and n["frame_e2e_ms"] < n["count_cpu_ms"]),
-        ("r14 one small blob: in kernel time the GPU now (row 1 flips: GPU 2.7x, 0.12 vs 0.045 ms)",
-         n["small_tiles_ms"] < n["small_cpu_ms"] and card_x(d["small_tiles_x"]) == "2.7×"
-         and card_ms(n["small_tiles_ms"]) == "0.045 ms" and card_row_ok(n["small_cpu_ms"], n["small_tiles_ms"])),
-        ("r14 ... with the copy, still the CPU (0.60 vs 0.12 ms)",
-         n["small_tiles_e2e_ms"] > n["small_cpu_ms"] and card_ms(n["small_tiles_e2e_ms"]) == "0.60 ms"),
-        ("r14 every drone, every frame (caption: kernel 0.13 ms max; with the copies 1.89 ms, under budget too)",
-         n["drone_gpu_max_ms"] < d["budget_ms"] and n["drone_e2e_max_ms"] < d["budget_ms"]
-         and card_ms(n["drone_gpu_max_ms"]) == "0.13 ms"),
-        ("r14 card footnote, the twins: 4.1x, 470x, 130x (8-way BFS, 8-way BFS, labels only)",
-         (card_x(d["small_tiles_twin_x"]), card_x(d["big_tiles_twin_x"]), card_x(d["count_twin_x"]))
-         == ("4.1×", "470×", "130×")),
+         and n["big_tiles_e2e_ms"] < n["big_cpu_fill_ms"] and n["frame_e2e_ms"] < n["count_cpu_ms"]
+         and card_x(d["big_tiles_e2e_x"]) == "24×" and card_x(d["count_e2e_x"]) == "4.1×"),
+        ("r14 one small blob: in kernel time the GPU now, in every CPU round (row 1 in two steps: the CPU cell to "
+         "the 8-neighbour CPU, 0.192 ms, then the tiles' 0.044 ms and GPU 4.4x; the card reads true)",
+         n["small_tiles_ms"] < n["small_cpu8_ms"] and min(rng["small_tiles_x_range"]) > 1
+         and card_x(d["small_tiles_x"]) == "4.4×" and card_ms(n["small_tiles_ms"]) == "0.044 ms"
+         and card_ms(n["small_cpu8_ms"]) == "0.192 ms" and card_row_ok(n["small_cpu8_ms"], n["small_tiles_ms"])),
+        ("r14 ... with the copy to the card, still the CPU (0.665 vs 0.192 ms: the CPU by 3.5x)",
+         n["small_tiles_e2e_ms"] > n["small_cpu8_ms"] and n["small_tiles_e2e_ms"] > n["small_cpu_ms"]
+         and card_ms(n["small_tiles_e2e_ms"]) == "0.665 ms" and card_x(d["small_e2e_cpu_x"]) == "3.5×"),
+        ("r14 card footnote, with the copies (rounded, never spoken): small blob 0.665 ms (CPU 0.192), huge blob "
+         "44.3 ms, frame 54.8 ms",
+         (card_ms_note(n["small_tiles_e2e_ms"]), card_ms_note(n["small_cpu8_ms"]), card_ms_note(n["big_tiles_e2e_ms"]),
+          card_ms_note(n["frame_e2e_ms"])) == ("0.665 ms", "0.192 ms", "44.3 ms", "54.8 ms")),
+        ("r14 every drone, every frame (caption 3: with copies 1.26 ms, the worst frame's median; far under 33)",
+         n["drone_e2e_max_ms"] < d["budget_ms"] and card_ms(n["drone_e2e_max_ms"]) == "1.26 ms"
+         and n["drone_e2e_ms"] <= n["drone_e2e_max_ms"] and n["drone_ok"] == 1 and n["drone_first_version"] == 1),
+        ("r14 the drones are not called a GPU win: with the copies the CPU's 0.679 ms beats the GPU's 0.977 "
+         "(kernel time 0.090 ms, shown nowhere)",
+         n["drone_e2e_ms"] > n["drone_cpu_ms"] and math.isclose(d["drone_x"], n["drone_x_json"])),
+        ("N2 (not shown): act 2's seeds kernel already beats the 8-neighbour CPU with depth on the small blob, "
+         "1.12x, in every CPU round",
+         round(d["small_ch05_x"], 2) == 1.12 and min(n["small_ch05_x_range"]) > 1),
     ]
 
 
