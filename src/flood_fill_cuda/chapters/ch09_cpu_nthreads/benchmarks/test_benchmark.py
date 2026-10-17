@@ -349,3 +349,48 @@ def test_probe_chain_is_real_work():
     with ff.num_threads(2):
         B._probe_all(10, 2)
         assert best(B._probe_all, n, 2) > 0.5e-9 * n
+
+
+def test_dispatch_cells_measure_the_fixed_cost_on_the_cpu_only(monkeypatch):
+    """The CPU clock carries Python, the checks and every njit dispatch,
+    which the GPU's events hide: 1 x 1 scenes measure that fixed cost
+    at every thread count. They have no GPU cells."""
+    args = _args("--scenes", "dispatch")
+    got = {n: (k, im.shape) for n, k, im, sd, c in B.build_scenes(args)}
+    assert got == {"dispatch_1x1": ("one", (1, 1, 3)),
+                   "dispatch_1x1_labels": ("many", (1, 1, 3))}
+    seen = []
+
+    class FakeGpu:
+        device, sm_count, cc = "fake", 1, (8, 9)
+
+    class FakeSampler:
+        def stop(self):
+            pass
+    monkeypatch.setattr(B, "Gpu", FakeGpu)
+    monkeypatch.setattr(B, "Sampler", FakeSampler)
+    monkeypatch.setattr(B, "_smi", lambda q: None)
+    monkeypatch.setattr(B, "reference", lambda *a, **k: {})
+    monkeypatch.setattr(B, "gpu_scene",
+                        lambda gpu, smp, name, *a: seen.append(name) or ({}, {}))
+    img, seed, conns = _scene("one")
+    scenes_ = [("sq", "one", img, seed, conns)] + B.build_scenes(args)
+    rows = [{"scene": s[0], "gpu": {}} for s in scenes_]
+    args.cooldown = 0
+    B.run_gpu_blocks(rows, scenes_, [], args)
+    assert seen == ["sq"]
+
+
+def test_factors_end_to_end_and_host_wall():
+    """Beside the event-timed factor, the summary gives the factor
+    against the GPU's end to end (pageable copy in, the pipeline, the
+    copy back: the data starts in host memory) and its host wall time
+    (launch to synchronize, the image already on the GPU)."""
+    row = {"connectivities": [8], "cells": {
+        "ch09_tile_t16_c8": _cell(0.08), "one_fill_paint_c8": _cell(0.2)},
+        "gpu": {"ch07_c8": {"ms": 0.044, "connectivity": 8,
+                            "e2e": {"ms": 0.60, "host_wall": {"ms": 0.09}}}}}
+    tl = B.summarize(row, "one", [16])["tile_c8"][16]
+    assert tl["gpu_x"] == pytest.approx(0.08 / 0.044)
+    assert tl["gpu_x_e2e"] == pytest.approx(0.08 / 0.60)
+    assert tl["gpu_x_host_wall"] == pytest.approx(0.08 / 0.09)

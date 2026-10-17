@@ -58,6 +58,22 @@ clock, bench_v5's gap before every timed launch):
                    same idea as ch09's tile labels (no dense-tile path)
   ch08             ch08's default engine (the dense-tile path), rgb
 
+CPU cells (dispatch_1x1, dispatch_1x1_labels: CPU only):
+
+  the cells above on a 1 x 1 image: the fixed cost of one call at each
+  thread count (the checks, the thread count, every njit dispatch, the
+  stats dict, the forks), which the CPU clock carries and the GPU's
+  events do not
+
+GPU context (perf_counter, after each timed block, E2E_REPEATS each):
+
+  e2e         a pageable host-to-GPU copy of the image, the pipeline,
+              the copy back (bench_v5's e2e; the CPU's data is already
+              in host memory). Its output is checked
+  host_wall   launch to synchronize with the image already on the GPU
+              (no gap): what the host waits for
+  Factors: gpu_x (events), gpu_x_e2e, gpu_x_host_wall
+
 Policy:
 
   one session     GPU blocks first (a CPU pass between them lets the GPU
@@ -226,6 +242,10 @@ EVENT_REASONS = {0x1: "gpu_idle", 0x2: "app_clocks", 0x4: "sw_power_cap",
                  0x8: "hw_slowdown", 0x10: "sync_boost",
                  0x20: "sw_thermal", 0x40: "hw_thermal",
                  0x80: "hw_power_brake", 0x100: "display_clock"}
+
+# scenes without GPU cells: the dispatch-overhead cells (1 x 1)
+CPU_ONLY_SCENES = ("dispatch",)
+E2E_REPEATS = 5
 
 # the GPU cell with the same idea as each ch09 variant
 SAME_IDEA_GPU = {"pixel": "ch03_conn{conn}", "tile": "ch07_c{conn}",
@@ -833,6 +853,13 @@ def build_scenes(args):
             img = np.ascontiguousarray(img[:w, :h])
             name = f"input_blobs_crop_{w}x{h}"
         out.append((name, "many", img, None, (8,)))
+    if want("dispatch"):
+        # the fixed cost of a call (CPU only): checks, the thread count,
+        # every njit dispatch, the stats, the forks
+        one = np.full((1, 1, 3), 255, np.uint8)
+        one[0, 0] = RED
+        out.append(("dispatch_1x1", "one", one, (0, 0), (8,)))
+        out.append(("dispatch_1x1_labels", "many", one.copy(), None, (8,)))
     return [(n, k, np.ascontiguousarray(im), sd, c)
             for n, k, im, sd, c in out]
 
@@ -1428,19 +1455,26 @@ class GpuCell:
         cuda = self.gpu.cuda
         self.d_img.copy_to_device(self.d_pristine)
         self.gpu.gap()
+        ev = self.enqueue()
+        ev[-1].synchronize()
+        if self.meta["chapter"] == "ch03":
+            self.last_kernel_ms = cuda.event_elapsed_time(ev[3], ev[4])
+            return cuda.event_elapsed_time(ev[0], ev[1]) + self.last_kernel_ms
+        if self.meta["chapter"] == "ch07":
+            return self.gpu.ff7.phase_times(ev)[1]
+        return cuda.event_elapsed_time(ev[0], ev[1])
+
+    def enqueue(self):
+        """The pipeline on d_img, enqueued (not waited for). Returns its
+        events: ch03 reset (3) + kernel (2), ch07 its own, ch08 two."""
+        cuda = self.gpu.cuda
         if self.meta["chapter"] == "ch03":
             ev = self.runner.reset(*self.seed)
             L = self.launch
-            e0, e1 = self.runner.run(L["kernel"], L["bare"], L["blocks"],
-                                     L["tpb"], self.d_img)
-            e1.synchronize()
-            self.last_kernel_ms = cuda.event_elapsed_time(e0, e1)
-            return (cuda.event_elapsed_time(ev[0], ev[1])
-                    + self.last_kernel_ms)
+            return list(ev) + list(self.runner.run(
+                L["kernel"], L["bare"], L["blocks"], L["tpb"], self.d_img))
         if self.meta["chapter"] == "ch07":
-            _, ev = self.eng.run(self.d_img, *self.seed)
-            ev[-1].synchronize()
-            return self.gpu.ff7.phase_times(ev)[1]
+            return self.eng.run(self.d_img, *self.seed)[1]
         stages = self.eng.stages(self.d_img, "rgb")
         e0 = cuda.event(timing=True)
         e1 = cuda.event(timing=True)
@@ -1448,8 +1482,33 @@ class GpuCell:
         for _, go in stages:
             go()
         e1.record()
-        e1.synchronize()
-        return cuda.event_elapsed_time(e0, e1)
+        return [e0, e1]
+
+    def e2e(self, img, expected, repeats=E2E_REPEATS):
+        """Context, perf_counter: end to end (a pageable host-to-GPU copy
+        of img, the pipeline, the copy back: bench_v5's e2e) and the
+        host wall time (the image already on the GPU: launch to
+        synchronize, no gap). Reused buffers."""
+        cuda = self.gpu.cuda
+        out = np.empty_like(img)
+        e2e, host = [], []
+        for _ in range(repeats):
+            cuda.synchronize()
+            t0 = time.perf_counter()
+            self.d_img.copy_to_device(img)
+            self.enqueue()
+            self.d_img.copy_to_host(out)
+            e2e.append((time.perf_counter() - t0) * 1000)
+        ok = same(out, expected)
+        for _ in range(repeats):
+            self.d_img.copy_to_device(self.d_pristine)
+            cuda.synchronize()
+            t0 = time.perf_counter()
+            self.enqueue()
+            cuda.synchronize()
+            host.append((time.perf_counter() - t0) * 1000)
+        return {**_stats(e2e), "samples": e2e, "matches_cpu": ok,
+                "host_wall": _stats(host)}
 
     def verify(self, ref, counters=True):
         out = self.d_img.copy_to_host()
@@ -1565,6 +1624,11 @@ def gpu_scene(gpu, sampler, name, kind, img, seed, conns, ref, args):
         if c.last_kernel_ms is not None:
             res[c.key]["kernel_only"] = _stats(
                 [r[c.key + ":kernel"] for r in data])
+    for c in cells:
+        # context, after the timed block (its own last output checked)
+        exp = (ref[c.conn]["blue"] if kind == "one" else ref["palette"])
+        res[c.key]["e2e"] = c.e2e(img, exp)
+        res[c.key]["checks_ok"] &= res[c.key]["e2e"]["matches_cpu"]
     block = {"attempts": attempts}
     del cells
     gpu.cuda.current_context().deallocations.clear()
@@ -1605,13 +1669,28 @@ def gpu_drones(gpu, sampler, frames, args):
                                  warm_round, args)
     last_j = idx[-1] if (len(data) - 1) % 2 == 0 else idx[0]
     last_ok = all(c.verify(frames[last_j]["ref"])["ok"] for c in cells)
+    # context, after the timed block: end to end and host wall per frame
+    e2e = {c.key: [] for c in cells}
+    host = {c.key: [] for c in cells}
+    for j, f in enumerate(frames):
+        for c in cells:
+            c.d_pristine = pristine[j]
+            r = c.e2e(f["img"], f["ref"]["palette"])
+            e2e[c.key].append(r["ms"])
+            host[c.key].append(r["host_wall"]["ms"])
+            ok_all &= r["matches_cpu"]
     res = {}
     for c in cells:
         per = [statistics.median(r[c.key][j] for r in data) for j in idx]
         res[c.key] = {"per_frame_median_ms": per,
                       "median_of_frame_medians_ms": statistics.median(per),
-                      "max_frame_median_ms": max(per), **c.meta,
-                      "side": "gpu", "checks_ok": bool(ok_all and last_ok),
+                      "max_frame_median_ms": max(per),
+                      "per_frame_samples_ms": [[r[c.key][j] for r in data]
+                                               for j in idx],
+                      "per_frame_e2e_median_ms": e2e[c.key],
+                      "per_frame_host_wall_median_ms": host[c.key],
+                      **c.meta, "side": "gpu",
+                      "checks_ok": bool(ok_all and last_ok),
                       "full_clocks": attempts[-1]["full_clocks"]}
     del cells, pristine
     gpu.cuda.current_context().deallocations.clear()
@@ -1777,6 +1856,12 @@ def summarize(row, kind, threads):
                              gpu_x_range_cpu_rounds=[
                                  min(c["round_medians"]) / gpu["ms"],
                                  max(c["round_medians"]) / gpu["ms"]])
+                    if "e2e" in gpu:
+                        # the data starts in host memory: the GPU's copies
+                        # in and out, and its launch costs, count too
+                        e.update(gpu_x_e2e=c["ms"] / gpu["e2e"]["ms"],
+                                 gpu_x_host_wall=(
+                                     c["ms"] / gpu["e2e"]["host_wall"]["ms"]))
                 other = {k: c["ms"] / g["ms"] for k, g in gpus.items()
                          if k != gkey}
                 if other:
@@ -1864,6 +1949,8 @@ def run_gpu_blocks(rows, scenes, frames, args):
     try:
         print(f"GPU: {gpu.device} ({gpu.sm_count} SMs)", flush=True)
         for row, (name, kind, img, seed, conns) in zip(rows, scenes):
+            if name.startswith(CPU_ONLY_SCENES):
+                continue
             print(f"  GPU {name}", flush=True)
             ref = reference(kind, img, seed, conns)
             row["gpu"], gpu_blocks[name] = gpu_scene(
