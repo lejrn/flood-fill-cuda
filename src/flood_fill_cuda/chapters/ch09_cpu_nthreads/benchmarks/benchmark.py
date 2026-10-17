@@ -70,6 +70,15 @@ Policy:
                   under WSL2 a binding pins vCPUs, not P- or E-cores
   JIT warm-up     every engine and twin runs at every thread count on a
                   small scene first (compiles, thread pool start)
+  settle          before every cell's batch, and before every drone
+                  call with fewer threads than the call before it, wait
+                  (off the clock) until the previous call's OpenMP
+                  workers have parked: libgomp's idle workers spin for
+                  about 10 ms after a parallel call by default, beside
+                  whatever runs next (a one-core twin after a 16-thread
+                  cell would share the package with 15 spinning
+                  threads). The wait policy itself is left at its
+                  default, so a cell's own back-to-back calls keep it
   CPU rounds      one untimed checked call per cell, one timed first
                   call (sets the calls per round: a cell under
                   CPU_ROUND_S repeats, at most CPU_MAX_CALLS), then
@@ -596,6 +605,55 @@ def _cpu_busy():
         return 0, 0
 
 
+SETTLE_WINDOW_S = 0.005
+SETTLE_QUIET_NS = 250_000        # 5% of one CPU over the window
+SETTLE_MAX_S = 0.5
+SETTLE_FALLBACK_S = 0.05
+
+
+def _pool_cpu_ns():
+    """CPU time (ns) of this process's threads other than the calling
+    one (the OpenMP workers), from /proc/self/task/*/schedstat; None if
+    the kernel does not provide it."""
+    me = threading.get_native_id()
+    total = 0
+    try:
+        for tid in os.listdir("/proc/self/task"):
+            if int(tid) == me:
+                continue
+            try:
+                with open(f"/proc/self/task/{tid}/schedstat") as f:
+                    total += int(f.read().split()[0])
+            except (FileNotFoundError, ProcessLookupError):
+                continue          # a thread that just exited
+    except (OSError, ValueError, IndexError):
+        return None
+    return total
+
+
+def settle_workers(max_s=SETTLE_MAX_S):
+    """Wait until the thread pool is parked: after a parallel call,
+    libgomp's idle workers spin (about 10 ms by default) before they
+    sleep, beside whatever runs next. Polls the workers' CPU time until
+    a window passes with almost none. Off the clock."""
+    t0 = time.perf_counter()
+    prev = _pool_cpu_ns()
+    if prev is None:
+        time.sleep(SETTLE_FALLBACK_S)
+        return {"settled": None,
+                "waited_ms": (time.perf_counter() - t0) * 1000}
+    while True:
+        time.sleep(SETTLE_WINDOW_S)
+        cur = _pool_cpu_ns()
+        if cur is None or cur - prev <= SETTLE_QUIET_NS:
+            return {"settled": cur is not None,
+                    "waited_ms": (time.perf_counter() - t0) * 1000}
+        if time.perf_counter() - t0 >= max_s:
+            return {"settled": False,
+                    "waited_ms": (time.perf_counter() - t0) * 1000}
+        prev = cur
+
+
 def wait_quiet(max_wait_s, enabled=True):
     """Until the rest of the machine is nearly idle (its busy share over
     1 s, this process asleep, at most QUIET_BUSY_PCT) or max_wait_s
@@ -891,6 +949,13 @@ def check_call(c, where):
         c["mismatch_at"].append(where)
 
 
+def settle(c):
+    """Before a cell's batch: the previous cell's workers parked. A
+    timeout is counted (batches_started_unsettled)."""
+    if settle_workers()["settled"] is False:
+        c["unsettled"] += 1
+
+
 def cpu_pass(cells, args):
     """One untimed checked call per cell, a timed first call (it sets
     the calls per round), then the interleaved rounds. Every timed call
@@ -903,7 +968,9 @@ def cpu_pass(cells, args):
             c["check"] = c["verify"]()
         c["calls_checked"], c["call_mismatches"] = 0, 0
         c["mismatch_at"] = []
+        c["unsettled"] = 0
         c["prep"]()
+        settle(c)
         t0 = time.perf_counter()
         c["fn"]()
         first = time.perf_counter() - t0
@@ -920,8 +987,11 @@ def cpu_pass(cells, args):
         final = r == args.cpu_rounds - 1
         for c in (cells if r % 2 == 0 else cells[::-1]):
             ts = []
+            c["prep"]()
+            settle(c)
             for i in range(c["calls"]):
-                c["prep"]()
+                if i:
+                    c["prep"]()
                 t0 = time.perf_counter()
                 c["fn"]()
                 ts.append((time.perf_counter() - t0) * 1000)
@@ -953,6 +1023,7 @@ def cpu_record(c):
     out["check_last_timed"] = last
     out["calls_checked"] = c["calls_checked"]
     out["call_mismatches"] = c["call_mismatches"]
+    out["batches_started_unsettled"] = c["unsettled"]
     out["mismatch_at"] = c["mismatch_at"][:20]
     out["checks_ok"] = bool(chk["ok"] and last["ok"]
                             and c["call_mismatches"] == 0)
@@ -1285,10 +1356,18 @@ def cpu_drones(frames, args):
     engs = {f"ch09_labels_t{nt}": nt for nt in args.threads}
     keys = list(engs) + ["one_label", "one_label_paint"]
 
+    state = {"prev_nt": 1, "unsettled": 0}
+
     def call(key, f):
         np.copyto(work, f["img"])
+        nt = engs.get(key, 1)
+        if nt < state["prev_nt"]:
+            # the workers of a call with more threads park first
+            if settle_workers()["settled"] is False:
+                state["unsettled"] += 1
+        state["prev_nt"] = nt
         if key in engs:
-            eng.threads = engs[key]
+            eng.threads = nt
         t0 = time.perf_counter()
         if key in engs:
             st = eng.run(work)
@@ -1296,14 +1375,18 @@ def cpu_drones(frames, args):
         else:
             n = one.labels(work, key == "one_label_paint")
         ms = (time.perf_counter() - t0) * 1000
-        ok = int(n) == f["ref"]["n_blobs"]
-        if key != "one_label":
-            ok &= bool(np.array_equal(work, f["ref"]["palette"]))
-        if key in engs:
-            ok &= bool(np.array_equal(eng.label_map(), f["ref"]["label"]))
-        else:
-            ok &= bool(np.array_equal(one.label, f["ref"]["label"]))
-        return ms, ok
+        with ff.num_threads(1):            # checks never wake the pool
+            ok = int(n) == f["ref"]["n_blobs"]
+            ok &= same(work, f["img"] if key == "one_label"
+                       else f["ref"]["palette"])
+            if key in engs:
+                ok &= same(eng.label_map(), f["ref"]["label"])
+                ok &= st["expanded"] == st["ring_pieces"]
+                ok &= st["claims"] == (st["ring_pieces"] - st["seeds"]
+                                       + st["dropped"])
+            else:
+                ok &= same(one.label, f["ref"]["label"])
+        return ms, bool(ok)
 
     ok_all = True
     for f in frames:                      # untimed check pass
@@ -1321,7 +1404,9 @@ def cpu_drones(frames, args):
                 samples[k][j].append(ms)
                 ok_all &= ok
         rounds.append({"round": r, "seconds": round(time.time() - w0, 2),
-                       "loadavg": list(os.getloadavg()), "quiet_gate": gate})
+                       "loadavg": list(os.getloadavg()), "quiet_gate": gate,
+                       "calls_started_unsettled": state["unsettled"]})
+        state["unsettled"] = 0
     out = {}
     for k in keys:
         per = [statistics.median(s) for s in samples[k]]

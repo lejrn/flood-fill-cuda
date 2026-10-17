@@ -135,3 +135,34 @@ def test_timed_run_refuses_a_skewed_runtime():
     assert len(notes) == 2
     smoke = B.parse_args(["--smoke"])
     assert len(B.check_runtime(smoke, {**base, "niceness": 10})) == 1
+
+
+def test_settle_waits_until_the_pool_is_parked():
+    """After a 16-thread call libgomp's idle workers spin before they
+    sleep: settle_workers() returns once they stopped using CPU."""
+    if B._pool_cpu_ns() is None:
+        pytest.skip("no per-thread schedstat on this kernel")
+    img, sx, sy = scenes.square_scene(256, 256, 128, 128)
+    from .. import flood_fill as ff
+    eng = ff.TileBFS(256, 256, threads=16)
+    for _ in range(3):
+        eng.run(img.copy(), sx, sy)
+        got = B.settle_workers()
+        assert got["settled"] is True, got
+        a = B._pool_cpu_ns()
+        B.time.sleep(0.02)
+        # parked: well under one CPU's worth over 20 ms
+        assert B._pool_cpu_ns() - a < 5_000_000
+
+
+def test_every_cell_batch_starts_on_a_parked_pool(monkeypatch):
+    """A one-core cell must not start next to the workers of the
+    16-thread cell before it: cpu_pass settles before every batch."""
+    args = _args("--cpu-rounds", "2", "--max-calls", "2", "--round-s", "5")
+    cells, _ = _cells("one", args)
+    seen = []
+    monkeypatch.setattr(B, "settle_workers",
+                        lambda **kw: seen.append(1) or {"settled": True})
+    B.cpu_pass(cells, args)
+    # the first timed call, and every batch of every round
+    assert len(seen) >= len(cells) * (1 + args.cpu_rounds)
