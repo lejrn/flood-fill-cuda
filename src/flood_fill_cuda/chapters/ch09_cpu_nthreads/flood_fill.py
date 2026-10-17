@@ -3,6 +3,7 @@
 Public API:
 
     PixelBFS(width, height, connectivity=8, threads=None, ...)
+    TileBFS(width, height, connectivity=8, threads=None, ...)
         .run(img, seed_x, seed_y, paint=True)  -> stats dict
         .visited()                             -> bool (W, H) (off clock)
     flood_fill(img, seed_x, seed_y, connectivity=8, method="tile",
@@ -35,6 +36,9 @@ CONNECTIVITIES = (4, 8)
 PIXEL_SERIAL_BELOW = 1024
 PIXEL_MIN_CHUNK = 256
 FRONT_START = 1 << 16
+# tile BFS: a round below TILE_SERIAL_BELOW tiles runs on the calling
+# thread (one tile visit is ~ a microsecond, a fork and barrier more)
+TILE_SERIAL_BELOW = 8
 
 
 @contextmanager
@@ -141,6 +145,76 @@ class PixelBFS:
         return self._visited != 0
 
 
+class TileBFS:
+    """ch07's tile BFS on every core (one blob): 64 x 64 tiles of
+    uint64 row words, a frontier of tiles, a prange per round.
+
+    run() packs the RGB image to the tile-major mask (rows in parallel),
+    resets the per-tile state, runs the rounds and paints the reached
+    words (rows in parallel), all on the clock."""
+
+    method = "tile"
+
+    def __init__(self, width, height, connectivity=8, threads=None,
+                 serial_below=TILE_SERIAL_BELOW):
+        _check_shape(width, height)
+        _check_conn(connectivity)
+        if serial_below < 1:
+            raise ValueError("serial_below must be >= 1")
+        self.width, self.height = int(width), int(height)
+        self.connectivity = connectivity
+        self.threads = threads
+        self.serial_below = int(serial_below)
+        self.tiles_x = (self.width + K.TILE - 1) // K.TILE
+        self.wpr = (self.height + K.TILE - 1) // K.TILE
+        nt = self.n_tiles = self.tiles_x * self.wpr
+        self.mask = np.zeros((nt, K.TILE), np.uint64)
+        self.colm = np.zeros((nt, 2), np.uint64)
+        self.reach = np.zeros((nt, K.TILE), np.uint64)
+        self.inbox = np.zeros((2, nt, 8), np.uint64)
+        self.known = np.zeros((nt, 8), np.uint64)
+        self.sent = np.zeros((nt, 8), np.uint64)
+        self.tdirty = np.zeros(nt, np.uint64)
+        self.tlo = np.zeros(nt, np.int16)
+        self.thi = np.zeros(nt, np.int16)
+        self.queued = np.zeros(nt, np.int32)
+        self.front = np.zeros(nt, np.int64)
+        self.out = np.zeros(8 * nt, np.int64)
+
+    def run(self, img, seed_x, seed_y, paint=True):
+        check_image(img, self.width, self.height)
+        sx, sy = check_seed(img, seed_x, seed_y)
+        with num_threads(self.threads) as nt:
+            K.pack_tiles(img, self.mask, self.wpr)
+            K.tile_columns(self.mask, self.colm)
+            K.reset_tile_state(self.reach, self.inbox, self.known, self.sent,
+                               self.tdirty, self.tlo, self.thi, self.queued)
+            rounds, peak, par, tot = K.tile_bfs(
+                self.mask, self.colm, self.reach, self.inbox, self.known,
+                self.sent, self.tdirty, self.tlo, self.thi, self.queued,
+                self.front, self.out, self.connectivity == 8, self.tiles_x,
+                self.wpr, sx, sy, self.serial_below, nt)
+            if paint:
+                K.paint_tiles(img, self.reach, self.wpr)
+        return {"rounds": int(rounds), "peak_round_tiles": int(peak),
+                "parallel_rounds": int(par),
+                "tile_visits": int(tot[K.TS_VISITS]),
+                "idle_visits": int(tot[K.TS_IDLE]),
+                "closure_passes": int(tot[K.TS_PASSES]),
+                "sends": int(tot[K.TS_SENDS]), "n_tiles": self.n_tiles,
+                "threads": int(nt)}
+
+    def filled(self):
+        """Reached pixels of the last run (off clock)."""
+        return int(K.popcount_words(self.reach))
+
+    def visited(self):
+        """bool (W, H): the reached set of the last run (off clock)."""
+        out = np.empty((self.width, self.height), np.bool_)
+        K.unpack_tiles(self.reach, self.wpr, out)
+        return out
+
+
 @dataclass
 class FillResult:
     img: np.ndarray        # (W, H, 3) uint8: a copy, the blob painted blue
@@ -153,7 +227,7 @@ class FillResult:
     stats: dict = field(repr=False)
 
 
-ENGINES = {"pixel": PixelBFS}
+ENGINES = {"pixel": PixelBFS, "tile": TileBFS}
 
 
 def flood_fill(img, seed_x, seed_y, connectivity=8, method="tile",
@@ -176,8 +250,11 @@ def flood_fill(img, seed_x, seed_y, connectivity=8, method="tile",
                           **engine_kw)
     st = eng.run(out, seed_x, seed_y, paint=True)
     visited = eng.visited().astype(np.int32)
-    steps = st["levels"] if method == "pixel" else st["rounds"]
-    return FillResult(img=out, visited=visited, filled=st["filled"],
+    if method == "pixel":
+        steps, filled = st["levels"], st["filled"]
+    else:
+        steps, filled = st["rounds"], eng.filled()
+    return FillResult(img=out, visited=visited, filled=filled,
                       steps=steps, method=method,
                       connectivity=connectivity, threads=st["threads"],
                       stats=st)

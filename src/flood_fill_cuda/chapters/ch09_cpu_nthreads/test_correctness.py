@@ -35,7 +35,7 @@ from ..ch08_gpu_nblob_tiles import scenes as scenes8
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 RED = scenes.RED
 THREADS = (1, 2, 16)
-FILL_METHODS = ("pixel",)
+FILL_METHODS = ("pixel", "tile")
 
 RNG_SEEDS = (0, 1, 2, 3)
 
@@ -315,18 +315,23 @@ ONE_BLOB = {
 
 @pytest.mark.parametrize("threads", THREADS)
 @pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("method", FILL_METHODS)
 @pytest.mark.parametrize("name", list(ONE_BLOB))
-def test_pixel_bfs_matches_oracle(name, connectivity, threads):
+def test_fill_matches_oracle(name, method, connectivity, threads):
     img, sx, sy = ONE_BLOB[name]()
     want_img, want_vis, want_levels, want_filled = expected_fill(
         img, sx, sy, connectivity)
     res = ff.flood_fill(img, sx, sy, connectivity=connectivity,
-                        method="pixel", threads=threads)
+                        method=method, threads=threads)
     np.testing.assert_array_equal(res.visited, want_vis)
     np.testing.assert_array_equal(res.img, want_img)
     assert res.filled == want_filled
-    assert res.steps == want_levels
     assert res.threads == threads
+    if method == "pixel":
+        assert res.steps == want_levels
+    else:
+        # a round moves the wave at least one pixel level
+        assert 1 <= res.steps <= want_levels
 
 
 @pytest.mark.parametrize("connectivity", [4, 8])
@@ -413,3 +418,134 @@ def test_input_layouts_and_seed_dtypes():
     res = ff.flood_fill(f_order, np.int16(sx), np.uint8(sy), method="pixel")
     np.testing.assert_array_equal(res.img, want_img)
     np.testing.assert_array_equal(img, scenes.disk_scene(150, 120, 50)[0])
+
+
+# ------------------------------------------------------------ tile BFS
+
+def _red(img):
+    return (img[..., 0] == 255) & (img[..., 1] == 0) & (img[..., 2] == 0)
+
+
+@pytest.mark.parametrize("shape", [(1, 1), (64, 64), (65, 63), (130, 200),
+                                   (3, 300), (300, 3)])
+def test_pack_tiles_and_columns(shape):
+    """The tile-major mask equals the red mask bit for bit (colours that
+    share bytes with red do not count), padding rows and bits are 0, and
+    the mask columns are the tiles' first and last bits."""
+    w, h = shape
+    rng = np.random.default_rng(w * 1000 + h)
+    img = rng.integers(0, 256, (w, h, 3)).astype(np.uint8)
+    pick = rng.random((w, h))
+    img[pick < 0.4] = RED
+    img[(pick >= 0.4) & (pick < 0.5)] = (255, 0, 1)
+    img[(pick >= 0.5) & (pick < 0.6)] = (255, 1, 0)
+    img[(pick >= 0.6) & (pick < 0.7)] = (254, 0, 0)
+    eng = ff.TileBFS(w, h)
+    eng.mask[:] = np.uint64(0xDEADBEEFDEADBEEF)   # poison: all rewritten
+    K.pack_tiles(img, eng.mask, eng.wpr)
+    K.tile_columns(eng.mask, eng.colm)
+    got = np.empty((w, h), np.bool_)
+    K.unpack_tiles(eng.mask, eng.wpr, got)
+    np.testing.assert_array_equal(got, _red(img))
+    assert K.popcount_words(eng.mask) == int(_red(img).sum())
+    for t in range(eng.n_tiles):
+        rows = [int(v) for v in eng.mask[t]]
+        assert int(eng.colm[t, 0]) == sum((r & 1) << i
+                                          for i, r in enumerate(rows))
+        assert int(eng.colm[t, 1]) == sum(((r >> 63) & 1) << i
+                                          for i, r in enumerate(rows))
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", ["full_red_512", "noise_0.62_big",
+                                  "disk_400", "maze_255", "tile_zigzags"])
+def test_tile_bfs_every_round_parallel(name, connectivity):
+    """serial_below=1: every round of two tiles or more is a prange, at
+    16 threads; the same engine three times."""
+    img, sx, sy = {
+        "full_red_512": lambda: (scenes.full_red_scene(512, 512)[0], 256,
+                                 256),
+        "noise_0.62_big": lambda: _noise(500, 400, 0.62, 9),
+        "disk_400": lambda: scenes.disk_scene(400, 400, 190),
+        "maze_255": lambda: worst_cases.maze_scene(cells=128, rng_seed=5),
+        "tile_zigzags": lambda: tile_border_zigzag_scene(700, 520),
+    }[name]()
+    want_img, want_vis, want_levels, want_filled = expected_fill(
+        img, sx, sy, connectivity)
+    eng = ff.TileBFS(img.shape[0], img.shape[1], connectivity=connectivity,
+                     threads=16, serial_below=1)
+    for _ in range(3):
+        work = img.copy()
+        st = eng.run(work, sx, sy)
+        np.testing.assert_array_equal(eng.visited(), want_vis == 1)
+        np.testing.assert_array_equal(work, want_img)
+        assert eng.filled() == want_filled
+        assert st["peak_round_tiles"] < 2 or st["parallel_rounds"] >= 1
+        assert st["tile_visits"] >= st["idle_visits"]
+
+
+def test_tile_bfs_rounds_on_a_solid_square():
+    """A center-seeded full square: the 8-conn tile graph's BFS from the
+    seed tile reaches the farthest tile in max(|dtx|, |dty|) rounds, plus
+    one round for the last sends to land; every tile is closed once and
+    the bounces are filtered (few idle visits)."""
+    img, _, _ = scenes.full_red_scene(640, 640)
+    eng = ff.TileBFS(640, 640, connectivity=8)
+    st = eng.run(img, 320, 320)
+    assert eng.filled() == 640 * 640
+    # seed tile (5, 5) of 10 x 10: farthest tile 5 steps away
+    assert st["rounds"] in (6, 7)
+    assert st["tile_visits"] - st["idle_visits"] == 100
+    assert st["idle_visits"] <= 2 * 100
+
+
+def test_tile_bfs_reuse_across_seeds_and_threads():
+    img, _, _ = scenes.square_scene(300, 260, 200, 150)
+    img[0:20, 0:20] = RED
+    img[290:300, 250:260] = RED
+    seeds = [(150, 130), (5, 5), (295, 255), (150, 130)]
+    eng = ff.TileBFS(300, 260, connectivity=8, serial_below=1)
+    for i in range(8):
+        sx, sy = seeds[i % 4]
+        want_img, want_vis, _, want_filled = expected_fill(img, sx, sy, 8)
+        work = img.copy()
+        with ff.num_threads(THREADS[i % 3]):
+            eng.run(work, sx, sy)
+        np.testing.assert_array_equal(work, want_img)
+        assert eng.filled() == want_filled
+
+
+@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("connectivity", [4, 8])
+def test_tile_bfs_fuzz(seed, connectivity):
+    """Random rectangles, disks and noise patches on odd image sizes,
+    seeded on random red pixels: both methods equal the oracle."""
+    rng = np.random.default_rng(100 + seed)
+    w, h = int(rng.integers(1, 400)), int(rng.integers(1, 400))
+    img = _white(w, h)
+    for _ in range(int(rng.integers(1, 12))):
+        kind = rng.integers(0, 3)
+        x0, y0 = int(rng.integers(0, w)), int(rng.integers(0, h))
+        a, b = int(rng.integers(1, 150)), int(rng.integers(1, 150))
+        if kind == 0:
+            img[x0:x0 + a, y0:y0 + b] = RED
+        elif kind == 1:
+            xs, ys = np.ogrid[:w, :h]
+            img[(xs - x0) ** 2 + (ys - y0) ** 2 <= a * a // 4] = RED
+        else:
+            patch = rng.random((min(a, w - x0), min(b, h - y0))) < 0.6
+            sub = img[x0:x0 + a, y0:y0 + b]
+            sub[patch] = RED
+    red = np.argwhere(_red(img))
+    if len(red) == 0:
+        img[w // 2, h // 2] = RED
+        red = np.argwhere(_red(img))
+    for k in range(3):
+        sx, sy = (int(v) for v in red[int(rng.integers(0, len(red)))])
+        want_img, want_vis, want_levels, want_filled = expected_fill(
+            img, sx, sy, connectivity)
+        for method in FILL_METHODS:
+            res = ff.flood_fill(img, sx, sy, connectivity=connectivity,
+                                method=method, threads=THREADS[k])
+            np.testing.assert_array_equal(res.img, want_img)
+            assert res.filled == want_filled

@@ -85,13 +85,13 @@ def popcount(x):
     x = x - ((x >> S1) & _M1)
     x = (x & _M2) + ((x >> S2) & _M2)
     x = (x + (x >> S4)) & _M4
-    return int((x * _H01) >> S56)
+    return np.int64((x * _H01) >> S56)
 
 
 @njit(cache=True)
 def lowest_bit(x):
     """Index of the lowest set bit of a non-zero uint64."""
-    return int(trailing_zeros(x))
+    return np.int64(trailing_zeros(x))
 
 
 @njit(cache=True)
@@ -475,3 +475,380 @@ def pixel_bfs(img, visited, seed_x, seed_y, conn8, front, raw, min_chunk,
                     front[dst + j] = raw[src + j]
         n = total
     return levels, filled, dups, peak, par_levels, front, raw
+
+
+# ---------------------------------------------------------------- tiles
+
+@njit(parallel=True, cache=True)
+def pack_tiles(img, mask, wpr):
+    """RGB -> 1 bit per pixel, tile-major: mask[tx * wpr + ty, x % 64]
+    bit b <=> img[x, 64 * ty + b] is exactly (255, 0, 0). Rows in
+    parallel: every word is written by the one thread that owns its row.
+    The padding rows of the last tile row (x >= width) are zeroed."""
+    width, height = img.shape[0], img.shape[1]
+    for x in prange(width):
+        base = (x >> 6) * wpr
+        i = x & 63
+        for ty in range(wpr):
+            y0 = ty * TILE
+            y1 = min(height, y0 + TILE)
+            w = U0
+            for y in range(y0, y1):
+                r = (img[x, y, 0] == 255) & (img[x, y, 1] == 0) \
+                    & (img[x, y, 2] == 0)
+                w |= np.uint64(r) << np.uint64(y - y0)
+            mask[base + ty, i] = w
+    pad0 = width & 63
+    if pad0 != 0:
+        base = (width >> 6) * wpr
+        for ty in range(wpr):
+            for i in range(pad0, TILE):
+                mask[base + ty, i] = U0
+
+
+@njit(parallel=True, cache=True)
+def tile_columns(mask, colm):
+    """colm[t, 0] = the tile's west mask column (bit i = bit 0 of row i),
+    colm[t, 1] its east column (bit 63). One tile per iteration."""
+    for t in prange(mask.shape[0]):
+        colm[t, 0] = col_low(mask[t], TILE)
+        colm[t, 1] = col_high(mask[t], TILE)
+
+
+@njit(parallel=True, cache=True)
+def unpack_tiles(words, wpr, out):
+    """out[x, y] = bit of tile-major words (bool (W, H)), rows in
+    parallel (off the clock: the tests' and the checks' view)."""
+    width, height = out.shape[0], out.shape[1]
+    for x in prange(width):
+        base = (x >> 6) * wpr
+        i = x & 63
+        for y in range(height):
+            out[x, y] = ((words[base + (y >> 6), i]
+                          >> np.uint64(y & 63)) & U1) != U0
+
+
+@njit(parallel=True, cache=True)
+def paint_tiles(img, reach, wpr):
+    """Reached pixels become (0, 0, 255): rows in parallel, a full word
+    painted in one stretch, a partial one bit by bit, an empty one
+    skipped."""
+    width = img.shape[0]
+    for x in prange(width):
+        base = (x >> 6) * wpr
+        i = x & 63
+        for ty in range(wpr):
+            w = reach[base + ty, i]
+            if w == U0:
+                continue
+            y0 = ty * TILE
+            if w == ONES:
+                for y in range(y0, y0 + TILE):
+                    img[x, y, 0] = 0
+                    img[x, y, 1] = 0
+                    img[x, y, 2] = 255
+            else:
+                while w != U0:
+                    y = y0 + lowest_bit(w)
+                    w &= w - U1
+                    img[x, y, 0] = 0
+                    img[x, y, 1] = 0
+                    img[x, y, 2] = 255
+
+
+@njit(parallel=True, cache=True)
+def popcount_words(words):
+    """Set bits of a 2-D uint64 array (a parallel reduction)."""
+    total = 0
+    for t in prange(words.shape[0]):
+        s = 0
+        for i in range(words.shape[1]):
+            s += popcount(words[t, i])
+        total += s
+    return total
+
+
+# --------------------------------------------------------------- tile BFS
+#
+# ch07 on the CPU. A round is a prange over the frontier's tiles, cut
+# into contiguous chunks. Visiting a tile: OR in what its neighbours
+# sent, close it, send its borders. The barrier at the end of the
+# prange ends the round; the next frontier is built serially from the
+# chunks' lists of targets, deduplicated by a per-tile round stamp
+# (frontiers of tiles are small: a ring of a few hundred tiles).
+#
+# NO RACE ON A BORDER. A tile's words (reach[t]) are read and written
+# only by the thread visiting it, and a tile is visited at most once per
+# round (the frontier is deduplicated). Neighbours talk only through
+# inboxes: inbox[buf, t, d] holds the raw border of t's neighbour in
+# direction d (its facing row word, column word or corner bit). Each
+# (target, side) slot has exactly ONE writer, the neighbour on that
+# side, and the inboxes are double-buffered by round parity: in round r
+# a tile reads and clears inbox[r & 1] (its own slots only) and writes
+# inbox[(r + 1) & 1] of its neighbours. So in one round a slot is either
+# read by its owner or written by its one source, never both, and the
+# barrier orders the write before the read a round later. A tile that
+# writes a slot appends the target to its chunk's list, so every written
+# slot is read (and cleared) in the next round.
+#
+# WHAT IS SENT. The raw border (the source's own reached bits), not the
+# target's bits: the target spreads it (8-conn) and masks it itself.
+# known[t, d] keeps the latest raw border each neighbour sent t, and
+# sent[t, d] what t last sent each neighbour; both are owned by t. A
+# tile sends to a neighbour only if (a) some red bit of the neighbour
+# next to its reached border is not known to be reached there (known is
+# a subset of the neighbour's reached bits, as they only grow), and
+# (b) the border changed since the last send (the neighbour absorbed the
+# last one in full). Without (a) every visit would bounce a full border
+# back to where it came from; without (b) a stale `known` would make a
+# tile resend the same border on every visit. Neither filter can drop a
+# needed bit: a dropped candidate is either reached already (a) or was
+# already delivered (b).
+#
+# WHY THE FILL IS EXACT. Every bit set is red and joined to a set bit
+# (row fill, column step, inbox seeds), so nothing outside the blob is
+# reached. The rounds end when no tile sent anything: then every tile is
+# closed, and every red pixel next to a reached border pixel in another
+# tile is reached (else the source would have sent). A set closed like
+# that which holds the seed is the whole component.
+
+# neighbour tile in direction d: N, S, W, E, NW, NE, SW, SE
+DTX = np.array([-1, 1, 0, 0, -1, -1, 1, 1], dtype=np.int64)
+DTY = np.array([0, 0, -1, 1, -1, 1, -1, 1], dtype=np.int64)
+OPP = np.array([1, 0, 3, 2, 7, 6, 5, 4], dtype=np.int64)
+N_, S_, W_, E_, NW_, NE_, SW_, SE_ = 0, 1, 2, 3, 4, 5, 6, 7
+
+# per-chunk counters of the tile BFS
+TS_VISITS = 0       # tiles visited (frontier entries)
+TS_IDLE = 1         # visits whose inboxes held no new bit (no closure)
+TS_PASSES = 2       # closure passes, summed
+TS_SENDS = 3        # inbox slots written
+N_TS = 4
+
+
+@njit(cache=True)
+def _seed_row(f, m, i, s, dirty, lo, hi):
+    """OR new bits s (a subset of m[i]) into row i, row-filled; returns
+    (dirty, lo, hi)."""
+    new = s & ~f[i]
+    if new != U0:
+        f[i] = row_fill(f[i] | new, m[i])
+        dirty |= bit(i)
+        if i < lo:
+            lo = i
+        if i > hi:
+            hi = i
+    return dirty, lo, hi
+
+
+@njit(cache=True)
+def _seed_column(f, m, s, b, dirty, lo, hi):
+    """For every set bit i of s: bit b of row i (a red pixel) is new."""
+    one = bit(b)
+    while s != U0:
+        i = lowest_bit(s)
+        s &= s - U1
+        dirty, lo, hi = _seed_row(f, m, i, one, dirty, lo, hi)
+    return dirty, lo, hi
+
+
+@njit(cache=True)
+def _merge_inbox(t, f, m, colm, inbox, cur, known, conn8, dirty, lo, hi):
+    """Read and clear tile t's inbox slots of buffer cur; seed the bits
+    next to each neighbour's raw border. Returns (dirty, lo, hi)."""
+    nd = 8 if conn8 else 4
+    for d in range(nd):
+        r = inbox[cur, t, d]
+        if r == U0:
+            continue
+        inbox[cur, t, d] = U0
+        known[t, d] |= r
+        if d == N_:
+            dirty, lo, hi = _seed_row(f, m, 0, spread(r, conn8) & m[0],
+                                      dirty, lo, hi)
+        elif d == S_:
+            dirty, lo, hi = _seed_row(f, m, TILE - 1,
+                                      spread(r, conn8) & m[TILE - 1],
+                                      dirty, lo, hi)
+        elif d == W_:
+            dirty, lo, hi = _seed_column(f, m, spread(r, conn8) & colm[t, 0],
+                                         0, dirty, lo, hi)
+        elif d == E_:
+            dirty, lo, hi = _seed_column(f, m, spread(r, conn8) & colm[t, 1],
+                                         TILE - 1, dirty, lo, hi)
+        elif d == NW_:
+            dirty, lo, hi = _seed_row(f, m, 0, m[0] & U1, dirty, lo, hi)
+        elif d == NE_:
+            dirty, lo, hi = _seed_row(f, m, 0, m[0] & TOP, dirty, lo, hi)
+        elif d == SW_:
+            dirty, lo, hi = _seed_row(f, m, TILE - 1, m[TILE - 1] & U1,
+                                      dirty, lo, hi)
+        else:
+            dirty, lo, hi = _seed_row(f, m, TILE - 1, m[TILE - 1] & TOP,
+                                      dirty, lo, hi)
+    return dirty, lo, hi
+
+
+@njit(cache=True)
+def _send_borders(t, tx, ty, tw, wpr, f, mask, colm, inbox, nxt, known,
+                  sent, conn8, out, base):
+    """Write t's raw borders into the neighbours' inboxes of buffer nxt
+    (filters (a) and (b) above) and list the targets at out[base:].
+    Returns the number of targets."""
+    row0 = f[0]
+    row63 = f[TILE - 1]
+    cl = col_low(f, TILE)
+    ch = col_high(f, TILE)
+    nd = 8 if conn8 else 4
+    cnt = 0
+    for d in range(nd):
+        ntx = tx + DTX[d]
+        nty = ty + DTY[d]
+        if ntx < 0 or ntx >= tw or nty < 0 or nty >= wpr:
+            continue
+        x = ntx * wpr + nty
+        if d == N_:
+            raw = row0
+            cand = spread(row0, conn8) & mask[x, TILE - 1]
+        elif d == S_:
+            raw = row63
+            cand = spread(row63, conn8) & mask[x, 0]
+        elif d == W_:
+            raw = cl
+            cand = spread(cl, conn8) & colm[x, 1]
+        elif d == E_:
+            raw = ch
+            cand = spread(ch, conn8) & colm[x, 0]
+        elif d == NW_:
+            raw = row0 & U1
+            cand = raw & (mask[x, TILE - 1] >> S63)
+        elif d == NE_:
+            raw = row0 >> S63
+            cand = raw & mask[x, TILE - 1]
+        elif d == SW_:
+            raw = row63 & U1
+            cand = raw & (mask[x, 0] >> S63)
+        else:
+            raw = row63 >> S63
+            cand = raw & mask[x, 0]
+        if (cand & ~known[t, d]) == U0 or raw == sent[t, d]:
+            continue
+        sent[t, d] = raw
+        inbox[nxt, x, OPP[d]] = raw
+        out[base + cnt] = x
+        cnt += 1
+    return cnt
+
+
+@njit(cache=True)
+def _visit_tiles(front, a, b, out, base, tw, wpr, mask, colm, reach, inbox,
+                 cur, known, sent, tdirty, tlo, thi, conn8, st, c):
+    """Visit the frontier tiles [a, b) as chunk c: merge, close, send.
+    Returns the number of targets listed at out[base:]."""
+    cnt = 0
+    for j in range(a, b):
+        t = front[j]
+        tx = t // wpr
+        ty = t - tx * wpr
+        f = reach[t]
+        m = mask[t]
+        dirty = tdirty[t]
+        tdirty[t] = U0
+        lo = np.int64(tlo[t])
+        hi = np.int64(thi[t])
+        dirty, lo, hi = _merge_inbox(t, f, m, colm, inbox, cur, known, conn8,
+                                     dirty, lo, hi)
+        st[c, TS_VISITS] += 1
+        if dirty == U0:
+            st[c, TS_IDLE] += 1
+            continue
+        passes, lo, hi = close_tile(f, m, conn8, dirty, lo, hi)
+        tlo[t] = lo
+        thi[t] = hi
+        st[c, TS_PASSES] += passes
+        k = _send_borders(t, tx, ty, tw, wpr, f, mask, colm, inbox, cur ^ 1,
+                          known, sent, conn8, out, base + cnt)
+        st[c, TS_SENDS] += k
+        cnt += k
+    return cnt
+
+
+@njit(parallel=True, cache=True)
+def reset_tile_state(reach, inbox, known, sent, tdirty, tlo, thi, queued):
+    """Every per-tile buffer of the tile BFS back to its start, tiles in
+    parallel (on the clock, as ch07's init kernel)."""
+    for t in prange(reach.shape[0]):
+        for i in range(TILE):
+            reach[t, i] = U0
+        for d in range(8):
+            inbox[0, t, d] = U0
+            inbox[1, t, d] = U0
+            known[t, d] = U0
+            sent[t, d] = U0
+        tdirty[t] = U0
+        tlo[t] = TILE
+        thi[t] = -1
+        queued[t] = 0
+
+
+@njit(parallel=True, cache=True)
+def tile_bfs(mask, colm, reach, inbox, known, sent, tdirty, tlo, thi,
+             queued, front, out, conn8, tw, wpr, seed_x, seed_y,
+             serial_below, n_threads):
+    """Rounds of the tile BFS from (seed_x, seed_y), a red pixel, on
+    reset state. A round with fewer than serial_below tiles runs on the
+    calling thread. Returns (rounds, peak frontier, parallel rounds,
+    counters summed over chunks: visits, idle visits, passes, sends)."""
+    max_chunks = min(MAX_CHUNKS, 4 * max(n_threads, 1))
+    counts = np.zeros(max_chunks, np.int64)
+    st = np.zeros((max_chunks, N_TS), np.int64)
+    t0 = (seed_x >> 6) * wpr + (seed_y >> 6)
+    i0 = seed_x & 63
+    reach[t0, i0] = row_fill(bit(seed_y & 63), mask[t0, i0])
+    tdirty[t0] = bit(i0)
+    tlo[t0] = i0
+    thi[t0] = i0
+    front[0] = t0
+    queued[t0] = 1
+    n = 1
+    rounds = 0
+    peak = 0
+    par = 0
+    while n > 0:
+        rounds += 1
+        if n > peak:
+            peak = n
+        cur = rounds & 1
+        nch = min(max_chunks, n)
+        if n < serial_below:
+            nch = 1
+        if nch == 1:
+            counts[0] = _visit_tiles(front, 0, n, out, 0, tw, wpr, mask, colm,
+                                     reach, inbox, cur, known, sent, tdirty,
+                                     tlo, thi, conn8, st, 0)
+        else:
+            par += 1
+            for c in prange(nch):
+                a = n * c // nch
+                b = n * (c + 1) // nch
+                counts[c] = _visit_tiles(front, a, b, out, 8 * a, tw, wpr,
+                                         mask, colm, reach, inbox, cur,
+                                         known, sent, tdirty, tlo, thi,
+                                         conn8, st, c)
+        # the next frontier: the targets, each once (serial)
+        m = 0
+        nxt_stamp = rounds + 1
+        for c in range(nch):
+            base = 8 * (n * c // nch)
+            for j in range(counts[c]):
+                t = out[base + j]
+                if queued[t] != nxt_stamp:
+                    queued[t] = nxt_stamp
+                    front[m] = t
+                    m += 1
+        n = m
+    tot = np.zeros(N_TS, np.int64)
+    for c in range(max_chunks):
+        for k in range(N_TS):
+            tot[k] += st[c, k]
+    return rounds, peak, par, tot
