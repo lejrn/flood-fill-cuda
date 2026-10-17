@@ -73,22 +73,28 @@ Timing policy (ch07's, with ch08's two-event rule):
                   where ch08 saw the driver stall)
   rounds          9 per scene, every config once per round, the order
                   reversed on odd rounds; medians, min, max, stdev and the
-                  per-round samples; paired per-round ratios between GPU
-                  configs. Drone frames: 9 rounds over all 240 frames,
-                  the frame order reversed on odd rounds
-  ch05            in the rounds like every other side. ch08's benchmark
-                  rebuilt ch05's buffers on the host per sample and ran it
-                  after the rounds; here its buffers are reset on the
-                  device (img restored, visited 0, depth / label / prov /
-                  owner -1, the small state copied from its first build),
-                  so no host work separates it from the others
+                  per-round samples; paired per-round ratios between the
+                  interleaved GPU configs. Drone frames: 9 rounds over all
+                  240 frames, the frame order reversed on odd rounds
+  ch05            its own block of 9 runs after the scene's interleaved
+                  rounds (ch08's policy: ch05 next to ch08 on the 81 Mpx
+                  frame hits the laptop's 40 W power cap, and the clock
+                  it leaves behind slowed ch08's next run by 12% in a
+                  probe). Its buffers are reset on the device (img
+                  restored, visited 0, depth / label / prov / owner -1,
+                  the small state copied from its first build), so no
+                  host work sits between its runs. Its ratio to the tile
+                  chapter is a ratio of medians, not a paired one
   ch07, ch08      their init kernels are on their own clocks; ch01-ch03
                   and ch05 resets are off theirs (as in ch07's benchmark)
-  clocks          8 s spin-up before the first scene, a 1 s GPU-bound
-                  respin right before each scene's timed rounds (after
-                  the untimed checks, which are host work), a background
-                  nvidia-smi sampler (100 ms) whose window over each
-                  scene's timed rounds is kept, plus the whole trace
+  clocks          the ramp is the block's own protocol, untimed, for 4 s
+                  right before its timed runs (after the untimed checks,
+                  which are host work). Probes on this machine: a spin of
+                  L2-flush reads hit the 40 W cap and left the next short
+                  rounds at ~1,650 MHz; ch07's launch-bound spin idled at
+                  ~1,650-1,700 MHz; the scenes' own rounds settle at 2,070.
+                  A background nvidia-smi sampler (100 ms): its window over
+                  each block's timed runs is kept, plus the whole trace
   CPU             all @njit cells run last, after every GPU scene (a CPU
                   pass between scenes lets the GPU clock fall), and they
                   are interleaved too: one warm call per cell (its result
@@ -120,7 +126,8 @@ v5_<stamp>.csv. Files are recorded by name only (with md5 / SHA-1).
 
 Run:  PYTHONUNBUFFERED=1 uv run python -m flood_fill_cuda.overview.bench_v5
 Smoke: ... bench_v5 --no-save --rounds 2 --drone-step 24 --scenes sq_256
-Budget: about 6-10 min (compiles, 8 s spin, ~2 s per sq_8000 round).
+Budget: about 4-8 min (compiles, 4 s warm blocks, ~2 s per sq_8000
+round, about 1 min of CPU cells).
 """
 
 import os
@@ -162,8 +169,7 @@ from ..chapters.ch07_gpu_1blob_tiles import flood_fill as ff7
 from ..chapters.ch07_gpu_1blob_tiles.kernels import gpu_sleep_kernel
 from ..chapters.ch07_gpu_1blob_tiles.benchmarks.benchmark import (
     ClockSampler, Ch03Runner, _ch03_kernel, _ch03_seed, _fill, _l2_flush,
-    _clocks, _spin_up, _one, L2_FLUSH_BYTES, SLEEP_NAPS, SPIN_SECONDS,
-    SCENE_SPIN_SECONDS, GPU_REPEATS)
+    _clocks, _one, L2_FLUSH_BYTES, SLEEP_NAPS, GPU_REPEATS)
 from ..chapters.ch08_gpu_nblob_tiles import flood_fill as ff8
 from ..shared import results_paths
 
@@ -179,6 +185,7 @@ MASK_DIR = os.path.join(REPO, "video", "assets", "drones_mask")
 V4_DRONES = "drones_20261014T023648Z.json"       # v4's drone session
 
 E2E_REPEATS = 5
+WARM_SECONDS = 4.0          # untimed rounds of the block before its timed ones
 QUIET_BUSY_PCT = 10.0       # the rest of the host, at most (1.6 of 16 CPUs)
 QUIET_WAIT_CPU_S = 600      # before each CPU round, at most
 QUIET_WAIT_GPU_S = 120      # before each GPU scene's timed rounds, at most
@@ -697,6 +704,20 @@ def run_once(side, flush, sink):
     return side.launch()
 
 
+def warm_block(sides, flush, sink, seconds):
+    """The clock ramp: the block's own protocol, untimed, for `seconds`
+    (at least one round). A spin of L2-flush reads drew 40 W, hit the
+    laptop's 40 W cap and left the next short rounds at ~1,650 MHz; ch07's
+    launch-bound spin idled at ~1,650-1,700. The scenes' own rounds settle
+    at 2,070 MHz under the cap (both measured on this machine)."""
+    t0 = time.time()
+    while True:
+        for s in sides:
+            run_once(s, flush, sink)
+        if time.time() - t0 >= seconds:
+            return
+
+
 def e2e(side, img, expected, repeats=E2E_REPEATS):
     """Context: pageable H2D + pipeline + D2H, perf_counter."""
     out = np.empty_like(img)
@@ -800,17 +821,27 @@ def bench_scene(name, kind, img, seed, sampler, flush, sink, rounds):
         print(f"  check {s.name:16s} {'OK' if checks[s.name]['ok'] else 'MISMATCH'} "
               f"{infos[s.name]}", flush=True)
 
-    # -- timed rounds, interleaved
+    # -- timed rounds: the interleaved block, then ch05's own block
     gate = wait_quiet(QUIET_WAIT_GPU_S)
-    _spin_up(SCENE_SPIN_SECONDS)
+    inter = [s for s in sides if s.chapter != "ch05"]
+    late = [s for s in sides if s.chapter == "ch05"]
     samples = {s.name: [] for s in sides}
-    t0 = time.time()
-    for i in range(rounds):
-        order = sides if i % 2 == 0 else sides[::-1]
-        for s in order:
-            samples[s.name].append(run_once(s, flush, sink))
-    t1 = time.time()
-    clk = clock_window(sampler, t0, t1)
+    blocks = {}
+    for label, group in (("interleaved", inter), ("ch05", late)):
+        if not group:
+            continue
+        warm_block(group, flush, sink, WARM_SECONDS)
+        t0 = time.time()
+        for i in range(rounds):
+            for s in (group if i % 2 == 0 else group[::-1]):
+                samples[s.name].append(run_once(s, flush, sink))
+        t1 = time.time()
+        blocks[label] = {"configs": [s.name for s in group],
+                         "timed_window_s": [round(t0 - sampler.t0, 2),
+                                            round(t1 - sampler.t0, 2)],
+                         **clock_window(sampler, t0, t1)}
+    clk = {k: v for k, v in blocks["interleaved"].items()
+           if k.startswith("clk")}
 
     # ch05 keeps its own image: its last timed run is checked too
     for s in sides:
@@ -844,17 +875,21 @@ def bench_scene(name, kind, img, seed, sampler, flush, sink, rounds):
         if s.name in e2e_cells:
             cell["e2e"] = e2e_cells[s.name]
         cells[s.name] = cell
-    pairs = {}
+    pairs, unpaired = {}, {}
+    in_block = {s.name for s in inter}
     for num, den in PAIRS.get(name, []):
         if num in samples and den in samples:
-            pairs[f"{num}/{den}"] = _ratio_stats(
-                [x["total"] for x in samples[num]],
-                [x["total"] for x in samples[den]])
+            if num in in_block and den in in_block:
+                pairs[f"{num}/{den}"] = _ratio_stats(
+                    [x["total"] for x in samples[num]],
+                    [x["total"] for x in samples[den]])
+            else:
+                unpaired[f"{num}/{den}"] = (cells[num]["ms"]
+                                            / cells[den]["ms"])
     row = {"scene": name, "kind": kind, "note": SCENE_NOTES[name],
            "width": ctx.w, "height": ctx.h, "red_px": ref["red_px"],
            "configs": names, "cells": cells, "paired": pairs,
-           "timed_window_s": [round(t0 - sampler.t0, 2),
-                              round(t1 - sampler.t0, 2)],
+           "ratio_of_medians": unpaired, "blocks": blocks,
            "host_loadavg": list(os.getloadavg()), "quiet_gate": gate,
            **clk}
     if kind == "one":
@@ -874,9 +909,13 @@ def bench_scene(name, kind, img, seed, sampler, flush, sink, rounds):
     for k, v in pairs.items():
         print(f"  paired {k}: x{v['median']:.2f} [{v['min']:.2f}, "
               f"{v['max']:.2f}]", flush=True)
-    print(f"  sm {clk.get('clk_sm_min', '?')}-{clk.get('clk_sm_median', '?')} "
-          f"MHz, mem median {clk.get('clk_mem_median', '?')}, "
-          f"{'all OK' if row['all_checks_ok'] else 'CHECK FAILED'}",
+    for k, v in unpaired.items():
+        print(f"  ratio of medians {k}: x{v:.2f}", flush=True)
+    for k, b in blocks.items():
+        print(f"  {k} block: sm {b.get('clk_sm_min', '?')}-"
+              f"{b.get('clk_sm_median', '?')} MHz, mem median "
+              f"{b.get('clk_mem_median', '?')}", flush=True)
+    print(f"  {'all OK' if row['all_checks_ok'] else 'CHECK FAILED'}",
           flush=True)
 
     del sides, ctx, ref
@@ -906,7 +945,12 @@ def bench_drones(frames, sampler, flush, sink, rounds):
     print(f"  checks: {'all OK' if ok_all else 'MISMATCH'}", flush=True)
 
     gate = wait_quiet(QUIET_WAIT_GPU_S)
-    _spin_up(SCENE_SPIN_SECONDS)
+    t_w = time.time()
+    j = 0
+    while time.time() - t_w < WARM_SECONDS:
+        ctx.d_pristine = pristine[j % len(frames)]
+        run_once(side, flush, sink)
+        j += 1
     samples = [[] for _ in frames]
     idx = list(range(len(frames)))
     t0 = time.time()
@@ -1173,10 +1217,7 @@ def main():
     print(f"  warm in {time.perf_counter() - t_w:.0f} s", flush=True)
 
     sampler = ClockSampler()
-    print(f"Spinning the clock up for {SPIN_SECONDS:.0f} s...", flush=True)
-    _spin_up(SPIN_SECONDS)
     clocks_start = _clocks()
-    print(f"  clocks: {clocks_start}", flush=True)
 
     rows = []
     for name, kind, img, seed in scenes:
@@ -1251,8 +1292,7 @@ def main():
                    "cpu_rounds": CPU_ROUNDS, "cpu_round_s": CPU_ROUND_S,
                    "cpu_max_calls_per_round": CPU_MAX_CALLS,
                    "drone_step": args.drone_step,
-                   "spin_seconds": SPIN_SECONDS,
-                   "scene_spin_seconds": SCENE_SPIN_SECONDS,
+                   "warm_seconds": WARM_SECONDS,
                    "sleep_naps": SLEEP_NAPS,
                    "l2_flush_bytes": L2_FLUSH_BYTES},
         "timing_note": (
