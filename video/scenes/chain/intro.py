@@ -54,6 +54,7 @@ from scenes.style import (ASSETS, BG, GREY, GRID, INK, INK_SOFT, OUT, RED_PX, TE
 GAP = 0.4               # silence between the two beats inside this clip (assembly)
 DIM_TO = 0.4            # the drone panels' brightness after "Scale up"
 START = 18              # the footage's first frame: its loop then falls at about 8.5 s, not at "On"
+VALUE_SIZE = 16         # the cards' values (the names stay at 13)
 CAMERA, FILTER, COUNT, CARD = 0, 1, 2, 3     # panel slots, in reading order
 
 if is_vertical():
@@ -137,7 +138,7 @@ class MsCard(VGroup):
         self.names, self.values, self.bars = VGroup(), [], []
         for (name, ms), y in zip(rows, y_rows):
             nm = ov.lbl(name, 13, INK_SOFT).move_to([self.x0, y, 0], aligned_edge=LEFT)
-            val = Readout("?" if ms is None else ms_text(ms), 13, INK_SOFT if ms is None else INK,
+            val = Readout("?" if ms is None else ms_text(ms), VALUE_SIZE, INK_SOFT if ms is None else INK,
                           np.array([self.x1, y, 0]))
             self.names.add(nm)
             self.values.append(val)
