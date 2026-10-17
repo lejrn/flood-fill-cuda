@@ -1,14 +1,17 @@
 """r05: all blocks (v4). Every SM gets two blocks (48 x 256 threads) and
-the 64 Mpx square goes 18x the CPU. Each colour is one block: the blocks
-take turns down one queue, so their pixels mix, and small rings keep only
-a few of them busy. Then the launch-shape sweep, and the default we kept.
+the 64 Mpx square goes 8.5x the CPU (v5: 1,195 vs 141 ms, against the
+4-neighbour CPU on kept arrays; v4 said 18x). Each colour is one block:
+the blocks take turns down one queue, so their pixels mix, and small
+rings keep only a few of them busy. Then the launch-shape sweep, and the
+default we kept.
 
 At "So" the carried caption leaves and the square goes back to red (a
 fresh run). At "every SM" the 22 dark SMs light in a ripple out from SMs
 0 and 2. At "forty-eight" the 48 cubes land in the measured order (D5),
 each in its block's hue: one on each even SM, then on each odd SM, then
-the second cubes. At "Eighteen" the square refills in one quick pass with
-the 48-block owner mosaic (D4), "18x" / kernel time.
+the second cubes. At "Eight" ("Eight and a half times the CPU") the square
+refills in one quick pass with the 48-block owner mosaic (D4), "8.5×" /
+kernel time.
 
 At "Each colour" the pass replays from the seed out: the mosaic dims to
 a ghost, the rings light again under a white outline, and a cube is
@@ -53,7 +56,7 @@ from scenes.style import RED_PX
 RIPPLE = 14             # frames of the light ripple over the 22 dark SMs
 LAND = 0.4              # seconds of one cube's drop (the drops overlap, in block order)
 DROP = 0.22             # how far above its SM a cube starts (frame units)
-QUICK = 1.4             # seconds of the quick refill pass at "Eighteen"
+QUICK = 1.4             # seconds of the quick refill pass at "Eight" (and a half)
 SLOW_BUSY = 12          # the slow replay runs until this many blocks have work (a quarter: still few)
 SLOW_TAIL = 0.35        # ... and holds the small rings this long past "busy", under the caption
 GHOST = 0.6             # a cell the replay has not reached: its paint this far towards the empty floor
@@ -190,11 +193,12 @@ class AllBlocks(ChainScene):
         self.remove(*cubes)
         self.add(teams)             # after the floor: redrawn every frame, so the replay can recolour it
 
-        # ---- "Eighteen": the square refills in one quick pass, block by block mixed
-        tq = self.cue("Eighteen")
+        # ---- "Eight and a half times the CPU": the square refills in one quick
+        # pass, block by block mixed ("forty-eight" is its own word: no clash)
+        tq = self.cue("Eight")
         self.until(tq)
         self.floor_play(lambda p: min(top, int(p * (top + 1))), mosaic, QUICK)
-        self.say(f"{int(self.der['big_48_x'])}×", "kernel time")
+        self.say(ov.fmt_x(self.der["big_48_x"]), "kernel time")
 
         # ---- "Each colour is one block": the pass replays from the seed out. A cube is
         # bright while its block has work in the ring, dim while it has none (D6). Slow
