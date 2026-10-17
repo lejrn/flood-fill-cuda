@@ -28,6 +28,7 @@ from manim.constants import RESAMPLING_ALGORITHMS
 from PIL import Image
 
 from scenes.chain import die as dz
+from scenes.chain import floor as fl
 from scenes.chain.iso import Box, Placement, box_faces, on_plane, plane_corners
 from scenes.style import BLUE, GOLD, GREEN, GREY, INK, INK_SOFT, RED_PX, TEAL, label
 
@@ -67,6 +68,9 @@ LINK_Y = (DIE_Y + dz.GPU_D - 1.25, DIE_Y + dz.GPU_D - 0.85)
 KERNEL_W, KERNEL_D, KERNEL_GAP = 0.60, 0.40, 0.09
 SPILL_SLOTS = 3                               # the spill: VRAM chip 0's slots
 TAG_D = 0.15                                  # a tag stripe: this share of its token's depth (D7)
+TOKEN_KINDS = ("pixel", "tile", "piece")
+TOKEN_TOP = 0.20                              # a token's top face (slot top 0.10 + token 0.10)
+MAX_TEAMS = 3                                 # cubes per SM: act 3 launches 72 blocks, 3 per SM
 
 
 def sm_rect(i: int) -> dz.R:
@@ -107,7 +111,7 @@ def kernel_rect(j: int) -> dz.R:
 class Spec:
     cpu: str = "off"                    # P-core 0: off | lit (our CPU code runs on one core)
     rooms: tuple = ("off",) * 24        # SMs: off | idle | lit | wait
-    teams: tuple = (0,) * 24            # blocks resident per SM: 0, 1 or 2
+    teams: tuple = (0,) * 24            # blocks resident per SM: 0 to 3 (act 3's 72 blocks: 3 each)
     team_state: str = "work"            # work | wait: wait (the gate flash) turns every cube amber
     team_hues: tuple = ()               # per SM, a hue per resident cube, left first (missing: BLUE)
     team_busy: tuple = ()               # per SM, per cube: work | dim | wait (missing: work)
@@ -115,6 +119,8 @@ class Spec:
     room_fence: str | None = None       # None | rest | wait: __syncthreads around SM 0
     queue: bool = False                 # the global queue, in VRAM
     tokens: tuple = ()                  # token colours, slot 0 first
+    token_kind: str = "pixel"           # what a token carries: pixel | tile (a 2 x 2 grid on its top) |
+                                        # piece (the grid with one cell lit): TOKEN_KINDS
     tag_tokens: tuple = ()              # a tag colour per token: a thin stripe, one bit of the entry
     spill: bool = False                 # the shared ring's overflow: tokens in VRAM chip 0's slots
     gate: str | None = None             # None | rest | wait: grid.sync around the GPU
@@ -223,14 +229,14 @@ def block_states(busy: int, blocks: int, idle: str = "dim") -> tuple:
 def place_blocks(spec: "Spec", sm_ids, hues=None, busy=None) -> "Spec":
     """spec with block b's cube on SM sm_ids[b] (D5), in hues[b] (default:
     all BLUE) and state busy[b] (default: all work). On a shared SM the
-    lower block stands on the left."""
+    lower block stands on the left; up to MAX_TEAMS cubes an SM."""
     teams, th, tb = [0] * 24, [[] for _ in range(24)], [[] for _ in range(24)]
     for b, sm in enumerate(sm_ids):
         teams[sm] += 1
         th[sm].append(hues[b] if hues is not None else BLUE)
         tb[sm].append(busy[b] if busy is not None else "work")
-    if max(teams) > 2:
-        raise ValueError("at most two cubes per SM")
+    if max(teams) > MAX_TEAMS:
+        raise ValueError(f"at most {MAX_TEAMS} cubes per SM")
     return replace(spec, teams=tuple(teams), team_hues=tuple(map(tuple, th)) if hues is not None else (),
                    team_busy=tuple(map(tuple, tb)) if busy is not None else ())
 
@@ -323,11 +329,10 @@ def _boxes(spec: Spec) -> list[tuple[str, Box]]:
         n = spec.teams[i]
         if not n:
             continue
-        r = sm_rect(i)
-        bw = 0.20 if n == 1 else 0.14
-        xs = [r.x + (r.w - bw) / 2] if n == 1 else [r.x + 0.04, r.x + r.w - 0.04 - bw]
-        for j, x in enumerate(xs):
-            out.append(("teams", Box(x, r.y + 0.16, DIE_Z, bw, 0.24, 0.10, cube_color(spec, i, j), layer=4)))
+        if n > MAX_TEAMS:
+            raise ValueError(f"SM {i}: {n} cubes, at most {MAX_TEAMS}")
+        for j, (x, bw) in enumerate(cube_xs(i, n)):
+            out.append(("teams", Box(x, sm_rect(i).y + 0.16, DIE_Z, bw, 0.24, 0.10, cube_color(spec, i, j), layer=4)))
     if spec.room_fence:
         r = sm_rect(0)
         # like the gate: a low rail at rest (SM 0 stays visible), a wall when the threads wait
@@ -347,6 +352,7 @@ def _boxes(spec: Spec) -> list[tuple[str, Box]]:
         for j, colr in enumerate(spec.tokens[:SLOTS]):
             s = slot_rect(j).inset(0.025, 0.04)
             out.append(("queue_tokens", Box(s.x, s.y, 0.10, s.w, s.d, 0.10, colr, layer=4)))
+            out += [("token_marks", b) for b in token_marks(s, spec.token_kind, colr)]
         for j, colr in enumerate(spec.tag_tokens[:SLOTS]):
             if colr:
                 # one bit of the entry: a thin band round the token's front end
@@ -381,6 +387,38 @@ def _fence(x0, y0, x1, y1, z0, h, state, thick=0.05) -> list[Box]:
         Box(x1 - t, y0, z0, t, y1 - y0, h, col, layer=5),          # right
         Box(x0, y0, z0, x1 - x0, t, h, col, layer=7),              # front, drawn last
     ]
+
+
+def cube_xs(i: int, n: int) -> list[tuple[float, float]]:
+    """(x, width) of each of the n cubes on SM i, left first: one centred,
+    two at the edges, three side by side (act 3's 3 blocks per SM)."""
+    r = sm_rect(i)
+    if n == 1:
+        return [(r.x + (r.w - 0.20) / 2, 0.20)]
+    if n == 2:
+        return [(r.x + 0.04, 0.14), (r.x + r.w - 0.04 - 0.14, 0.14)]
+    bw, m = 0.10, 0.035
+    step = (r.w - 2 * m - bw) / (n - 1)
+    return [(r.x + m + j * step, bw) for j in range(n)]
+
+
+def token_marks(s: dz.R, kind: str, colr: str) -> list[Box]:
+    """The texture on a token's top (s: the token's footprint): nothing for a
+    pixel; a 2 x 2 grid for a tile (the queue carries tiles); the grid with
+    its back-left cell lit for a piece (a tile token with one piece)."""
+    if kind not in TOKEN_KINDS:
+        raise ValueError(f"token_kind must be one of {TOKEN_KINDS}, not {kind!r}")
+    if kind == "pixel":
+        return []
+    line = mix_hex(colr, dz.DIE, 0.62)
+    t = 0.014
+    out = []
+    if kind == "piece":
+        out.append(Box(s.x + t, s.y + s.d / 2 + t / 2, TOKEN_TOP, s.w / 2 - 1.5 * t, s.d / 2 - 1.5 * t, 0.003,
+                       mix_hex(colr, INK, 0.7), layer=5))
+    out += [Box(s.x, s.y + (s.d - t) / 2, TOKEN_TOP, s.w, t, 0.004, line, layer=5),       # across
+            Box(s.x + (s.w - t) / 2, s.y, TOKEN_TOP, t, s.d, 0.004, line, layer=5)]       # along
+    return out
 
 
 def _images(spec: Spec, pl: Placement) -> list[tuple[str, object, int, tuple]]:
@@ -1008,3 +1046,197 @@ def vram_closeup(pl: Placement, centre, height: float, form: str = "tags", width
     """D2: the VRAM close-up at `centre`, `height` tall (width default
     0.62 x height); see VramPanel for the forms and the keywords."""
     return VramPanel(pl, centre, (width or 0.62 * height, height), form, **kw)
+
+
+# ---- the SM close-up's parts (v5): where a partition's lanes sit -----------
+
+def closeup_rect(closeup: Group, r: dz.R) -> tuple[np.ndarray, float, float]:
+    """A rectangle of one SM (world units from its front-left corner, e.g.
+    dz.sm_parts().lanes[q]) on an sm_closeup: (centre, width, height) in
+    frame units. The close-up's image is its second member."""
+    img = closeup[1]
+    sx, sy = img.width / dz.SM_W, img.height / dz.SM_D
+    c = img.get_corner(np.array([-1, -1, 0])) + np.array([(r.x + r.w / 2) * sx, (r.y + r.d / 2) * sy, 0.0])
+    return c, r.w * sx, r.d * sy
+
+
+def partition_point(closeup: Group, q: int = 0) -> np.ndarray:
+    """Frame point of partition q's "32" on an sm_closeup: where the warp
+    card unfolds from (q = 2 a + b: a the column, b the row from the front)."""
+    return closeup_rect(closeup, dz.sm_parts().lanes[q])[0]
+
+
+def partition_light(closeup: Group, q: int = 0, color: str = INK, width: float = 3.0):
+    """An outline round partition q's lanes on an sm_closeup ("one partition's
+    32 lights"): fade it in over the close-up, at the close-up's z + 2."""
+    from manim import Rectangle
+
+    c, w, h = closeup_rect(closeup, dz.sm_parts().lanes[q])
+    r = Rectangle(width=w + 0.04, height=h + 0.04, stroke_color=color, stroke_width=width).move_to(c)
+    r.set_z_index(closeup[1].z_index + 2)
+    return r
+
+
+# ---- the gate's flash (v5): the waiting state as an overlay ----------------
+
+def set_alpha(g, a: float) -> None:
+    """Opacity of a group of images and faces (Group has no set_opacity)."""
+    from manim import VMobject
+
+    for m in g.get_family():
+        if isinstance(m, ImageMobject):
+            m.set_opacity(a)
+        elif isinstance(m, VMobject):
+            m.set_fill(opacity=a, family=False)
+
+
+def amber_overlay(spec: Spec, pl: Placement, parts=("teams", "gate"), z0: float = 100.0) -> Group:
+    """`spec`'s waiting state, invisible: its cubes amber and its gate up (and
+    with "rooms" in parts, every lit SM amber too). Built at the machine's
+    own z, so added after the machine it draws over the parts; its opacity
+    is the flash (base.ChainScene.gate_rounds drives it). Act 3 flashes the
+    cubes and the gate only: large areas never flash."""
+    lit = [i for i, st in enumerate(spec.rooms) if st != "off"]
+    w = build(replace(with_rooms(spec, "wait", lit), team_state="wait", gate="wait"), pl, z0=z0)
+    want = set(parts)
+    g = Group(*[v for k, v in w.parts.items() if k in want or ("rooms" in want and k.startswith("room")
+                                                                 and k[4:].isdigit())])
+    set_alpha(g, 0.0)
+    return g
+
+
+# ---- the warp card (v5, r10): one warp's tile, 32 lanes x 32 bits ----------
+
+WARP_N = 32
+WARP_FRAME = "#7fb2ea"       # the lit SM's edge: the card is one partition, drawn large
+
+
+def tile_bits(words) -> np.ndarray:
+    """32 uint32 words (lane i = row i) -> (32, 32) bool [lane, bit], bit j
+    of lane i at (i, j): the kernels' little-endian order (assets/tiles/README.md)."""
+    w = np.asarray(words, dtype=np.uint64).reshape(-1)
+    return ((w[:, None] >> np.arange(WARP_N, dtype=np.uint64)) & 1).astype(bool)
+
+
+def _redraw(m, dt) -> None:
+    """A no-op updater: the card's image changes its pixels from hooks, so the
+    renderer must draw it every frame instead of caching it."""
+
+
+class WarpCard(Group):
+    """One warp's tile drawn large, a flat dark card (sibling of sm_closeup
+    and vram_closeup): 32 rows of 32 bit cells, row i the word of lane i
+    (one thread), bit j its column. A red cell is a red pixel not yet
+    reached, a blue cell (floor.REACHED) a reached one, a dark cell no red
+    pixel. One ImageMobject whose pixels change per sweep (`show`), a frame
+    (`frame`: pulse it for "registers"), a column of 32 vote dots right of
+    the rows (`votes`), and under the grid a slot for a direction glyph
+    (`glyph(kind)`: row, diag, col). No title: the caption names it.
+
+    Grow it out of `partition_point(closeup)` (FadeIn with target_position)
+    and fold it back into `sm_point(pl, 0)`."""
+
+    def __init__(self, centre, height: float, mask, reached=None, z: float = Z_CALLOUT):
+        from manim import Dot, Rectangle
+
+        super().__init__()
+        self.z = z
+        self.mask = np.asarray(mask, bool) if np.asarray(mask).ndim == 2 else tile_bits(mask)
+        pad, self.glyph_h, gap = 0.16, 0.34, 0.08
+        s = height - 2 * pad - self.glyph_h - gap                  # the grid's side
+        self.side = s
+        cell = s / WARP_N
+        dot_r = cell * 0.26
+        vote_dx = 0.12 + dot_r
+        w = s + vote_dx + dot_r + 2 * pad
+        cx, cy = float(centre[0]), float(centre[1])
+        # the grid's centre: left in the card, above the glyph slot
+        gx = cx - w / 2 + pad + s / 2
+        gy = cy + height / 2 - pad - s / 2
+        self.box = RoundedRectangle(corner_radius=0.14, width=w, height=height, fill_color=CARD_FILL,
+                                    fill_opacity=0.97, stroke_color=CARD_EDGE, stroke_width=1.5).move_to([cx, cy, 0])
+        self.px = max(WARP_N, int(round(s * _ppu())))
+        self.image = ImageMobject(self.raster(None))
+        self.image.set_resampling_algorithm(RESAMPLING_ALGORITHMS["nearest"])
+        self.image.stretch_to_fit_width(s)
+        self.image.stretch_to_fit_height(s)
+        self.image.move_to([gx, gy, 0])
+        self.image.add_updater(_redraw)
+        self.frame = Rectangle(width=s + 0.06, height=s + 0.06, stroke_color=WARP_FRAME, stroke_width=2.5).move_to(
+            [gx, gy, 0])
+        self.votes = VGroup(*[Dot([gx + s / 2 + vote_dx, gy + s / 2 - (i + 0.5) * cell, 0], radius=dot_r,
+                                 color=WARP_FRAME) for i in range(WARP_N)])
+        self.grid_c = np.array([gx, gy, 0.0])
+        self.glyph_c = np.array([gx, cy - height / 2 + pad + self.glyph_h / 2, 0.0])
+        self.box.set_z_index(z)
+        for m in (self.image, self.frame, *self.votes):
+            m.set_z_index(z + 1)
+        self.frame.set_z_index(z + 1.5)
+        self.add(self.box, self.image, self.frame, self.votes)
+        if reached is not None:
+            self.show(reached)
+
+    # ---- the picture
+    def colors(self, reached=None, dim=None, glow=None) -> np.ndarray:
+        """(32, 32, 3) uint8: empty, red or reached per cell; dim (32,) in
+        0..1 pulls row i towards the card (unlit), glow (32,) towards white."""
+        r = np.zeros((WARP_N, WARP_N), bool) if reached is None else (
+            np.asarray(reached, bool) if np.asarray(reached).ndim == 2 else tile_bits(reached))
+        out = np.tile(fl.rgb(fl.EMPTY), (WARP_N, WARP_N, 1)).astype(np.float32)
+        out[self.mask] = fl.rgb(RED_PX)
+        out[self.mask & r] = fl.rgb(fl.REACHED)
+        if glow is not None:
+            g = np.clip(np.asarray(glow, np.float32), 0, 1)[:, None, None] * 0.45
+            out = out + (fl.rgb(INK).astype(np.float32) - out) * g
+        if dim is not None:
+            d = np.clip(np.asarray(dim, np.float32), 0, 1)[:, None, None] * 0.7
+            out = out + (fl.rgb(CARD_FILL).astype(np.float32) - out) * d
+        return out.astype(np.uint8)
+
+    def raster(self, reached=None, dim=None, glow=None) -> np.ndarray:
+        return fl.toy_raster(self.colors(reached, dim, glow), self.px)
+
+    def show(self, reached=None, dim=None, glow=None) -> "WarpCard":
+        """Swap the grid's pixels in place (call from a hook, as Floor.show_raster)."""
+        arr = self.raster(reached, dim, glow)
+        img = self.image
+        img.orig_alpha_pixel_array = arr[:, :, 3].copy()
+        if img.stroke_opacity < 1:          # keep a fade in progress
+            arr[:, :, 3] = (img.orig_alpha_pixel_array * img.stroke_opacity).astype(arr.dtype)
+        img.pixel_array = arr
+        return self
+
+    # ---- places on the card
+    def cell_point(self, i: float, j: float) -> np.ndarray:
+        """Frame point of cell (row i, column j)'s centre (fractional cells allowed)."""
+        cell = self.side / WARP_N
+        return self.grid_c + np.array([-self.side / 2 + (j + 0.5) * cell, self.side / 2 - (i + 0.5) * cell, 0.0])
+
+    def row_bracket(self, i: int, color: str = INK, width: float = 2.5):
+        """An outline round row i's 32 cells: one thread's row."""
+        from manim import Rectangle
+
+        cell = self.side / WARP_N
+        r = Rectangle(width=self.side + 0.05, height=cell + 0.05, stroke_color=color, stroke_width=width)
+        r.move_to(self.cell_point(i, (WARP_N - 1) / 2))
+        r.set_z_index(self.z + 2)
+        return r
+
+    def glyph(self, kind: str, color: str = INK_SOFT):
+        """The sweep's direction under the grid, no words: row (along a row,
+        right), diag (one diagonal step, down-right), col (down a column)."""
+        from manim import Arrow
+
+        d = {"row": np.array([1.0, 0, 0]), "diag": np.array([0.72, -0.72, 0]),
+             "col": np.array([0, -1.0, 0])}[kind]
+        L = self.glyph_h * 0.9
+        a = Arrow(self.glyph_c - d * L / 2, self.glyph_c + d * L / 2, buff=0, stroke_width=4, color=color,
+                  max_tip_length_to_length_ratio=0.35)
+        a.set_z_index(self.z + 1)
+        return a
+
+
+def warp_closeup(centre, height: float, mask, reached=None, z: float = Z_CALLOUT) -> WarpCard:
+    """r10's warp card at `centre`, `height` tall (G.warp gives the slot):
+    `mask` and `reached` are 32 words or (32, 32) bool [lane, bit]."""
+    return WarpCard(centre, height, mask, reached, z)

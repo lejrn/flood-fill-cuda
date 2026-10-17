@@ -49,6 +49,9 @@ HOLD = {"r00_zoom": 1.5, "r02_one_block": 1.2, "r03b_one_sm": 0.8, "r06_diagonal
         "r10_runs": 1.8, "r11_reveal": 3.5}
 # A caption stays at least this long before the next one replaces it.
 MIN_DWELL = 1.75
+# The gate's flashes (act 3: once per round) start at least this far apart:
+# at most two a second, the cut's photosensitivity rule made stricter (v5).
+GATE_GAP = 0.5
 
 
 def fr(n: int) -> float:
@@ -258,6 +261,47 @@ class ChainScene(BeatScene):
         anims = self.machine_anims(spec, slide)
         if anims or extra:
             self.play(*anims, *extra, run_time=fr(frames))
+
+    def gate_rounds(self, flashes=(), hold: tuple | None = None, parts=("teams", "gate"), peak: float = 0.85,
+                    held: float = 0.7, up: float = 0.08, top: float = 0.12, down: float = 0.22,
+                    ramp: float = 0.15):
+        """The gate's amber flash once per round, at each scene time in
+        `flashes` (up, top, down seconds: a short trapezoid at `peak`), and,
+        with hold = (t0, t1), held up at steady amber (`held`) while rounds
+        race, eased in and out over `ramp` (r05b's pattern). Flashes start
+        at least GATE_GAP apart and never inside a hold (ValueError
+        otherwise). Drives an mc.amber_overlay of the machine as it is now
+        (its cubes and gate; parts=("rooms", ...) adds the SMs), added over
+        the machine and left at opacity 0 after its last round; a part the
+        scene adds later draws over it. Returns the overlay."""
+        times = sorted(float(t) for t in flashes)
+        if any(b - a < GATE_GAP - 1e-6 for a, b in zip(times, times[1:])):
+            raise ValueError(f"{self.beat}: gate flashes closer than {GATE_GAP} s: {times}")
+        if hold is not None:
+            h0, h1 = hold
+            if any(h0 - GATE_GAP < t < h1 + GATE_GAP for t in times):
+                raise ValueError(f"{self.beat}: a gate flash within {GATE_GAP} s of the hold {hold}")
+        overlay = mc.amber_overlay(self.machine.spec, self.Lay.machine_pl, parts=parts)
+        self.add(overlay)
+        t0 = self.elapsed()
+        ends = [t + up + top + down for t in times] + ([hold[1] + ramp] if hold is not None else [])
+        t_end = max(ends + [t0 + fr(1)])
+
+        def alpha(t: float) -> float:
+            a = 0.0
+            for tf in times:
+                x = t - tf
+                if 0 <= x < up + top + down:
+                    a = max(a, peak * min(1.0, x / up, (up + top + down - x) / down))
+            if hold is not None:
+                a = max(a, held * max(0.0, min(1.0, (t - hold[0]) / ramp, (hold[1] + ramp - t) / ramp)))
+            return a
+
+        def step(p: float) -> None:
+            mc.set_alpha(overlay, 0.0 if p >= 1 else alpha(t0 + p * (t_end - t0)))
+
+        self.run(step, t_end - t0)
+        return overlay
 
     # ---- overlays (goal meter, scoreboard strip, inset, act tag)
     def over_anims(self, name: str, new) -> list:

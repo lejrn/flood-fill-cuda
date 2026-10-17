@@ -41,6 +41,12 @@ class Frame:
     cards: tuple = ()          # D1, the shelf cards: ((SM 0's centre, SM 2's centre), (w, h)), SM 0's lower (r04)
     vram: tuple = ()           # D2, the VRAM close-up (r08, r10_runs)
     side_card: tuple = ()      # the corner beside the floor's front tip, ((x0, y0), (x1, y1)): r05's cards
+    # v5, r10: the warp card and the SM close-up it unfolds from, side by side
+    # over the floor area, clear of the inset, the act tag and the caption;
+    # each as (centre, height): the card's (machine.warp_closeup), the
+    # close-up image's (machine.sm_closeup)
+    warp: tuple = ()
+    sm_side: tuple = ()
 
     def split(self, side: str) -> tuple:
         """(centre, (w, h)) of the left or right half of the floor box."""
@@ -67,13 +73,15 @@ def frame() -> Frame:
             cards=(((-2.70, -3.15), (-2.70, -2.25)), (2.3, 0.8)),
             vram=((0.0, 1.65), (6.8, 3.9)),           # over the floor area, under the inset and the act tag
             side_card=((-3.5, -0.3), (3.5, 3.6)),     # r05's sweep card, over the floor area
+            warp=((1.3, 1.45), 3.9),
+            sm_side=((-2.55, 1.4), 2.9),
         )
     top = h / 2
     return Frame(
         floor_c=np.array([-3.25, -0.2, 0]), floor_wh=(6.3, 4.9),
         machine_c=np.array([3.6, -0.08, 0]), machine_wh=(6.8, 5.6),
         caption_c=np.array([0.0, -h / 2 + 0.6, 0]),
-        goal_c=np.array([3.55, top - 0.55, 0]), goal_w=6.6,
+        goal_c=np.array([3.55, top - 0.58, 0]), goal_w=6.6,     # its top 0.05 inside the frame
         score_c=np.array([-3.5, top - 0.68, 0]), score_w=6.6,
         card_c=np.array([0.0, 0.2, 0]),
         inset_c=np.array([-6.05, 1.95, 0]),
@@ -83,4 +91,6 @@ def frame() -> Frame:
         cards=(((1.20, 1.30), (1.20, 2.25)), (2.1, 0.85)),
         vram=((-2.75, -0.45), (5.1, 3.9)),       # over the floor area, clear of the inset
         side_card=((-5.3, -2.4), (-0.2, 1.5)),     # r05's sweep card, over the floor area
+        warp=((-1.75, -0.55), 3.6),
+        sm_side=((-4.7, -0.95), 2.4),
     )

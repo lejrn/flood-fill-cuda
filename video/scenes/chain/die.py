@@ -330,28 +330,45 @@ def sm_tile(state: str, ppw: float, shelf="off") -> np.ndarray:
     return c.done()
 
 
-@lru_cache(maxsize=4)
-def sm_detail(ppw: float, shelf="off") -> np.ndarray:
-    """One SM, lit, drawn large like NVIDIA's SM figure, with its few labels:
-    32 lanes in each of the four partitions, the shared memory, the RT core."""
-    c = Canvas(SM_W, SM_D, ppw, None)
-    r = R(0, 0, SM_W, SM_D)
-    _sm(c, r, "lit", shelf)
-    inner = r.inset(0.018)
+@dataclass(frozen=True)
+class SmParts:
+    """Where the labelled units sit inside one SM (world units, from its
+    front-left corner), the same arithmetic as `_sm`: the RT core, the
+    shared-memory strip, and each partition's lanes (the "32"), partition
+    q = 2 a + b (a: left/right column, b: front/back row)."""
+    rt: R
+    shared: R
+    lanes: tuple
+
+
+def sm_parts() -> SmParts:
+    inner = R(0, 0, SM_W, SM_D).inset(0.018)
     rt_d, tex_d, l1_d = inner.d * 0.17, inner.d * 0.05, inner.d * 0.07
     part_d = inner.d - rt_d - tex_d - l1_d - 3 * 0.008
-    c.text(R(inner.x, inner.y, inner.w, rt_d), "RT core", color="#e8e4b0", height=0.026)
     y_l1 = inner.y + rt_d + tex_d + 2 * 0.008
-    c.text(R(inner.x, y_l1, inner.w, l1_d), "shared memory", color="#e6edf3", height=0.022)
     y = y_l1 + l1_d + 0.008
     pw, pd = (inner.w - 0.012) / 2, (part_d - 0.012) / 2
+    lanes = []
     for a in range(2):
         for b in range(2):
             P = R(inner.x + a * (pw + 0.012), y + b * (pd + 0.012), pw, pd)
             sd, rd, ld = pd * 0.13, pd * 0.16, pd * 0.12
-            body = R(P.x, P.y + ld + 0.004, P.w * 0.6, P.d - sd - rd - ld - 0.012)
-            c.text(body, "32", color="#ffffff", height=0.03, bold=True)
-            c.text(body.shift(0, -0.024), "lanes", color="#e6edf3", height=0.016)
+            lanes.append(R(P.x, P.y + ld + 0.004, P.w * 0.6, P.d - sd - rd - ld - 0.012))
+    return SmParts(R(inner.x, inner.y, inner.w, rt_d), R(inner.x, y_l1, inner.w, l1_d), tuple(lanes))
+
+
+@lru_cache(maxsize=4)
+def sm_detail(ppw: float, shelf="off") -> np.ndarray:
+    """One SM, lit, drawn large like NVIDIA's SM figure, with its few labels:
+    "32" on each of the four partitions' lanes (the voice says threads, so
+    the picture says no more), the shared memory, the RT core."""
+    c = Canvas(SM_W, SM_D, ppw, None)
+    _sm(c, R(0, 0, SM_W, SM_D), "lit", shelf)
+    p = sm_parts()
+    c.text(p.rt, "RT core", color="#e8e4b0", height=0.026)
+    c.text(p.shared, "shared memory", color="#e6edf3", height=0.022)
+    for body in p.lanes:
+        c.text(body, "32", color="#ffffff", height=0.03, bold=True)
     return c.done()
 
 

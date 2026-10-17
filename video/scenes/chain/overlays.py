@@ -5,7 +5,10 @@
   the real frame's current time;
 - scoreboard: "CPU vs GPU" in three rows (one small blob, one huge blob,
   many blobs). Collapsed it is a strip of three pills; a scene shows the
-  expanded card for a few seconds when a row fills;
+  expanded card for a few seconds when a row fills. v5: the card draws
+  each row's tag (its like-for-like CPU, "CPU: 8 neighbours") under the
+  row's name, and a row may be half known (a CPU time, the GPU and the
+  winner "?": r14's first flip step);
 - the "you are here" inset (one line) and the act tag (SIZE / COUNT).
 
 Every builder is a pure function of its spec, so `state.chain_state(k)`
@@ -21,6 +24,7 @@ from manim import (DOWN, LEFT, RIGHT, UP, Group, ImageMobject, Line, Polygon, Re
                    VGroup, config)
 from manim.constants import RESAMPLING_ALGORITHMS
 
+from scenes.chain import numbers as nb
 from scenes.chain.geo import Frame
 from scenes.style import ASSETS, GREY, GRID, INK, INK_SOFT, RED_PX, TEAL, label
 
@@ -44,17 +48,13 @@ def lbl(text: str, size: int = 36, color: str = INK, mono: bool = False):
     return label(text, size * 4, color, mono=mono).scale(0.25)
 
 
-def fmt_ms(ms: float) -> str:
-    """1,346 ms / 58.5 ms / 2.96 ms: never rounded up past what is spoken."""
-    if ms >= 100:
-        return f"{ms:,.0f} ms"
-    if ms >= 10:
-        return f"{int(ms * 10) / 10:.1f} ms"
-    return f"{ms:.2f} ms"
-
-
-def fmt_x(x: float) -> str:
-    return f"{x:.1f}×" if x < 10 else f"{x:.0f}×"
+# The on-screen formats are numbers.py's, so its claim checks read what the
+# screen shows: 1,065 ms / 53.9 ms (never rounded up past what is spoken) /
+# 3.12 ms / 0.192 ms; the footnote's unspoken times rounded; factors with
+# two significant figures (4.4×, 11×, 340×).
+fmt_ms = nb.card_ms
+fmt_ms_note = nb.card_ms_note
+fmt_x = nb.card_x
 
 
 # ---- goal meter ----------------------------------------------------------
@@ -68,7 +68,6 @@ class GoalSpec:
     needle_ms: float | None = None      # None: parked (hidden)
     needle_text: str = ""
     needle_color: str = INK              # neutral: amber means only "waiting"
-    mask_mark: bool = False             # the faint "1.46 ms packed mask" mark
 
 
 def _track_x(G: Frame, ms: float, x0: float, x1: float) -> float:
@@ -97,9 +96,6 @@ def goal_meter(G: Frame, spec: GoalSpec, nums: dict) -> VGroup:
         xc = _track_x(G, nums["njit_ms"], x0, x1)
         g.add(Line([xc, y - 0.14, 0], [xc, y + 0.14, 0], stroke_color=GREY, stroke_width=4))
         g.add(lbl("CPU", 13, GREY, mono=True).move_to([xc, y + 0.25, 0]))
-    if spec.mask_mark:
-        xm = _track_x(G, nums["ch06_mask_ms"], x0, x1)
-        g.add(Line([xm, y - 0.08, 0], [xm, y + 0.08, 0], stroke_color=TEAL, stroke_width=2, stroke_opacity=0.5))
     if spec.needle_ms is not None:
         xn = _track_x(G, spec.needle_ms, x0, x1)
         tri = Polygon([xn, y - 0.02, 0], [xn - 0.09, y - 0.2, 0], [xn + 0.09, y - 0.2, 0],
@@ -117,11 +113,20 @@ def goal_meter(G: Frame, spec: GoalSpec, nums: dict) -> VGroup:
 class Row:
     what: str                  # "one small blob"
     cpu_ms: float | None = None
-    gpu_ms: float | None = None
-    winner: str | None = None  # "CPU" | "GPU" | None (not yet)
-    factor: str = ""           # "2.4×"
+    gpu_ms: float | None = None    # None: "?" (r14's first flip step)
+    winner: str | None = None  # "CPU" | "GPU" | None (not yet: "?")
+    factor: str = ""           # "4.3×"
     picture: str = ""          # "16 K px test blob"
-    tag: str = ""              # "one session"
+    tag: str = ""              # the like-for-like CPU: "CPU: 4 neighbours"
+
+    @property
+    def verdict(self) -> str:
+        """The pill's and the card's winner text: "GPU 11×", or "?"."""
+        return f"{self.winner} {self.factor}" if self.winner else "?"
+
+    @property
+    def color(self) -> str:
+        return TEAL if self.winner == "GPU" else GREY if self.winner == "CPU" else DIM
 
 
 ROW_NAMES = ("small blob", "huge blob", "many blobs")
@@ -152,19 +157,28 @@ def score_strip(G: Frame, rows: tuple) -> VGroup:
         if r == "?":
             p = _pill(ROW_NAMES[i], "?", DIM, w)
         else:
-            col = TEAL if r.winner == "GPU" else GREY
-            p = _pill(ROW_NAMES[i], f"{r.winner} {r.factor}", col, w)
+            p = _pill(ROW_NAMES[i], r.verdict, r.color, w)
         p.move_to([x, G.score_c[1], 0])
         g.add(p)
     return _z(g, Z_OVER + 1)
 
 
-def score_card(G: Frame, rows: tuple, highlight: int | None = None, footnote: str | None = None) -> VGroup:
-    """The expanded scoreboard: picture | CPU | GPU | winner per row."""
-    filled = [r for r in rows if isinstance(r, Row)]
+CARD_HEADER = "one session, GPU kernel time"
+
+
+def score_card(G: Frame, rows: tuple, highlight=None, footnote: str | None = None,
+               header: str | None = CARD_HEADER) -> VGroup:
+    """The expanded scoreboard, opaque: a title and `header`, then per row its
+    name, picture and tag (the like-for-like CPU, under the name) | CPU |
+    GPU | winner; a "?" row is dim, a half-known row shows "?" for what is
+    unknown. highlight: a row index or a tuple of them (bright names).
+    VGroup(box, body); body = VGroup(VGroup(title, header), lines[, footnote]),
+    lines[0] the head, lines[1 + i] row i's cells, so a scene can frame rows."""
+    from manim import VectorizedPoint
+
+    lit = (highlight,) if isinstance(highlight, int) else tuple(highlight or ())
     lines = VGroup()
-    blank = Rectangle(width=0.01, height=0.01, stroke_width=0, fill_opacity=0)   # an empty cell with points
-    head = VGroup(blank, lbl("CPU", 16, INK_SOFT), lbl("GPU", 16, INK_SOFT), lbl("winner", 16, INK_SOFT))
+    head = VGroup(VectorizedPoint(), lbl("CPU", 16, INK_SOFT), lbl("GPU", 16, INK_SOFT), lbl("winner", 16, INK_SOFT))
     lines.add(head)
     for i, r in enumerate(rows):
         if r is None:
@@ -173,32 +187,40 @@ def score_card(G: Frame, rows: tuple, highlight: int | None = None, footnote: st
             cells = VGroup(lbl(ROW_NAMES[i], 20, DIM), lbl("?", 20, DIM, mono=True),
                            lbl("?", 20, DIM, mono=True), lbl("?", 20, DIM, mono=True))
         else:
-            col = TEAL if r.winner == "GPU" else GREY
-            name = VGroup(lbl(r.what, 20, INK if i == highlight else INK_SOFT),
-                          lbl(r.picture, 13, INK_SOFT)).arrange(DOWN, buff=0.03, aligned_edge=LEFT)
-            cells = VGroup(name, lbl(fmt_ms(r.cpu_ms), 20, INK, mono=True),
-                           lbl(fmt_ms(r.gpu_ms), 20, INK, mono=True),
-                           lbl(f"{r.winner} {r.factor}", 22, col, mono=True))
+            parts = [lbl(r.what, 20, INK if i in lit else INK_SOFT), lbl(r.picture, 13, INK_SOFT)]
+            if r.tag:
+                parts.append(lbl(r.tag, 13, INK_SOFT, mono=True))
+            name = VGroup(*parts).arrange(DOWN, buff=0.03, aligned_edge=LEFT)
+            cpu = lbl(fmt_ms(r.cpu_ms), 20, INK, mono=True) if r.cpu_ms is not None else lbl("?", 20, DIM, mono=True)
+            gpu = lbl(fmt_ms(r.gpu_ms), 20, INK, mono=True) if r.gpu_ms is not None else lbl("?", 20, DIM, mono=True)
+            cells = VGroup(name, cpu, gpu, lbl(r.verdict, 22, r.color, mono=True))
         lines.add(cells)
     cols = [max(row[j].width for row in lines) for j in range(4)]
     xs = np.cumsum([0] + [c + 0.45 for c in cols[:-1]])
-    for row in lines:
-        for j, m in enumerate(row):
-            m.move_to([xs[j], 0, 0], aligned_edge=LEFT)
     lines.arrange(DOWN, buff=0.22, aligned_edge=LEFT)
     for row in lines:
         for j, m in enumerate(row):
             m.set_x(xs[j] + m.width / 2)
-    body = VGroup(lbl("CPU vs GPU", 22, INK), lines).arrange(DOWN, buff=0.25, aligned_edge=LEFT)
+    top = VGroup(lbl("CPU vs GPU", 22, INK))
+    if header:
+        top.add(lbl(header, 13, INK_SOFT, mono=True))
+        top.arrange(DOWN, buff=0.06, aligned_edge=LEFT)
+    body = VGroup(top, lines).arrange(DOWN, buff=0.25, aligned_edge=LEFT)
     if footnote:
         fn = lbl(footnote, 12, INK_SOFT, mono=True)
+        if fn.width > lines.width and ", " in footnote:
+            # two lines, broken at the comma nearest the middle: the table sets the card's width
+            cuts = [i for i in range(len(footnote)) if footnote.startswith(", ", i)]
+            i = min(cuts, key=lambda c: abs(c - len(footnote) / 2))
+            fn = VGroup(lbl(footnote[:i + 1], 12, INK_SOFT, mono=True),
+                        lbl(footnote[i + 2:], 12, INK_SOFT, mono=True)).arrange(DOWN, buff=0.05, aligned_edge=LEFT)
         body.add(fn)
         body.arrange(DOWN, buff=0.22, aligned_edge=LEFT)
     room = config.frame_width - 0.9
     if body.width > room:
         body.scale_to_fit_width(room)
     box = RoundedRectangle(corner_radius=0.16, width=body.width + 0.6, height=body.height + 0.5,
-                           fill_color=PANEL, fill_opacity=0.97, stroke_color=GRID, stroke_width=2)
+                           fill_color=PANEL, fill_opacity=1.0, stroke_color=GRID, stroke_width=2)
     box.move_to(G.card_c)
     body.move_to(box)
     return _z(VGroup(box, body), Z_OVER + 20)
