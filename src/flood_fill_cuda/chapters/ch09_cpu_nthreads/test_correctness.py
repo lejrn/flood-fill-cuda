@@ -21,6 +21,9 @@ Run:
     uv run pytest src/flood_fill_cuda/chapters/ch09_cpu_nthreads/test_correctness.py -v
 """
 
+import os
+from pathlib import Path
+
 import numba
 import numpy as np
 import pytest
@@ -31,6 +34,9 @@ from ..ch03_gpu_1blob_nblock.cpu_oracle import cpu_flood_fill, cpu_flood_fill_8
 from ..ch03_gpu_1blob_nblock import scenes
 from ..ch07_gpu_1blob_tiles.benchmarks import worst_cases
 from ..ch08_gpu_nblob_tiles import scenes as scenes8
+from ..ch05_gpu_nblob_nblock import scenes as scenes5
+from ..ch05_gpu_nblob_nblock.cpu_oracle import cpu_label_components
+from ..ch08_gpu_nblob_tiles.cpu_oracle import cpu_label
 
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 RED = scenes.RED
@@ -549,3 +555,269 @@ def test_tile_bfs_fuzz(seed, connectivity):
                                 method=method, threads=THREADS[k])
             np.testing.assert_array_equal(res.img, want_img)
             assert res.filled == want_filled
+
+
+# ---------------------------------------------------------- tile labels
+
+IMAGES = Path(os.environ.get(
+    "FLOOD_FILL_IMAGES",
+    Path(__file__).resolve().parents[4] / "images" / "input"))
+
+
+def expected_labels(img, connectivity):
+    if connectivity == 8:
+        lab, n = cpu_label_components(img)
+    else:
+        lab, n = cpu_label(img, 4)
+    out = img.copy()
+    m = lab >= 0
+    out[m] = K.PALETTE[lab[m] % K.N_PALETTE]
+    return out, lab, int(n)
+
+
+def check_labels(img, connectivity, want=None, **kw):
+    want_img, want_lab, want_n = (want if want is not None
+                                  else expected_labels(img, connectivity))
+    res = ff.label(img, connectivity=connectivity, **kw)
+    np.testing.assert_array_equal(res.label, want_lab)
+    np.testing.assert_array_equal(res.img, want_img)
+    assert res.n_blobs == want_n
+    st = res.stats
+    # every ring piece is expanded exactly once; it is a seed or listed
+    # by a claim, and a raced claim lists it again, then is dropped
+    assert st["expanded"] == st["ring_pieces"]
+    assert st["claims"] == st["ring_pieces"] - st["seeds"] + st["dropped"]
+    return res
+
+
+def frame_teeth_scene():
+    """One blob that enters the centre 64-tile through 120 isolated
+    frame pixels (30 per side, teeth 2 px apart, joined by spines
+    outside the tile): 120 ring pieces in one tile, the ordinal range
+    the frame map has to hold."""
+    img = _white(192, 192)
+    c0, c1 = 64, 127
+    for j in range(30):
+        y = c0 + 3 + 2 * j
+        img[c0 - 3:c0 + 1, y] = RED      # N teeth: rows 61..64
+        img[c1:c1 + 4, y] = RED          # S teeth: rows 127..130
+        img[y, c0 - 3:c0 + 1] = RED      # W teeth
+        img[y, c1:c1 + 4] = RED          # E teeth
+    img[c0 - 4, c0 - 4:c1 + 5] = RED     # spines, joined at the corners
+    img[c1 + 4, c0 - 4:c1 + 5] = RED
+    img[c0 - 4:c1 + 5, c0 - 4] = RED
+    img[c0 - 4:c1 + 5, c1 + 4] = RED
+    return img
+
+
+def rmin_trap64_scene():
+    """The blob's min-index pixel (80, 80) is in tile (1, 1); the blob
+    runs down to row 100 and then left into tile (1, 0), whose anchor
+    (100, 20) is larger: the canonical piece must win the union."""
+    img = _white(192, 192)
+    img[80:101, 80] = RED
+    img[100, 20:81] = RED
+    return img
+
+
+def diag_snake64_scene(m=13):
+    """The anti-diagonal x + y = 64 m + 63 through 64-tile corners: each
+    piece's anchor has a red predecessor (its UR neighbour), so one
+    seed and a chain of m + 1 pieces, m + 1 rounds when no tile is on
+    the lattice (m % 8 != 0)."""
+    n = 64 * (m + 1)
+    img = _white(n, n)
+    c = 64 * m + 63
+    xs = np.arange(0, min(n, c + 1))
+    ys = c - xs
+    ok = ys < n
+    img[xs[ok], ys[ok]] = RED
+    return img
+
+
+def dots_scene(w, h, step=2):
+    img = _white(w, h)
+    img[0::step, 0::step] = RED
+    return img
+
+
+def noise_img(w, h, density, seed):
+    rng = np.random.default_rng(seed)
+    return scenes8.from_mask(rng.random((w, h)) < density)
+
+
+def _blank_px(w, h, red=False):
+    img = _white(w, h)
+    if red:
+        img[:] = RED
+    return img
+
+
+MANY_BLOBS = {
+    "random_blobs": lambda: scenes5.random_blobs_scene(500, 377, 0.3, 1)[0],
+    "blob_grid": lambda: scenes5.blob_grid_scene(400, 330, 6, 5, 50)[0],
+    "u_shape": lambda: scenes5.u_shape_scene(300, 200)[0],
+    "comb": lambda: scenes5.comb_scene(300, 300)[0],
+    "serpentine": lambda: scenes5.serpentine_scene(200, 150)[0],
+    "two_disks": lambda: scenes5.two_disks_scene(200, 300, 60)[0],
+    "blank": lambda: _blank_px(130, 70),
+    "full_red": lambda: _blank_px(130, 70, red=True),
+    "one_by_one_red": lambda: _blank_px(1, 1, red=True),
+    "one_by_one_white": lambda: _blank_px(1, 1),
+    "strip_1x500": lambda: noise_img(1, 500, 0.5, 3),
+    "strip_500x1": lambda: noise_img(500, 1, 0.5, 4),
+    "strip_3x700": lambda: noise_img(3, 700, 0.6, 5),
+    "noise_0.40": lambda: noise_img(400, 300, 0.40, 6),
+    "noise_0.45": lambda: noise_img(300, 400, 0.45, 7),
+    "noise_0.59": lambda: noise_img(330, 260, 0.59, 8),
+    "checkerboard": lambda: checkerboard_scene(200, 130)[0],
+    "dots": lambda: dots_scene(130, 200),
+    "spiral": lambda: scenes8.spiral_scene(256, 2),
+    "corner_joined": lambda: scenes8.corner_joined_scene("main"),
+    "corner_joined_anti": lambda: scenes8.corner_joined_scene("anti"),
+    "all_eight": lambda: scenes8.all_eight_scene(),
+    "rmin_trap32": lambda: scenes8.rmin_trap_scene(),
+    "lexmin_multi": lambda: scenes8.lexmin_multi_scene(),
+    "tile_corners": lambda: corner_pixels_scene()[0],
+    "tile_zigzags": lambda: tile_border_zigzag_scene(450, 333)[0],
+    "frame_teeth": frame_teeth_scene,
+    "rmin_trap64": rmin_trap64_scene,
+    "diag_snake64": lambda: diag_snake64_scene(5),
+    "maze": lambda: worst_cases.maze_scene(cells=100, rng_seed=1)[0],
+}
+
+
+@pytest.mark.parametrize("threads", THREADS)
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("name", list(MANY_BLOBS))
+def test_labels_match_oracle(name, connectivity, threads):
+    img = MANY_BLOBS[name]()
+    res = check_labels(img, connectivity, threads=threads)
+    assert res.threads == threads
+
+
+def test_palette_is_ch05s():
+    from ..ch05_gpu_nblob_nblock.kernels import N_PALETTE, PALETTE_HOST
+    np.testing.assert_array_equal(K.PALETTE, PALETTE_HOST)
+    assert K.N_PALETTE == N_PALETTE
+
+
+@pytest.mark.parametrize("connectivity", [4, 8])
+@pytest.mark.parametrize("kw", [
+    dict(serial_below=1),                                  # every round
+    dict(serial_below=1, claims_per_entry=0, meets_per_entry=0),
+    dict(lattice=0), dict(lattice=1), dict(lattice=3),
+    dict(lattice=0, serial_below=1, claims_per_entry=0, meets_per_entry=0),
+], ids=lambda kw: "-".join(f"{k}{v}" for k, v in kw.items()))
+@pytest.mark.parametrize("name", ["noise_0.45", "noise_0.59", "maze",
+                                  "frame_teeth", "random_blobs",
+                                  "tile_zigzags", "diag_snake64"])
+def test_labels_every_path(name, connectivity, kw):
+    """Forced prange rounds, zero-size per-entry regions (every chunk
+    holds one worst case, so entries are requeued), and seed lattices
+    from none to every tile: the labels never move."""
+    img = MANY_BLOBS[name]()
+    res = check_labels(img, connectivity, threads=16, **kw)
+    if kw.get("claims_per_entry") == 0 and res.stats["parallel_rounds"]:
+        # requeues happen only in multi-chunk rounds
+        assert res.stats["requeued"] >= 0
+
+
+def test_labels_seeds_and_rounds():
+    """The seed rule: the canonical piece is always a seed. On the
+    lattice-free diagonal snake there is one seed and one round per
+    piece of the chain; with lattice 1 every ring piece is a seed and a
+    single round claims nothing."""
+    img = diag_snake64_scene(5)
+    want = expected_labels(img, 8)
+    res = check_labels(img, 8, want=want, lattice=0)
+    assert res.stats["seeds"] == 1
+    assert res.stats["rounds"] == res.stats["ring_pieces"]
+    res = check_labels(img, 8, want=want, lattice=1)
+    assert res.stats["seeds"] == res.stats["ring_pieces"]
+    assert res.stats["claims"] == 0 and res.stats["rounds"] == 1
+    img = rmin_trap64_scene()
+    res = check_labels(img, 8, lattice=0)
+    assert res.n_blobs == 1 and res.label[80, 80] == 80 * 192 + 80
+
+
+def test_labels_frame_ordinals():
+    """frame_teeth puts 120 ring pieces in one tile."""
+    img = frame_teeth_scene()
+    eng = ff.TileLabels(192, 192)
+    eng.run(img.copy())
+    assert eng.n_ring[1 * eng.wpr + 1] == 120
+    assert eng.n_blobs == 1
+
+
+@pytest.mark.parametrize("family", ["fuzz_noise", "fuzz_rects_and_disks",
+                                    "fuzz_walks", "fuzz_border_zigzags",
+                                    "fuzz_stitched_tiles"])
+@pytest.mark.parametrize("connectivity", [4, 8])
+def test_labels_fuzz(family, connectivity):
+    rng = np.random.default_rng(hash((family, connectivity)) % (2 ** 32))
+    for k in range(5):
+        img = getattr(scenes8, family)(rng)
+        check_labels(img, connectivity, threads=THREADS[k % 3],
+                     serial_below=1 + 63 * (k % 2))
+
+
+def test_labels_repeatable_and_reusable():
+    """One engine, runs at 1, 2 and 16 threads on two images of one
+    shape: labels, images, blob and round counts are identical every
+    time (which wave wins a race is not, and must not show)."""
+    imgs = [noise_img(400, 300, 0.45, 21), noise_img(400, 300, 0.59, 22)]
+    wants = [expected_labels(im, 8) for im in imgs]
+    eng = ff.TileLabels(400, 300, serial_below=1)
+    seen = {}
+    for i in range(9):
+        j = i % 2
+        work = imgs[j].copy()
+        with ff.num_threads(THREADS[i % 3]):
+            st = eng.run(work)
+        np.testing.assert_array_equal(work, wants[j][0])
+        np.testing.assert_array_equal(eng.label_map(), wants[j][1])
+        assert st["n_blobs"] == wants[j][2]
+        key = (j, st["rounds"], st["seeds"], st["ring_pieces"])
+        seen.setdefault(j, key)
+        assert seen[j] == key
+
+
+def test_labels_bad_inputs():
+    with pytest.raises(ValueError):
+        ff.label(np.zeros((4, 4), np.uint8))
+    with pytest.raises(ValueError):
+        ff.TileLabels(10, 10, connectivity=6)
+    with pytest.raises(ValueError):
+        ff.TileLabels(10, 10, lattice=-1)
+    with pytest.raises(ValueError):
+        ff.TileLabels(1 << 16, 1 << 15)
+    eng = ff.TileLabels(10, 10)
+    with pytest.raises(ValueError):
+        eng.run(np.full((10, 11, 3), 255, np.uint8))
+    with pytest.raises(ValueError):
+        eng.run(np.asfortranarray(np.full((10, 10, 3), 255, np.uint8)))
+
+
+def _png(name):
+    path = IMAGES / f"{name}.png"
+    if not path.exists():
+        pytest.skip(f"{name}.png not found (set FLOOD_FILL_IMAGES)")
+    return scenes5.png_scene(str(path))[0]
+
+
+@pytest.mark.parametrize("crop", [(0, 0, 1000, 1000), (3000, 4100, 1500, 777)])
+def test_labels_input_blobs_crops(crop):
+    img = _png("input_blobs")
+    x0, y0, w, h = crop
+    sub = np.ascontiguousarray(img[x0:x0 + w, y0:y0 + h])
+    check_labels(sub, 8, threads=16)
+    check_labels(sub, 8, threads=2, serial_below=1)
+
+
+def test_labels_input_blobs_full():
+    """The 81 Mpx frame, once, at 16 threads: the label map, the palette
+    image and the 2,522 blobs equal ch05's oracle."""
+    img = _png("input_blobs")
+    res = check_labels(img, 8, threads=16)
+    assert res.n_blobs == 2522

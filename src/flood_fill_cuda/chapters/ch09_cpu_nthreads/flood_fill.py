@@ -6,8 +6,15 @@ Public API:
     TileBFS(width, height, connectivity=8, threads=None, ...)
         .run(img, seed_x, seed_y, paint=True)  -> stats dict
         .visited()                             -> bool (W, H) (off clock)
+    TileLabels(width, height, connectivity=8, lattice=8, threads=None,
+               ...)
+        .run(img, paint=True)                  -> stats dict
+        .label_map()                           -> int32 (W, H), -1 off
+                                                  blob (off clock)
     flood_fill(img, seed_x, seed_y, connectivity=8, method="tile",
                threads=None, **engine_kw)      -> FillResult
+    label(img, connectivity=8, lattice=8, threads=None, **engine_kw)
+                                               -> LabelResult
 
 An engine owns its buffers for one image shape (allocated once, as the
 GPU sides allocate theirs) and resets them inside run(), on the clock,
@@ -39,6 +46,14 @@ FRONT_START = 1 << 16
 # tile BFS: a round below TILE_SERIAL_BELOW tiles runs on the calling
 # thread (one tile visit is ~ a microsecond, a fork and barrier more)
 TILE_SERIAL_BELOW = 8
+# tile labels: a wave round below LABEL_SERIAL_BELOW entries runs on the
+# calling thread; the chunks' claim and meeting regions hold this many
+# per entry (plus one worst-case expansion each; past that an entry is
+# requeued); ch08's seed lattice
+LABEL_SERIAL_BELOW = 64
+CLAIMS_PER_ENTRY = 8
+MEETS_PER_ENTRY = 4
+DEFAULT_LATTICE = 8
 
 
 @contextmanager
@@ -213,6 +228,153 @@ class TileBFS:
         out = np.empty((self.width, self.height), np.bool_)
         K.unpack_tiles(self.reach, self.wpr, out)
         return out
+
+
+class TileLabels:
+    """ch08's tile waves on every core (many blobs, no seeds given):
+    canonical labels (the blob's min x * height + y) and the palette
+    paint, 4- or 8-connected.
+
+    run() packs, splits every tile into pieces, seeds, runs the waves,
+    unions the meetings and paints, all on the clock; the per-pixel
+    label map is an off-clock twin of the paint (label_map())."""
+
+    method = "tile_labels"
+
+    def __init__(self, width, height, connectivity=8,
+                 lattice=DEFAULT_LATTICE, threads=None,
+                 serial_below=LABEL_SERIAL_BELOW,
+                 claims_per_entry=CLAIMS_PER_ENTRY,
+                 meets_per_entry=MEETS_PER_ENTRY):
+        _check_shape(width, height)
+        _check_conn(connectivity)
+        if lattice < 0:
+            raise ValueError(f"lattice must be >= 0, got {lattice}")
+        if serial_below < 1 or claims_per_entry < 0 or meets_per_entry < 0:
+            raise ValueError("serial_below >= 1, per-entry sizes >= 0")
+        self.width, self.height = int(width), int(height)
+        self.connectivity = connectivity
+        self.lattice = int(lattice)
+        self.threads = threads
+        self.serial_below = int(serial_below)
+        self.claims_per_entry = int(claims_per_entry)
+        self.meets_per_entry = int(meets_per_entry)
+        self.tiles_x = (self.width + K.TILE - 1) // K.TILE
+        self.wpr = (self.height + K.TILE - 1) // K.TILE
+        nt = self.n_tiles = self.tiles_x * self.wpr
+        self.mask = np.zeros((nt, K.TILE), np.uint64)
+        self.colm = np.zeros((nt, 2), np.uint64)
+        self.n_ring = np.zeros(nt, np.int32)
+        self.n_int = np.zeros(nt, np.int32)
+        self.n_seed = np.zeros(nt, np.int32)
+        self.seed_off = np.zeros(nt, np.int64)
+        slots = nt * K.RING_CAP
+        self.anchor = np.zeros(slots, np.int32)
+        self.lab = np.full(slots, -1, np.int32)
+        self.claimer = np.zeros(slots, np.uint8)
+        self.dirs = np.zeros(slots, np.uint8)
+        self.fmap = np.full((nt, 4, K.TILE), K.NO_PIECE, np.uint8)
+        self._seed_cap = 0
+        self._ensure_seeds(1024)
+        self.meet_a = np.empty(1024, np.int64)
+        self.meet_b = np.empty(1024, np.int64)
+        self._dummy_img = np.zeros((1, 1, 3), np.uint8)
+        self._dummy_lab = np.zeros((1, 1), np.int32)
+        self.n_blobs = 0
+
+    def _ensure_seeds(self, n):
+        if n <= self._seed_cap:
+            return
+        cap = max(n, 2 * self._seed_cap)
+        self.seed_slot = np.empty(cap, np.int64)
+        self.seed_anchor = np.empty(cap, np.int32)
+        self.parent = np.empty(cap, np.int64)
+        self.seed_label = np.empty(cap, np.int32)
+        self.ent_a = np.empty(cap, np.int64)
+        self.ent_w = np.empty(cap, np.int64)
+        self._seed_cap = cap
+
+    def run(self, img, paint=True):
+        check_image(img, self.width, self.height)
+        conn8 = self.connectivity == 8
+        with num_threads(self.threads) as nt:
+            K.pack_tiles(img, self.mask, self.wpr)
+            K.tile_columns(self.mask, self.colm)
+            K.label_pieces(self.mask, self.colm, self.wpr, self.tiles_x,
+                           self.width, self.height, conn8, self.lattice,
+                           self.n_ring, self.n_int, self.n_seed, self.anchor,
+                           self.lab, self.claimer, self.dirs, self.fmap, nt)
+            n_seeds, n_int = K.seed_offsets(self.n_seed, self.n_int,
+                                            self.seed_off)
+            self._ensure_seeds(n_seeds)
+            K.assign_seeds(self.n_ring, self.seed_off, self.lab, self.anchor,
+                           self.seed_slot, self.seed_anchor, self.parent,
+                           self.ent_a, self.ent_w)
+            (rounds, peak, par, n_meet, tots, self.meet_a,
+             self.meet_b) = K.label_waves(
+                self.ent_a, self.ent_w, n_seeds, self.lab, self.claimer,
+                self.dirs, self.fmap, self.wpr, conn8, self.meet_a,
+                self.meet_b, self.claims_per_entry, self.meets_per_entry,
+                self.serial_below, nt)
+            roots = K.resolve_labels(self.parent, self.seed_anchor,
+                                     self.seed_label, n_seeds, self.meet_a,
+                                     self.meet_b, n_meet)
+            uniform = 0
+            if paint:
+                uniform = K.paint_labels(img, self._dummy_lab, True, self.mask,
+                                         self.wpr, conn8, self.n_ring,
+                                         self.n_int, self.lab, self.anchor,
+                                         self.seed_label, nt)
+        self.n_blobs = int(roots + n_int)
+        return {"n_blobs": self.n_blobs, "rounds": int(rounds),
+                "peak_round_entries": int(peak), "parallel_rounds": int(par),
+                "seeds": int(n_seeds), "ring_pieces": int(self.n_ring.sum()),
+                "interior_pieces": int(n_int), "meetings": int(n_meet),
+                "expanded": int(tots[K.LS_EXPANDED]),
+                "lost": int(tots[K.LS_LOST]),
+                "dropped": int(tots[K.LS_DROPPED]),
+                "claims": int(tots[K.LS_CLAIMS]),
+                "requeued": int(tots[K.LS_REQUEUED]),
+                "uniform_tiles": int(uniform), "n_tiles": self.n_tiles,
+                "lattice": self.lattice, "threads": int(nt)}
+
+    def label_map(self):
+        """int32 (W, H): the last run's labels, -1 off blob (off clock)."""
+        out = np.empty((self.width, self.height), np.int32)
+        K.fill_i32(out, -1)
+        K.paint_labels(self._dummy_img, out, False, self.mask, self.wpr,
+                       self.connectivity == 8, self.n_ring, self.n_int,
+                       self.lab, self.anchor, self.seed_label,
+                       numba.get_num_threads())
+        return out
+
+
+@dataclass
+class LabelResult:
+    img: np.ndarray        # (W, H, 3) uint8: a copy, palette[label % 6]
+    label: np.ndarray      # (W, H) int32: canonical labels, -1 off blob
+    n_blobs: int
+    rounds: int            # wave rounds
+    connectivity: int
+    threads: int
+    stats: dict = field(repr=False)
+
+
+def label(img, connectivity=8, lattice=DEFAULT_LATTICE, threads=None,
+          **engine_kw):
+    """Label and paint every red blob on every core (tile waves).
+
+    img: (width, height, 3) uint8, any memory layout; not modified."""
+    if (not isinstance(img, np.ndarray) or img.ndim != 3
+            or img.shape[2] != 3 or img.dtype != np.uint8):
+        raise ValueError("img must be a (width, height, 3) uint8 array")
+    out = np.ascontiguousarray(img).copy()
+    eng = TileLabels(out.shape[0], out.shape[1], connectivity=connectivity,
+                     lattice=lattice, threads=threads, **engine_kw)
+    st = eng.run(out, paint=True)
+    return LabelResult(img=out, label=eng.label_map(), n_blobs=st["n_blobs"],
+                       rounds=st["rounds"], connectivity=connectivity,
+                       threads=st["threads"], stats=st)
 
 
 @dataclass
