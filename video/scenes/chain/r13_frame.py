@@ -3,20 +3,37 @@ label wins"): the same tiles, pieces and waves run on the whole 81 Mpx
 frame.
 
 "On the big frame": the crop's hues blend back to red and its border
-fades; the crop gives way to the frame's own pixels at the same window,
-and the floor pulls back to the whole red frame (one zoom about a fixed
-point, geometric in the window's side).
+fades. Then the crop gives way to the frame at the same window. The
+crop's pixels are the frame's (ch08 cut it out of the frame), so only
+its faint tile grid goes, and the frame around it comes in from the
+crop's edge outward: a blob the crop cut grows back out of its cut edge.
+The floor pulls back to the whole red frame: one zoom about a fixed
+point, geometric in the window's side.
+
+The zoom is drawn from every pixel of the frame (frame_mask, from
+assets/tiles/input_blobs_red.npz), never from the 900 px picture, whose
+pixels would be squares 25 px wide at the start (a mosaic). Up close each
+frame pixel is a sharp square, as the crop draws its cells; further out
+each output pixel averages the frame pixels under it. The red drifts
+from the crop's red to the frame floors' darker red on the way, and once
+whole the frame blends into the 900 px floor (frame_red).
 
 "over eleven thousand seeds": the seeds fade in as small white dots, tile
-by tile over the whole frame (state.frame_seed_dots, no rings at this
-scale), and each seed's own piece takes its colour with its dot (round 0).
+by tile over the whole frame (state.frame_seed_dots: one dot per seed
+tile, 8,602 dots for the 11,609 seeds, no rings at this scale). Each
+seed's own piece takes its colour with its dot (round 0). Caption
+"11,609 seeds" / "6 rounds, 2,522 blobs", at "rounds".
 
 "six rounds": six gate flashes, GATE_GAP apart (the cubes and the gate
-only); the claims spread out from the seeds, a round per flash (WV's
-claim rounds at 900 px, state.frame_round_map). Only rounds 1-4 show at
-900 px: the fifth claims 6 pieces and the sixth none, so the last two
-flashes change nothing. The dots fade during them: every blob counted,
-the floor is the labelled frame.
+only). The claims spread out from the seeds, a round per flash (WV's
+claim rounds at 900 px, state.frame_round_map). Round 0's seed pieces
+hold about a sixth of the 900 px blob pixels, round 1 brings it to about
+three quarters and round 2 to 97%. Rounds 3 and 4 add the last 3%, and
+the fifth and sixth flashes change nothing at 900 px. A claimed piece
+takes its blob's final colour at once (frame_rounds_picture paints the
+labelled frame), so no waves meet on screen: at 900 px a piece is a few
+pixels, and r12 showed the meetings on the crop. The dots fade during the
+last two flashes: every blob counted, the floor is the labelled frame.
 
 "Two point two milliseconds": the needle slides from 53.9 ms past the
 33 ms line to 2.21 ms and turns teal; its value comes in with the carried
@@ -27,23 +44,30 @@ Starts on chain_state(17), ends on chain_state(18).
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import numpy as np
 from manim import FadeIn, FadeOut, Transform, config
+from PIL import Image
 
 from scenes.chain import floor as fl
+from scenes.chain import numbers as nb
 from scenes.chain import overlays as ov
 from scenes.chain import state as st
 from scenes.chain.base import GATE_GAP, ChainScene, fr
+from scenes.style import RED_PX
 
 SEED_FADE = 1.0         # the dots fade in over at least this long (s)
 SPREAD = 0.35           # a tile's share of the dots' fade (state.frame_seed_dots' default)
 # phase lengths in seconds of whole 15 fps frames, so -ql and --fps 30 agree
 HUE_S = 5 / 15          # the crop's hues back to red, its border out
-SWAP_S = 3 / 15         # the crop (its own image) gives way to the frame's pixels at the same window
+SWAP_S = 3 / 15         # the crop's tile grid goes, the frame around it comes in from its edge
 ZOOM_S = 0.8            # the pull back, at least
-SMOOTH_S = 3 / 15       # the zoom's sharp pixels give way to the frame floor (bilinear)
+SMOOTH_S = 4 / 15       # the whole frame, drawn from every pixel, gives way to the 900 px floor
 ROUND_BLEND = 0.2       # s: a round's claims colour in
 DOTS_OUT = 0.6          # s: the seed dots fade once the last visible round has landed
+
+MASK = nb.TILES / "input_blobs_red.npz"     # the frame's red mask, every pixel (assets/make_frame_mask.py)
 
 
 def ease(p: float) -> float:
@@ -53,6 +77,33 @@ def ease(p: float) -> float:
 
 def mix(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
     return (a.astype(np.float32) * (1 - t) + b.astype(np.float32) * t).astype(np.uint8)
+
+
+@lru_cache(maxsize=1)
+def frame_mask() -> tuple[np.ndarray, Image.Image]:
+    """The whole frame's red mask, (9000, 9000) uint8 (255: red) in the
+    kernels' [x, y] (state.picture's orientation), and the same pixels as
+    a PIL image for area sampling."""
+    z = np.load(MASK)
+    m = np.unpackbits(z["red_bits"], axis=1, count=int(z["shape"][1])) * np.uint8(255)
+    return m, Image.fromarray(m, "L")
+
+
+def mask_window(rpx: int, r0: float, c0: float, side: float) -> np.ndarray:
+    """(rpx, rpx) float32 in [0, 1]: how red each output pixel is, over the
+    square window [r0, r0 + side) x [c0, c0 + side) of the frame (frame
+    pixels). Up close (a frame pixel at least an output pixel) it samples
+    nearest, every pixel a sharp square, as crop_raster draws the crop's
+    cells; further out it averages the frame pixels under each output
+    pixel (PIL's box filter)."""
+    m, im = frame_mask()
+    if side <= rpx:
+        pos = (np.arange(rpx) + 0.5) / rpx * side
+        rr = np.clip(np.floor(r0 + pos).astype(int), 0, m.shape[0] - 1)
+        cc = np.clip(np.floor(c0 + pos).astype(int), 0, m.shape[1] - 1)
+        return m[rr[:, None], cc].astype(np.float32) / 255
+    out = im.resize((rpx, rpx), Image.BOX, box=(c0, r0, c0 + side, r0 + side))
+    return np.asarray(out, np.float32) / 255
 
 
 class BigFrame(ChainScene):
@@ -90,16 +141,46 @@ class BigFrame(ChainScene):
         # ---- the floor's pictures, all at the floor's own size
         start = st.floor_raster("crop_labels", rpx)            # the state's floor
         crop_red = st.crop_raster(rpx, border=0.0)              # hues back to red, border gone
-        keyed = fl.key_picture(st.picture("red"))
-        r0, c0, s0 = st.crop_window()
-        side = float(keyed.shape[0])
+        r0, c0, s0 = st.crop_window()                           # in 900 px picture pixels
+        side = st.SIDE_PX * st.TO_900                           # the 900 px picture's side
+        to_px = st.SIDE_PX / side                               # picture pixel -> frame pixels
+        empty = fl.rgb(fl.EMPTY).astype(np.float32)
+        red_crop = fl.rgb(RED_PX).astype(np.float32)            # the crop's red (crop_colors)
+        red_frame = fl.key_picture(np.array([[[255, 0, 0]]], np.uint8))[0, 0].astype(np.float32)
 
         def window(q: float) -> np.ndarray:
             """The zoom: the window's side grows geometrically from the crop's
-            to the whole frame, about the one point that stays put."""
+            to the whole frame, about the one point that stays put. Drawn
+            from every frame pixel; its red drifts from the crop's to the
+            frame floors'."""
             s = s0 * (side / s0) ** q
             k = (side - s) / (side - s0)
-            return fl.window_raster(keyed, rpx, r0 * k, c0 * k, s, keyed=True)
+            cov = mask_window(rpx, r0 * k * to_px, c0 * k * to_px, s * to_px)[..., None]
+            red_q = red_crop + (red_frame - red_crop) * q
+            out = np.empty((rpx, rpx, 4), np.uint8)
+            out[..., :3] = (empty + (red_q - empty) * cov).astype(np.uint8)
+            out[..., 3] = 255
+            return out
+
+        # the swap: inside the crop's box only the faint tile grid fades; the
+        # frame around it comes in from the box's edge outward (a soft front),
+        # so a blob the crop cut grows back out of its cut edge, never half
+        # there along a straight seam
+        w0 = window(0.0)
+        cri, cci = st.crop_cells(rpx).maps()
+        inside = (cri >= 0)[:, None] & (cci >= 0)[None, :]
+        t_, l_, b_, r_ = (np.array(st.CROP_BOX) * rpx).tolist()
+        pos = np.arange(rpx) + 0.5
+        dy = np.maximum(np.maximum(t_ - pos, pos - b_), 0.0)
+        dx = np.maximum(np.maximum(l_ - pos, pos - r_), 0.0)
+        dist = np.hypot(dy[:, None], dx[None, :])               # output px outside the box
+        feather = 0.03 * rpx
+        reach = float(dist.max()) + feather
+
+        def swap_raster(p: float) -> np.ndarray:
+            a = np.where(inside, p, np.clip((p * reach - dist) / feather, 0.0, 1.0))[..., None]
+            out = crop_red.astype(np.float32) * (1 - a) + w0.astype(np.float32) * a
+            return out.astype(np.uint8)
 
         red = fl.picture_raster(st.picture("red"), rpx)          # = floor_raster("frame_red")
         last = int(st.frame_round_map().max())                  # 4: the last round 900 px shows
@@ -161,7 +242,7 @@ class BigFrame(ChainScene):
             if kind == "hue":
                 return mix(start, crop_red, ease(key[1] / (HUE_S * fps)))
             if kind == "swap":
-                return mix(crop_red, window(0.0), ease(key[1] / (SWAP_S * fps)))
+                return swap_raster(ease(key[1] / (SWAP_S * fps)))
             if kind == "zoom":
                 return window(ease(key[1] / max((t_smooth - t_zoom) * fps, 1)))
             if kind == "smooth":

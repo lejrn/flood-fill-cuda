@@ -385,11 +385,13 @@ On the big frame: over eleven thousand seeds, six rounds, every blob counted. Tw
 - New (text unchanged from the evening draft); it holds: 2.21 ms,
   kernel time, ch08's first version. With the copies the frame takes
   54.8 ms, over 33: hence "once the frame is on the card".
-- The crop goes back to red and its border fades; pull back to the
-  whole frame: the 11,609 seeds fade in as dots over at least 1 s (no
-  white rings at this scale); six gate flashes, 0.5 s apart, as the
-  rounds sweep out from them (real claim rounds, sampled at 900 px); the
-  frame ends labelled.
+- The crop goes back to red and its border fades; the frame around it
+  comes in from its edge, and the floor pulls back to the whole frame,
+  drawn from every frame pixel (`assets/tiles/input_blobs_red.npz`, no
+  mosaic). The 11,609 seeds fade in as dots over at least 1 s (no white
+  rings at this scale); six gate flashes, 0.5 s apart, as the rounds
+  sweep out from them (real claim rounds, sampled at 900 px); the frame
+  ends labelled.
 - At "milliseconds" the needle slides from 53.9 ms past the 33 ms line
   to 2.21 ms (24× down) and turns teal. At "budget", COUNT is won and
   scoreboard row 3 jumps from "GPU 3.8×" to "GPU 100×" (225 vs 2.21 ms;
