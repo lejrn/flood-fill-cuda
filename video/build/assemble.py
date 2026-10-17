@@ -8,10 +8,20 @@ Usage (from video/):
     uv run build/assemble.py --render --only s03_n_blocks   # one clip
     uv run build/assemble.py --no-audio --check              # silent cut + seam check
     uv run build/assemble.py --cut chain --look iso --layout vertical --render --check
+    uv run build/assemble.py --cut chain --look iso --layout vertical --render --jobs 3 \
+        --wrap path/to/slot_wrapper.sh                      # clips in parallel, each through the wrapper
 
 Output: out/final_<layout>_<voice>.mp4 for the three-pane cut, and
 out/final_chain_<look>_<layout>_<voice>.mp4 for the chain cut (narration
 from out/<voice>_chain/, clips in media/chain_<look>/<layout>/).
+
+--jobs N renders N clips at once. Manim's text cache is per media folder,
+and two renders that share one race on it, so each job renders into its
+own folder (<media>_jobs/<clip>/) and its finished clip (with the snap
+sidecar) is then moved to where a sequential render puts it. --check, the
+seam check and the mux read the same layout either way. --wrap CMD (or
+RENDER_WRAP) runs every render through a command prefix, such as a script
+that caps how many renders run at once on a small machine.
 
 Each scene is exactly `beat + gap` seconds long (see style.BeatScene.finish),
 so the narration wavs are placed at the cumulative start of each scene as
@@ -23,8 +33,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import av
@@ -54,9 +66,10 @@ PANES = [
 ]
 BEATS = PANES
 
-# The problem -> fix chain cut, v4 "size, then count: the memory story"
-# (narration/script_chain.md, scenes/chain/). The intro clip voices two beats,
-# like the three-pane intro.
+# The problem -> fix chain cut, v5 "from pixels to tiles" (narration/script_chain.md,
+# scenes/chain/): v4's first fourteen beats, then act 3 (the tiles) and the
+# finale. The intro clip voices two beats, like the three-pane intro.
+# v4's r10_runs and r11_reveal left the chain; their files stay.
 CHAIN = [
     ("chain/intro", "Intro", "i0_problem"),
     ("chain/intro", "Intro", "i1_compare"),
@@ -72,8 +85,11 @@ CHAIN = [
     ("chain/r07_real_frame", "RealFrame", "r07_real_frame"),
     ("chain/r08_tags", "Tags", "r08_tags"),
     ("chain/r09_seeds", "Seeds", "r09_seeds"),
-    ("chain/r10_runs", "Runs", "r10_runs"),
-    ("chain/r11_reveal", "Reveal", "r11_reveal"),
+    ("chain/r10_tiles", "Tiles", "r10_tiles"),
+    ("chain/r11_rounds", "Rounds", "r11_rounds"),
+    ("chain/r12_pieces", "Pieces", "r12_pieces"),
+    ("chain/r13_frame", "BigFrame", "r13_frame"),
+    ("chain/r14_reveal", "Reveal", "r14_reveal"),
 ]
 CUTS = {"panes": PANES, "chain": CHAIN}
 LOOKS = ("flat", "iso")
@@ -104,24 +120,87 @@ def voice_dir(voice: str, cut: str = "panes") -> str:
     return voice if cut == "panes" else f"{voice}_chain"
 
 
+def render_cmd(stem: str, cls: str, media: Path, layout: str, quality: str, preview: bool,
+               wrap: list[str]) -> list[str]:
+    # --disable_caching: a cached play skips update_mobjects(0), so end
+    # states can differ from an uncached render. Always render fresh.
+    cmd = [*wrap, str(PY), "-m", "manim", "render", "--disable_caching", "--media_dir", str(media)]
+    if preview:     # 480 px, 15 fps: for checking timing and layout, never for a cut
+        cmd += ["-ql", "-r", "480,854" if layout == "vertical" else "854,480"]
+    else:
+        cmd += [f"-q{quality}", "--fps", "30"]
+        if layout == "vertical":
+            cmd += ["-r", "1080,1920"]
+    return cmd + [str(SCENES / f"{stem}.py"), cls]
+
+
+def _show(p: Path) -> str:
+    """A path for the console: relative to video/ when it is under it."""
+    try:
+        return str(p.relative_to(VIDEO))
+    except ValueError:
+        return str(p)
+
+
+def job_dir(layout: str, stem: str, cut: str, look: str) -> Path:
+    """A parallel job's own media folder, beside the cut's: <media>_jobs/<clip>."""
+    m = media_dir(layout, cut, look)
+    return m.parent / f"{m.name}_jobs" / Path(stem).name
+
+
+def adopt(job: Path, layout: str, stem: str, cls: str, cut: str, look: str) -> Path:
+    """Move a job's newest clip of stem/cls (and its .snap.json) to the path a
+    sequential render gives it: <media>/videos/<stem>/<quality>/<cls>.mp4.
+    A move keeps the render's mtime, so newest_render() still picks it."""
+    folder = job / "videos" / Path(stem).name
+    hits = sorted(folder.glob(f"*/{cls}.mp4"), key=lambda p: p.stat().st_mtime)
+    if not hits:
+        raise RuntimeError(f"{stem}/{cls}: the job finished but left no clip under {folder}")
+    src = hits[-1]
+    dst = media_dir(layout, cut, look) / "videos" / Path(stem).name / src.parent.name / src.name
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    snap = Path(str(src) + ".snap.json")
+    os.replace(src, dst)
+    if snap.exists():
+        os.replace(snap, Path(str(dst) + ".snap.json"))
+    return dst
+
+
 def render(layout: str, voice: str, quality: str, only: list[str] | None = None,
-           cut: str = "panes", look: str = "flat", preview: bool = False) -> None:
+           cut: str = "panes", look: str = "flat", preview: bool = False, jobs: int = 1,
+           wrap: list[str] | None = None) -> None:
     env = dict(os.environ, VOICE=voice_dir(voice, cut), VIDEO_LAYOUT=layout, LOOK=look)
-    for stem, cls, _ in clip_list(cut):
-        if only and stem not in only and Path(stem).name not in only:
-            continue
-        # --disable_caching: a cached play skips update_mobjects(0), so end
-        # states can differ from an uncached render. Always render fresh.
-        cmd = [str(PY), "-m", "manim", "render", "--disable_caching", "--media_dir", str(media_dir(layout, cut, look))]
-        if preview:     # 480 px, 15 fps: for checking timing and layout, never for a cut
-            cmd += ["-ql", "-r", "480,854" if layout == "vertical" else "854,480"]
+    wrap = wrap or []
+    todo = [(stem, cls) for stem, cls, _ in clip_list(cut)
+            if not only or stem in only or Path(stem).name in only]
+    if jobs <= 1:
+        for stem, cls in todo:
+            print("render", stem, cls, flush=True)
+            subprocess.run(render_cmd(stem, cls, media_dir(layout, cut, look), layout, quality, preview, wrap),
+                           cwd=VIDEO, env=env, check=True)
+        return
+
+    def one(job: tuple[str, str]) -> tuple[str, str, int, Path]:
+        stem, cls = job
+        d = job_dir(layout, stem, cut, look)
+        d.mkdir(parents=True, exist_ok=True)
+        log = d / f"{cls}.log"
+        print("render", stem, cls, f"(job, log {_show(log)})", flush=True)
+        with open(log, "w", encoding="utf-8") as fh:
+            rc = subprocess.run(render_cmd(stem, cls, d, layout, quality, preview, wrap), cwd=VIDEO, env=env,
+                                stdout=fh, stderr=subprocess.STDOUT).returncode
+        if rc == 0:
+            dst = adopt(d, layout, stem, cls, cut, look)
+            print(f"done   {stem} {cls} -> {_show(dst)}", flush=True)
         else:
-            cmd += [f"-q{quality}", "--fps", "30"]
-            if layout == "vertical":
-                cmd += ["-r", "1080,1920"]
-        cmd += [str(SCENES / f"{stem}.py"), cls]
-        print("render", stem, cls, flush=True)
-        subprocess.run(cmd, cwd=VIDEO, env=env, check=True)
+            print(f"FAILED {stem} {cls} (exit {rc}); see {_show(log)}", flush=True)
+        return stem, cls, rc, log
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        results = list(pool.map(one, todo))
+    failed = [(s, c, log) for s, c, rc, log in results if rc != 0]
+    if failed:
+        raise SystemExit("failed renders: " + ", ".join(f"{s}/{c} ({_show(log)})" for s, c, log in failed))
 
 
 def newest_render(layout: str, stem: str, cls: str, cut: str = "panes", look: str = "flat",
@@ -169,12 +248,21 @@ def main() -> None:
     ap.add_argument("--cut", choices=sorted(CUTS), default="panes", help="panes (three-pane) or chain")
     ap.add_argument("--look", choices=LOOKS, default="flat", help="chain cut only: flat or iso (2.5D)")
     ap.add_argument("--preview", action="store_true", help="render at 480 px and 15 fps (checks only)")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="render this many clips at once, each in its own media folder, then move each clip "
+                         "where a sequential render puts it")
+    ap.add_argument("--wrap", default=os.environ.get("RENDER_WRAP", ""),
+                    help="a command prefix for every render (default: $RENDER_WRAP), e.g. a render-slot script")
     args = ap.parse_args()
     vdir = voice_dir(args.voice, args.cut)
     name = f"{args.layout}_{args.voice}" if args.cut == "panes" else f"chain_{args.look}_{args.layout}_{args.voice}"
+    wrap = shlex.split(args.wrap)
+    if args.render and args.jobs > 1 and not wrap:
+        print(f"warning: {args.jobs} parallel renders without --wrap: each 1080p render can take over 1 GB",
+              flush=True)
 
     if args.render:
-        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look, args.preview)
+        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look, args.preview, args.jobs, wrap)
         if args.only:
             print("rendered", args.only)
             return
