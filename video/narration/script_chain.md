@@ -160,7 +160,9 @@ On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixel
 Freeze. Zoom into one drone until its pixels show.
 ```
 
-- Unchanged.
+- Text unchanged. At "Freeze" the floor's edge gets one white outline
+  pulse (0.8 s). v4's two-frame white flash of the whole floor went: a
+  large area never flashes.
 
 ## beat r01_cpu
 

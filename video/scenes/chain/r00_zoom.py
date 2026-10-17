@@ -1,9 +1,10 @@
 """r00: freeze the footage and zoom into one drone until its pixels show.
 
 The floor appears holding the camera frame (frame 216), a square crop
-with the chosen drone near its top left. At "Freeze" a two-frame white
-flash; the camera frame dissolves into the filter's mask and a thin red
-box marks the drone; the "you are here" inset (one line) fades in while
+with the chosen drone near its top left. At "Freeze" the floor's edge
+gets one white outline pulse (no flash of the floor itself: large areas
+never flash); the camera frame dissolves into the filter's mask and a
+thin red box marks the drone; the "you are here" inset (one line) fades in while
 they hold. At "Zoom" a nearest-neighbour push-in shrinks the crop from
 the frame's full width to the toy's 18 px window, drifting so the drone
 ends centred, and the last crop blends into the toy floor ('drone_red'):
@@ -28,9 +29,11 @@ from scenes.chain import overlays as ov
 from scenes.chain import toy
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import DRONE_N, Z_FLOOR, boundary, floor_raster
-from scenes.style import ASSETS, RED_PX
+from scenes.style import ASSETS, INK, RED_PX
 
-from manim import FadeIn
+from manim import FadeIn, Polygon
+
+PULSE = 0.8          # seconds of the "Freeze" outline pulse: its stroke rises and falls once
 
 
 @lru_cache(maxsize=None)
@@ -106,17 +109,16 @@ class Zoom(ChainScene):
         first = crop_raster("camera", ox0, oy0, side0, rpx)
         f.show_raster(first)
         self.set_floors([f])
-        self.play(FadeIn(f), run_time=fr(2))           # short, so the flash lands on "Freeze"
+        self.play(FadeIn(f), run_time=fr(2))           # short, so the pulse starts on "Freeze"
 
-        # one clock for the whole floor: flash, dissolve, push-in, become the toy
-        t_flash = max(self.cue("Freeze"), self.elapsed())
-        t_dis = t_flash + 2 / 15
+        # one clock for the whole floor: pulse, dissolve, push-in, become the toy
+        t_freeze = max(self.cue("Freeze"), self.elapsed())
+        t_dis = t_freeze + 2 / 15
         t_mask = t_dis + 6 / 15                         # the mask and the box, held ...
         t_push = max(self.cue("Zoom"), t_mask)          # ... until "Zoom" starts the push-in
         t_toy = max(self.cue("show"), t_push + MIN_DWELL)    # the 18 px window by "show" ...
                                                         # ... and the red cells by its end
         t_end = t_toy + 7 / 15
-        white = np.full_like(first, 255)
         mask0 = crop_raster("mask", ox0, oy0, side0, rpx)
         goal = floor_raster("drone_red", rpx)
         x1, y1, s1 = view(1.0)
@@ -134,10 +136,8 @@ class Zoom(ChainScene):
             if k == "end":
                 return goal
             t = k / 15
-            if t < t_flash:
-                return first
             if t < t_dis:
-                return (first.astype(np.float32) * 0.25 + white.astype(np.float32) * 0.75).astype(np.uint8)
+                return first
             if t < t_push:
                 a = ease((t - t_dis) / (t_mask - t_dis))
                 r = (first.astype(np.float32) * (1 - a) + mask0.astype(np.float32) * a).astype(np.uint8)
@@ -152,6 +152,13 @@ class Zoom(ChainScene):
 
         t0 = self.elapsed()
         self.floor_play(key, render, t_end - t0)
+        # "Freeze": the floor's edge, outlined in white, rises and falls once
+        # (the cut's white outline pulse; the floor itself never flashes)
+        edge = Polygon(*[f.frac_point(r, c) for r, c in ((0, 0), (0, 1), (1, 1), (1, 0))],
+                       stroke_color=INK, stroke_width=3.5, stroke_opacity=0, fill_opacity=0)
+        edge.set_z_index(Z_FLOOR + 2)
+        self.add(edge)
+        self.run(lambda p: edge.set_stroke(opacity=float(np.sin(np.pi * p))), PULSE, start=t_freeze)
         # the inset while the mask and its box hold, before "Zoom": its line is
         # text too, so it keeps MIN_DWELL clear of the caption, and the beat's
         # last text change stays clear of r01's boards (they slide in at "CPU")
