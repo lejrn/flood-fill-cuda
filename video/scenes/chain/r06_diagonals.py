@@ -35,7 +35,7 @@ from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import numbers as nb
 from scenes.chain import overlays as ov
-from scenes.chain.base import ChainScene, fr
+from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import (LEVEL_LO, Z_OVER, floor_raster, level_colors, owner_colors, owner_fine,
                                 score_rows, toys)
 from scenes.style import BLUE, GRID, INK
@@ -48,6 +48,7 @@ GLYPH_AT = (-4.0, -0.9)         # world: just left of the floor's x = -3 edge
 # a wave rather than a flicker
 ATTACK, RELEASE = 0.07, 0.2     # seconds for the full change, each way
 LINGER = 0.35                   # seconds the last ring's waiting cubes stay amber after a fill ends
+DWELL = float(np.ceil(MIN_DWELL * 15) / 15)     # MIN_DWELL in whole frames (1.8 s): until() rounds 1.75 s down a frame
 
 
 def stencil(pl) -> tuple[VGroup, VGroup, VGroup]:
@@ -198,13 +199,20 @@ class Diagonals(ChainScene):
         self.play(FadeIn(corners), *[GrowArrow(a) for a in diag], run_time=fr(5))
         self.extras += [corners, diag]
 
+        # in the pause before "On a square", what the diagonals buy: half the
+        # rings. It comes in DWELL plus its fade before "half the gates", so
+        # the payoff can land on "gates" (said there, it would push the
+        # payoff past the voice by MIN_DWELL)
+        t_pay = self.cue("gates", after=self.cue("half", n=2))
+        t_rings = min(self.cue("On"), max(self.elapsed(), t_pay - DWELL - fr(5)))
+        self.say(f"{int(n['big_rings4']):,} → {int(n['big_rings8']):,} rings", at=t_rings)
+
         # "On a square": red again, then 8 neighbours fill it as a square
         self.until(self.cue("On"))
         self.floor_blend(floor_raster("square_own48", rpx), red, frames=3)
         key, render = self.wave(l8, n8, "c8")
         self.until(s0)
         self.floor_play(key, render, s1 - s0)
-        self.say(f"{int(n['big_rings4']):,} → {int(n['big_rings8']):,} rings", at=self.cue("half"))
 
         # "half the gates": size is won. The pill, the tag's tick and the
         # result come in together (one text change), the stencil leaves. The
@@ -216,5 +224,5 @@ class Diagonals(ChainScene):
         anims = [FadeIn(self.over["strip"])] + self.over_anims("tag", ov.act_tag(self.G, "SIZE", True))
         anims += [FadeOut(m) for m in self.extras]
         self.extras = []
-        self.say_last(at=self.cue("gates", after=self.cue("half", n=2)), extra=anims)
+        self.say_last(at=t_pay, extra=anims)
         self.remove(old)
