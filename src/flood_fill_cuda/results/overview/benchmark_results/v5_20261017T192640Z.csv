@@ -1,0 +1,33 @@
+scene,side,config,ms,ms_min,ms_max,n,cpu_twin,twin_ms,x_twin,reference_only,full_clocks,check,detail
+sq_256,gpu,ch07,0.0440,0.0430,0.0635,209,cpu_fill8,0.1917,4.3543,False,True,OK,"{""rounds"": 4, ""filled"": 16384}"
+sq_256,gpu,ch01_ring,0.5202,0.5140,1.4223,209,cpu_bfs4,0.1209,0.2325,False,True,OK,"{""levels"": 129, ""filled"": 16384, ""peak_occupancy"": 506}"
+sq_256,gpu,ch05_fused_L8,0.1659,0.1516,0.4321,300,cpu_bfs8,0.1862,1.1225,True,True,OK,"{""levels"": 8, ""filled"": 16384}"
+sq_256,cpu,cpu_bfs4,0.1209,0.1144,0.2269,505,,,,False,,OK,"ch01's 4-conn BFS loop (cpu_flood_fill), visited + depth, buffers kept between calls, reset before the clock"
+sq_256,cpu,cpu_bfs8,0.1862,0.1732,0.2731,505,,,,False,,OK,"the shared 8-conn BFS loop (cpu_flood_fill_8), visited + depth, buffers kept, reset before the clock"
+sq_256,cpu,cpu_fill8,0.1917,0.1777,0.3801,505,,,,False,,OK,"the shared 8-conn BFS loop without its depth map, visited only, buffers kept, reset on the clock"
+sq_256,cpu,oracle_bfs4,0.1262,0.1175,0.2167,505,,,,True,,OK,cpu_flood_fill as called (fresh arrays every call): reference only
+sq_256,cpu,oracle_bfs8,0.1948,0.1823,0.4152,505,,,,True,,OK,cpu_flood_fill_8 as called (fresh arrays every call): reference only
+sq_8000_center,gpu,ch07,3.1222,3.0966,3.9608,9,cpu_fill8,1064.6835,341.0069,False,True,OK,"{""rounds"": 127, ""filled"": 64000000}"
+sq_8000_center,gpu,ch03_conn8,101.1640,100.5599,103.1752,9,cpu_bfs8,1125.5118,11.1256,False,True,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 202451725}"
+sq_8000_center,gpu,ch03_conn4,140.5819,138.5748,143.5576,9,cpu_bfs4,1195.2399,8.5021,False,True,OK,"{""levels"": 8001, ""filled"": 64000000, ""cas_attempts"": 127984000}"
+sq_8000_center,gpu,ch03_wc_bare,75.1503,74.0219,76.1846,9,cpu_bfs8,1125.5118,14.9768,True,True,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 0}"
+sq_8000_center,gpu,ch02_global,537.6082,535.1096,542.0134,9,cpu_bfs4,1195.2399,2.2233,False,True,OK,"{""levels"": 8001, ""filled"": 64000000}"
+sq_8000_center,gpu,ch01_spill,1096.5627,1090.8744,1097.7628,9,cpu_bfs4,1195.2399,1.0900,False,True,OK,"{""levels"": 8001, ""filled"": 64000000, ""peak_occupancy"": 31994, ""spilled"": 35426302}"
+sq_8000_center,cpu,cpu_bfs4,1195.2399,1119.7907,1283.9363,5,,,,False,,OK,"ch01's 4-conn BFS loop (cpu_flood_fill), visited + depth, buffers kept between calls, reset before the clock"
+sq_8000_center,cpu,cpu_bfs8,1125.5118,1003.4939,1182.4593,5,,,,False,,OK,"the shared 8-conn BFS loop (cpu_flood_fill_8), visited + depth, buffers kept, reset before the clock"
+sq_8000_center,cpu,cpu_fill8,1064.6835,970.9977,1076.9964,5,,,,False,,OK,"the shared 8-conn BFS loop without its depth map, visited only, buffers kept, reset on the clock"
+sq_8000_center,cpu,oracle_bfs4,1774.8866,1608.5435,1910.4182,5,,,,True,,OK,cpu_flood_fill as called (fresh arrays every call): reference only
+sq_8000_center,cpu,oracle_bfs8,1568.8006,1507.6186,1882.5488,5,,,,True,,OK,cpu_flood_fill_8 as called (fresh arrays every call): reference only
+input_blobs,gpu,ch08_old,2.2139,2.1832,3.8666,95,cpu_label,224.7014,101.4963,False,True,OK,"{""rounds"": 6, ""n_blobs"": 2522, ""dense_label_tiles"": 0, ""dense_paint_tiles"": 0}"
+input_blobs,gpu,ch08,2.2487,2.2241,3.6383,95,cpu_label,224.7014,99.9249,True,True,OK,"{""rounds"": 6, ""n_blobs"": 2522, ""dense_label_tiles"": 0, ""dense_paint_tiles"": 0}"
+input_blobs,gpu,ch05_split_L8,53.9023,50.7996,56.1142,23,cpu_label_pre,202.1551,3.7504,False,True,OK,"{""levels"": 19, ""filled"": 13451960}"
+input_blobs,gpu,est_ch03_conn8,1461.7109,1456.5458,1478.4973,11,cpu_label_pre,202.1551,0.1383,False,True,OK,"{""sample_blob_px"": [16548, 2705, 4502, 898, 4645, 145], ""sample_filled"": [16548, 2705, 4502, 898, 4645, 145], ""sample_levels"": [154, 65, 81, 37, 80, 15]}"
+input_blobs,gpu,est_ch04_multi8,850.2974,847.7148,1057.5452,11,cpu_label_pre,202.1551,0.2377,False,True,OK,"{""sample_blob_px"": [27534, 17823, 8195, 3729, 7649, 220], ""sample_filled"": [27534, 17823, 8195, 3729, 7649, 220], ""sample_levels"": [154, 145, 81, 66, 80, 15]}"
+input_blobs,gpu,loop_ch03_conn8,1646.7323,1640.0507,2200.8198,3,cpu_label_pre,202.1551,0.1228,True,True,OK,"{""untimed_ms"": 1646.85205078125}"
+input_blobs,gpu,loop_ch04_multi8,1147.1360,1145.3317,1147.8824,3,cpu_label_pre,202.1551,0.1762,True,True,OK,"{""untimed_ms"": 1152.4638671875}"
+input_blobs,cpu,cpu_label,224.7014,214.2288,237.6088,5,,,,False,,OK,"ch05's labels-only loop (cpu_label_components), 8-conn, buffers kept, reset on the clock"
+input_blobs,cpu,cpu_label_pre,202.1551,188.6291,238.2902,10,,,,False,,OK,"ch05's labels-only loop, 8-conn, buffers kept, reset before the clock"
+input_blobs,cpu,oracle_label,314.9916,287.9097,330.6402,5,,,,True,,OK,cpu_label_components as called (fresh arrays every call): reference only
+input_blobs,cpu,cpu_fill_canonical,1165.4831,1054.9071,1400.3007,5,,,,True,,OK,"cpu_fill_canonical (ch05: labels + a BFS from each canonical seed, with depth, fresh arrays): v4's baseline, reference only"
+drones (per-frame medians),gpu,ch08_old,0.0901,0.0799,0.1044,240,cpu_label,0.6791,7.5361,False,True,OK,p90 0.0993
+drones (per-frame medians),cpu,cpu_label,0.6791,0.5922,0.8778,240,,,,False,,OK,p90 0.7673
