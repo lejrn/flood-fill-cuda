@@ -184,9 +184,16 @@ Smoke (small sizes, no gate, nothing written):
 
     ... benchmark --smoke --no-save [--drones-dir DIR] [--no-gpu]
 
-Budget: about 15-25 min. Peak host memory about 3.5 GB (one scene's
-buffers at a time: the oracles' arrays and the one-core twins' buffers
-of the 64 Mpx square and of the 81 Mpx frame are the largest).
+Budget (estimates: the timed run has not been made): about 20-35 min
+(six rounds, the cold cells, the settles and a check after every
+call). Peak host memory about 4.5-5 GB, recorded as peak_rss_mb
+(during the 64 Mpx and 81 Mpx passes): the two
+big scenes kept all session (0.45 GB), the 240 drone frames (0.45 GB;
+their oracle maps, about 1 GB more, live only in the drone passes),
+one scene's references (0.5-0.6 GB), work image (0.2-0.25 GB), the
+one-core twins' buffers (about 1 GB), an oracle call's own arrays
+(about 1 GB), a label map check (0.3 GB), the engines, the flush
+buffer (64 MB), the CUDA context and the interpreter.
 """
 
 import os
@@ -935,6 +942,22 @@ def load_drones(args):
                        "img": mask_image(p)})
     print(f"drones: {len(frames)} frames", flush=True)
     return frames
+
+
+def drone_refs(frames):
+    """Every frame's oracle labels and palette image (untimed), for one
+    drone pass; drop_drone_refs() frees them (about 1 GB for 240)."""
+    for f in frames:
+        lab, nb = cpu_label_components(f["img"])
+        f["ref"] = {"label": lab, "n_blobs": int(nb),
+                    "palette": palette_image(f["img"], lab)}
+        f["n_blobs"] = int(nb)
+
+
+def drop_drone_refs(frames):
+    for f in frames:
+        f.pop("ref", None)
+    gc.collect()
 
 
 def reference(kind, img, seed, conns):
@@ -1787,7 +1810,16 @@ def gpu_drones(gpu, sampler, frames, args):
 def cpu_drones(frames, args):
     """Per frame: the one-core twins and ch09's labels at every thread
     count, rounds over all frames (order reversed on odd rounds). The
-    headline keys also run cold (_cold: the caches flushed first)."""
+    headline keys also run cold (_cold: the caches flushed first). The
+    frames' references live for this pass only."""
+    drone_refs(frames)
+    try:
+        return _cpu_drones(frames, args)
+    finally:
+        drop_drone_refs(frames)
+
+
+def _cpu_drones(frames, args):
     w, h = frames[0]["img"].shape[:2]
     work = np.empty_like(frames[0]["img"])
     one = OneCore(w, h, "many")
@@ -2179,7 +2211,12 @@ def run_gpu_blocks(rows, scenes, frames, args):
             gc.collect()
         if frames:
             print("  GPU drones", flush=True)
-            dg, gpu_blocks["drones"] = gpu_drones(gpu, sampler, frames, args)
+            drone_refs(frames)
+            try:
+                dg, gpu_blocks["drones"] = gpu_drones(gpu, sampler, frames,
+                                                      args)
+            finally:
+                drop_drone_refs(frames)
             drones = {"gpu": dg}
     finally:
         sampler.stop()
@@ -2294,10 +2331,6 @@ def main(argv=None):
                      "shape": [int(img.shape[0]), int(img.shape[1])],
                      "seed": None if seed is None else [int(v) for v in seed],
                      "connectivities": list(conns), "cells": {}, "gpu": {}})
-    for f in frames:
-        lab, nb = cpu_label_components(f["img"])
-        f["ref"] = {"label": lab, "n_blobs": int(nb),
-                    "palette": palette_image(f["img"], lab)}
 
     # -- GPU blocks first
     gpu_blocks, drones, gpu_info = {}, None, None
@@ -2332,8 +2365,7 @@ def main(argv=None):
         drones = drones or {}
         drones.update(cpu=dc, cpu_rounds=dr, cpu_checks_ok=dok,
                       frames=[{"key": f["key"], "sha1": f["sha1"],
-                               "n_blobs": f["ref"]["n_blobs"]}
-                              for f in frames])
+                               "n_blobs": f["n_blobs"]} for f in frames])
         drones["summary"] = summarize_drones(drones)
         print(f"    checks {'OK' if dok else 'MISMATCH'}", flush=True)
 
@@ -2365,7 +2397,9 @@ def main(argv=None):
             "lattice": ff.DEFAULT_LATTICE, "tile": K.TILE,
             "png": PNG_NAME, "png_md5": PNG_MD5},
         "rows": rows, "cpu_rounds": cpu_rounds, "gpu_blocks": gpu_blocks,
-        "drones": drones, "all_checks_ok": bool(ok)}
+        "drones": drones, "all_checks_ok": bool(ok),
+        "peak_rss_mb": round(resource.getrusage(
+            resource.RUSAGE_SELF).ru_maxrss / 1024)}
     if args.no_save:
         return
     out_dir = args.out_dir or results_paths.results_dir(CHAPTER,

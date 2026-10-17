@@ -521,3 +521,36 @@ def test_summary_splits_method_cores_and_gpu():
         "x_gpu": pytest.approx(5.0), "gpu_ms": 5.0}
     assert sm[16]["per_vcpu_efficiency"] == pytest.approx(0.25)
     assert "efficiency" not in sm[16]
+
+
+def test_drone_references_live_only_in_the_drone_passes(monkeypatch):
+    """The 240 frames' oracle maps and images (about 1 GB) are built for
+    a drone pass and dropped after it, not kept through the 64 and
+    81 Mpx scenes' passes."""
+    img, _ = scenes5.random_blobs_scene(64, 48, 0.3, 1)
+    frames = [{"key": "frame_000", "img": img}]
+    seen = []
+
+    class FakeGpu:
+        device, sm_count, cc = "fake", 1, (8, 9)
+
+    class FakeSampler:
+        def stop(self):
+            pass
+
+    def fake_gpu_drones(gpu, sampler, fr, args):
+        seen.append(all("ref" in f for f in fr))
+        return {}, {}
+    monkeypatch.setattr(B, "Gpu", FakeGpu)
+    monkeypatch.setattr(B, "Sampler", FakeSampler)
+    monkeypatch.setattr(B, "_smi", lambda q: None)
+    monkeypatch.setattr(B, "gpu_drones", fake_gpu_drones)
+    args = _args("--cooldown", "0")
+    B.run_gpu_blocks([], [], frames, args)
+    assert seen == [True]
+    assert "ref" not in frames[0]
+    args.threads = [1]
+    args.cpu_rounds = 1
+    dc, dr, ok = B.cpu_drones(frames, args)
+    assert ok and "ref" not in frames[0]
+    assert dc["one_label"]["per_frame_samples_ms"]
