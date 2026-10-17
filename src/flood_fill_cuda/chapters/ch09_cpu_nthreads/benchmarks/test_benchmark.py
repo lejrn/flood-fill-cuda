@@ -440,3 +440,64 @@ def test_cold_factors_are_labelled():
     assert tl["x_vs_one_core"] == pytest.approx(0.3 / 0.08)
     assert tl["cold"]["x_vs_one_core"] == pytest.approx(0.33 / 0.2)
     assert tl["cold"]["gpu_x"] == pytest.approx(0.2 / 0.044)
+
+
+def test_rounds_run_as_often_forward_as_reversed():
+    """Odd rounds reverse the cell order: an even count gives both
+    orders the same weight in every median."""
+    assert B.CPU_ROUNDS % 2 == 0
+    assert B.parse_args([]).cpu_rounds == B.CPU_ROUNDS
+
+
+def _drones():
+    # 3 frames x 2 rounds; ch09 at 16 threads is 4x one core, the GPU
+    # 0.1 ms per frame (e2e 1 ms)
+    one = [[2.0, 2.2], [4.0, 4.0], [8.0, 8.8]]
+    t16 = [[0.5, 0.55], [1.0, 1.0], [2.0, 2.2]]
+    med = lambda s: [sorted(x)[len(x) // 2] if len(x) % 2 else
+                     sum(sorted(x)[len(x) // 2 - 1:len(x) // 2 + 1]) / 2
+                     for x in s]
+    cpu = {"ch09_labels_t16": {"per_frame_samples_ms": t16,
+                               "per_frame_median_ms": med(t16),
+                               "side": "ch09", "threads": 16,
+                               "cache": "hot"},
+           "one_label_paint": {"per_frame_samples_ms": one,
+                               "per_frame_median_ms": med(one),
+                               "side": "one_core", "threads": 1,
+                               "cache": "hot"}}
+    gpu = {k: {"per_frame_median_ms": [0.1, 0.1, 0.1],
+               "per_frame_e2e_median_ms": [1.0, 1.0, 1.0],
+               "median_of_frame_medians_ms": 0.1, "max_frame_median_ms": 0.1,
+               "side": "gpu", "checks_ok": True} for k in ("ch08_old",
+                                                          "ch08")}
+    return {"cpu": cpu, "gpu": gpu, "cpu_checks_ok": True}
+
+
+def test_drones_have_a_summary():
+    """Per frame: ch09 against the one-core twin (paired per round),
+    against the GPU with the same idea and end to end; then the median,
+    p90, min and max over the frames."""
+    sm = B.summarize_drones(_drones())
+    t16 = sm["ch09_labels_t16"]
+    assert t16["x_vs_one_core"]["median"] == pytest.approx(4.0)
+    assert t16["x_vs_one_core"]["n"] == 3
+    assert t16["gpu_cell"] == "ch08_old"
+    assert t16["gpu_x"]["median"] == pytest.approx(10.0)
+    assert t16["gpu_x"]["max"] == pytest.approx(21.0)
+    assert t16["gpu_x_e2e"]["median"] == pytest.approx(1.0)
+    assert set(t16["gpu_x_other"]) == {"ch08"}
+    assert sm["one_label_paint"]["gpu_x"]["median"] == pytest.approx(40.0)
+
+
+def test_csv_has_the_drone_rows(tmp_path):
+    import csv
+    row = {"scene": "sq", "cells": {"one_fill_c8": {
+        "ms": 1.0, "ms_min": 0.9, "ms_max": 1.1, "n": 6, "checks_ok": True,
+        "side": "one_core", "threads": 1}}, "gpu": {}}
+    path = tmp_path / "x.csv"
+    B.write_csv(str(path), [row], _drones())
+    got = list(csv.DictReader(open(path)))
+    assert [r["scene"] for r in got] == ["sq"] + ["drones"] * 4
+    d = {r["cell"]: r for r in got if r["scene"] == "drones"}
+    assert float(d["ch09_labels_t16"]["ms"]) == pytest.approx(1.0)
+    assert d["ch08_old"]["side"] == "gpu"

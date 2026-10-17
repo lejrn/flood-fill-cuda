@@ -167,7 +167,12 @@ map too): a host check between timed GPU runs would let the clock
 fall.
 
 Output: results/ch09_cpu_nthreads/benchmark_results/ch09_<stamp>.json
-and ch09_<stamp>.csv (files named, never paths).
+and ch09_<stamp>.csv (files named, never paths). The drones get a
+summary (per frame, then median, p90, min and max over the frames:
+ch09 against the one-core twin, paired per round, and against the GPU
+by events and end to end) and their own CSV lines (ms: the median of
+the per-frame medians). Every sample is kept, per frame for the
+drones.
 
 Run (on a quiet machine, never under nice; the GPU part takes the GPU
 lock if one is used on this host):
@@ -224,7 +229,7 @@ MASK_DIR = os.path.join(REPO, "video", "assets", "drones_mask")
 
 THREADS = (1, 2, 4, 8, 16)
 NOPAINT_THREADS = (1, 16)
-CPU_ROUNDS = 5
+CPU_ROUNDS = 6             # even: as many rounds forward as reversed
 CPU_ROUND_S = 0.4
 CPU_MAX_CALLS = 101
 CPU_COOLDOWN_S = 60
@@ -1885,9 +1890,12 @@ def cpu_drones(frames, args):
         base = k[:-len("_cold")] if k.endswith("_cold") else k
         out[k] = {"per_frame_median_ms": per,
                   "median_of_frame_medians_ms": statistics.median(per),
-                  "max_frame_median_ms": max(per), "side": (
-                      "ch09" if base in engs else "one_core"),
+                  "max_frame_median_ms": max(per),
+                  "per_frame_samples_ms": samples[k],
+                  "side": "ch09" if base in engs else "one_core",
+                  "variant": "labels" if base in engs else "one_core",
                   "threads": engs.get(base, 1),
+                  "paint": base != "one_label",
                   "cache": "cold" if k.endswith("_cold") else "hot"}
     return out, rounds, bool(ok_all)
 
@@ -2006,6 +2014,79 @@ def summarize(row, kind, threads):
                                       for k, g in gpus.items()},
                 "gpu_ms": {k: g["ms"] for k, g in gpus.items()}}
     return out
+
+
+def _spread(vals):
+    """Median, p90 (nearest rank), min, max and count of per-frame
+    values."""
+    v = sorted(vals)
+    return {"median": statistics.median(v),
+            "p90": v[max(0, math.ceil(0.9 * len(v)) - 1)],
+            "min": v[0], "max": v[-1], "n": len(v)}
+
+
+def summarize_drones(drones):
+    """Per drone frame, then over the frames (median, p90, min, max):
+    each CPU key against the one-core like-for-like twin (ch09 keys,
+    paired per round), against ch08_old (the same idea) by events and
+    end to end, and against the other GPU cells, kept apart."""
+    cpu, gpu = drones.get("cpu") or {}, drones.get("gpu") or {}
+    same_gpu = gpu.get(SAME_IDEA_GPU["labels"])
+    out = {}
+    for k, c in cpu.items():
+        e = {"threads": c.get("threads"), "cache": c.get("cache", "hot")}
+        if c.get("side") == "ch09":
+            twin = cpu.get(TWIN_FULL["many"] + ("_cold" if k.endswith("_cold")
+                                                else ""))
+            if twin:
+                e["x_vs_one_core"] = _spread([
+                    statistics.median(a / b for a, b in zip(ts, cs))
+                    for ts, cs in zip(twin["per_frame_samples_ms"],
+                                      c["per_frame_samples_ms"])])
+        per = c["per_frame_median_ms"]
+        if same_gpu:
+            e["gpu_cell"] = SAME_IDEA_GPU["labels"]
+            e["gpu_x"] = _spread([a / b for a, b in zip(
+                per, same_gpu["per_frame_median_ms"])])
+            if same_gpu.get("per_frame_e2e_median_ms"):
+                e["gpu_x_e2e"] = _spread([a / b for a, b in zip(
+                    per, same_gpu["per_frame_e2e_median_ms"])])
+        other = {g: _spread([a / b for a, b in zip(
+                     per, gc["per_frame_median_ms"])])
+                 for g, gc in gpu.items() if g != SAME_IDEA_GPU["labels"]}
+        if other:
+            e["gpu_x_other"] = other
+        out[k] = e
+    return out
+
+
+CSV_FIELDS = ["scene", "cell", "side", "variant", "threads", "connectivity",
+              "paint", "cache", "ms", "ms_min", "ms_max", "n", "checks_ok"]
+
+
+def write_csv(path, rows, drones):
+    """One line per cell. Drone lines: ms is the median of the per-frame
+    medians, ms_min and ms_max the least and the largest per-frame
+    median, n the number of frames."""
+    with open(path, "w", newline="") as f:
+        wr = csv.writer(f)
+        wr.writerow(CSV_FIELDS)
+        for r in rows:
+            for k, c in list(r["cells"].items()) + list(r["gpu"].items()):
+                wr.writerow([r["scene"], k, c.get("side"), c.get("variant"),
+                             c.get("threads"), c.get("connectivity"),
+                             c.get("paint"), c.get("cache"), c["ms"],
+                             c["ms_min"], c["ms_max"], c["n"],
+                             c["checks_ok"]])
+        for side in ("cpu", "gpu"):
+            for k, c in ((drones or {}).get(side) or {}).items():
+                per = c["per_frame_median_ms"]
+                ok = (drones.get("cpu_checks_ok") if side == "cpu"
+                      else c.get("checks_ok"))
+                wr.writerow(["drones", k, c.get("side"), c.get("variant"),
+                             c.get("threads"), 8, c.get("paint"),
+                             c.get("cache"), statistics.median(per),
+                             min(per), max(per), len(per), ok])
 
 
 # ------------------------------------------------------------------ main
@@ -2227,6 +2308,7 @@ def main(argv=None):
                       frames=[{"key": f["key"], "sha1": f["sha1"],
                                "n_blobs": f["ref"]["n_blobs"]}
                               for f in frames])
+        drones["summary"] = summarize_drones(drones)
         print(f"    checks {'OK' if dok else 'MISMATCH'}", flush=True)
 
     ok = all(r["all_checks_ok"] for r in rows) and (
@@ -2267,17 +2349,7 @@ def main(argv=None):
     with open(jpath, "w") as f:
         json.dump(session, f, indent=1, default=_json_default)
     cpath = os.path.join(out_dir, f"ch09_{stamp}.csv")
-    with open(cpath, "w", newline="") as f:
-        wr = csv.writer(f)
-        wr.writerow(["scene", "cell", "side", "variant", "threads",
-                     "connectivity", "paint", "ms", "ms_min", "ms_max", "n",
-                     "checks_ok"])
-        for r in rows:
-            for k, c in list(r["cells"].items()) + list(r["gpu"].items()):
-                wr.writerow([r["scene"], k, c.get("side"), c.get("variant"),
-                             c.get("threads"), c.get("connectivity"),
-                             c.get("paint"), c["ms"], c["ms_min"],
-                             c["ms_max"], c["n"], c["checks_ok"]])
+    write_csv(cpath, rows, drones)
     print(f"wrote {os.path.basename(jpath)} and {os.path.basename(cpath)}",
           flush=True)
 
