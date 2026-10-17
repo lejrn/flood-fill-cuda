@@ -58,6 +58,18 @@ clock, bench_v5's gap before every timed launch):
                    same idea as ch09's tile labels (no dense-tile path)
   ch08             ch08's default engine (the dense-tile path), rgb
 
+Cold cells (scenes of at most COLD_MAX_BYTES, the drone frames too):
+
+  <key>_cold    the headline cells (ch09 at 1 thread and at the most
+                threads, painting, and the one-core like-for-like twin)
+                again, with the caches flushed before every call
+                (flush_caches: a 64 MB read on every thread, then on
+                the calling thread, then the pool parked; at most
+                COLD_MAX_CALLS calls a round). The GPU's L2 is flushed
+                before each of its timed launches, while the hot cells'
+                image and buffers sit in the 24 MB L3: on the small
+                scenes the summary gives both (cache "hot", "cold")
+
 CPU cells (dispatch_1x1, dispatch_1x1_labels: CPU only):
 
   the cells above on a 1 x 1 image: the fixed cost of one call at each
@@ -222,6 +234,10 @@ QUIET_BUSY_PCT_PARALLEL = 3.0   # the same for rounds with 8+ threads: one
                                 # other runnable thread stalls a barrier
 MAX_ROUND_REDOS = 2
 PROBE_N = 8_000_000         # the calibration chain (about 10 ms per core)
+COLD_MAX_BYTES = 8 << 20    # scenes whose image is at most this (it and
+                            # the buffers fit the 24 MB L3) get cold cells
+COLD_MAX_CALLS = 15         # a cold call costs a flush (about 30 ms)
+FLUSH_BYTES = 64 << 20      # read to evict the L2s and the 24 MB L3
 QUIET_WAIT_CPU_S = 600
 QUIET_WAIT_GPU_S = 120
 GPU_ROUNDS = 9
@@ -405,6 +421,40 @@ def same(a, b):
         return False
     return _count_differences(np.ascontiguousarray(a).reshape(-1),
                               np.ascontiguousarray(b).reshape(-1)) == 0
+
+
+@njit(cache=True)
+def _read_serial(a):
+    s = np.uint64(0)
+    for i in range(a.size):
+        s += a[i]
+    return s
+
+
+@njit(parallel=True, cache=True)
+def _read_parallel(a):
+    s = np.uint64(0)
+    for i in prange(a.size):
+        s += a[i]
+    return s
+
+
+_FLUSH = {}
+
+
+def flush_caches():
+    """Evict the CPU caches, off the clock (a cold call's prep): a read
+    of FLUSH_BYTES on every thread (every core's L2, the L3), then the
+    same read on this thread (its own core and the L3 again, long
+    enough for the pool's spin to end), then settle_workers(). The GPU
+    side's twin is its L2 flush before every timed launch."""
+    if "buf" not in _FLUSH:
+        _FLUSH["buf"] = np.ones(FLUSH_BYTES // 8, np.uint64)
+    buf = _FLUSH["buf"]
+    with ff.num_threads(numba.config.NUMBA_NUM_THREADS):
+        _read_parallel(buf)
+    _read_serial(buf)
+    settle_workers()
 
 
 class OneCore:
@@ -1093,7 +1143,36 @@ def cpu_cells(name, kind, img, seed, conns, ref, args, work, one):
             return {"ok": all(ok.values()), **ok}
         cell("oracle_label", fn_or, verify_or, variant="oracle", threads=1,
              paint=False, connectivity=8, side="oracle", reference_only=True)
+    for c in cells:
+        c["meta"]["cache"] = "hot"
+    if img.nbytes <= COLD_MAX_BYTES and not name.startswith(CPU_ONLY_SCENES):
+        cells += cold_cells(cells, kind, conns, args)
     return cells
+
+
+def cold_cells(cells, kind, conns, args):
+    """Cold twins of the headline cells (ch09 at 1 thread and at the most
+    threads, painting, and the one-core like-for-like twin): the same
+    call and checks, with the caches flushed before every call."""
+    nts = sorted({1, max(args.threads)} & set(args.threads))
+    if kind == "one":
+        want = [f"ch09_{m}_t{nt}_c{c}" for c in conns for m in ("pixel",
+                                                               "tile")
+                for nt in nts] + [f"one_fill_paint_c{c}" for c in conns]
+    else:
+        want = [f"ch09_labels_t{nt}" for nt in nts] + ["one_label_paint"]
+    out = []
+    for c in cells:
+        if c["key"] not in want:
+            continue
+
+        def prep(hot=c["prep"]):
+            hot()
+            flush_caches()
+        out.append({"key": c["key"] + "_cold", "fn": c["fn"], "prep": prep,
+                    "verify": c["verify"], "max_calls": COLD_MAX_CALLS,
+                    "meta": {**c["meta"], "cache": "cold"}})
+    return out
 
 
 def check_call(c, where):
@@ -1134,6 +1213,7 @@ def cpu_pass(cells, args):
         first = time.perf_counter() - t0
         check_call(c, "first timed call")
         c["calls"] = max(1, min(args.max_calls,
+                                c.get("max_calls", args.max_calls),
                                 int(args.round_s / max(first, 1e-6))))
         c["times"], c["round_medians"] = [], []
     gc.collect()
@@ -1701,38 +1781,47 @@ def gpu_drones(gpu, sampler, frames, args):
 
 def cpu_drones(frames, args):
     """Per frame: the one-core twins and ch09's labels at every thread
-    count, rounds over all frames (order reversed on odd rounds)."""
+    count, rounds over all frames (order reversed on odd rounds). The
+    headline keys also run cold (_cold: the caches flushed first)."""
     w, h = frames[0]["img"].shape[:2]
     work = np.empty_like(frames[0]["img"])
     one = OneCore(w, h, "many")
     eng = ff.TileLabels(w, h)
     engs = {f"ch09_labels_t{nt}": nt for nt in args.threads}
     keys = list(engs) + ["one_label", "one_label_paint"]
+    if work.nbytes <= COLD_MAX_BYTES:
+        keys += [f"ch09_labels_t{max(args.threads)}_cold",
+                 "one_label_paint_cold"]
 
     state = {"prev_nt": 1, "unsettled": 0}
 
     def call(key, f):
+        cold = key.endswith("_cold")
+        base = key[:-len("_cold")] if cold else key
         np.copyto(work, f["img"])
-        nt = engs.get(key, 1)
+        nt = engs.get(base, 1)
+        if cold:
+            flush_caches()                 # it settles the pool too
+            state["prev_nt"] = 1
         if nt < state["prev_nt"]:
             # the workers of a call with more threads park first
             if settle_workers()["settled"] is False:
                 state["unsettled"] += 1
         state["prev_nt"] = nt
-        if key in engs:
+        if base in engs:
             eng.threads = nt
         t0 = time.perf_counter()
-        if key in engs:
+        if base in engs:
             st = eng.run(work)
             n = st["n_blobs"]
         else:
-            n = one.labels(work, key == "one_label_paint")
+            n = one.labels(work, base == "one_label_paint")
         ms = (time.perf_counter() - t0) * 1000
         with ff.num_threads(1):            # checks never wake the pool
             ok = int(n) == f["ref"]["n_blobs"]
-            ok &= same(work, f["img"] if key == "one_label"
+            ok &= same(work, f["img"] if base == "one_label"
                        else f["ref"]["palette"])
-            if key in engs:
+            if base in engs:
                 ok &= same(eng.label_map(), f["ref"]["label"])
                 ok &= st["expanded"] == st["ring_pieces"]
                 ok &= st["claims"] == (st["ring_pieces"] - st["seeds"]
@@ -1793,10 +1882,13 @@ def cpu_drones(frames, args):
     out = {}
     for k in keys:
         per = [statistics.median(s) for s in samples[k]]
+        base = k[:-len("_cold")] if k.endswith("_cold") else k
         out[k] = {"per_frame_median_ms": per,
                   "median_of_frame_medians_ms": statistics.median(per),
                   "max_frame_median_ms": max(per), "side": (
-                      "ch09" if k in engs else "one_core")}
+                      "ch09" if base in engs else "one_core"),
+                  "threads": engs.get(base, 1),
+                  "cache": "cold" if k.endswith("_cold") else "hot"}
     return out, rounds, bool(ok_all)
 
 
@@ -1862,6 +1954,22 @@ def summarize(row, kind, threads):
                         e.update(gpu_x_e2e=c["ms"] / gpu["e2e"]["ms"],
                                  gpu_x_host_wall=(
                                      c["ms"] / gpu["e2e"]["host_wall"]["ms"]))
+                e["cache"] = "hot"
+                cold = cells.get(fmt.format(nt) + sfx + "_cold")
+                twin_cold = cells.get(TWIN_FULL[kind] + sfx + "_cold")
+                if cold:
+                    # caches flushed before every call, like the GPU's
+                    # L2 before every timed launch
+                    co = {"ms": cold["ms"]}
+                    if twin_cold:
+                        rr = [a / b for a, b in zip(twin_cold["round_medians"],
+                                                    cold["round_medians"])]
+                        co.update(x_vs_one_core=statistics.median(rr),
+                                  x_vs_one_core_range=[min(rr), max(rr)])
+                    if gpu:
+                        co.update(gpu_cell=gkey,
+                                  gpu_x=cold["ms"] / gpu["ms"])
+                    e["cold"] = co
                 other = {k: c["ms"] / g["ms"] for k, g in gpus.items()
                          if k != gkey}
                 if other:
@@ -1931,6 +2039,8 @@ def warm_up(args):
     same(img, img)
     same(onel.label, onel.label)
     _probe_chain(10, 1)
+    _read_serial(np.ones(8, np.uint64))
+    _read_parallel(np.ones(8, np.uint64))
     for nt in args.threads:
         with ff.num_threads(nt):
             _probe_all(10, nt)

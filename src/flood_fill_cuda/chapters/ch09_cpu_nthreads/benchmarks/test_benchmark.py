@@ -394,3 +394,49 @@ def test_factors_end_to_end_and_host_wall():
     assert tl["gpu_x"] == pytest.approx(0.08 / 0.044)
     assert tl["gpu_x_e2e"] == pytest.approx(0.08 / 0.60)
     assert tl["gpu_x_host_wall"] == pytest.approx(0.08 / 0.09)
+
+
+def test_small_scenes_get_cold_cache_cells(monkeypatch):
+    """Before a GPU run the L2 is flushed; before a CPU call the image
+    and the buffers stay hot. Scenes small enough to sit in the caches
+    get cold twins of the headline cells (1 and the most threads, and
+    the one-core like-for-like twin), flushed before every call."""
+    args = _args()
+    cells, _ = _cells("one", args)
+    cold = {c["key"]: c for c in cells if c["meta"].get("cache") == "cold"}
+    assert set(cold) == {"ch09_pixel_t1_c8_cold", "ch09_pixel_t2_c8_cold",
+                         "ch09_tile_t1_c8_cold", "ch09_tile_t2_c8_cold",
+                         "one_fill_paint_c8_cold"}
+    assert all(c["max_calls"] == B.COLD_MAX_CALLS for c in cold.values())
+    cells, _ = _cells("many", args)
+    assert {c["key"] for c in cells if c["key"].endswith("_cold")} == {
+        "ch09_labels_t1_cold", "ch09_labels_t2_cold", "one_label_paint_cold"}
+    monkeypatch.setattr(B, "COLD_MAX_BYTES", 0)
+    cells, _ = _cells("one", args)
+    assert not any(c["key"].endswith("_cold") for c in cells)
+
+
+def test_cold_cells_are_checked_and_flushed(monkeypatch):
+    args = _args("--cpu-rounds", "1", "--max-calls", "3", "--round-s", "5")
+    cells, _ = _cells("one", args)
+    flushes = []
+    real = B.flush_caches
+    monkeypatch.setattr(B, "flush_caches",
+                        lambda: flushes.append(1) or real())
+    B.cpu_pass(cells, args)
+    cold = [c for c in cells if c["key"].endswith("_cold")]
+    # untimed, first timed, then every call of the round
+    assert len(flushes) == sum(2 + c["calls"] for c in cold)
+    assert all(B.cpu_record(c)["checks_ok"] for c in cells)
+
+
+def test_cold_factors_are_labelled():
+    row = {"connectivities": [8], "cells": {
+        "ch09_tile_t16_c8": _cell(0.08), "ch09_tile_t16_c8_cold": _cell(0.2),
+        "one_fill_paint_c8": _cell(0.3), "one_fill_paint_c8_cold": _cell(0.33)},
+        "gpu": {"ch07_c8": {"ms": 0.044, "connectivity": 8}}}
+    tl = B.summarize(row, "one", [16])["tile_c8"][16]
+    assert tl["cache"] == "hot"
+    assert tl["x_vs_one_core"] == pytest.approx(0.3 / 0.08)
+    assert tl["cold"]["x_vs_one_core"] == pytest.approx(0.33 / 0.2)
+    assert tl["cold"]["gpu_x"] == pytest.approx(0.2 / 0.044)
