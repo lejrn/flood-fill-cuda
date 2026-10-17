@@ -501,3 +501,23 @@ def test_csv_has_the_drone_rows(tmp_path):
     d = {r["cell"]: r for r in got if r["scene"] == "drones"}
     assert float(d["ch09_labels_t16"]["ms"]) == pytest.approx(1.0)
     assert d["ch08_old"]["side"] == "gpu"
+
+
+def test_summary_splits_method_cores_and_gpu():
+    """x_vs_one_core mixes the method (bit tiles, a uint8 visited) with
+    the core count: the summary gives the steps apart. One core's twin
+    -> ch09 on one thread (the method) -> ch09 on every thread (the
+    cores) -> the GPU with the same idea. Efficiency is per vCPU: the
+    16 logical CPUs are not 16 equal cores."""
+    row = {"connectivities": [8], "cells": {
+        "ch09_tile_t1_c8": _cell(100.0), "ch09_tile_t16_c8": _cell(25.0),
+        "one_fill_paint_c8": _cell(300.0)},
+        "gpu": {"ch07_c8": {"ms": 5.0, "connectivity": 8}}}
+    sm = B.summarize(row, "one", [1, 16])["tile_c8"]
+    assert sm["steps"] == {
+        "one_core_ms": 300.0, "x_method": pytest.approx(3.0),
+        "ch09_t1_ms": 100.0, "x_cores": pytest.approx(4.0),
+        "cores": 16, "ch09_ms": 25.0, "gpu_cell": "ch07_c8",
+        "x_gpu": pytest.approx(5.0), "gpu_ms": 5.0}
+    assert sm[16]["per_vcpu_efficiency"] == pytest.approx(0.25)
+    assert "efficiency" not in sm[16]

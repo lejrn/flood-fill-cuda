@@ -1914,9 +1914,19 @@ def _json_default(o):
     raise TypeError(f"not JSON serializable: {type(o)}")
 
 
+def _paired(a, b):
+    """The median over rounds of a's round median over b's."""
+    return statistics.median(x / y for x, y in zip(a["round_medians"],
+                                                   b["round_medians"]))
+
+
 def summarize(row, kind, threads):
     """Scaling and the like-for-like factors of one scene (and one
-    connectivity for one-blob scenes)."""
+    connectivity for one-blob scenes). Per variant: every thread count
+    (speedup over 1 thread, per-vCPU efficiency, the factor over the
+    one-core twin, over the GPU), the no-paint cells, and the steps:
+    one core's twin -> ch09 on one thread (x_method) -> ch09 on every
+    thread (x_cores) -> the GPU with the same idea (x_gpu)."""
     cells = row["cells"]
     out = {}
     variants = ((("pixel", "ch09_pixel_t{}", "ch09_pixel_fill_t{}"),
@@ -1944,7 +1954,10 @@ def summarize(row, kind, threads):
                                                 c["round_medians"])]
                     e.update(speedup_vs_t1=statistics.median(rr),
                              speedup_range=[min(rr), max(rr)],
-                             efficiency=statistics.median(rr) / nt)
+                             # per vCPU: WSL's 16 logical CPUs are not 16
+                             # equal cores (6 P-cores with 2 threads each
+                             # and 8 E-cores, scheduled by Windows)
+                             per_vcpu_efficiency=statistics.median(rr) / nt)
                 if twin:
                     rr = [a / b for a, b in zip(twin["round_medians"],
                                                 c["round_medians"])]
@@ -1993,6 +2006,19 @@ def summarize(row, kind, threads):
                     sc[f"no_paint_t{nt}"] = {
                         "ms": c["ms"], "x_vs_one_core_no_paint":
                             statistics.median(rr)}
+            top = cells.get(fmt.format(max(threads)) + sfx)
+            if base and top and twin:
+                # one core's twin -> ch09 on one thread (the method) ->
+                # ch09 on every thread (the cores) -> the GPU (same idea)
+                st = {"one_core_ms": twin["ms"],
+                      "x_method": _paired(twin, base),
+                      "ch09_t1_ms": base["ms"],
+                      "x_cores": _paired(base, top),
+                      "cores": max(threads), "ch09_ms": top["ms"]}
+                if gpu:
+                    st.update(gpu_cell=gkey, x_gpu=top["ms"] / gpu["ms"],
+                              gpu_ms=gpu["ms"])
+                sc["steps"] = st
             out[f"{name}{sfx}"] = sc
         if kind == "many":
             nt = max(threads)
