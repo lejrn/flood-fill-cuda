@@ -425,6 +425,10 @@ One huge blob, or many at once: the GPU. And one small blob? In kernel time, the
      the GPU cell and the winner go to "?".
   2. At "now": the GPU cell lands at 0.044 ms and the winner at "GPU
      4.4×". At "copy" the footnote's copy line lights.
+  3. At "CPU": a grey note pill hangs under the strip's small-blob pill,
+     "with the copy" / "CPU 3.5×", and stays to the end. The closing
+     strip shows both sides of the small blob, not a GPU win on every
+     row. The inset makes way for it.
 - Card rows (the header says "one session, GPU kernel time"):
   - one small blob: 0.192 / 0.044 ms, GPU 4.4×, CPU: 8 neighbours
   - one huge blob: 1,065 / 3.12 ms, GPU 340×, CPU: 8 neighbours
@@ -433,8 +437,8 @@ One huge blob, or many at once: the GPU. And one small blob? In kernel time, the
   44.3 ms, frame 54.8 ms." The huge blob and the frame stay the GPU's
   with the copies too (24× and 4.1×).
 - Captions: "the GPU" / "huge or many blobs"; "small blob too" / "in
-  kernel time"; "every drone frame" / "with copies: 1.26 ms" (the worst
-  frame, copies included, far under 33).
+  kernel time"; "every drone frame" / "GPU + copies: 1.26 ms" (the GPU's
+  worst frame, copies included, far under 33; a time, not a win).
 - Then the live drones, with no GPU-versus-CPU claim: with the copies
   the GPU takes 0.977 ms per drone frame and the CPU's 0.679 ms is
   faster; both are far under the budget.

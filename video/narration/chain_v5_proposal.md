@@ -738,7 +738,11 @@ Picture (v4's r11_reveal, re-cued):
 - "In kernel time, the GPU now": the second step, about 3 s later: the
   GPU cell lands at 0.044 ms and the winner at "GPU 4.4×"; caption 2.
 - "with the copy to the card, still the CPU": the footnote's copy line
-  lights; P-core 0 lights and goes dark again.
+  lights; P-core 0 lights and goes dark again. At "CPU" a grey note
+  pill, "with the copy" / "CPU 3.5×", hangs under the strip's small-blob
+  pill and stays to the end, where the inset was: the footnote leaves
+  with the card, and without the note the closing strip read as a GPU
+  win on every row (final check, F1).
 - "Every drone": the card closes onto the live drones; caption 3. The
   title card fades in for the last seconds: "flood fill, from pixels to
   tiles" over "flood-fill-cuda".
@@ -758,7 +762,8 @@ ms (CPU 0.192), huge blob 44.3 ms, frame 54.8 ms."
 Captions (3):
 1. "the GPU" / "huge or many blobs", at "GPU".
 2. "small blob too" / "in kernel time", at "now".
-3. "every drone frame" / "with copies: 1.26 ms", at "Every".
+3. "every drone frame" / "GPU + copies: 1.26 ms", at "Every" (it names
+   whose time it is: a time, not a win).
 
 Numbers:
 - Row 1: CPU 0.192 ms (`small_cpu8_ms`, the 8-neighbour BFS without a

@@ -8,7 +8,8 @@
   expanded card for a few seconds when a row fills. v5: the card draws
   each row's tag (its like-for-like CPU, "CPU: 8 neighbours") under the
   row's name, and a row may be half known (a CPU time, the GPU and the
-  winner "?": r14's first flip step);
+  winner "?": r14's first flip step); a strip note is a second pill hung
+  under a row's pill (r14: the small blob "with the copy", the CPU's);
 - the "you are here" inset (one line) and the act tag (SIZE / COUNT).
 
 Every builder is a pure function of its spec, so `state.chain_state(k)`
@@ -144,14 +145,22 @@ def _pill(text_top: str, text_bottom: str, color: str, w: float, h: float = 0.62
     return VGroup(box, t)
 
 
+PILL_H = 0.62
+PILL_GAP = 0.12            # between the strip's pills
+NOTE_GAP = 0.08            # a strip note's gap under its pill
+
+
+def _slot(G: Frame, i: int) -> tuple:
+    """(centre x, width) of the strip's pill i (of three)."""
+    w = (G.score_w - PILL_GAP * 2) / 3
+    return G.score_c[0] - G.score_w / 2 + w / 2 + i * (w + PILL_GAP), w
+
+
 def score_strip(G: Frame, rows: tuple) -> VGroup:
     """rows: three entries, each a Row, "?" (promised, unknown) or None (absent)."""
-    n = 3
-    gap = 0.12
-    w = (G.score_w - gap * (n - 1)) / n
     g = VGroup()
     for i, r in enumerate(rows):
-        x = G.score_c[0] - G.score_w / 2 + w / 2 + i * (w + gap)
+        x, w = _slot(G, i)
         if r is None:
             continue
         if r == "?":
@@ -161,6 +170,15 @@ def score_strip(G: Frame, rows: tuple) -> VGroup:
         p.move_to([x, G.score_c[1], 0])
         g.add(p)
     return _z(g, Z_OVER + 1)
+
+
+def score_note(G: Frame, i: int, text_top: str, text_bottom: str, color: str) -> VGroup:
+    """A pill the size of the strip's pill i, hung just under it: a second
+    verdict for that row (r14: the small blob "with the copy", "CPU 3.5×")."""
+    x, w = _slot(G, i)
+    p = _pill(text_top, text_bottom, color, w, PILL_H)
+    p.move_to([x, G.score_c[1] - PILL_H - NOTE_GAP, 0])
+    return _z(p, Z_OVER + 1)
 
 
 CARD_HEADER = "one session, GPU kernel time"

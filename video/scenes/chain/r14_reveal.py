@@ -13,10 +13,15 @@ times, and its rows are framed as they are named.
   at "GPU 4.4×" (the pill too); the frame turns teal; caption 2.
 - "copy": the footnote's first line (the small blob with its copy, and
   the CPU beside it) lights, on a band in the CPU's grey.
-- "CPU": P-core 0 lights.
+- "CPU": P-core 0 lights, and a grey note pill hangs under the strip's
+  small-blob pill: "with the copy" / "CPU 3.5×". It stays to the end, so
+  the closing strip shows both sides of the small blob (decision 3), not
+  a GPU win on every row. The inset makes way for it (16:9: it is hidden
+  under the card already and does not come back; 9:16: it fades out).
 - "Every drone": the card closes onto the live drone footage (labels from
-  the GPU, 30 fps), P-core 0 goes dark, the hidden overlays come back,
-  caption 3 (the worst drone frame with the copies). The meter's needle
+  the GPU, 30 fps), P-core 0 goes dark, the other hidden overlays come
+  back, caption 3 (the GPU's worst drone frame with the copies: a time,
+  not a win; with the copies the CPU is faster there). The meter's needle
   parks: its 2.21 ms is the big frame's kernel time, and the drones'
   time is the caption's. The title card fades in over the drones once
   the speech and caption 3's dwell are done; base.construct fades
@@ -88,7 +93,7 @@ class Reveal(ChainScene):
     def captions(self) -> tuple:
         """The beat's three captions, (text, sub) each, in order."""
         return (("the GPU", "huge or many blobs"), ("small blob too", "in kernel time"),
-                ("every drone frame", f"with copies: {ov.fmt_ms(self.num['drone_e2e_max_ms'])}"))
+                ("every drone frame", f"GPU + copies: {ov.fmt_ms(self.num['drone_e2e_max_ms'])}"))
 
     # ---- the card
     def card(self, flip: int, lit: tuple) -> VGroup:
@@ -168,8 +173,9 @@ class Reveal(ChainScene):
         return VGroup(_z(band, Z_OVER + 20.5), _z(line.copy().set_color(INK), Z_OVER + 21))
 
     def behind(self, c: VGroup) -> list:
-        """The overlays the card would cut through (the inset, the act tag).
-        They fade out while it shows, so no sliver of them peeks out."""
+        """The overlays c would cut through (the inset, the act tag): the
+        card's fade out while it shows, so no sliver of them peeks out; the
+        note's leave for good."""
         out = []
         for name in ("inset", "tag"):
             m = self.over.get(name)
@@ -283,9 +289,20 @@ class Reveal(ChainScene):
         lit_line = self.light_line(self.cur_card)
         self.play(FadeIn(lit_line), run_time=fr(6))
 
-        # "still the CPU": P-core 0 lights
+        # "still the CPU": P-core 0 lights, and the small blob's second verdict
+        # hangs under its pill, to stay: with the copy, the CPU (in the CPU's
+        # grey). An overlay under it leaves for good: hidden by the card
+        # (16:9), it does not come back; on screen (9:16), it fades out
         self.until(self.cue("CPU"))
-        self.machine_to(replace(m18, cpu="lit"), frames=6, slide=0)
+        note = ov.score_note(G, 0, "with the copy", f"CPU {ov.fmt_x(self.der['small_e2e_cpu_x'])}", GREY)
+        gone = []
+        for m in self.behind(note):
+            if m in hidden:
+                hidden.remove(m)
+            else:
+                gone.append(FadeOut(m))
+            self.over = {k: v for k, v in self.over.items() if v is not m}
+        self.machine_to(replace(m18, cpu="lit"), frames=6, slide=0, extra=gone + [FadeIn(note)])
 
         # "Every drone, every frame." - one change: the card closes onto the
         # live drones as the caption turns, P-core 0 goes dark, the needle

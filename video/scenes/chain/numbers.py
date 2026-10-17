@@ -119,6 +119,8 @@ STORY_SHOWN = (
     ("count_x", "frame_waves", False),                    # r13: 100×, row 3
     ("small_tiles_x", "small_tiles", False),              # r14: 4.4×, row 1
 )
+# r14's strip note, "with the copy" / "CPU 3.5×", has no story entry: its
+# fact ties it to the ch07 cell's own twin (x_e2e, the same CPU as row 1).
 
 # Not in any benchmark JSON: the host CPU's core count, from Intel's spec
 # for the model lscpu reports ("13th Gen Intel(R) Core(TM) i9-13900H":
@@ -409,6 +411,9 @@ def load() -> dict[str, Num]:
     put("small_tiles_ms", c["ch07"]["ms"], f + ".ch07.ms (kernel only)")
     put_list("small_tiles_x_range", c["ch07"]["twin"]["x_range_cpu_rounds"], f + ".ch07.twin.x_range_cpu_rounds")
     put("small_tiles_e2e_ms", c["ch07"]["e2e"]["ms"], f + ".ch07.e2e.ms (with the copies)")
+    put("small_tiles_e2e_min_ms", c["ch07"]["e2e"]["ms_min"], f + ".ch07.e2e.ms_min (the fastest run with the copies)")
+    put("small_tiles_x_e2e", c["ch07"]["twin"]["x_e2e"], f + ".ch07.twin.x_e2e (its twin's CPU / the GPU with the copies)")
+    put_list("small_cpu8_round_ms", c["cpu_fill8"]["round_medians"], f + ".cpu_fill8.round_medians")
     put("small_tiles_rounds", c["ch07"]["info"]["rounds"], f + ".ch07.info.rounds")
     put("small_tiles_blocks", c["ch07"]["config"]["blocks"], f + ".ch07.config.blocks")
     put("small_ok", _cells_ok(sq), f + ": every cell's check")
@@ -1183,11 +1188,16 @@ def facts() -> list[tuple[str, bool]]:
         ("r14 ... with the copy to the card, still the CPU (0.665 vs 0.192 ms: the CPU by 3.5x)",
          n["small_tiles_e2e_ms"] > n["small_cpu8_ms"] and n["small_tiles_e2e_ms"] > n["small_cpu_ms"]
          and card_ms(n["small_tiles_e2e_ms"]) == "0.665 ms" and card_x(d["small_e2e_cpu_x"]) == "3.5×"),
+        ("r14 strip note, to the end: \"with the copy\" / \"CPU 3.5x\" under the small blob's pill, like for "
+         "like (V5's ch07 twin.x_e2e on that blob, row 1's own CPU), the CPU ahead in every CPU round and every "
+         "run with the copies",
+         card_x(d["small_e2e_cpu_x"]) == "3.5×" and math.isclose(d["small_e2e_cpu_x"], 1 / n["small_tiles_x_e2e"])
+         and max(n["small_cpu8_round_ms"]) < n["small_tiles_e2e_min_ms"]),
         ("r14 card footnote, with the copies (rounded, never spoken): small blob 0.665 ms (CPU 0.192), huge blob "
          "44.3 ms, frame 54.8 ms",
          (card_ms_note(n["small_tiles_e2e_ms"]), card_ms_note(n["small_cpu8_ms"]), card_ms_note(n["big_tiles_e2e_ms"]),
           card_ms_note(n["frame_e2e_ms"])) == ("0.665 ms", "0.192 ms", "44.3 ms", "54.8 ms")),
-        ("r14 every drone, every frame (caption 3: with copies 1.26 ms, the worst frame's median; far under 33)",
+        ("r14 every drone, every frame (caption 3: GPU + copies 1.26 ms, the worst frame's median; far under 33)",
          n["drone_e2e_max_ms"] < d["budget_ms"] and card_ms(n["drone_e2e_max_ms"]) == "1.26 ms"
          and n["drone_e2e_ms"] <= n["drone_e2e_max_ms"] and n["drone_ok"] == 1 and n["drone_first_version"] == 1),
         ("r14 the drones are not called a GPU win: with the copies the CPU's 0.679 ms beats the GPU's 0.977 "
