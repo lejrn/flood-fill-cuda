@@ -377,7 +377,8 @@ def window_raster(rgb_img: np.ndarray, rpx: int, r0: float, c0: float, side: flo
     out = np.empty((rpx, rpx, 4), np.uint8)
     out[..., :3] = rgb(bg)
     out[..., 3] = 255
-    out[np.ix_(rs, cs), :3] = img[rr[rs]][:, cc[cs]]
+    ri, ci = np.flatnonzero(rs), np.flatnonzero(cs)        # output rows and columns inside the picture
+    out[ri[:, None], ci, :3] = img[rr[ri][:, None], cc[ci], :3]
     return out
 
 
