@@ -168,7 +168,10 @@ Freeze. Zoom into one drone until its pixels show.
 On the CPU: paint a pixel, queue its red neighbours, repeat. One pixel per step, on one core, while twenty-four GPU SMs sit idle.
 ```
 
-- Unchanged.
+- Text unchanged. Two captions, not v4's three (three could not each keep
+  their 1.75 s in a 4.5 s sentence, so the last landed after the line):
+  "1 pixel per step" / "1 core of 14" in the pause before "One", then
+  the carried "24 SMs" / "streaming multiprocessors" at "SMs".
 
 ## beat r02_one_block
 

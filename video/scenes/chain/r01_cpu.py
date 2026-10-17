@@ -1,6 +1,7 @@
 """r01: the CPU. One worker paints the drone one pixel per step, queueing
 its red neighbours; its queue is the wave's edge. One P-core works while
-the GPU's 24 SMs sit dark.
+the GPU's 24 SMs sit dark. Two captions: "1 pixel per step" / "1 core of
+14" before "One", then the carried "24 SMs" at "SMs".
 
 Start on chain_state(k), cue every change on a spoken word, end exactly on
 chain_state(k + 1) (base.construct snaps to it), and say the carried
@@ -63,10 +64,11 @@ class Cpu(ChainScene):
 
         self.until(t0)
         self.floor_play(key, render, t1 - t0)
-        # the sentence names three things, each kept the captions' least dwell (MIN_DWELL):
-        # the first lands in the pause before "One", so the next two keep up
-        self.say("1 pixel per step", at=self.cue("One") - 0.5)
-        self.say(f"1 core of {int(self.num['cpu_cores'])}", at=self.cue("core") - fr(2))
+        # the sentence names three things in 4.5 s: too little for three captions
+        # that each keep MIN_DWELL (the SMs' landed after the line, in silence,
+        # and r02 took it 1.2 s later). Two: the step with the core as its sub,
+        # in the pause before "One"; the SMs' (carried) at "SMs"
+        self.say("1 pixel per step", f"1 core of {int(self.num['cpu_cores'])}", at=self.cue("One") - 0.5)
         # the 24 SMs come up idle in a wave, left to right, then go dark again
         self.until(self.cue("twenty-four"))
         self.ripple(mc.with_rooms(cpu, "idle"), frames=12)
