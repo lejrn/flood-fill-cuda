@@ -11,9 +11,9 @@ from every seed at once; where two meet, both keep the smaller label (the
 colours merge). The counter shows 3 launches. At "fifty" (v5: "about fifty
 milliseconds") the floor becomes the real labelled frame and the needle
 slides to 53.9 ms (full clocks), left of the CPU tick, still right of the
-33 ms line. At "Faster than the CPU" one text change: the needle's value
-and row 3's pill ("many blobs: GPU 3.8×", 202 vs 53.9 ms against the
-labels-only CPU, its reset before the clock). At "budget" the carried
+33 ms line; its value comes in as it stops, on "milliseconds". At "Faster
+than the CPU" row 3's pill ("many blobs: GPU 3.8×", 202 vs 53.9 ms against
+the labels-only CPU, its reset before the clock). At "budget" the carried
 caption, "53.9 ms" / "still over 33 ms". But the queue in VRAM still
 carries every red pixel: a counter climbs to all 13,451,960 of them.
 
@@ -248,20 +248,23 @@ class Seeds(ChainScene):
 
         # "about fifty milliseconds": the real picture, every blob labelled;
         # the needle slides to 53.9 ms, left of the CPU tick, still right of
-        # the 33 ms line. Its value waits for the next text change
+        # the 33 ms line, and its value comes in as it stops, while
+        # "milliseconds" is said
         self.until(t_fifty)
         self.floor_blend(waves(nf - 1), self.pic(picture("labels")), frames=8)
         meter, val = self.needle_slide(end.goal)
+        self.play(FadeIn(val), run_time=fr(5))
+        self.remove(val)
+        meter.add(val)
 
-        # "Faster than the CPU": one text change, the needle's value and row
-        # 3's pill ("many blobs: GPU 3.8×"). The new strip fades in over the
-        # old one: its pills are opaque, so the two that do not change never dip
+        # "Faster than the CPU": row 3's pill ("many blobs: GPU 3.8×"). The
+        # new strip fades in over the old one: its pills are opaque, so the
+        # two that do not change never dip
         old = self.over["strip"]
         self.over["strip"] = self.strip(end.rows)
         self.until(max(self.cue("Faster") - fr(1), self.elapsed()))
-        self.play(FadeIn(val), FadeIn(self.over["strip"]), run_time=fr(5))
-        self.remove(val, old)
-        meter.add(val)
+        self.play(FadeIn(self.over["strip"]), run_time=fr(5))
+        self.remove(old)
         t_pill = self.elapsed()
 
         # "But over budget": the carried caption, "53.9 ms" / "still over 33 ms"
