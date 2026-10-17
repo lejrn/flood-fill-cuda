@@ -16,9 +16,13 @@ with the same tag at the queue's rear. "picks its colour: its label": the
 tag cell and the painted pixel pulse together (no label array: the paint is
 the label map). "One bit tells two blobs apart": the tag cell flips blue,
 green, blue. The panel folds back into the chips; both blobs fill at once
-from their seeds, 4-way like ch04's kernel ("max, not sum", the launch
-counter halves in the same play); the needle settles by the CPU tick. But
-two seeds per launch still come from P-core 0 over the PCIe link.
+from their seeds, 8 ways like the estimate's kernel (ch04 at 8
+neighbours), and the fill ends at "faster". On "faster" one text change:
+the caption "max, not sum", the launch counter halving and the needle,
+which slides left to ~850 ms and settles well right of the CPU tick (the
+CPU still wins, by 4.2x). At "slower" the track between the CPU tick and
+the needle lights white once. "only two seeds, each handed in": P-core 0
+lights, and two seeds per launch run from it over the PCIe link.
 
 Starts on chain_state(12), ends on chain_state(13).
 """
@@ -27,13 +31,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import (DOWN, Dot, FadeIn, FadeOut, Indicate, Line, Rectangle, ReplacementTransform,
-                   UpdateFromAlphaFunc, VGroup, there_and_back)
+from manim import (DOWN, RIGHT, Dot, FadeIn, FadeOut, Indicate, Line, Rectangle, ReplacementTransform,
+                   UpdateFromAlphaFunc, VGroup, smooth, there_and_back)
 
 from scenes.chain import machine as mc
 from scenes.chain import toy
-from scenes.chain.base import ChainScene, MIN_DWELL, fr
-from scenes.chain.state import Z_MACHINE, boundary, filled_picture, label_colors, toys
+from scenes.chain.base import ChainScene, MIN_DWELL, caption_group, fr
+from scenes.chain.state import Z_MACHINE, Z_OVER, boundary, filled_picture, label_colors, toys
 from scenes.style import BLUE, GREEN, GREY, INK, RED_PX
 
 Z_SEED = Z_MACHINE + 90         # over the dies, under the silkscreen and the launch pill (as r07, r09)
@@ -50,6 +54,15 @@ WINDOW = (4, 36)                # the level's entries [front, rear) in the queue
 FOLLOW = 6                      # the followed warp lane: entry WINDOW[0] + 6, tag blue (the board's cycle)
 FOLLOW_PX = 13                  # its pixel: queued, beside the blue core; pixel 14 is red and unclaimed
 WARP_LIT = "#2c5a8f"            # the warp's lanes once they hold their entries
+FAST, SLIDE, LAND_IN = 8, 7, 5  # "faster": frames of the play, of the needle's slide, of the text coming in
+FAST_LEAD = 3                   # the play starts this many frames before "faster" (the slide runs on the word)
+GAP_PULSE = 12                  # frames of the gap's pulse at "slower"
+
+
+def span(a: float, b: float):
+    """A rate function that runs `smooth` over the fraction [a, b] of a play
+    only (r02's): several changes in one play, each at its own moment."""
+    return lambda t: smooth(min(1.0, max(0.0, (t - a) / max(b - a, 1e-6))))
 
 
 def tags_panel(L, tags) -> mc.VramPanel:
@@ -70,24 +83,48 @@ def outline(m, z: float, pad: float = 0.05):
     return o
 
 
-def needle_move(scene, spec, frames: int = 6) -> None:
-    """Move the needle to `spec`'s value: the old value label fades out, the
-    triangle slides along the track, the new label fades in. The meter's box
-    and labels are the same pixels before and after, so they never blink."""
+def faster(scene, spec, machine: mc.Spec, text: str):
+    """At "faster", one text change: the caption and the needle's old value
+    fade out (2 frames); then over FAST frames the needle slides to `spec`'s
+    value, and in its last frames the caption `text`, the needle's new
+    value and the machine's change (the launch counter halving) come in
+    together. The meter's box and labels are the same pixels before and
+    after, so they never blink."""
     old = scene.over["goal"]
     new = scene.goal(spec)
-    scene.play(FadeOut(old[-1]), run_time=fr(2))
     tri, val = new[-2], new[-1]
     new.remove(tri, val)
     dx = tri.get_center()[0] - old[-2].get_center()[0]
-    tri.shift(-dx * np.array([1.0, 0, 0]))
+    tri.shift(-dx * RIGHT)
+    out = [FadeOut(old[-1])] + ([FadeOut(scene.cap)] if scene.cap is not None else [])
+    scene.play(*out, run_time=fr(2))
+    scene.cap = None
     scene.remove(old)
     scene.add(new, tri)
-    scene.play(tri.animate.shift(dx * np.array([1.0, 0, 0])), run_time=fr(frames))
-    scene.play(FadeIn(val), run_time=fr(3))
+    cap = caption_group(scene.G, text)
+    land = span(1 - LAND_IN / FAST, 1.0)
+    counter = scene.machine_anims(machine, slide=0)
+    for anim in counter:
+        anim.set_rate_func(land)
+    scene.play(tri.animate(rate_func=span(0.0, SLIDE / FAST)).shift(dx * RIGHT),
+               FadeIn(cap, scale=1.06, rate_func=land), FadeIn(val, rate_func=land), *counter,
+               run_time=fr(FAST))
     scene.remove(tri, val)
     new.add(tri, val)
     scene.over["goal"] = new
+    scene.cap, scene._cap_t = cap, scene.elapsed()
+
+
+def gap_bar(scene) -> Line:
+    """A white bar along the meter's track from the CPU tick to the needle
+    (goal_meter's order: the tick, its label, the needle, its value last),
+    hidden: the pulse at "slower" fades it in and out. It touches no text."""
+    goal = scene.over["goal"]
+    tick, needle, y = goal[-4], goal[-2], goal[2].get_y()
+    bar = Line([tick.get_x(), y, 0], [needle.get_x(), y, 0], stroke_color=INK, stroke_width=6)
+    bar.set_stroke(opacity=0)
+    bar.set_z_index(Z_OVER + 3)
+    return bar
 
 
 class Tags(ChainScene):
@@ -107,7 +144,7 @@ class Tags(ChainScene):
         two, lab = t["two"], t["two_lab"]
         ids = sorted(int(v) for v in np.unique(lab[lab >= 0]))
         seeds = [toy.centre_seed(lab == v) for v in ids]
-        multi = toy.bfs(two, seeds, 4).level
+        multi = toy.bfs(two, seeds, 8).level           # the estimate's kernel: ch04 at 8 neighbours
         top = int(multi.max())
         full = label_colors(two, lab)
         red = label_colors(two, np.full(two.shape, -1))
@@ -260,8 +297,9 @@ class Tags(ChainScene):
         self.until(t_fold)
         self.play(FadeOut(panel, target_position=home, scale=0.08), run_time=fr(8))
 
-        # "two per launch": both blobs fill at once from their seeds, each in
-        # its own colour, in the rings of the bigger one
+        # "two per launch": both blobs fill at once from their seeds, 8 ways,
+        # each in its own colour, in the rings of the bigger one; the fill
+        # ends as "faster" ends
         def render(i: int):
             col = red.copy()
             done = (multi >= 0) & (multi <= i)
@@ -270,18 +308,25 @@ class Tags(ChainScene):
 
         t_two = max(t_two, self.elapsed())
         self.until(t_two)
-        self.floor_play(lambda p: round(p * top), render, max(self.cue("speed", end=True) - t_two, 1.0))
-        # "launch": the caption, and the launch counter halves in the same play (one text change)
-        self.say("max, not sum", at=max(self.cue("launch"), self._cap_t + DWELL - fr(LAND)),
-                 extra=self.machine_anims(end, slide=0))
+        self.floor_play(lambda p: round(p * top), render, max(self.cue("faster", end=True) - t_two, 1.0))
 
-        # "about CPU speed": the needle settles by the CPU tick (its new label
-        # never lands within MIN_DWELL of the caption)
-        self.until(max(self.cue("CPU"), self._cap_t + DWELL - fr(11)))
-        needle_move(self, b1.goal)
+        # "faster": one text change. The caption ("max, not sum": two blobs in
+        # one launch take the bigger one's time), the launch counter halving
+        # and the needle's new value land together; the needle slides left
+        # while the word is said and settles well right of the CPU tick
+        t_fast = max(self.cue("faster") - fr(FAST_LEAD), self._cap_t + DWELL - fr(2 + FAST), self.elapsed())
+        self.until(t_fast)
+        faster(self, b1.goal, end, "max, not sum")
         t_needle = self.elapsed()
 
-        # "But only two seeds, each handed in": P-core 0 lights (our host code
+        # "still slower than the CPU": the stretch of track between the CPU
+        # tick and the needle lights white once (no text: the needle says it)
+        bar = gap_bar(self)
+        self.add(bar)                   # after the floor: redrawn every frame
+        self.run(lambda p: bar.set_stroke(opacity=there_and_back(p)), fr(GAP_PULSE),
+                 start=max(self.cue("slower"), self.elapsed()))
+
+        # "only two seeds, each handed in": P-core 0 lights (our host code
         # runs) and the seeds run from it over the PCIe link, a pair per
         # launch: two dots side by side, across the path
         core = mc.build(replace(end, cpu="lit"), pl, z0=Z_MACHINE).parts["pcore"]
@@ -296,9 +341,9 @@ class Tags(ChainScene):
             dots.append(d)
         self.add(*dots)
         self.extras += dots
-        self.until(max(self.cue("But"), self.elapsed()))
+        self.until(max(self.cue("only"), self.elapsed()))
         self.play(FadeIn(core), run_time=fr(3))
-        t0 = max(self.cue("two", after=self.cue("But")), self.elapsed())
+        t0 = max(self.cue("two", after=self.cue("only")), self.elapsed())
         t1 = max(self.cue("in", end=True, after=self.cue("handed")), t0 + travel + 0.6)
         gap = (t1 - t0 - travel) / (launches - 1)
 
