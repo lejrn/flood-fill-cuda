@@ -413,6 +413,57 @@ def one_blob_picture() -> np.ndarray:
 
 
 @lru_cache(maxsize=1)
+def one_blob_ring() -> tuple[tuple[float, float], float]:
+    """The white ring round the frame's one blob: (centre (row, col), radius)
+    in 900 px picture pixels. About the blob's centroid, 1.5 times its
+    farthest pixel and never under 3.5% of the side: the blob is about 38 px
+    across at 900 px (a few output pixels in a 480 px preview), among some
+    2,500 red ones, so without the ring "1 blob" shows no single blob."""
+    lab, _ = picture_blobs()
+    ys, xs = np.nonzero(lab == largest_blob())
+    cy, cx = ys.mean() + 0.5, xs.mean() + 0.5
+    far = float(np.sqrt((ys + 0.5 - cy) ** 2 + (xs + 0.5 - cx) ** 2).max())
+    return (float(cy), float(cx)), max(1.5 * far, 0.035 * lab.shape[0])
+
+
+@lru_cache(maxsize=2)
+def _one_blob_base(rpx: int) -> np.ndarray:
+    return fl.picture_raster(one_blob_picture(), rpx)
+
+
+def one_blob_raster(rpx: int, ring: float = 1.0, dot: float = 1.0, dot_scale: float = 1.0) -> np.ndarray:
+    """frame_one_blob: the red frame, its one blob blue, a white ring round
+    the blob (alpha `ring`, dark-edged over the red specks) and the blob's
+    one seed (TL closeup.seed) a white dot (alpha `dot`, its radius times
+    `dot_scale`). k = 16 shows both at 1; r11 brings them in, r12 starts
+    on them and lets them go with the blob's blue."""
+    return one_blob_marks(_one_blob_base(rpx).copy(), ring, dot, dot_scale)
+
+
+def one_blob_marks(out: np.ndarray, ring: float = 1.0, dot: float = 1.0, dot_scale: float = 1.0) -> np.ndarray:
+    """one_blob_raster's ring and seed dot drawn over any floor raster `out`
+    (in place): r11 draws them over the square shrinking onto the blob."""
+    rpx = out.shape[0]
+    side = one_blob_picture().shape[0]
+    cells = fl.Cells(rpx, (side, side))
+    if ring > 0:
+        (cy, cx), r = one_blob_ring()
+        a = np.linspace(0, 2 * np.pi, 65)
+        segs = np.stack([cy + r * np.cos(a[:-1]), cx + r * np.sin(a[:-1]),
+                         cy + r * np.cos(a[1:]), cx + r * np.sin(a[1:])], axis=1)
+        w = max(2.0, rpx / 400)
+        fl.segments(out, cells, segs, fl.EMPTY, width=w + 2 * max(1.0, rpx / 900), alpha=ring)
+        fl.segments(out, cells, segs, INK, width=w, alpha=ring)
+    if dot > 0:
+        fr_row, fr_col = blob_seed_frac()
+        r = max(3.0, rpx / 190) * dot_scale
+        at = [(fr_row * side, fr_col * side)]
+        fl.discs(out, cells, at, r + max(1.5, rpx / 700), fl.EMPTY, dot)
+        fl.discs(out, cells, at, r, INK, dot)
+    return out
+
+
+@lru_cache(maxsize=1)
 def frame_round_map() -> np.ndarray:
     """(900, 900) int: WV's full_round_900 with the picture's blob edges
     filled in. WV samples each 900 px pixel at one point (10 i + 5, 10 j +
@@ -905,8 +956,8 @@ def floor_raster(name: str, rpx: int) -> np.ndarray:
         return tile_ctx_raster(rpx, upto=ctx_centre_round() - 1, outline=ctx_centre())
     if name == "square_tiles":                 # r11: every round closed
         return square_tiles_raster(rpx)
-    if name == "frame_one_blob":               # k = 16
-        return fl.picture_raster(one_blob_picture(), rpx)
+    if name == "frame_one_blob":               # k = 16: the one blob in its ring, its seed a dot
+        return one_blob_raster(rpx)
     if name == "frame_rounds":                 # r13: every claim (rounds 0-4 at 900 px)
         return fl.picture_raster(frame_rounds_picture(int(frame_round_map().max())), rpx)
     if name == "crop_red":                     # r12, after the zoom lands
