@@ -7,6 +7,8 @@
 
 # render outputs and caches (assets/*/ are frames unpacked from the parent repo's GIFs)
 assets/*/
+# ... except assets/tiles/: kernel-recorded floor data, committed (its README)
+!assets/tiles/
 media/
 out/
 __pycache__/
