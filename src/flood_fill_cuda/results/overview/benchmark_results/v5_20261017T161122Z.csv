@@ -1,0 +1,26 @@
+scene,side,config,ms,ms_min,ms_max,n,njit_over,twin_over,check,detail
+sq_256,gpu,ch07,0.0451,0.0430,0.0594,9,2.680,4.145,OK,"{""rounds"": 4, ""filled"": 16384}"
+sq_256,gpu,ch07_fused_pack,0.0522,0.0502,0.0532,9,2.312,3.576,OK,"{""rounds"": 4, ""filled"": 16384}"
+sq_256,gpu,ch05_fused_L8,0.1710,0.1618,0.1782,9,0.706,1.092,OK,"{""levels"": 8, ""filled"": 16384}"
+sq_256,cpu,njit,0.1208,0.1181,0.2411,505,,,OK,"cpu_flood_fill (ch01, 4-conn BFS: v4's baseline)"
+sq_256,cpu,njit8,0.1868,0.1816,0.3909,505,,,OK,"cpu_flood_fill_8 (shared, 8-conn BFS)"
+sq_8000_center,gpu,ch07,3.1007,3.0915,3.3362,9,537.282,474.750,OK,"{""rounds"": 127, ""filled"": 64000000}"
+sq_8000_center,gpu,ch03_conn8,99.9629,99.6598,100.3325,9,16.666,14.726,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 202293130}"
+sq_8000_center,gpu,ch03_conn4,137.6645,137.2815,139.7555,9,12.101,10.693,OK,"{""levels"": 8001, ""filled"": 64000000, ""cas_attempts"": 127984000}"
+sq_8000_center,gpu,ch03_wc,86.8147,86.1501,88.4367,9,19.190,16.956,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 211097442}"
+sq_8000_center,gpu,ch03_wc_bare,73.2303,72.2145,74.4622,9,22.749,20.102,OK,"{""levels"": 4001, ""filled"": 64000000, ""cas_attempts"": 0}"
+sq_8000_center,gpu,ch02_global,530.4883,528.7659,533.0657,9,3.140,2.775,OK,"{""levels"": 8001, ""filled"": 64000000}"
+sq_8000_center,gpu,ch01_spill,1077.2490,1075.2400,1079.3831,9,1.546,1.366,OK,"{""levels"": 8001, ""filled"": 64000000, ""spilled"": 35426302}"
+sq_8000_center,cpu,njit,1665.9353,1646.6895,1793.8862,5,,,OK,"cpu_flood_fill (ch01, 4-conn BFS: v4's baseline)"
+sq_8000_center,cpu,njit8,1472.0445,1423.3082,1922.2106,5,,,OK,"cpu_flood_fill_8 (shared, 8-conn BFS)"
+input_blobs,gpu,ch08,2.2374,2.2241,2.2467,9,517.279,126.065,OK,"{""rounds"": 6, ""n_blobs"": 2522}"
+input_blobs,gpu,ch05_split_L8,51.7192,50.9276,53.5245,9,22.378,5.454,OK,"{""levels"": 19, ""filled"": 13451960}"
+input_blobs,cpu,njit,1157.3804,1048.2434,1241.7123,5,,,OK,cpu_fill_canonical (ch05: labels + BFS from each canonical seed: v4's baseline)
+input_blobs,cpu,njit_label,282.0619,273.8933,291.7583,5,,,OK,cpu_label_components (ch05: labels only)
+random_1000,gpu,ch08,0.2867,0.2826,0.2898,9,71.925,36.679,OK,"{""rounds"": 4, ""n_blobs"": 47655}"
+random_1000,gpu,ch05_split_L8,1.0639,1.0588,1.2810,9,19.383,9.885,OK,"{""levels"": 21, ""filled"": 299991}"
+random_1000,cpu,njit,20.6223,19.5229,22.8008,90,,,OK,cpu_fill_canonical (ch05: labels + BFS from each canonical seed: v4's baseline)
+random_1000,cpu,njit_label,10.5166,9.8038,13.1792,190,,,OK,cpu_label_components (ch05: labels only)
+drones (per-frame medians),gpu,ch08,0.1147,0.0942,0.1300,240,12.698,,OK,p90 0.1219
+drones (per-frame medians),cpu,njit,1.4563,1.1957,1.8820,240,,,OK,p90 1.6095
+drones (per-frame medians),cpu,njit_label,0.6371,0.5368,0.7990,240,,,OK,p90 0.7092
