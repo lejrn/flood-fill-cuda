@@ -596,20 +596,28 @@ Picture:
   (`crop_piece`, `crop_comp`).
 - "Some pieces are seeds": 36 sparks (as r09's); 11 of them are seeds
   only because their tile is on the lattice (`crop_tile_lattice`, faint
-  diagonal hatching).
+  diagonal hatching). Each seed keeps a mark after its spark, its dot,
+  larger, in its wave's hue with a white rim: of the 25 seeds not on
+  the lattice, 19 are 13 px or less, too small to show a hue.
+- "8 blobs": 2 of them are tiny (2 and 25 px, on the crop's edge), so a
+  dashed ring stands round each until the rounds start.
 - "each seed sends a wave": the queue's tokens become piece tokens.
-  Six rounds, one gate flash each, 0.5 s apart. A claimed piece takes
+  Six rounds, one gate flash each, 0.55 s apart. A claimed piece takes
   its wave's hue in its round (`crop_comp_round`, `crop_comp_wave`): 50,
   38, 7, 3, 1, then none. Each round's meetings appear as faint white
   ticks on the tile borders (`crop_meet_tester`, `crop_meet_other`,
   `crop_meet_round`, 116 in all).
 - "Where two waves meet": the ticks brighten together, once.
-- "and at the end": the dots, hatching and ticks fade. At "smallest
-  label", every piece of a blob turns to one hue at once
-  (`crop_comp_label`).
+- "and at the end": the hatching, ticks, seed marks and dots fade, all
+  but 8 dots, which grow: each blob's label piece, its smallest anchor
+  over all its pieces (ch08's flatten passes; `crop_comp_label`). In 5
+  of the 8 blobs that piece is no seed. One dot per blob, so the 8 can
+  be counted. At "smallest" the 8 dots grow once more and every piece of
+  a blob turns at once to the hue its label piece already shows; the
+  dots fade after "label".
 - Hues: the waves need distinct hues where they meet (a colouring of the
-  meeting graph from `BLOB_HUES`); the 8 final labels too, at least where
-  blobs share tiles.
+  meeting graph from `BLOB_HUES`); the 8 label pieces' waves too, at
+  least where blobs share or neighbour tiles.
 
 Captions (3):
 1. "pieces" / "blobs cut by tiles", at "pieces".

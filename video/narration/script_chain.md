@@ -364,12 +364,15 @@ So first, every tile finds the blob pieces inside it, in registers, all at once.
   12 tiles, 8 blobs (6 of them cut by its edge), 135 pieces (at most 4
   per tile). The SMs pulse once; each piece gets an outline and a dot at
   its first pixel; 36 seeds spark (11 only because their tile is on the
-  lattice).
-- Six rounds, one gate flash each, 0.5 s apart: pieces take their wave's
+  lattice) and keep a mark in their wave's hue. A dashed ring stands
+  round each of the 2 tiny blobs (2 and 25 px) at "8 blobs".
+- Six rounds, one gate flash each, 0.55 s apart: pieces take their wave's
   hue as they are claimed (50, 38, 7, 3, 1, then 0). Faint ticks mark
   the 116 meetings and brighten once at "meet".
-- "at the end": the marks fade and every blob turns to one hue, its
-  smallest label.
+- "at the end": the marks fade but 8 dots, which grow: each blob's
+  smallest anchor over all its pieces, its label (in 5 blobs no seed's).
+  At "smallest" they grow once more and every blob turns to the hue its
+  label piece shows.
 - Captions: "pieces" / "blobs cut by tiles"; "36 seeds" / "8 blobs";
   carried "min" / "smallest label wins".
 

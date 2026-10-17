@@ -538,23 +538,34 @@ def _greedy(nodes: list, edges: set, n_hues: int) -> dict:
 
 
 @lru_cache(maxsize=1)
+def crop_label_pieces() -> dict:
+    """blob (canonical label) -> its label piece k: the piece whose anchor
+    is the blob's label, the smallest anchor over all its pieces (ch08's
+    flatten passes: the root's minimum anchor). 8 pieces, one per blob;
+    only 3 of them are seeds."""
+    a = a3()
+    lab, anchor = a["crop_comp_label"], a["crop_comp_anchor"]
+    out = {int(lab[k]): k for k in range(len(lab)) if int(anchor[k]) == int(lab[k])}
+    assert len(out) == len(set(int(v) for v in lab)), out
+    for k in range(len(lab)):
+        assert anchor[out[int(lab[k])]] <= anchor[k]
+    return out
+
+
+@lru_cache(maxsize=1)
 def crop_hues() -> tuple[dict, dict]:
     """(wave hue, blob hue), each a dict of RGB rows: wave (seed piece k) ->
-    hue, blob (canonical label) -> hue. Waves that meet differ; each blob's
-    smallest-label wave (its seed with the smallest anchor) differs from
-    the other blobs' in the same or a neighbouring tile; a blob ends in the hue of its
-    smallest-label wave, so "each blob keeps its smallest label" reads as
-    that hue winning."""
+    hue, blob (canonical label) -> hue. Waves that meet differ. The label is
+    no wave's: it is the smallest anchor over all the blob's pieces
+    (crop_label_pieces), and in 5 of the 8 blobs that piece is not a seed.
+    So a blob ends in the hue its label piece already shows, its claiming
+    wave's: "each blob keeps its smallest label" reads as the hue on the
+    smallest-label dot spreading over the blob. Those 8 waves also differ
+    from each other where their blobs share or neighbour a tile."""
     a = a3()
     wave, lab, tile = a["crop_comp_wave"], a["crop_comp_label"], a["crop_comp_tile"]
     seeds = [int(k) for k in np.nonzero(a["crop_comp_seed"])[0]]
-    anchor = a["crop_comp_anchor"]
-    blob_of_seed = {k: int(lab[k]) for k in seeds}
-    winner = {}
-    for k in seeds:
-        b = blob_of_seed[k]
-        if b not in winner or anchor[k] < anchor[winner[b]]:
-            winner[b] = k
+    winner = {b: int(wave[k]) for b, k in crop_label_pieces().items()}
     edges = {(int(wave[t]), int(wave[o])) for t, o in zip(a["crop_meet_tester"], a["crop_meet_other"])}
     ny = a["crop_tile_lattice"].shape[1]
     tiles_of: dict = {}
