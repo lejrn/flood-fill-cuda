@@ -56,6 +56,7 @@ FOLLOW_PX = 13                  # its pixel: queued, beside the blue core; pixel
 WARP_LIT = "#2c5a8f"            # the warp's lanes once they hold their entries
 FAST, SLIDE, LAND_IN = 8, 7, 5  # "faster": frames of the play, of the needle's slide, of the text coming in
 FAST_LEAD = 3                   # the play starts this many frames before "faster" (the slide runs on the word)
+OLD_OUT = 2                     # frames the launch counter's old number takes to go, at the play's start
 GAP_PULSE = 12                  # frames of the gap's pulse at "slower"
 
 
@@ -103,12 +104,23 @@ def faster(scene, spec, machine: mc.Spec, text: str):
     scene.add(new, tri)
     cap = caption_group(scene.G, text)
     land = span(1 - LAND_IN / FAST, 1.0)
-    counter = scene.machine_anims(machine, slide=0)
-    for anim in counter:
-        anim.set_rate_func(land)
+    # the launch counter's old number goes in the play's first frames, so the
+    # two numbers never overlap in the pill; its box and word stay under the
+    # new pill (the same pixels) until the play ends
+    chip = scene.machine.parts.get("launches")
+    counter, gone = [], None
+    for anim in scene.machine_anims(machine, slide=0):
+        if chip is not None and isinstance(anim, FadeOut) and anim.mobject is chip:
+            counter.append(FadeOut(chip[0][1][0], rate_func=span(0.0, OLD_OUT / FAST)))
+            gone = chip
+        else:
+            anim.set_rate_func(land)
+            counter.append(anim)
     scene.play(tri.animate(rate_func=span(0.0, SLIDE / FAST)).shift(dx * RIGHT),
                FadeIn(cap, scale=1.06, rate_func=land), FadeIn(val, rate_func=land), *counter,
                run_time=fr(FAST))
+    if gone is not None:
+        scene.remove(gone, *gone.get_family())
     scene.remove(tri, val)
     new.add(tri, val)
     scene.over["goal"] = new
