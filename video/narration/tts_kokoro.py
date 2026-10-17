@@ -11,6 +11,10 @@ silence between beats, timing.json for the assembly step, and words.json
 seconds from the trimmed wav's start) for scenes that cue on a word.
 Kokoro is not bit-reproducible, so `--only` voices just the named beats
 and reads every other beat from its existing wav.
+
+Each side of a semicolon is voiced as its own piece (SPLIT): Kokoro can
+read straight through a semicolon, and then pace.py has no pause to
+stretch and cuts its silence into running speech.
 """
 from __future__ import annotations
 
@@ -28,6 +32,10 @@ import soundfile as sf  # noqa: E402
 from common import HERE, load_beats, read_words, script_path, trim_bounds, write_timing, write_words  # noqa: E402
 
 SR = 24_000
+# Kokoro's own default splits on newlines, which a beat never has (load_beats
+# joins its lines). The chain cut's r14 ("the GPU now; with the copy") had
+# no pause at all at its semicolon; voiced in two pieces it gets a real one.
+SPLIT = r"(?<=;)\s+"
 
 
 def main() -> None:
@@ -75,7 +83,7 @@ def main() -> None:
         wav = out / f"{beat.name}.wav"
         if args.only is None or beat.name in args.only:
             chunks, rows, t0 = [], [], 0.0
-            for res in pipe(beat.text, voice=args.voice, speed=args.speed):
+            for res in pipe(beat.text, voice=args.voice, speed=args.speed, split_pattern=SPLIT):
                 a = res.audio.numpy() if hasattr(res.audio, "numpy") else np.asarray(res.audio)
                 for tk in res.tokens or ():
                     if tk.start_ts is not None and tk.end_ts is not None and any(c.isalnum() for c in tk.text):
