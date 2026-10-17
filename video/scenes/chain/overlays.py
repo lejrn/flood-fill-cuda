@@ -207,13 +207,23 @@ def score_card(G: Frame, rows: tuple, highlight=None, footnote: str | None = Non
         top.arrange(DOWN, buff=0.06, aligned_edge=LEFT)
     body = VGroup(top, lines).arrange(DOWN, buff=0.25, aligned_edge=LEFT)
     if footnote:
-        fn = lbl(footnote, 12, INK_SOFT, mono=True)
-        if fn.width > lines.width and ", " in footnote:
-            # two lines, broken at the comma nearest the middle: the table sets the card's width
+        # Two lines, broken at the comma nearest the middle, when one line
+        # would be wider than the table (the table sets the card's width).
+        # The whole line is never built to measure it: Pango wraps a Text at
+        # config.pixel_width (480 px in a 9:16 preview), and Manim's text
+        # cache keys ignore that width, so a preview's wrapped footnote could
+        # reach the full render. The halves are short enough not to wrap; in
+        # a mono font the line is as wide per character as they are.
+        fn = None
+        if ", " in footnote:
             cuts = [i for i in range(len(footnote)) if footnote.startswith(", ", i)]
             i = min(cuts, key=lambda c: abs(c - len(footnote) / 2))
-            fn = VGroup(lbl(footnote[:i + 1], 12, INK_SOFT, mono=True),
-                        lbl(footnote[i + 2:], 12, INK_SOFT, mono=True)).arrange(DOWN, buff=0.05, aligned_edge=LEFT)
+            a, b = footnote[:i + 1], footnote[i + 2:]
+            ha, hb = lbl(a, 12, INK_SOFT, mono=True), lbl(b, 12, INK_SOFT, mono=True)
+            if (ha.width + hb.width) * len(footnote) / (len(a) + len(b)) > lines.width:
+                fn = VGroup(ha, hb).arrange(DOWN, buff=0.05, aligned_edge=LEFT)
+        if fn is None:
+            fn = lbl(footnote, 12, INK_SOFT, mono=True)
         body.add(fn)
         body.arrange(DOWN, buff=0.22, aligned_edge=LEFT)
     room = config.frame_width - 0.9
