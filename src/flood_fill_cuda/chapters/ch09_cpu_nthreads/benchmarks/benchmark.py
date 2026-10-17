@@ -15,6 +15,8 @@ Scenes (bench_v5's, plus the serpentine):
   input_blobs      the 81 Mpx frame (md5 checked), 2,522 blobs, 8-conn
   drones           the 240 masks of video/assets/drones_mask, if present
                    (--drones-dir), 8-conn labels per frame
+  dispatch_1x1     a 1 x 1 red image, one blob and labels (CPU only):
+                   the fixed cost of a call
 
 CPU cells (one blob; "on" = reset on the clock, like ch07 and ch08):
 
@@ -94,9 +96,9 @@ Policy:
   idle gate       before every CPU round and every GPU attempt, wait (up
                   to QUIET_WAIT_*_S) until the REST of the machine
                   (/proc/stat's busy time minus this process's own CPU
-                  time, all its threads) is at most QUIET_BUSY_PCT_
-                  PARALLEL (3%) busy over one second for rounds with
-                  cells of 8 threads or more, QUIET_BUSY_PCT (10%) for
+                  time, all its threads) is at most 3% busy over one
+                  second (QUIET_BUSY_PCT_PARALLEL) for rounds with
+                  cells of 8 threads or more, 10% (QUIET_BUSY_PCT) for
                   the GPU attempts. The same share is measured over
                   every CPU round and every cell's batch; a round above
                   its threshold is run again (up to MAX_ROUND_REDOS
