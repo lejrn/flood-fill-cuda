@@ -252,7 +252,11 @@ Size is won. Now count: twenty-five hundred blobs in the big frame, one launch e
   ms (its label map reset before the clock, as act 2's loops reset
   theirs): the CPU by 7.2×. v4's host clock on the same calls reads 1,919
   ms and the full loop 1,647 ms: slower by every measure.
-- The meter's CPU tick sits at the CPU's time; the needle swings past it
+- The meter's CPU tick sits at the 81 Mpx card's CPU time, 225 ms
+  (`njit_ms`, its label map reset on the clock), not at the 202 ms the
+  claims in r07-r09 use (reset before the clock). The tick carries no
+  number and the scale is log, so this is meant: every needle (~1,462,
+  ~850, 53.9 ms) sits on the same side of both. The needle swings past it
   to ~1,462 ms. Caption "~1,462 ms" / "estimate".
 
 ## beat r08_tags
