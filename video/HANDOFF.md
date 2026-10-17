@@ -1,10 +1,10 @@
 # The flood-fill-cuda explainer video: summary and handoff
 
-Status on 2026-10-14. Branch `video-chain` (off `main`), folder `video/`,
-version 0.7.0. Two cuts of the same story: the three-pane cut (sections
+Status on 2026-10-18. Branch `video-v5` (off `main`), folder `video/`,
+version 0.10.0. Two cuts of the same story: the three-pane cut (sections
 1-10, four files below) and the chain cut (section 11, a "But... So"
-chain in two acts, size then count, 2.5D). `out/` and `media/` are gitignored; only sources
-are tracked.
+chain in three acts, size, count, then tiles, 2.5D). `out/` and `media/`
+are gitignored; only sources are tracked.
 
 | file | frame | voice | length | Triton beat |
 |---|---|---|---|---|
@@ -362,17 +362,176 @@ the outro fade. Rules that keep this true:
 - Add the ch06 column to the README grand table (`overview/build.py`).
 - Background music (`--music`) and captions.
 
-## 11. The chain cut (v4, v3 and v2 on 2026-10-14; v1 on 2026-10-13)
+## 11. The chain cut (v5 on 2026-10-18; v4, v3 and v2 on 2026-10-14; v1 on 2026-10-13)
 
 A second cut beside the three-pane one, told as a chain of "But... So"
 rungs in the style of the Infinite Desk Shorts (`reference/infinite-desk/`,
-whose README distils 21 of them). v4 is the current version; v3, v2 and
-v1 are in git history (v1's four renders are kept in `out/chain_v1/`).
+whose README distils 21 of them). v5 is the current version; v4, v3, v2
+and v1 are in git history. v4's two renders are kept in `out/chain_v4/`,
+v1's four in `out/chain_v1/`.
 
 | file | frame | look | voice | length |
 |---|---|---|---|---|
-| `final_chain_iso_vertical_kokoro_paced.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam`, paced | 217.6 s |
-| `final_chain_iso_landscape_kokoro_paced.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam`, paced | 217.6 s |
+| `final_chain_iso_vertical_kokoro_paced.mp4` | 1080x1920 | 2.5D | Kokoro `am_adam`, paced | 278.4 s |
+| `final_chain_iso_landscape_kokoro_paced.mp4` | 1920x1080 | 2.5D | Kokoro `am_adam`, paced | 278.4 s |
+| `share/chain_v5_iso_vertical_kokoro_small.mp4` | 1080x1920 | 2.5D | the same, phone copy (22.1 MB) | 278.4 s |
+| `share/chain_v5_iso_landscape_kokoro_small.mp4` | 1920x1080 | 2.5D | the same, phone copy (19.7 MB) | 278.4 s |
+
+### v5: tiles, like for like (278.4 s)
+
+The user dropped v4's run-based beat (`r10_runs`): the video is about
+the BFS. A third act replaces it. The queue carries 32 x 32 tiles (ch07),
+then tiles find their blob pieces and seeds send waves (ch08).
+
+ch06 is out entirely: no "CCL", "runs", "spans" or "union-find", spoken
+or shown, and no number from it. No GPU number comes from ch08's
+dense-tile path (K2b/K4b, a run union-find inside tiles).
+
+Every CPU-vs-GPU number was re-made like for like, in one session. The
+ratios got smaller (r05 18x -> 8.5x, r06 25.8x -> 11x); the user
+accepted that.
+
+The user's decisions (2026-10-17), all binding:
+
+1. One session: every CPU-vs-GPU number comes from V5 (below). No July
+   number is set against a CPU.
+2. Like for like: the CPU does exactly the GPU's work. The same
+   neighbours (4 against 4, 8 against 8), the same output (no depth map
+   where the GPU keeps none; many blobs: labels only) and the same setup
+   (arrays allocated once, reset where the GPU resets its own).
+3. The finale says both sides of the small blob aloud: in kernel time
+   the GPU wins now; with the copy to the card, the CPU still wins.
+4. Title card: "flood fill, from pixels to tiles" over "flood-fill-cuda".
+5. Kokoro `am_adam`, paced. Cairo renders in parallel on the CPU; the
+   GPU only measures. Act 3 at the end, mechanism and numbers. At most 5
+   minutes.
+
+Defaults adopted with them: r13 keeps "once the frame is on the card"
+(with the copies the frame takes 54.8 ms; the r14 footnote says so); r11
+compares against r06's kernel; act 2's ch05 is timed at full clocks;
+every tile-wave number is ch08's first version (`OLD_PATH`, no dense-tile
+path at all); the 900 px frame is transposed, so one orientation holds
+everywhere. The design, both critics' reviews and the open questions are
+in `narration/chain_v5_proposal.md`.
+
+The session (V5): `results/overview/benchmark_results/v5_20261017T192640Z.json`
+(and `.csv`), from `overview/bench_v5.py` with `overview/cpu_twins.py`,
+both at the committed HEAD (`script_matches_head`).
+
+- GPU: kernel-only CUDA events. All 8 timed blocks at full clocks (P0
+  only, memory 8,001 MHz, SM median 2,070 MHz). ch05 on the frame got
+  there on its second attempt; its first sat in P3 under the power cap.
+- CPU: `@njit` on one core, after all GPU work and 60 s of idle, 5
+  interleaved rounds behind a quiet-host gate. The round medians spread
+  by up to 19%, so factors show two significant figures, and each one
+  is checked over the CPU's rounds.
+- The twins (תאומים) run each oracle's loop on buffers kept between
+  calls: `cpu_bfs4` (ch01-ch03 at 4 ways), `cpu_bfs8` (ch03 at 8 ways),
+  `cpu_fill8` (ch07: no depth, reset on the clock), `cpu_label` (ch08 and
+  the drones: `cpu_label_components`' loop, reset on the clock) and
+  `cpu_label_pre` (act 2, reset before the clock).
+- Two earlier v5 sessions stay committed but are not read: `161122Z`
+  predates the twins, and `182449Z` ran the oracles as called, so the
+  CPU paid for its allocations (critic 1, F1).
+- Mechanism numbers (rounds, seeds, pieces) come from the tiles' own
+  sessions (T7, D8, W8) and the act-3 exports in `assets/tiles/`. Act
+  1's GPU-only numbers (spill, placement, sweep, snake) still come from
+  the July sessions; none of them is set against a CPU.
+
+| beat | start, s | length, s | the link |
+|---|---|---|---|
+| intro (i0, i1) | 0.00 | 26.73 | drones, 33 ms; drone card CPU 0.679 ms, GPU "?"; 81 Mpx: the CPU needs 225 ms; "size and count" |
+| r00 zoom | 26.73 | 5.73 | one drone |
+| r01 CPU | 32.47 | 9.73 | one pixel per step, one core, 24 SMs idle |
+| r02 one block | 42.20 | 15.73 | threads and block defined; on one small blob the CPU wins, 4.3x (0.121 vs 0.520 ms); row 1 |
+| r03 giant | 57.93 | 13.70 | 48 KB per block, the queue needs 125 KB: it spills to global memory |
+| r03b one SM | 71.63 | 6.53 | one block a little faster than the CPU, 1.1x; 1 of 24 SMs |
+| r04 two blocks | 78.17 | 24.93 | the queue moves to global memory; twice as fast (GPU vs GPU); 22 SMs dark |
+| r05 all blocks | 103.10 | 23.60 | 48 blocks, 8.5x; their pixels mix; the launch-shape sweep, +15% at best |
+| r05b snake | 126.70 | 9.37 | 48 blocks lose to one: the gate, twice per ring, ~2 us |
+| r06 diagonals | 136.07 | 7.53 | half the rings; 11x against the 8-neighbour CPU; row 2 |
+| r07 real frame | 143.60 | 11.33 | 2,522 launches, ~1,462 ms (estimate): the CPU (202 ms) wins by 7.2x |
+| r08 tags | 154.93 | 20.40 | two per launch, ~850 ms: faster, but the CPU still wins by 4.2x |
+| r09 seeds | 175.33 | 13.00 | 53.9 ms: faster than the CPU (3.8x, row 3), over 33 ms: every red pixel rides the queue |
+| r10 tiles | 188.33 | 24.13 | 32 x 32 tiles; one warp per tile, a row per thread in registers; row, diagonal, column fills until nothing changes |
+| r11 rounds | 212.47 | 19.53 | border bits join the next round; one gate per round; 4,001 rings -> 127 rounds, 101 -> 3.12 ms; row 2 340x |
+| r12 pieces | 232.00 | 17.17 | a 384 px crop as its own image: 135 pieces, 36 seeds, 8 blobs; waves meet, the smallest label wins |
+| r13 frame | 249.17 | 12.00 | 11,609 seeds, 6 rounds, 2,522 blobs: 2.21 ms once the frame is on the card; row 3 100x |
+| r14 reveal | 261.17 | 17.27 | the card (0.192 / 0.044 ms GPU 4.4x, 1,065 / 3.12 ms 340x, 225 / 2.21 ms 100x), copies in its footnote; the drones; the title card |
+
+Files:
+- Narration: `narration/script_chain.md` (v5, 19 beats, k = 0..18) and
+  `narration/chain_v5_proposal.md`. Numbers and claim checks:
+  `scenes/chain/numbers.py`.
+- Scenes: new `r10_tiles.py`, `r11_rounds.py`, `r12_pieces.py`,
+  `r13_frame.py`, `r14_reveal.py`; the intro, r02, r03b, r05, r06, r07,
+  r08 and r09 changed. `state.py` holds the 19 beats' states,
+  `machine.py` the warp card and 3 blocks per SM. v4's `r10_runs.py` and `r11_reveal.py` stay in the
+  folder, out of the cut.
+- Act-3 data: `chapters/ch07_gpu_1blob_tiles/benchmarks/video_tiles.py`
+  and `chapters/ch08_gpu_nblob_tiles/benchmarks/video_waves.py` record
+  the floors into `assets/tiles/` (its README; tracked through a
+  `.gitignore` exception). `assets/make_frame_mask.py` writes
+  `assets/tiles/input_blobs_red.npz`, every red pixel of the frame, for
+  r13's zoom.
+- The drone footage is labelled by ch08's first version now (section
+  7, "Labels vs tracks").
+- Build: `assemble.py --jobs N --wrap CMD` renders clips in parallel,
+  each in its own media folder; `seam_check.py --intra` checks the
+  intro's snap; `tts_kokoro.py` voices each side of a semicolon as its
+  own piece.
+
+How it was rendered (2026-10-18): Kokoro `am_adam`, then `pace.py`;
+`assemble.py --cut chain --look iso --layout <layout> --voice
+kokoro_paced --render --check` with `--jobs` and a `--wrap` script that
+lets at most 3 renders run at once (memory), one layout after the other.
+
+- `--check` stops before the mux when a seam is flagged. After the three
+  seams below were reviewed, a second run without `--render` or
+  `--check` muxed each layout.
+- Phone copies: v4's settings (x264 preset slow, CRF 27, AAC 128k,
+  faststart).
+- v4's clips in `media/chain_iso/{landscape,vertical}/` and its
+  `work_chain_iso_*_kokoro_paced` folders were overwritten.
+
+Checks:
+- `numbers.py`: 115 claim checks, all ok. `build/audit_numbers.py` has
+  no chain mode (it audits the three-pane cut, and still passes), so
+  `numbers.py` is the chain cut's audit. Every on-screen number is a
+  `numbers.py` value, and `STORY_SHOWN` ties every shown CPU-vs-GPU
+  factor to V5's own story entry.
+- Snaps: all 17 pass in both layouts (largest 1.02 in 9:16, 0.82 in
+  16:9, limit 1.5). r14 ends on a fade, so the check skips it.
+- Seams: 14 of 17 pass. Three are flagged (16:9 / 9:16): r05 -> r05b,
+  the 48-block owner mosaic (0.133% / 0.174%, as in v4); r09 -> r10, the
+  speckled label frame (0.052% / 0.084%, below v4's); r13 -> r14, new,
+  the 81 Mpx labelled frame (0.148% / 0.215%).
+- The flagged pixels are 67-258 scattered patches of 1-4 boxes (4x4 px),
+  at most 22-30 levels. Both frames show the same picture: a clip ends
+  on a P-frame and the next opens on a keyframe. Nothing moved.
+- The final files: video and audio both 278.433 s, 8,353 frames. The
+  frame 0.5 s into each clip matches that clip's own frame, so the clip
+  order holds. Every beat's voice starts 0.12-0.14 s into its slot.
+- `assemble.py` prints OVERRUN for every clip, as designed: each chain
+  scene holds at least 0.75 s after its beat. Speech plus gaps is 258.8
+  s; the proposal's model said 286.9 s.
+- Contact sheets of 20 frames per layout; the title card is up at
+  277.5 s.
+
+Gotchas found in v5:
+- The 900 px frame PNGs are in PNG order, act 3's arrays [x, y]:
+  `state.picture()` transposes the PNG side once, and `numbers.py`
+  checks it (overlap 0.78 transposed, 0.10 as is).
+- `card_ms` truncates 10-100 ms for spoken values; the r14 footnote uses
+  `card_ms_note`, which rounds, so a cost never reads below its measure.
+- A flashing element flashes at most twice per second (the cut's rule
+  allows three), and large areas never flash.
+
+Open (2026-10-18): the user has not reviewed the v5 renders yet; the
+branch is not merged into `main`. The proposal's open questions stay
+open: Q8 (where r11's time goes), N2 (act 2's seeds beat the CPU on the
+small blob, unseen), N3 ("as a thirty-two bit word" in r10) and N4
+(r03b's thin margin, 1.02-1.17 over the CPU's rounds).
 
 ### v4: the memory story
 
