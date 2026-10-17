@@ -172,10 +172,14 @@ Timing policy (ch07's, with ch08's two-event rule):
                   and each GPU block's attempt, first waits (up to 600 s
                   / 120 s) until the rest of the machine is at most 10%
                   busy, and records what it saw. The pass starts after
-                  60 s of idle: the laptop's CPU and GPU share one
-                  cooler, and a dry run with the pass straight after the
+                  60 s of idle (the laptop's CPU and GPU share one
+                  cooler). A dry run with the pass straight after the
                   GPU blocks read the 4-conn oracle about 15% slower than
-                  a cold scratch run (1,750 against 1,516 ms)
+                  a cold scratch run (1,750 against 1,516 ms); the idle
+                  did not close that gap (v5_20261017T192640Z read
+                  1,775), and the CPU's round medians there spread by up
+                  to 15%, which every factor's range over the CPU's
+                  rounds carries
   end to end      context only: ch07 (sq_256, sq_8000_center), ch08_old
                   (input_blobs and every drone frame) with
                   a pageable host-to-GPU copy of the image, the pipeline,
