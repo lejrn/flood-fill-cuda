@@ -10,9 +10,9 @@ lattice 8, valve 16, 8-conn), its instrumented twin, on two images:
    frame's; it holds 8 blobs, 6 of which cross tile borders with two or
    more seeds (waves that meet), 36 seeds of which 11 come from the
    lattice, at most 4 pieces per tile, and 6 rounds like the full frame.
-   Picked among the 1,249 aligned 384 and 512 px crops by a CPU-model
-   survey (rounds >= 4, >= 2 blobs with two seeds, <= 4 pieces per
-   tile, <= 24 blobs), then by eye.
+   Picked by eye among the 1,249 of the 2,312 aligned 384 and 512 px
+   crops that pass a CPU-model survey (rounds >= 4, >= 2 blobs with
+   two seeds, <= 4 pieces per tile, <= 24 blobs).
 2. The full frame (9000 x 9000, 2,522 blobs): the counters, the
    frontier per round, and per-tile and 900 x 900 summaries of the
    round each piece was claimed in.
