@@ -120,8 +120,11 @@ time on `zz_lattice_4k` and 1.459× on `input_blocks`.
 On images up to about 2000 × 2000 px, ch06 is faster than ch08 or
 ties.
 
-ch09 also compares the CPU with the GPU, in one session. By events,
-ch07 and ch08's first version are still 6.24× and 9.43× faster.
+ch09 also compares the CPU with the GPU, in one session. There ch07
+takes the square in 3.411 ms, not the 3.107 above.
+
+By events, ch07 and ch08's first version are still 6.24× and 9.43×
+faster.
 
 With the image starting in host memory, the GPU's copies change the
 verdict: the CPU wins both big scenes, by 1.89× and 2.34×. One-tile
