@@ -4,6 +4,8 @@
 # local environment and model cache
 .venv*/
 .hf-cache/
+# downloaded tools (a static ffmpeg with NVENC: scenes/glcompat.py, build/nvenc_bench.py)
+.tools/
 
 # render outputs and caches (assets/*/ are frames unpacked from the parent repo's GIFs)
 assets/*/
