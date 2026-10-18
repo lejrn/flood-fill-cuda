@@ -76,7 +76,7 @@ the same cores. None of them is quoted here.
 ## Inherited problems
 
 1. **The baseline was one core.** The video's v5 session
-   (`v5_20261017T192640Z`, on the branch `video-v5`) compares the GPU
+   (`v5_20261017T192640Z`, on main with the video) compares the GPU
    with the same work on one core. `sq_8000` 8-conn fill: 1,065 ms on
    one core, 3.12 ms for ch07 (341x). `input_blobs` labels: 225 ms,
    2.21 ms for ch08's first version (101x). `sq_256`: 0.192 ms, 0.044
@@ -374,8 +374,8 @@ session had 3.107 ms (`tiles_20261016T064724Z`); against that, the
 tile BFS's hardware step would be 6.85x (derived).
 
 **The video's factors.** The video uses `v5_20261017T192640Z`, in
-`results/overview/benchmark_results/` on the branch `video-v5` (not
-merged here). It had 1,064.7 ms for one core and 3.122 ms for ch07 on
+`results/overview/benchmark_results/`, merged into main with the
+video. It had 1,064.7 ms for one core and 3.122 ms for ch07 on
 the square: 341x.
 
 Its twin, `cpu_fill8`, fills without the paint, like `one_fill_c8`
