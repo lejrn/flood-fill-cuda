@@ -27,7 +27,17 @@ with a tile's local component as the node, and beats ch06 on the
 
 Chapter 9 (`ch09_cpu_nthreads/`) asks the fair CPU question: chapters
 3, 7 and 8 on every core, with `prange` and no atomics, against one
-core and the GPU in one session. Results: pending a quiet machine.
+core and the GPU in one session (`ch09_20261017T233237Z`).
+
+On 16 vCPUs the tiles fill the 64 Mpx square in 21.29 ms (51x one
+core) and label the 81 Mpx frame in 21.06 ms (13x). Most of that is
+the method: tiles on one thread are already 12.2x one core on the
+square, and the 16 threads add 4.18x.
+
+ch07 and ch08 are still 6.24x and 9.43x faster by events. With the
+image starting in host memory, their copies make the CPU 1.89x and
+2.34x faster. The drone frames tie, and one-tile fronts stay the
+CPU's.
 
 ---
 
