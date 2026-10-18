@@ -619,7 +619,8 @@ else:
                    "-cq", os.environ.get("GL_NVENC_CQ", "23"), "-b:v", "0", str(path)]
             self._path = path
             self._ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-            self.queue = Queue()
+            # bounded: rendering can outrun the pipe, and each frame is 8 MB
+            self.queue = Queue(maxsize=int(os.environ.get("GL_QUEUE", "16")))
             self.writer_thread = Thread(target=self.listen_and_write, args=())
             self.writer_thread.start()
 
