@@ -1,10 +1,12 @@
 # flood-fill-cuda
 
 Find every red blob in an image and recolor it - on the GPU, in CUDA +
-Numba, built up over six chapters from a sequential CPU BFS.
+Numba, built up over ten chapters (ch00-ch09) from a sequential CPU BFS.
+The last one takes the GPU's ideas back to every CPU core.
 
 Every kernel is pixel-exact against a CPU oracle. Every number is a
-committed benchmark JSON, measured on an RTX 4060 Laptop (24 SMs).
+committed benchmark JSON, measured on an RTX 4060 Laptop (24 SMs) and,
+for ch09, an i9-13900H under WSL2 (16 vCPUs).
 
 **The real story:
 [`chapters/README.md`](src/flood_fill_cuda/chapters/README.md)** - a
@@ -13,10 +15,10 @@ results → new problems exposed.
 
 ![input on the left, the kernel's output on the right](src/flood_fill_cuda/results/ch06_gpu_nblob_runs/figures/before_after.gif)
 
-*A crop of the real `input_blobs.png` (left) and what the kernel returns
-for it (right). The recolor ran on the whole 81 Mpx image - 2,522 blobs,
-**1.46 ms**. Colours repeat every 6 blobs: the label map, not the paint,
-is ground truth.*
+*A crop of the real `input_blobs.png` (left) and what ch06's kernel
+returns for it (right). The recolor ran on the whole 81 Mpx image -
+2,522 blobs, **1.46 ms**. Colours repeat every 6 blobs: the label map,
+not the paint, is ground truth.*
 
 ---
 
@@ -32,19 +34,32 @@ flowchart LR
     D -->|"one blob<br/>is one BFS"| E["2 blobs"]
     E -->|"who finds<br/>the seeds?"| F["N blobs"]
     F -->|"why move<br/>pixels at all?"| G["N runs"]
+    G -->|"one pixel<br/>per step?"| H["1 blob, tiles"]
+    H -->|"many blobs<br/>on tiles?"| I["N blobs, tile comps"]
+    I -->|"was one core<br/>fair?"| J["all CPU cores"]
     style G fill:#2aa198,stroke:#1d7c74,color:#fff
+    style H fill:#2aa198,stroke:#1d7c74,color:#fff
+    style I fill:#2aa198,stroke:#1d7c74,color:#fff
+    style J fill:#2aa198,stroke:#1d7c74,color:#fff
 ```
+
+The highlighted chapters are the best today, each for its own job
+([below](#what-is-best-for-which-job)).
 
 ## The chapters
 
 | # | Question | What it built | Headline |
 |---|---|---|---|
+| **0** | Where to start? | Pure-Python BFS, an `@njit` level-synchronous BFS (the oracle), a broken GPU prototype | The oracle every kernel must match pixel for pixel |
 | **1** | One core is serial | Level-synchronous BFS in one block; shared-memory ring + global spill tier | 2.03× the CPU at 36 Mpx |
 | **2** | One SM is 4% of the GPU | Two blocks, three ways to split the work | 2.10× ch1; the plainest design won |
 | **3** | Does it keep scaling? | N co-resident blocks, grid-wide barriers, 8-connectivity | 64 Mpx in 100 ms; plateau found at 512 threads/SM |
 | **4** | One blob is one BFS | Two blobs in one launch, labels inside the queue entry | 1.05-2.05× vs two sequential launches |
 | **5** | Who finds the seeds? | Seedless discovery: candidate waves + atomicMin union-find | **755,577 blobs in 24.8 ms**, one launch, zero seeds |
 | **6** | Why move pixels at all? | Runs, not pixels - run-table connected components | **58 ms → 1.46 ms** on the 81 Mpx image |
+| **7** | One pixel per step? | One blob, a BFS over 32×32 tiles closed in registers | `sq_8000` (64 Mpx) in **3.107 ms**, 22.7× ch03's best grid |
+| **8** | Many blobs on tiles? | Tile components as BFS nodes: waves, one union pass, a dense-tile path | `input_blobs` in **2.403 ms**, 0.890 of ch06's time (per-round median) |
+| **9** | Was one core fair? | ch03, ch07 and ch08's ideas on all 16 vCPUs: `prange`, no atomics | **21.29 ms** on the 64 Mpx square, 51× one core; GPU 6.24× by events, CPU 1.89× with copies |
 
 <p align="center">
   <img src="src/flood_fill_cuda/results/ch05_gpu_nblob_nblock/wavefront/input_blobs_final.gif" width="460" alt="chapter 5 filling all 2,522 blobs at once">
@@ -75,11 +90,40 @@ Two things the chart is careful about:
   clock spread on this laptop). The smallest gap on the chart is 35×,
   so it cannot change a conclusion.
 
+The chart stops at ch06. ch08 and ch09 time the same image in their
+own sessions (below).
+
 ---
 
-## Chapter 6 - the current best
+## What is best for which job
+
+No chapter is best at everything. Each number comes from the session
+named beside it.
+
+| job | best today | measured |
+|---|---|---|
+| fill one blob on the GPU, as a BFS | **ch07**, a frontier of 32×32 tiles | `sq_8000` in 3.107 ms, 22.7× ch03's best grid (`tiles_20261016T064724Z`) |
+| label many blobs on the GPU, as a BFS | **ch08**, waves over tile components | `input_blobs` in 2.403 ms, ch06 2.567 ms; per round, ch08 takes 0.890 of ch06's time (median, `dense_20261016T054922Z`) |
+| the non-BFS reference | **ch06**, run-based connected components | no frontier at all. It still wins where connectivity is the work: `sq_8000` (2.252 ms; ch07's default runs at 0.73× its speed, `tiles_20261016T064724Z`), the serpentines and the maze. Against ch08's default (`dense_20261016T054922Z`) it wins on long shapes along tile borders (ch08 takes 1.546× its time on `zz_lattice_4k`) and on `input_blocks` (1.459×), and it is faster or ties on images up to about 2000 × 2000 px |
+| the CPU | **ch09**, tiles on all 16 vCPUs | the 64 Mpx square in 21.29 ms (51× one core), the 81 Mpx frame in 21.06 ms (`ch09_20261017T233237Z`) |
+
+ch09 also compares the CPU with the GPU, in one session. By events,
+ch07 and ch08's first version are still 6.24× and 9.43× faster.
+
+With the image starting in host memory, the GPU's copies change the
+verdict: the CPU wins both big scenes, by 1.89× and 2.34×. One-tile
+fronts like the serpentine stay the CPU's at any thread count.
+
+The whole story, chapter by chapter, is in
+[`chapters/README.md`](src/flood_fill_cuda/chapters/README.md).
+
+---
+
+## Chapter 6 - runs, not pixels
 
 Chapters 1-5 optimize *how* pixels move. Chapter 6 changes **what moves**.
+Chapters 7 and 8 bring the BFS back on tiles; ch06 stays the non-BFS
+reference they are measured against.
 
 A **run** is a maximal red span inside one row. `input_blobs.png` is
 9000 × 9000, and this is the whole idea:
@@ -186,9 +230,9 @@ Both retroactively explain five chapters of "timing noise":
 
 ## Triton twins - the same chapters, in Triton
 
-Every Numba kernel above has a Triton twin: same algorithm, same tests,
-same host API. A harness times both on the same cells and compares
-their deterministic outputs on every run.
+Every Numba kernel of chapters 0-6 has a Triton twin: same algorithm,
+same tests, same host API. A harness times both on the same cells and
+compares their deterministic outputs on every run.
 
 | measure | result |
 |---|---|
@@ -205,8 +249,20 @@ their deterministic outputs on every run.
 
 ```bash
 uv sync
-uv run pytest                              # 723 tests, all chapters
+uv run pytest                              # 9,191 tests collected
 uv run python -m flood_fill_cuda.dashboard # whole-project dashboard
+```
+
+The 9,191, by folder (a collect-only run on 2026-10-18): ch01 48, ch02
+102, ch03 139, ch04 75, ch05 208, ch06 109, ch07 2,223 (247 tests in
+each of 9 switch modes), ch08 2,567, ch09 627, Triton twins 3,027,
+service 55, overview 11.
+
+ch01-ch08 and the Triton twins need the GPU. ch09's 627 run on the CPU
+(its GPU side is faked):
+
+```bash
+nice -n 10 uv run pytest src/flood_fill_cuda/chapters/ch09_cpu_nthreads/
 ```
 
 One chapter's benchmark + its dashboard section:
@@ -240,13 +296,13 @@ to rebuild and publish it.
 
 ```
 src/flood_fill_cuda/
-  chapters/     the numbered narrative: ch00_cpu_baseline .. ch06_gpu_nblob_runs
+  chapters/     the numbered narrative: ch00_cpu_baseline .. ch09_cpu_nthreads
   shared/       scene generators, CPU oracles, bandwidth model, plot core
   dashboard/    assembles every chapter's section into one page
   service/      interactive demo app (not part of the benchmark chain)
   overview/     the one-page grand table
   experiments/  live side-tracks (triton/, scan_multi_blob/)
-  triton_twins/ every chapter rebuilt in Triton, plus the Numba-vs-Triton harness
+  triton_twins/ chapters 0-6 rebuilt in Triton, plus the Numba-vs-Triton harness
   results/      generated JSON/CSV/HTML + wavefront renders, one folder per chapter
 graveyard/      superseded code, kept for reference
 ```
