@@ -667,7 +667,7 @@ every untimed call. None differed.
 The GPU cells checked their untimed and last timed runs, and every end
 to end output. All matched.
 
-**The cost.** Commit `3fb710e`, a clean tree. About 15 minutes from
+**The cost.** Commit `97bcc04` (the session JSON records it as `3fb710e`, its hash before the branch was rebased onto main), a clean tree. About 15 minutes from
 the session's start to its files, and a peak RSS of 5,210 MB.
 
 ## New problems and lessons
