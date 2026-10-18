@@ -1,10 +1,10 @@
 # The flood-fill-cuda explainer video: summary and handoff
 
 Status on 2026-10-18. On `main` (merged from `video-v5`), folder
-`video/`, version 0.10.1. Two cuts of the same story: the three-pane cut (sections
-1-10, four files below) and the chain cut (section 11, a "But... So"
-chain in three acts, size, count, then tiles, 2.5D). `out/` and `media/`
-are gitignored; only sources are tracked.
+`video/`, version 0.10.1. Two cuts of the same story: the three-pane
+cut (sections 1-10, four files below) and the chain cut (section 11, a
+"But... So" chain in three acts, size, count, then tiles, 2.5D).
+`out/` and `media/` are gitignored; only sources are tracked.
 
 | file | frame | voice | length | Triton beat |
 |---|---|---|---|---|
