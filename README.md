@@ -24,7 +24,7 @@ not the paint, is ground truth.*
 
 ## The chain
 
-Each chapter answers the previous one's **measured** weakness.
+Each chapter answers a weakness that an earlier chapter **measured**.
 
 ```mermaid
 flowchart LR
@@ -50,7 +50,7 @@ The highlighted chapters are the best today, each for its own job
 
 | # | Question | What it built | Headline |
 |---|---|---|---|
-| **0** | Where to start? | Pure-Python BFS, an `@njit` level-synchronous BFS (the oracle), a broken GPU prototype | The oracle every kernel must match pixel for pixel |
+| **0** | Where to start? | Pure-Python BFS, an `@njit` level-synchronous BFS (the oracle, kept in ch01's `cpu_oracle.py`), a broken GPU prototype | The oracle every kernel must match pixel for pixel |
 | **1** | One core is serial | Level-synchronous BFS in one block; shared-memory ring + global spill tier | 2.03× the CPU at 36 Mpx |
 | **2** | One SM is 4% of the GPU | Two blocks, three ways to split the work | 2.10× ch1; the plainest design won |
 | **3** | Does it keep scaling? | N co-resident blocks, grid-wide barriers, 8-connectivity | 64 Mpx in 100 ms; plateau found at 512 threads/SM |
@@ -58,7 +58,7 @@ The highlighted chapters are the best today, each for its own job
 | **5** | Who finds the seeds? | Seedless discovery: candidate waves + atomicMin union-find | **755,577 blobs in 24.8 ms**, one launch, zero seeds |
 | **6** | Why move pixels at all? | Runs, not pixels - run-table connected components | **58 ms → 1.46 ms** on the 81 Mpx image |
 | **7** | One pixel per step? | One blob, a BFS over 32×32 tiles closed in registers | `sq_8000` (64 Mpx) in **3.107 ms**, 22.7× ch03's best grid |
-| **8** | Many blobs on tiles? | Tile components as BFS nodes: waves, one union pass, a dense-tile path | `input_blobs` in **2.403 ms**, 0.890 of ch06's time (per-round median) |
+| **8** | Many blobs on tiles? | Tile components as BFS nodes: waves, one union pass, a dense-tile path | `input_blobs` in **2.403 ms**, 0.890 of ch06's time (per-round median, `dense_20261016T054922Z`) |
 | **9** | Was one core fair? | ch03, ch07 and ch08's ideas on all 16 vCPUs: `prange`, no atomics | **21.29 ms** on the 64 Mpx square, 51× one core; GPU 6.24× by events, CPU 1.89× with copies |
 
 <p align="center">
