@@ -21,11 +21,11 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from manim import (DOWN, LEFT, RIGHT, UP, Group, ImageMobject, Line, Polygon, Rectangle, RoundedRectangle,
-                   VGroup, config)
+from manim import DOWN, LEFT, RIGHT, UP, Group, Line, Polygon, Rectangle, RoundedRectangle, VGroup, config
 from manim.constants import RESAMPLING_ALGORITHMS
 
 from scenes.chain import numbers as nb
+from scenes.glcompat import ImageMobject
 from scenes.chain.geo import Frame
 from scenes.style import ASSETS, GREY, GRID, INK, INK_SOFT, RED_PX, TEAL, label
 

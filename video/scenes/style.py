@@ -24,13 +24,14 @@ from manim import (
     RIGHT,
     UP,
     Group,
-    ImageMobject,
     Scene,
     Text,
     VGroup,
     config,
 )
 from manim.constants import RESAMPLING_ALGORITHMS
+
+from scenes.glcompat import ImageMobject, swap_renderer
 
 VIDEO_DIR = Path(__file__).resolve().parents[1]
 ASSETS = VIDEO_DIR / "assets"
@@ -210,6 +211,11 @@ class FrameSequence(Group):
 
 class BeatScene(Scene):
     beat: str = ""
+
+    def __init__(self, renderer=None, *args, **kwargs):
+        # --renderer=opengl: the CLI's renderer becomes glcompat.GLRenderer
+        # (Cairo: unchanged)
+        super().__init__(swap_renderer(renderer), *args, **kwargs)
 
     def setup(self) -> None:
         self.camera.background_color = BG

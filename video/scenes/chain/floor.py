@@ -24,11 +24,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import numpy as np
-from manim import Group, ImageMobject, VGroup, config
+from manim import Group, VGroup, config
 from manim.constants import RESAMPLING_ALGORITHMS
 from PIL import Image
 
 from scenes.chain.iso import Box, Placement, box_faces, plane_corners
+from scenes.glcompat import ImageMobject
 from scenes.style import BG, BLUE, GOLD, GRID, INK, RED_PX
 
 N = 24                      # toy grid size

@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 
 import numpy as np
-from manim import DOWN, LEFT, ORIGIN, RIGHT, UP, FadeIn, FadeOut, Mobject, VGroup, config
+from manim import DOWN, LEFT, ORIGIN, RIGHT, UP, FadeIn, FadeOut, VGroup, config
 
 from narration.common import read_words
 from scenes.chain import floor as fl
@@ -36,6 +36,7 @@ from scenes.chain import machine as mc
 from scenes.chain import numbers as nb
 from scenes.chain import overlays as ov
 from scenes.chain.state import BEATS, Z_OVER, boundary, carry_caption, chain_state, layout, nums
+from scenes.glcompat import Mobject
 from scenes.style import INK, INK_SOFT, OUT, BeatScene, beat_seconds, label, voice
 
 F = 1 / 15

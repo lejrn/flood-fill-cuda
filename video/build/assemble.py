@@ -10,6 +10,7 @@ Usage (from video/):
     uv run build/assemble.py --cut chain --look iso --layout vertical --render --check
     uv run build/assemble.py --cut chain --look iso --layout vertical --render --jobs 3 \
         --wrap path/to/slot_wrapper.sh                      # clips in parallel, each through the wrapper
+    uv run build/assemble.py --cut chain --look iso --render --renderer gl --nvenc   # on the GPU (scenes/glcompat.py)
 
 Output: out/final_<layout>_<voice>.mp4 for the three-pane cut, and
 out/final_chain_<look>_<layout>_<voice>.mp4 for the chain cut (narration
@@ -95,6 +96,7 @@ CUTS = {"panes": PANES, "chain": CHAIN}
 LOOKS = ("flat", "iso")
 
 SR = 48_000
+GPU_ADAPTER = "NVIDIA"      # Mesa's D3D12 driver (WSL) picks the Intel iGPU unless told
 GAP = 0.4          # seconds between beats inside a clip (style.BeatScene.finish tail)
 
 
@@ -121,10 +123,12 @@ def voice_dir(voice: str, cut: str = "panes") -> str:
 
 
 def render_cmd(stem: str, cls: str, media: Path, layout: str, quality: str, preview: bool,
-               wrap: list[str]) -> list[str]:
+               wrap: list[str], renderer: str = "cairo") -> list[str]:
     # --disable_caching: a cached play skips update_mobjects(0), so end
     # states can differ from an uncached render. Always render fresh.
     cmd = [*wrap, str(PY), "-m", "manim", "render", "--disable_caching", "--media_dir", str(media)]
+    if renderer == "gl":        # scenes/glcompat.py; OpenGL writes a movie only when asked
+        cmd += ["--renderer=opengl", "--write_to_movie"]
     if preview:     # 480 px, 15 fps: for checking timing and layout, never for a cut
         cmd += ["-ql", "-r", "480,854" if layout == "vertical" else "854,480"]
     else:
@@ -166,18 +170,45 @@ def adopt(job: Path, layout: str, stem: str, cls: str, cut: str, look: str) -> P
     return dst
 
 
+def run_gl(cmd: list[str], env: dict) -> None:
+    """One GL render, its output passed through; it must report the NVIDIA
+    GPU (glcompat prints GL_RENDERER), or the clip came from another adapter."""
+    renderer = None
+    with subprocess.Popen(cmd, cwd=VIDEO, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, errors="replace") as p:
+        for line in p.stdout:
+            sys.stdout.write(line)
+            if "GL_RENDERER=" in line:
+                renderer = line.split("GL_RENDERER=", 1)[1].split(" GL_VERSION=")[0].strip()
+    if p.returncode:
+        raise subprocess.CalledProcessError(p.returncode, cmd)
+    if renderer is None or GPU_ADAPTER not in renderer:
+        raise SystemExit(f"GL render did not run on the {GPU_ADAPTER} GPU (GL_RENDERER={renderer})")
+    print(f"gl     GL_RENDERER={renderer}", flush=True)
+
+
 def render(layout: str, voice: str, quality: str, only: list[str] | None = None,
            cut: str = "panes", look: str = "flat", preview: bool = False, jobs: int = 1,
-           wrap: list[str] | None = None) -> None:
+           wrap: list[str] | None = None, renderer: str = "cairo", nvenc: bool = False) -> None:
     env = dict(os.environ, VOICE=voice_dir(voice, cut), VIDEO_LAYOUT=layout, LOOK=look)
+    if renderer == "gl":
+        env.setdefault("MESA_D3D12_DEFAULT_ADAPTER_NAME", GPU_ADAPTER)
+        if nvenc:
+            env["GL_NVENC"] = "1"
+        if jobs > 1:
+            print("note: --renderer gl renders one clip at a time (one GPU)", flush=True)
+            jobs = 1
     wrap = wrap or []
     todo = [(stem, cls) for stem, cls, _ in clip_list(cut)
             if not only or stem in only or Path(stem).name in only]
     if jobs <= 1:
         for stem, cls in todo:
             print("render", stem, cls, flush=True)
-            subprocess.run(render_cmd(stem, cls, media_dir(layout, cut, look), layout, quality, preview, wrap),
-                           cwd=VIDEO, env=env, check=True)
+            cmd = render_cmd(stem, cls, media_dir(layout, cut, look), layout, quality, preview, wrap, renderer)
+            if renderer == "gl":
+                run_gl(cmd, env)
+            else:
+                subprocess.run(cmd, cwd=VIDEO, env=env, check=True)
         return
 
     def one(job: tuple[str, str]) -> tuple[str, str, int, Path]:
@@ -253,7 +284,14 @@ def main() -> None:
                          "where a sequential render puts it")
     ap.add_argument("--wrap", default=os.environ.get("RENDER_WRAP", ""),
                     help="a command prefix for every render (default: $RENDER_WRAP), e.g. a render-slot script")
+    ap.add_argument("--renderer", choices=["cairo", "gl"], default="cairo",
+                    help="gl: Manim's OpenGL renderer through scenes/glcompat.py, on the NVIDIA GPU, one clip "
+                         "at a time (only scenes ported to glcompat render correctly)")
+    ap.add_argument("--nvenc", action="store_true",
+                    help="with --renderer gl: encode each clip with h264_nvenc (ffmpeg in video/.tools/)")
     args = ap.parse_args()
+    if args.nvenc and args.renderer != "gl":
+        raise SystemExit("--nvenc needs --renderer gl")
     vdir = voice_dir(args.voice, args.cut)
     name = f"{args.layout}_{args.voice}" if args.cut == "panes" else f"chain_{args.look}_{args.layout}_{args.voice}"
     wrap = shlex.split(args.wrap)
@@ -262,7 +300,8 @@ def main() -> None:
               flush=True)
 
     if args.render:
-        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look, args.preview, args.jobs, wrap)
+        render(args.layout, args.voice, args.quality, args.only, args.cut, args.look, args.preview, args.jobs, wrap,
+               args.renderer, args.nvenc)
         if args.only:
             print("rendered", args.only)
             return

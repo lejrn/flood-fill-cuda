@@ -23,13 +23,14 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
 import numpy as np
-from manim import DOWN, Group, ImageMobject, RoundedRectangle, VGroup, config
+from manim import DOWN, Group, RoundedRectangle, VGroup, config
 from manim.constants import RESAMPLING_ALGORITHMS
 from PIL import Image
 
 from scenes.chain import die as dz
 from scenes.chain import floor as fl
 from scenes.chain.iso import Box, Placement, box_faces, on_plane, plane_corners
+from scenes.glcompat import ImageMobject
 from scenes.style import BLUE, GOLD, GREEN, GREY, INK, INK_SOFT, RED_PX, TEAL, label
 
 # ---- colours ----
@@ -1081,7 +1082,7 @@ def partition_light(closeup: Group, q: int = 0, color: str = INK, width: float =
 
 def set_alpha(g, a: float) -> None:
     """Opacity of a group of images and faces (Group has no set_opacity)."""
-    from manim import VMobject
+    from scenes.glcompat import VMobject
 
     for m in g.get_family():
         if isinstance(m, ImageMobject):

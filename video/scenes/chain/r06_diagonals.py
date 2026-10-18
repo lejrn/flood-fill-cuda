@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import Arrow, FadeIn, FadeOut, Group, GrowArrow, Square, VGroup, VMobject
+from manim import Arrow, FadeIn, FadeOut, Group, GrowArrow, Square, VGroup
 
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
@@ -38,6 +38,7 @@ from scenes.chain import overlays as ov
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import (LEVEL_LO, Z_OVER, floor_raster, level_colors, owner_colors, owner_fine,
                                 score_rows, toys)
+from scenes.glcompat import VMobject
 from scenes.style import BLUE, GRID, INK
 
 SIDES = ((0, 1), (1, 0), (0, -1), (-1, 0))
