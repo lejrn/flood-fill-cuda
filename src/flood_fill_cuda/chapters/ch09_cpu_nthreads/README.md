@@ -381,13 +381,13 @@ median of the per-round ratios). 8-conn unless marked.
 |---|---|---:|---:|---:|---:|---:|---:|
 | `sq_8000_center` | tile BFS | 89.33 | 47.64 (1.89) | 28.94 (3.13) | 28.73 (3.10) | **21.29 (4.18)** | 0.26 |
 | `sq_8000_center`, 4-conn | tile BFS | 88.87 | 47.98 (1.88) | 28.16 (3.12) | 27.45 (3.22) | 20.35 (4.33) | 0.27 |
-| `sq_8000_center` | pixel BFS | 986.2 | 722.8 (1.39) | 460.7 (2.12) | 334.8 (2.98) | 259.0 (3.80) | 0.24 |
+| `sq_8000_center` | pixel BFS | 986.2 | 722.8 (1.39) | 460.7 (2.12) | 334.8 (2.97) | 259.0 (3.80) | 0.24 |
 | `sq_8000_center`, 4-conn | pixel BFS | 930.1 | 637.3 (1.43) | 412.6 (2.26) | 299.0 (3.06) | 259.8 (3.52) | 0.22 |
 | `input_blobs` | tile labels | 97.84 | 52.49 (1.89) | 29.83 (3.26) | 28.59 (3.49) | **21.06 (4.65)** | 0.29 |
 | drones, per frame | tile labels | 1.039 | 0.918 (1.15) | 0.804 (1.34) | 0.807 (1.32) | 0.792 (1.35) | 0.08 |
 | `sq_256` | tile BFS | 0.0759 | **0.0461 (1.66)** | 0.0475 (1.64) | 0.0572 (1.54) | 0.0563 (1.42) | 0.09 |
 | `sq_256` | pixel BFS | 0.1999 | 0.2022 (0.99) | 0.2054 (0.98) | 0.2212 (0.86) | 0.2371 (0.82) | 0.05 |
-| `serpentine_256` | tile BFS | 0.1650 | 0.1346 (1.24) | **0.1322 (1.29)** | 0.1722 (1.04) | 0.2139 (0.76) | 0.05 |
+| `serpentine_256` | tile BFS | 0.1650 | 0.1346 (1.23) | **0.1322 (1.29)** | 0.1722 (1.04) | 0.2139 (0.76) | 0.05 |
 | `serpentine_256` | pixel BFS | 0.6728 | 0.6914 (0.98) | 0.6924 (0.97) | 0.8216 (0.86) | 0.9788 (0.69) | 0.04 |
 | `dispatch_1x1`, in µs | tile BFS | 8.6 | 10.2 | 12.2 | 18.3 | 23.7 | |
 | `dispatch_1x1`, in µs | pixel BFS | 5.7 | 6.6 | 7.1 | 8.7 | 12.8 | |
@@ -404,7 +404,7 @@ thread's work.
 **From 4 to 8 threads the tile variants stall.** On the square the
 tile BFS goes from 3.13x to 3.10x; on the frame the labels go from
 3.26x to 3.49x. Both gain again at 16. The pixel BFS keeps climbing:
-2.12x, 2.98x, 3.80x.
+2.12x, 2.97x, 3.80x.
 
 This was not profiled. One reading (inferred, not measured): a static
 schedule gives each thread an equal chunk, and every barrier waits for
@@ -673,7 +673,7 @@ the session's start to its files, and a peak RSS of 5,210 MB.
   layer needs a newer TBB than this system has.
 - **One-tile fronts slow down with threads.** On the serpentine no
   step is split, yet the pixel BFS's fill alone takes 0.949 ms at 16
-  threads against 0.674 at one.
+  threads against 0.673 at one.
 - A likely cause (inferred, not measured): the serial levels run
   beside 15 workers still spinning after the parallel reset. A size
   threshold on pack, reset and paint, or a passive wait policy, would
