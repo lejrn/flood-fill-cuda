@@ -759,8 +759,8 @@ CPU core, and asked whether it had been a fair one.)*
   on one thread gave 12.2x on the square, 16 threads 4.18x. On many
   blobs it is the other way round: 2.75x against 4.65x on the frame,
   0.97x against 1.35x on the drones.
-- **16 vCPUs are not 16 cores.** With a static schedule, every barrier
-  waits for the slowest chunk.
+- **16 vCPUs are not 16 cores.** One reading (inferred, not measured):
+  with a static schedule, every barrier waits for the slowest chunk.
 - **A copy can cost more than the whole job.** Where the data lives
   decides the winner as much as the kernel does.
 - **Small images want few threads.** Pack, reset and paint fork at any
