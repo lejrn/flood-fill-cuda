@@ -1,7 +1,7 @@
 # The flood-fill-cuda explainer video: summary and handoff
 
-Status on 2026-10-18. Branch `video-v5` (off `main`), folder `video/`,
-version 0.10.0. Two cuts of the same story: the three-pane cut (sections
+Status on 2026-10-18. On `main` (merged from `video-v5`), folder
+`video/`, version 0.10.1. Two cuts of the same story: the three-pane cut (sections
 1-10, four files below) and the chain cut (section 11, a "But... So"
 chain in three acts, size, count, then tiles, 2.5D). `out/` and `media/`
 are gitignored; only sources are tracked.
@@ -550,7 +550,7 @@ Gotchas found in v5:
   allows three), and large areas never flash.
 
 Open (2026-10-18): the user has not reviewed the v5 renders yet; the
-branch is not merged into `main`. The proposal's open questions stay
+cut is on `main` (0.10.1). The proposal's open questions stay
 open: Q8 (where r11's time goes), N2 (act 2's seeds beat the CPU on the
 small blob, unseen), N3 ("as a thirty-two bit word" in r10) and N4
 (r03b's thin margin, 1.02-1.17 over the CPU's rounds).
