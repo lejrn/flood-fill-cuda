@@ -53,15 +53,19 @@ the same work without tiles, gains 1.10x and 3.80x.
 
 For the tile variants, 16 vCPUs are worth about four cores: 4.2-4.6x
 on the big scenes, 26-29% per vCPU. From 4 to 8 threads they gain
-nothing.
+little.
 
 The rest of the gap is the hardware, with the same idea on both
 sides: 6.24x on the square, 9.43x on the frame. On the drone frames
 the cores give only 1.35x, and the GPU leads 8.66x by events.
 
 The copies change the verdict (ההכרעה). When the image starts in host
-memory, the GPU's copies cost more than the CPU's whole run on both
-big scenes. The drones become a tie, the small square a CPU win.
+memory, the GPU's copies alone (derived: about 37 ms on the square, 47
+ms on the frame) cost more than the tile variants' whole run.
+
+The pixel BFS (259.0 ms) still loses to ch03, even with ch03's copies
+counted (137.0 ms): by 1.89x. The drones become a tie, the small
+square a CPU win.
 
 One-tile fronts belong to the CPU at any thread count. On the
 serpentine even one core's twin is 6.3x faster than ch07.
@@ -430,8 +434,11 @@ widest level has 504 entries, under its 1,024 threshold. The tile BFS
 has 3 rounds of at most 3 tiles, under its 8.
 
 So the tiles' 1.66x at 2 threads comes from the pack, the reset and
-the paint, which run in parallel at any size. On the serpentine every
-round has one tile, and more threads only cost.
+the paint, which run in parallel at any size.
+
+On the serpentine every round has one tile, so the rounds gain
+nothing. The pack, the reset and the paint still give up to 1.29x by
+4 threads. Beyond that, threads only cost: 1.04x at 8, 0.76x at 16.
 
 At 4-conn the small scenes agree. `sq_256` is fastest at 4 threads
 (0.0408 ms, 1.21x faster than ch07's 0.0492). The serpentine is
@@ -537,12 +544,16 @@ the image already on the GPU, no gap before it.
 back (bench_v5's e2e), 5 repeats after the timed block. Its output is
 checked too.
 
-Where the GPU's data lives decides as much as its kernel. By events
-the GPU leads on every scene but the serpentine (`sq_256` is a tie).
-Its launch path alone loses it `sq_256`.
+Where the GPU's data lives decides as much as its kernel. By events,
+at 8-conn, the GPU leads on every scene but the serpentine (`sq_256`
+is a tie). Its launch path alone loses it `sq_256`.
 
-With the image in host memory, the GPU leads only on the pixel BFS
-and, barely, on the drones.
+At 4-conn, ch09's tiles win `sq_256` even by events, by 1.21x.
+
+With the image in host memory, the GPU leads only on the square's
+pixel BFS and, barely, on the drones. On the small scenes even ch09's
+pixel BFS on one thread wins: 0.200 against 0.930 ms for ch03 on
+`sq_256`, 0.673 against 175.9 ms on the serpentine.
 
 ch08's default engine (the dense-tile path) is the slower one on these
 small frames: 0.1137 against 0.0911 ms by events. On `input_blobs` the
@@ -661,15 +672,18 @@ the session's start to its files, and a peak RSS of 5,210 MB.
 
 ## New problems and lessons
 
-- **The method is worth more than the cores.** On the square the
-  tiles on one thread gave 12.2x, and 16 threads 4.18x. The pixel BFS
-  on 16 threads is still 2.9x slower than the tiles on one.
+- **On one big blob, the method is worth more than the cores.** On the
+  square the tiles on one thread gave 12.2x, and 16 threads 4.18x. The
+  pixel BFS on 16 threads is still 2.9x slower than the tiles on one.
+  On many blobs it is the other way round: 2.75x against 4.65x on the
+  frame, 0.97x against 1.35x on the drones.
 - **16 vCPUs are not 16 cores.** The tile variants reach 4.2-4.6x on
   the big scenes, and stall from 4 to 8 threads. With a static
   schedule, every barrier waits for the slowest chunk.
 - **A copy can cost more than the whole job.** The square's pageable
-  copies took longer than the 16-thread fill. Where the data lives
-  decides the winner as much as the kernel does.
+  copies (about 37 ms, derived) took longer than the tile BFS's whole
+  16-thread fill (21.29 ms). Where the data lives decides the winner
+  as much as the kernel does.
 - **Small images want few threads.** Pack, reset and paint fork at
   any size, and the small scenes never split a BFS step. `sq_256` is
   fastest at 2 threads, the serpentine at 4.
