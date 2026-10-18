@@ -258,8 +258,9 @@ The 9,191, by folder (a collect-only run on 2026-10-18): ch01 48, ch02
 each of 9 switch modes), ch08 2,567, ch09 627, Triton twins 3,027,
 service 55, overview 11.
 
-ch01-ch08 and the Triton twins need the GPU. ch09's 627 run on the CPU
-(its GPU side is faked):
+ch01-ch08, the Triton twins and the service need the GPU. The
+overview's 11 are CPU only. ch09's 627 run on the CPU too (its GPU
+side is faked):
 
 ```bash
 nice -n 10 uv run pytest src/flood_fill_cuda/chapters/ch09_cpu_nthreads/
