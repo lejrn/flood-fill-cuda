@@ -104,8 +104,21 @@ named beside it.
 |---|---|---|
 | fill one blob on the GPU, as a BFS | **ch07**, a frontier of 32×32 tiles | `sq_8000` in 3.107 ms, 22.7× ch03's best grid (`tiles_20261016T064724Z`) |
 | label many blobs on the GPU, as a BFS | **ch08**, waves over tile components | `input_blobs` in 2.403 ms, ch06 2.567 ms; per round, ch08 takes 0.890 of ch06's time (median, `dense_20261016T054922Z`) |
-| the non-BFS reference | **ch06**, run-based connected components | no frontier at all. It still wins where connectivity is the work: `sq_8000` (2.252 ms; ch07's default runs at 0.73× its speed, `tiles_20261016T064724Z`), the serpentines and the maze. Against ch08's default (`dense_20261016T054922Z`) it wins on long shapes along tile borders (ch08 takes 1.546× its time on `zz_lattice_4k`) and on `input_blocks` (1.459×), and it is faster or ties on images up to about 2000 × 2000 px |
+| the non-BFS reference | **ch06**, run-based connected components | no frontier at all; it still beats ch07 and ch08 on some scenes (below) |
 | the CPU | **ch09**, tiles on all 16 vCPUs | the 64 Mpx square in 21.29 ms (51× one core), the 81 Mpx frame in 21.06 ms (`ch09_20261017T233237Z`) |
+
+ch06 takes `sq_8000` in 2.252 ms. There ch07's default runs at 0.73×
+its speed (paired median, `tiles_20261016T064724Z`).
+
+ch06 also beats ch07 on the serpentines and the maze, in the same
+session.
+
+Against ch08's default (`dense_20261016T054922Z`), ch06 wins on long
+shapes along tile borders and on `input_blocks`. ch08 takes 1.546× its
+time on `zz_lattice_4k` and 1.459× on `input_blocks`.
+
+On images up to about 2000 × 2000 px, ch06 is faster than ch08 or
+ties.
 
 ch09 also compares the CPU with the GPU, in one session. By events,
 ch07 and ch08's first version are still 6.24× and 9.43× faster.
