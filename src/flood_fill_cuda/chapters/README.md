@@ -8,13 +8,13 @@ chapter's inheritance. Every number below is measured on this repo's RTX
 same `@njit` CPU reference, and losses are reported as plainly as wins.
 
 ```
-CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs ──"one pixel per step?"──► 1 blob, tiles ──"many blobs on tiles?"──► N blobs, tile comps
-                                     │                                      │                            │                                    │                                   │                                    │                                     │                                           │
-                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:        "one step closes a 32×32 tile:              "the node is a tile comp:
-                                     ▼                            one BFS? where do they run?"    what stops it - and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,      BFS over tiles, ~31× fewer steps;            each claimed once, 6 rounds;
-                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write   but ch06's runs still beat its core          beats ch06 on input_blobs
-                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)       (70.5 ms → 3.49 ms vs ch03, bare)            (2.62 ms → 2.21 ms, core 0.76×)
-                                                                                                  plateau at 512 threads/SM      (1.6-1.8×)                        (755k blobs in 25 ms)
+CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs ──"one pixel per step?"──► 1 blob, tiles ──"many blobs on tiles?"──► N blobs, tile comps ──"was one core fair?"──► all CPU cores
+                                     │                                      │                            │                                    │                                   │                                    │                                     │                                           │                                          │
+                          "the queue doesn't fit"                "how should two blocks share    "does it keep scaling?          "two seeds, one queue:            "no seeds given at all:              "150× fewer runs than red px:        "one step closes a 32×32 tile:              "the node is a tile comp:                 "the GPU's ideas on 16 vCPUs:
+                                     ▼                            one BFS? where do they run?"    what stops it - and is          who owns each pixel?"             candidate waves + atomicMin           connectivity over 539k items,      BFS over tiles, ~31× fewer steps;            each claimed once, 6 rounds;              tiles, prange, no atomics; the GPU
+                                v2 spill tier                     split / global / dirsplit /     it bandwidth?"                  label in the entry;               union vs a CCL prepass;              the clock is one read + one write   but ch06's runs still beat its core          beats ch06 on input_blobs                 6.24-9.43× faster by events, but on
+                                                                  pinned                          global queue × 48 blocks;      levels = max, not sum             labels leave the entry               (58 ms → 1.46 ms, no BFS left)       (70.5 ms → 3.49 ms vs ch03, bare)            (2.62 ms → 2.21 ms, core 0.76×)           big scenes 1.89-2.34× slower e2e
+                                                                                                  plateau at 512 threads/SM      (1.6-1.8×)                        (755k blobs in 25 ms)                                                                                                                                            (1,087.4 ms → 21.29 ms vs one core)
 ```
 
 Chapters 1-5 all ask *how should pixels move?* Chapter 6 asks whether
@@ -707,6 +707,87 @@ as BFS waves, and union-find only joins waves that meet.)*
    (`results/ch08_gpu_nblob_tiles/ncu/`, before and after the dense
    path). The dense twins now wait on shared-memory bank conflicts; the
    paint floor is still unexplained.
+
+*(Chapter 9 took up none of these. It went back to the baseline, one
+CPU core, and asked whether it had been a fair one.)*
+
+---
+
+## Chapter 9 - every CPU core, the GPU's ideas (`ch09_cpu_nthreads/`)
+
+### Inherited problems
+1. **The baseline was one core.** Chapters 3, 7 and 8 were compared
+   with ONE CPU core. The video's v5 session (`v5_20261017T192640Z`)
+   put the `sq_8000` fill at 1,065 ms on one core against 3.12 ms for
+   ch07 (341x), and the `input_blobs` labels at 225 ms against 2.21 ms
+   for ch08's first version (101x).
+2. **The CPU is a hybrid seen through a hypervisor.** The i9-13900H
+   has 6 P-cores with two threads each and 8 E-cores. WSL2 shows 16
+   threads as a synthetic 8 cores x 2, and Windows schedules them over
+   the real cores. So efficiency is given per vCPU.
+3. **Numba's API exposes no CPU atomics.** Every GPU chapter leans on
+   CAS claims, atomic OR and atomicMin. On the CPU each claim must be
+   safe by construction, or harmless when it races.
+
+### Approaches - what each bets
+| approach | the bet |
+|---|---|
+| **pixel BFS** (`PixelBFS`, ch03's idea) | a level-synchronous BFS whose frontier splits into one chunk per thread; each chunk writes its discoveries into its own buffer, so no shared queue is needed |
+| **tile BFS** (`TileBFS`, ch07's idea) | 64 x 64 tiles of `uint64` words, closed with word operations: a round moves the wave a tile, not a pixel (64 rounds against 4,001 levels on the square); neighbours talk through inboxes with one writer each |
+| **tile labels** (`TileLabels`, ch08's idea) | local pieces per tile, seeds, waves from piece to piece, unions at the end; the waves claim pieces, not pixels, so a lost race costs one recorded meeting, never a wrong label |
+| **one chunk per thread** | Numba's OpenMP layer schedules a `prange` statically, so more chunks than threads would only run back to back; the kernels use `np.empty` and serial loops, because `np.zeros` and `.sum()` would each add a hidden fork and barrier |
+| **no atomics** | each chunk owns what it writes; where two chunks can touch one place, they store whole aligned bytes or int32s (benign races), and a stamp beside the claim lets exactly one racer expand it |
+
+### Results (i9-13900H under WSL2, RTX 4060 Laptop, session `ch09_20261017T233237Z`)
+| finding | number |
+|---|---|
+| **headline, the square** (`sq_8000_center`, 64 Mpx, one blob, 8-conn) | tile BFS on 16 threads **21.29 ms**, 51x one core (1,087.4 ms). ch07 by events: **3.411 ms, GPU 6.24x** |
+| **headline, the frame** (`input_blobs`, 81 Mpx, 2,522 blobs) | tile labels on 16 threads **21.06 ms**, 13x one core (271.5 ms). ch08's first version by events: **2.232 ms, GPU 9.43x** |
+| **end to end** (a pageable copy in, the painted image back) | ch07 40.31 ms, ch08's first version 49.30 ms: **CPU 1.89x and 2.34x**. The copies alone (derived: about 37 and 47 ms) cost more than the CPU's whole run; the labels win already at 4 threads (29.83 ms) |
+| method, cores, hardware: the square | one core 1,087.4 → one thread 89.33 ms (**method 12.2x**) → 16 threads 21.29 ms (cores 4.18x) → ch07 3.411 ms (hardware 6.24x) |
+| method, cores, hardware: the frame | one core 271.5 → one thread 97.84 ms (method 2.75x) → 16 threads 21.06 ms (cores 4.65x) → ch08's first version 2.232 ms (**hardware 9.43x**) |
+| the pixel BFS (no tiles) | method 1.10x, cores 3.80x: 259.0 ms on 16 threads, 2.9x slower than the tiles on one thread. ch03 (101.2 ms) wins by 2.56x, and by 1.89x even with its copies (137.0 ms) |
+| thread scaling | the tile variants reach 4.18-4.65x at 16 threads, 26-29% per vCPU, and stall from 4 to 8 threads (the square's tile BFS: 3.13x, then 3.10x); not profiled |
+| **where the CPU wins: a one-tile front** | `serpentine_256`: 388 rounds of one tile in 0.132 ms at 4 threads, 22.4x faster than ch07 (2.962 ms) even by events. One core's twin (0.470 ms) is 6.3x faster too |
+| **where the CPU wins: small images** | `sq_256`: a tie by events (0.0461 ms at 2 threads, ch07 0.0451). With ch07's copies (0.503 ms) the CPU is 10.9x faster; the GPU's launch path alone is about 0.26 ms (derived) |
+| the drones (240 frames, 0.59 Mpx) | the cores give only 1.35x. ch08's first version leads 8.66x by events; end to end it is a tie (0.776 vs 0.792 ms per frame, 1.02x for the GPU) |
+| correctness | 627 tests. A fuzz of about 1.08 million runs found no wrong output. Every timed CPU call in the session was checked off the clock (64,446 on the scenes, 12,960 on the drones); none differed |
+
+### New problems and lessons
+- **On one big blob, the method is worth more than the cores.** Tiles
+  on one thread gave 12.2x on the square, 16 threads 4.18x. On many
+  blobs it is the other way round: 2.75x against 4.65x on the frame,
+  0.97x against 1.35x on the drones.
+- **16 vCPUs are not 16 cores.** With a static schedule, every barrier
+  waits for the slowest chunk.
+- **A copy can cost more than the whole job.** Where the data lives
+  decides the winner as much as the kernel does.
+- **Small images want few threads.** Pack, reset and paint fork at any
+  size, and the small scenes never split a BFS step. `sq_256` is
+  fastest at 2 threads, the serpentine at 4.
+- **Exact without atomics, on one assumption.** Tests force the races
+  1,000 times (a 65 x 65 square, the duel scene), and every output is
+  exact. The compiler side rests on each racing access compiling to
+  one load or store.
+- **A load meter needs a window much longer than its tick.** Short
+  batches read up to 92% busy, most likely from tick counting.
+
+### Open problems → Chapter 10 candidates
+1. **The 4-to-8 stall.** Uneven chunks, a dynamic schedule or
+   per-thread timings would test the slow-chunk reading.
+2. **One-tile fronts slow down with threads**, though no step is split.
+   A size threshold on pack, reset and paint, or a passive wait policy,
+   would test the spinning-workers reading.
+3. **Untuned thresholds.** A thread count chosen by image size would
+   take `sq_256` from 0.0563 to 0.0461 ms.
+4. **The paint is 29% of the square's 16-thread run** (21.29 ms, 15.16
+   without it), and the pack is not fused.
+5. **Ports not done:** 32 x 32 tiles of `uint32`, relaxed atomics for
+   the benign races, a CAS claim variant, and ch08's run CCL for dense
+   tiles.
+6. **Pinned memory, and data that stays on the GPU.** Both would move
+   the copy verdicts; the session used pageable copies only.
+7. **One session.** A second would show the run-to-run spread.
 
 ---
 
