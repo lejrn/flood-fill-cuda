@@ -4,8 +4,9 @@ A living document. Each chapter follows the same loop: **the problems we
 inherited → the approaches that attack them → what the measurements said →
 the new problems those measurements exposed** - which become the next
 chapter's inheritance. Every number below is measured on this repo's RTX
-4060 Laptop GPU (24 SMs), every kernel is proven pixel-exact against the
-same `@njit` CPU reference, and losses are reported as plainly as wins.
+4060 Laptop GPU (24 SMs) and, for ch09, an i9-13900H under WSL2 (16
+vCPUs). Every kernel is proven pixel-exact against the same `@njit` CPU
+reference, and losses are reported as plainly as wins.
 
 ```
 CPU BFS ──"one core is serial"──► 1 block ──"one SM is 4% of the GPU"──► 2 blocks ──"2 SMs are 8%"──► N blocks ──"one blob is one BFS"──► 2 blobs ──"who finds the seeds?"──► N blobs ──"why move pixels at all?"──► N runs ──"one pixel per step?"──► 1 blob, tiles ──"many blobs on tiles?"──► N blobs, tile comps ──"was one core fair?"──► all CPU cores
