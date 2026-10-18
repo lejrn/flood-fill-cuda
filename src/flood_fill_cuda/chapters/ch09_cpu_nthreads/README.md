@@ -71,10 +71,12 @@ the same cores. None of them is quoted here.
 
 ## Inherited problems
 
-1. **The baseline was one core.** The video's v5 session compares the
-   GPU with the same work on one core. `sq_8000` 8-conn BFS: 1,396 ms
-   on one core, 3.1 ms for ch07. `input_blobs` labels: 274 ms, 2.2 ms
-   for ch08. `sq_256`: 0.19 ms, 0.044 ms for ch07.
+1. **The baseline was one core.** The video's v5 session
+   (`v5_20261017T192640Z`, on the branch `video-v5`) compares the GPU
+   with the same work on one core. `sq_8000` 8-conn fill: 1,065 ms on
+   one core, 3.12 ms for ch07 (341x). `input_blobs` labels: 225 ms,
+   2.21 ms for ch08's first version (101x). `sq_256`: 0.192 ms, 0.044
+   ms for ch07.
 2. **The CPU is a hybrid seen through a hypervisor** (מנהל
    וירטואליזציה). The i9-13900H has 6 P-cores with two threads each
    and 8 E-cores: 14 cores, 20 threads. WSL2 shows 16 of them as a
@@ -367,10 +369,19 @@ ch07's cell took 3.411 ms on the square (min 3.096). ch07's own
 session had 3.107 ms (`tiles_20261016T064724Z`); against that, the
 tile BFS's hardware step would be 6.85x (derived).
 
-**The video's factors.** Its v5 session had 1,396 ms for one core and
-3.1 ms for ch07 on the square, about 450x. Like for like here, it is
-1,087.4 against 3.411 ms: 319x. The two one-core figures were not
-reconciled (יושבו).
+**The video's factors.** The video uses `v5_20261017T192640Z`, in
+`results/overview/benchmark_results/` on the branch `video-v5` (not
+merged here). It had 1,064.7 ms for one core and 3.122 ms for ch07 on
+the square: 341x.
+
+Its twin, `cpu_fill8`, fills without the paint, like `one_fill_c8`
+here: 1,087.3 ms, 2.1% more. With the paint, this session gives
+1,087.4 against 3.411 ms: 319x. The lower factor comes from ch07's
+cell, 9% slower here (derived).
+
+An earlier v5 session, `182449Z`, timed the oracles as called, with
+their allocations on the clock (1,396 ms on the square). The video
+does not use it.
 
 ### Thread scaling
 
