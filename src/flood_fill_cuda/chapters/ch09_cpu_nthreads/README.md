@@ -607,8 +607,9 @@ round, 6-7% above its median. The medians absorb it.
 **The batch meter is coarse.** Each cell's batch also gets a load
 reading, but /proc/stat counts in 10 ms ticks (תקתוקים).
 
-Batches under 20 ms on the clock read up to 92% (182 of 523 above 3%).
-Batches of 300 ms or more read a median of 0.3%, and 2 of 239 above 3%.
+A batch's time on the clock is the sum of its timed calls. Batches
+under 20 ms read up to 92% (167 of 481 above 3%). Batches of 300 ms or
+more read a median of 0.3%, and 2 of 239 above 3%.
 
 The worst long batch (12.3%, the pixel BFS at 2 threads on the
 square) left no trace: its round median is 720.9 ms, the cell's median
