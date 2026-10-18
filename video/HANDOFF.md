@@ -752,3 +752,73 @@ Gotchas found while building the chain cut:
   `final_vertical_kokoro.mp4` from the newest clips in `media/vertical/`,
   which were Peter Baker's (section 7, "Voices share the media folder").
   It was restored with a full re-render (146.53 s, 10 of 10 seams OK).
+
+## 12. Rendering on the GPU (experimental, branch `video-gl`, 2026-10-18)
+
+The chain cut renders on the CPU with Cairo. `scenes/glcompat.py` lets a
+scene render with Manim's OpenGL renderer on the RTX 4060 instead. Mesa's
+D3D12 driver gives a GL 4.2 context inside WSL.
+
+Status: r06_diagonals is ported and checked; r10_tiles renders too. The
+other scenes need the same import edits first (below).
+
+```bash
+uv run build/assemble.py --cut chain --look iso --render --renderer gl --nvenc --only r06_diagonals
+MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA GL_NVENC=1 VOICE=kokoro_paced_chain LOOK=iso \
+    .venv/bin/python -m manim render --renderer=opengl --write_to_movie --disable_caching \
+    -qh --fps 30 --media_dir media/gl_test scenes/chain/r06_diagonals.py Diagonals
+uv run build/nvenc_bench.py <clip.mp4> --out <dir> --mode clip    # or --mode cut on a cut's video_only.mp4
+```
+
+How it works:
+- Under Cairo, glcompat exports Manim's own classes and patches nothing.
+  r06 and r10 render byte for byte as before (same MD5 as the cut's clips).
+- Under `--renderer=opengl` it adds Cairo's `z_index` to the OpenGL
+  classes and accepts `family=`. Its renderer draws in Cairo's order and
+  keeps Cairo's clock, so hooks, cues and the snap time match to the frame.
+- Images are resized and placed on the pixel box Cairo's camera uses,
+  so a still image lands on exactly the same pixels.
+- Fills use 8x MSAA shaded per sample. Manim's own fill feather made text
+  half a pixel bolder; this matches Cairo's weight. Open strokes end at
+  their endpoints (Cairo's butt cap); Manim's shader ran them a pixel on.
+- `GL_NVENC=1` encodes with h264_nvenc, one session per scene (opening one
+  takes about 1.5 s in WSL). Its colours decode the same as Manim's writer.
+
+Rules:
+- Import `ImageMobject`, `VMobject` and `Mobject` from `scenes.glcompat`,
+  never from manim, wherever a scene builds an image or checks a type.
+- The OpenGL renderer writes a movie only with `--write_to_movie`.
+- Without `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` Mesa picks the Intel
+  iGPU. `assemble.py --renderer gl` sets it and fails a clip whose
+  `GL_RENDERER` does not name NVIDIA.
+- One GL render at a time (one GPU). The static ffmpeg with NVENC lives in
+  `video/.tools/` (git-ignored): BtbN's n8.1 linux64 GPL build, checksum
+  verified against the publisher's list.
+
+Measured (1080p30 landscape, one render at a time):
+
+| scene | renderer | wall | CPU (user+sys) | peak RSS |
+|---|---|---|---|---|
+| r06 (226 frames) | Cairo | 48.3 s | 56.2 s | 725 MB |
+| r06 | GL + libx264 | 17.3 s | 22.0 s | 820 MB |
+| r06 | GL + NVENC | 7.8-9.3 s | 12.2-13.0 s | 474 MB |
+| r10 (724 frames) | Cairo | 157.1 s | 180.5 s | 796 MB |
+| r10 | GL + NVENC | 19.0 s | 29.4 s | 554 MB |
+
+About 4 s of each GL render is start-up (imports, building the states).
+The GPU stays near its idle level (13% on average, 47% at most, against
+14-19% idle with the desktop); the CPU side (Python, the scenes' own
+rasters) sets the pace. Before the writer's queue was bounded, r10
+peaked at 1,422 MB.
+
+Parity on r06: all 179 distinct raw frames have SSIM 0.9991 or more
+against Cairo. Mean difference 0.12 levels; at most 0.061% of pixels are
+off by more than 32. What differs is edge anti-aliasing (8 samples
+against Cairo's exact coverage), mostly on text and thin strokes, and
+the in-between frames of a growing arrow (GrowArrow, 135 levels on a
+few tip pixels for 3 frames). Images match pixel for pixel.
+
+Still to port: import edits in r02, r04, r05b, r07, r09, r11_rounds,
+stage.py and panes/middle_strip.py, and the bare `VMobject()` paths in
+machine.py and r09. Then a GL render and check of every clip, in both
+layouts.
