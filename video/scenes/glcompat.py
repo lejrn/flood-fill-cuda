@@ -197,9 +197,10 @@ else:
     void main() { vec4 c = texture(tex, v_uv); frag_color = vec4(c.rgb, c.a * opacity); }
     """
 
-    def _program(ctx, folder: str, per_sample: bool = False):
+    def _program(ctx, folder: str, per_sample: bool = False, butt_caps: bool = False):
         """A program from Manim's shader folder; per_sample: the fragment
-        shader runs once per MSAA sample (GLSL 4.0 `sample` input)."""
+        shader runs once per MSAA sample (GLSL 4.0 `sample` input);
+        butt_caps: open strokes end at their endpoints, as Cairo's do."""
         def code(name):
             return get_shader_code_from_file(Path(folder) / f"{name}.glsl")
         geom, frag = code("geom"), code("frag")
@@ -211,6 +212,11 @@ else:
                 "out vec2 uv_coords;", "sample out vec2 uv_coords;", 1)
             frag = frag.replace("#version 330", "#version 400", 1).replace(
                 "in vec2 uv_coords;", "sample in vec2 uv_coords;", 1)
+        if butt_caps:       # Cairo's butt cap: an open stroke ends at its endpoint, not a feather past it
+            old_buff = "float buff = 0.5 * uv_stroke_width - uv_anti_alias_width;"
+            if old_buff not in frag:
+                raise RuntimeError(f"{folder}: no `{old_buff}` to replace")
+            frag = frag.replace(old_buff, "float buff = 0.5 * uv_stroke_width;", 1)
         return ctx.program(vertex_shader=code("vert"), geometry_shader=geom, fragment_shader=frag)
 
     def _vao_format(prog, layout) -> tuple[str, list[str]]:
@@ -283,7 +289,8 @@ else:
 
             self.p_fill = _program(ctx, OpenGLVMobject.fill_shader_folder,
                                    per_sample=self.samples > 0 and self.fill_aa_px == 0)
-            self.p_stroke = _program(ctx, OpenGLVMobject.stroke_shader_folder)
+            self.p_stroke = _program(ctx, OpenGLVMobject.stroke_shader_folder,
+                                     butt_caps=os.environ.get("GL_BUTT_CAPS", "1") == "1")
             self.p_image = ctx.program(vertex_shader=_IMAGE_VS, fragment_shader=_IMAGE_FS)
             self.p_image["tex"].value = 0
             self._fmt = {
