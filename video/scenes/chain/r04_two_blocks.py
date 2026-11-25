@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import DOWN, FadeIn, FadeOut, Group, ImageMobject, Polygon, ReplacementTransform, smooth
+from manim import DOWN, FadeIn, FadeOut, Group, Polygon, ReplacementTransform, smooth
 
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
@@ -44,6 +44,7 @@ from scenes.chain.iso import plane_corners
 from scenes.chain.r03_giant import F15, plan_index, sweep_plan
 from scenes.chain.state import (OWNER_FLOORS, boundary, floor_raster, level_colors, owner_colors, owner_fine,
                                 toys)
+from scenes.glcompat import ImageMobject
 from scenes.style import INK, RED_PX
 
 DROP = 0.7              # how far above SM 0 block 1's cube starts its drop (frame units)

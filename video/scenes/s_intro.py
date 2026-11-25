@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from manim import DOWN, Dot, FadeIn, Line, Rectangle, RoundedRectangle, ValueTracker, VGroup, VMobject, config
+from manim import DOWN, Dot, FadeIn, Line, Rectangle, RoundedRectangle, ValueTracker, VGroup, config
 
+from scenes.glcompat import VMobject
 from scenes.panes import data
 from scenes.panes.geometry import Box
 from scenes.panes.middle_strip import load_image

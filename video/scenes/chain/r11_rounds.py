@@ -57,13 +57,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import Arrow, Circle, FadeIn, FadeOut, GrowArrow, Group, ImageMobject, Line, VGroup, config, smooth
+from manim import Arrow, Circle, FadeIn, FadeOut, GrowArrow, Group, Line, VGroup, config, smooth
 from manim.constants import RESAMPLING_ALGORITHMS
 
 from scenes.chain import floor as fl
 from scenes.chain import overlays as ov
 from scenes.chain import state as st
 from scenes.chain.base import EPS, MIN_DWELL, ChainScene, fr
+from scenes.glcompat import ImageMobject
 from scenes.style import INK, INK_SOFT, RED_PX
 
 # MIN_DWELL in whole frames (1.8 s): until() rounds 1.75 s down a frame. A

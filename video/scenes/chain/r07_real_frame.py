@@ -25,13 +25,14 @@ from dataclasses import replace
 from functools import lru_cache
 
 import numpy as np
-from manim import DL, UR, Circle, Dot, FadeIn, FadeOut, Group, ImageMobject, VMobject
+from manim import DL, UR, Circle, Dot, FadeIn, FadeOut, Group
 
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import LEVEL_HI, Z_OVER, boundary, filled_picture, floor_raster, picture, picture_blobs
+from scenes.glcompat import ImageMobject, VMobject
 from scenes.style import INK, INK_SOFT, label
 
 Z_LABEL = 195.0         # the machine's silkscreen and launch pill (z0 + 95)

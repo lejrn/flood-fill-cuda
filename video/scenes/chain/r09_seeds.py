@@ -24,8 +24,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import (DOWN, LEFT, RIGHT, UP, Dot, FadeIn, FadeOut, LaggedStart, RoundedRectangle, VGroup, VMobject,
-                   config)
+from manim import DOWN, LEFT, RIGHT, UP, Dot, FadeIn, FadeOut, LaggedStart, RoundedRectangle, VGroup, config
 
 from scenes.chain import floor as fl
 from scenes.chain import machine as mc
@@ -33,6 +32,7 @@ from scenes.chain import overlays as ov
 from scenes.chain import toy
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import BLOB_HUES, Z_MACHINE, Z_OVER, boundary, label_colors, picture, toys
+from scenes.glcompat import VMobject
 from scenes.style import GOLD, INK, RED_PX, label
 
 STRIDE = 4      # the toy's lattice; the real run (split_L8) uses 8 on a 9000 x 9000 picture

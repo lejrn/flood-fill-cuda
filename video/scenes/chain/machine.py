@@ -646,7 +646,7 @@ def vram_path(pl: Placement, sm: int, slot: int) -> list[np.ndarray]:
 
 def path_mobject(pts: list):
     """A VMobject through the points, for MoveAlongPath."""
-    from manim import VMobject
+    from scenes.glcompat import VMobject
 
     return VMobject().set_points_as_corners([np.asarray(p, float) for p in pts])
 

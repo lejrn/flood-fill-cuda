@@ -31,8 +31,7 @@ from dataclasses import replace
 
 import numpy as np
 from manim import (DL, DOWN, LEFT, UP, FadeIn, FadeOut, GrowFromEdge, Group, LaggedStart, Rectangle, RoundedRectangle,
-                   SurroundingRectangle, UpdateFromAlphaFunc, VGroup, VMobject, linear, rush_into, smooth,
-                   there_and_back)
+                   SurroundingRectangle, UpdateFromAlphaFunc, VGroup, linear, rush_into, smooth, there_and_back)
 
 from scenes.chain import die as dz
 from scenes.chain import floor as fl
@@ -40,6 +39,7 @@ from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
 from scenes.chain.base import MIN_DWELL, ChainScene, caption_group, fr
 from scenes.chain.state import Z_FLOOR, Z_OVER, boundary, floor_raster, fmt_ms, level_colors, toys
+from scenes.glcompat import VMobject
 from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT, RED_PX, label
 
 # The SM close-up: (centre of the SM picture, its height), the title and

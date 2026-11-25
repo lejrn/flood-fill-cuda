@@ -8,12 +8,10 @@ what keeps the boundary frames pixel-identical.
 from __future__ import annotations
 
 import numpy as np
-from manim import (
-    Group, ImageMobject, ReplacementTransform, RoundedRectangle, Square, VGroup,
-    LEFT, RIGHT,
-)
+from manim import Group, ReplacementTransform, RoundedRectangle, Square, VGroup, LEFT, RIGHT
 from manim.constants import RESAMPLING_ALGORITHMS
 
+from scenes.glcompat import ImageMobject
 from scenes.style import ASSETS, GREY, GRID, INK, INK_SOFT, PURPLE, RED_PX, TEAL, is_vertical, label
 from scenes.panes import data
 from scenes.panes.geometry import Box

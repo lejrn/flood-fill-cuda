@@ -26,13 +26,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from manim import (DOWN, RIGHT, FadeIn, FadeOut, Group, ImageMobject, Rectangle, RoundedRectangle, VGroup,
-                   VMobject, config)
+from manim import DOWN, RIGHT, FadeIn, FadeOut, Group, Rectangle, RoundedRectangle, VGroup, config
 
 from scenes.chain import machine as mc
 from scenes.chain import overlays as ov
 from scenes.chain.base import MIN_DWELL, ChainScene, fr
 from scenes.chain.state import boundary, floor_raster, level_colors, toys
+from scenes.glcompat import ImageMobject, VMobject
 from scenes.style import BLUE, GREY, GRID, INK, INK_SOFT
 
 SLOW_RING = 0.95        # at least this many seconds per slow ring: 2 stops per ring stay under 3 flashes/s

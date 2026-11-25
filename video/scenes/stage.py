@@ -25,11 +25,9 @@ import json
 from dataclasses import dataclass
 
 import numpy as np
-from manim import (
-    AnimationGroup, FadeIn, FadeOut, Group, ImageMobject, LaggedStart, VGroup,
-    config,
-)
+from manim import AnimationGroup, FadeIn, FadeOut, Group, LaggedStart, VGroup, config
 
+from scenes.glcompat import ImageMobject
 from scenes.style import ASSETS, BeatScene, beat_seconds
 from scenes.panes import data
 from scenes.panes.config import STAGES, Stage
