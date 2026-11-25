@@ -59,9 +59,9 @@ NAMES = ["chain", "runs_vs_pixels", "speedup", "scaling"]
 # number.
 EDITS = {
     "chain": {
-        # The footnote runs past the 720-unit viewBox; the page caption
-        # says the same with the estimate and session caveats added.
-        "drop": ["pure Python → ch06"],
+        # The two footnotes (the estimates, the two contracts) are said
+        # in full by the page text and caption, with the session caveat.
+        "drop": ["ch01-ch04 fill one or two", "The ends are not one contract"],
         # The two ch06 rows share one label; name the contract instead.
         "relabel": [("ch06 · N runs", ["ch06 · rgb in", "ch06 · packed mask"])],
     },

@@ -1,8 +1,10 @@
 # Project page
 
 A one-page site for flood-fill-cuda in the style of the
-[Nerfies](https://nerfies.github.io) project page. It covers the Numba
-chapters (ch01-ch06). The Triton twins are not on it yet.
+[Nerfies](https://nerfies.github.io) project page. It covers the ten
+chapters (ch00-ch09) and the session against OpenCV and CuPy. The
+videos, the carousel and the figures show ch01-ch06; ch07-ch09 and the
+libraries are text and tables. The Triton twins are not on it yet.
 
 ## View it
 
@@ -91,6 +93,15 @@ hyphens. No bar, dot, line or number changes.
   the page leaves them out.
 - Chapters 1-4 on the 2,522-blob image are estimates (six sample launches
   times the launch count), and the page says so.
+- The video's closing "16,000x" divides a pure-Python run on the host
+  clock by a kernel time. The page gives the like-for-like pair under
+  the video and beside the chain chart (122x by kernel time, 5.5x with
+  the copies, one session).
+- The numbers of ch07-ch09 and of the libraries are copied by hand from
+  the READMEs, which quote the committed sessions
+  (`tiles_20261016T064724Z`, `dense_20261016T054922Z`,
+  `ch09_20261017T233237Z`, `libs_20261125T140827Z`). Update the page
+  when those change.
 - The ch06 numbers and the pure-Python and @njit numbers come from
   different sessions. The page pairs same-session numbers where it
   compares them.
@@ -100,3 +111,5 @@ hyphens. No bar, dot, line or number changes.
 The design and code are adapted from the Nerfies page, which is CC BY-SA
 4.0. This page is shared under the same license, with the link back in
 its footer. See `THIRD_PARTY_NOTICES.md` for the bundled files.
+
+The rest of the repository is under the MIT license (`../LICENSE`).
