@@ -62,6 +62,7 @@ else:
     from manim.renderer.opengl_renderer import OpenGLRenderer
     from manim.renderer.shader_wrapper import get_shader_code_from_file
     from manim.scene.scene_file_writer import SceneFileWriter
+    from manim.utils.bezier import interpolate as _interp
     from manim.utils.color import color_to_rgba
     from manim.utils.exceptions import EndSceneEarlyException
     from manim.utils.images import change_to_rgba_array, get_full_raster_image_path
@@ -179,6 +180,26 @@ else:
 
         def get_shader_wrapper_list(self):
             return []
+
+        def interpolate(self, mobject1, mobject2, alpha: float, path_func=None):
+            """Cairo's ImageMobject.interpolate_color as well: the pixels blend
+            from mobject1's to mobject2's. A Transform's start and target are
+            deep copies that keep ticking their own updaters (a Replay plays
+            on in both), so a footage panel keeps playing while it fades in,
+            as under Cairo. Equal pixels are left alone (no re-upload)."""
+            if path_func is None:
+                super().interpolate(mobject1, mobject2, alpha)
+            else:
+                super().interpolate(mobject1, mobject2, alpha, path_func)
+            a1, a2 = getattr(mobject1, "pixel_array", None), getattr(mobject2, "pixel_array", None)
+            if a1 is None or a2 is None or a1.shape != a2.shape:
+                return self
+            if a1 is a2 or np.array_equal(a1, a2):
+                if self.pixel_array is not a1 and not np.array_equal(self.pixel_array, a1):
+                    self.pixel_array = a1.copy()
+                return self
+            self.pixel_array = _interp(a1, a2, alpha).astype(self.pixel_array.dtype)
+            return self
 
     ImageMobject = GLImage
 
