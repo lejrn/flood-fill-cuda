@@ -154,6 +154,63 @@ def test_contracts_agree(name):
     assert (a.n_runs, a.n_blobs, a.seeds) == (b.n_runs, b.n_blobs, b.seeds)
 
 
+# ------------------------------------------------- at the published size
+#
+# Every scene above is at most 200 px wide. count and emit give one warp
+# one row x at a time and are launched with 2,048 and 4,096 warps, so on
+# those scenes no warp ever takes a second trip of its row loop, and no
+# row is longer than 7 mask words. The headline numbers are measured at
+# 9000 x 9000. These scenes are wider than every phase's warp count
+# (width > 4,096), long along the run axis, or both.
+
+def _png(name):
+    from pathlib import Path
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    path = (Path(__file__).resolve().parents[4] / "images" / "input"
+            / f"{name}.png")
+    if not path.exists():
+        pytest.skip(f"{path} is missing")
+    return np.ascontiguousarray(np.array(Image.open(path).convert("RGB")))
+
+
+SCALE_SCENES = {
+    # 81 Mpx, the image of the chapter's headline
+    "input_blobs": lambda: _png("input_blobs"),
+    "input_blocks": lambda: _png("input_blocks"),
+    # 4,200 rows: every count and emit warp takes a second row; dense
+    # noise also overflows the run-capacity heuristic (the one-shot path
+    # must grow its table and still be exact)
+    "noise_4200": lambda: _scenes.random_blobs_scene(4200, 4200, 0.45, 11)[0],
+    # many rows, short ones; and few rows of 141 mask words each
+    "wide_4500x700": lambda: _scenes.random_blobs_scene(4500, 700, 0.30,
+                                                        12)[0],
+    "long_700x4500": lambda: _scenes.random_blobs_scene(700, 4500, 0.30,
+                                                        13)[0],
+    "grid_5000x3000": lambda: _scenes.blob_grid_scene(5000, 3000, 40, 24,
+                                                      90, gap=30)[0],
+}
+
+
+@pytest.mark.parametrize("name", sorted(SCALE_SCENES))
+@pytest.mark.parametrize("contract", CONTRACTS)
+def test_matches_cpu_oracle_at_the_published_size(name, contract):
+    """Label map, paint, blob count, seeds and run count, bit for bit, on
+    images as large as the ones the chapter is measured on."""
+    img = SCALE_SCENES[name]()
+    height = img.shape[1]
+    result = recolor(img, contract=contract, emit_label=True)
+    label, n_blobs = cpu_label_components(img)
+
+    assert result.n_blobs == n_blobs
+    assert result.n_runs == _numpy_run_count(img)
+    assert result.union_done == result.n_runs - result.n_blobs
+    np.testing.assert_array_equal(result.label, label)
+    np.testing.assert_array_equal(result.img, _expected_paint(img, label))
+    assert result.seeds == _expected_seeds(label, height)
+
+
 def test_blank_image_is_valid():
     """Zero blobs is a legal answer, not an error — ch05's rule kept."""
     img, _ = _scenes.blank_scene(32, 32)
