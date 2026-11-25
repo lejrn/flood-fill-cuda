@@ -752,6 +752,7 @@ CPU core, and asked whether it had been a fair one.)*
 | **where the CPU wins: a one-tile front** | `serpentine_256`: 388 rounds of one tile in 0.132 ms at 4 threads, 22.4x faster than ch07 (2.962 ms) even by events. One core's twin (0.470 ms) is 6.3x faster too |
 | **where the CPU wins: small images** | `sq_256`: a tie by events (0.0461 ms at 2 threads, ch07 0.0451). With ch07's copies (0.503 ms) the CPU is 10.9x faster; the GPU's launch path alone is about 0.26 ms (derived) |
 | the drones (240 frames, 0.59 Mpx) | the cores give only 1.35x. ch08's first version leads 8.66x by events; end to end it is a tie (0.776 vs 0.792 ms per frame, 1.02x for the GPU) |
+| against the libraries (`libs_20261125T140827Z`, RGB in, a label map out) | `input_blobs`: OpenCV 109.7 ms on 16 threads, ch09 **38.42 ms** (2.9x), CuPy on the GPU 22.43 ms, ch08 3.639 ms (59.98 ms with its copies). On noise OpenCV on 16 threads (24.83 ms) beats ch09 (27.63 ms). The one-core BFS of chapters 1-8 is 1.8x slower than OpenCV's one thread (6.7x on the square) |
 | correctness | 627 tests. A fuzz of about 1.08 million runs found no wrong output. Every timed CPU call in the session was checked off the clock (64,446 on the scenes, 12,960 on the drones); none differed |
 
 ### New problems and lessons

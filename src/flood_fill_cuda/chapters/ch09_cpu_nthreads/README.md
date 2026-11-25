@@ -601,6 +601,43 @@ On the drones, cold costs little: 0.846 against 0.792 ms per frame at
 take 0.970 of the lattice-8 time (range 0.806-1.106). Both need 5
 rounds; lattice 0 records 15,321 meetings against 20,028. A tie.
 
+### Against OpenCV and CuPy
+
+The session above measures ch09 against this project's own one-core
+twins and its GPU chapters. A second session, `libs_20261125T140827Z`
+(`benchmarks/library_baselines.py`, the same policy), puts the
+libraries beside them. Every output is checked against the oracle: the
+project's label maps exactly, a library's labels as the same partition.
+
+One contract here: the RGB image in, a full int32 label map out
+(ch09: `TileLabels.run(paint=False)` + `label_map()`; OpenCV:
+`inRange` + `connectedComponents`), 8-connectivity, host memory.
+
+| scene | OpenCV 1 thread | OpenCV 16 threads | ch09 1 thread | ch09 16 threads | ch08, GPU end to end |
+|---|---|---|---|---|---|
+| `input_blobs`, 81 Mpx | 174.9 ms | 109.7 ms | 146.0 ms | **38.42 ms** | 59.98 ms |
+| `sq_8000`, 64 Mpx, one blob | 137.7 ms | 88.10 ms | 135.7 ms | **39.35 ms** | 79.02 ms |
+| `random_4000`, 755,577 blobs | 84.65 ms | 24.83 ms | 173.0 ms | 27.63 ms | **13.98 ms** |
+| `input_blocks`, 1 Mpx | 1.899 ms | 1.154 ms | 4.550 ms | **0.735 ms** | 1.61 ms |
+
+"ch08, GPU end to end" is a pageable copy of the image in, ch08's
+pipeline with its label map, and the copy of the map back.
+
+**The two big images.** ch09 on 16 threads is 2.9x and 2.2x faster than
+OpenCV on 16, and it beats the GPU with its copies (1.6x and 2.0x).
+
+**Noise.** OpenCV wins on 16 threads (24.83 against 27.63 ms) and is
+twice as fast on one. With 755,577 blobs the GPU wins even with its
+copies. Not profiled.
+
+**The old baseline.** The oracle's BFS, the one core of chapters 1-8,
+takes 309.0 ms on `input_blobs` and 917.1 ms on the square: 1.8x and
+6.7x slower than OpenCV's one thread.
+
+The paint contract of the first session has no library cell. In this
+session ch09 recolours `input_blobs` in 19.80 ms on 16 threads (21.06
+there).
+
 ### How the session was protected
 
 **The order.** GPU blocks first, then 60 s of idle, then the CPU
@@ -777,10 +814,13 @@ test_correctness.py  596 tests
 benchmarks/
   benchmark.py       the one-session benchmark
   test_benchmark.py  31 tests of the harness
+  library_baselines.py       OpenCV and CuPy beside ch06, ch08 and ch09
+  test_library_baselines.py  5 tests of its harness
 ```
 
-The session: `results/ch09_cpu_nthreads/benchmark_results/`
-`ch09_20261017T233237Z.json` and `.csv`.
+The sessions: `results/ch09_cpu_nthreads/benchmark_results/`
+`ch09_20261017T233237Z.json` and `.csv`, and
+`libs_20261125T140827Z.json`.
 
 ## Run
 
@@ -796,6 +836,11 @@ uv run python -m flood_fill_cuda.chapters.ch09_cpu_nthreads.benchmarks.benchmark
 # about 15 min, peak RSS 5.2 GB):
 PYTHONUNBUFFERED=1 uv run python -m \
     flood_fill_cuda.chapters.ch09_cpu_nthreads.benchmarks.benchmark
+
+# the libraries' session (the same conditions; about 5 min, peak RSS
+# 5.3 GB):
+PYTHONUNBUFFERED=1 uv run python -m \
+    flood_fill_cuda.chapters.ch09_cpu_nthreads.benchmarks.library_baselines
 ```
 
 The drone masks are git-ignored assets. From the main checkout the
