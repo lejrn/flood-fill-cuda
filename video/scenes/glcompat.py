@@ -6,8 +6,8 @@ patches nothing, so a Cairo render stays byte for byte the same.
 With `--renderer=opengl` (the CLI sets config.renderer before it imports
 the scene file) it makes Manim's OpenGL renderer draw what Cairo draws:
 
-- Patches on import: OpenGLMobject gets Cairo's `z_index` and
-  `set_z_index`, and `family=` is accepted where Cairo takes it
+- Patches on import: OpenGLMobject gets Cairo's `z_index`, `set_z_index`
+  and `get_critical_point`, and `family=` is accepted where Cairo takes it
   (set_fill, set_stroke, set_color, set_opacity).
 - Exports `ImageMobject` = GLImage, `VMobject` = OpenGLVMobject and
   `Mobject` = OpenGLMobject, so the scenes' isinstance checks keep their
@@ -95,6 +95,9 @@ else:
     if not getattr(OpenGLMobject.set_opacity, "_family_alias", False):
         OpenGLMobject.z_index = 0
         OpenGLMobject.set_z_index = _set_z_index
+        # Cairo's name for the bounding-box point (GrowFromEdge calls it)
+        if not hasattr(OpenGLMobject, "get_critical_point"):
+            OpenGLMobject.get_critical_point = OpenGLMobject.get_bounding_box_point
         for cls, names in ((OpenGLMobject, ("set_opacity", "set_color")),
                            (OpenGLVMobject, ("set_fill", "set_stroke", "set_opacity", "set_color"))):
             for name in names:
@@ -243,8 +246,9 @@ else:
 
         def write(self, data: bytes) -> None:
             if len(data) > self.buf.size:
+                size = max(len(data), 2 * self.buf.size)        # read before release: a released buffer has no size
                 self.buf.release()
-                self.buf = self.ctx.buffer(reserve=max(len(data), 2 * self.buf.size), dynamic=True)
+                self.buf = self.ctx.buffer(reserve=size, dynamic=True)
                 self.gen += 1
             if data:
                 self.buf.orphan(self.buf.size)
@@ -628,7 +632,9 @@ else:
             self._ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE)
             # bounded: rendering can outrun the pipe, and each frame is 8 MB
             self.queue = Queue(maxsize=int(os.environ.get("GL_QUEUE", "16")))
-            self.writer_thread = Thread(target=self.listen_and_write, args=())
+            # a daemon: if the scene raises, finish() never runs and a plain
+            # thread would wait on the queue forever, keeping the process alive
+            self.writer_thread = Thread(target=self.listen_and_write, args=(), daemon=True)
             self.writer_thread.start()
 
         def encode_and_write_frame(self, frame, num_frames: int) -> None:
