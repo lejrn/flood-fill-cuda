@@ -7,7 +7,9 @@ With `--renderer=opengl` (the CLI sets config.renderer before it imports
 the scene file) it makes Manim's OpenGL renderer draw what Cairo draws:
 
 - Patches on import: OpenGLMobject gets Cairo's `z_index`, `set_z_index`
-  and `get_critical_point`, and `family=` is accepted where Cairo takes it
+  and `get_critical_point`, `get_center` returns a copy as Cairo's does,
+  arcs are built on Cairo's anchors (the same bounding box),
+  and `family=` is accepted where Cairo takes it
   (set_fill, set_stroke, set_color, set_opacity).
 - Exports `ImageMobject` = GLImage, `VMobject` = OpenGLVMobject and
   `Mobject` = OpenGLMobject, so the scenes' isinstance checks keep their
@@ -99,6 +101,63 @@ else:
         # Cairo's name for the bounding-box point (GrowFromEdge calls it)
         if not hasattr(OpenGLMobject, "get_critical_point"):
             OpenGLMobject.get_critical_point = OpenGLMobject.get_bounding_box_point
+
+        # OpenGL's get_center returns a view into the bounding box, which a
+        # shift updates in place, so a stored centre would follow the mobject
+        # (r04's drain path started at its own moving token). Cairo copies.
+        _bb_center = OpenGLMobject.get_center
+
+        def _get_center(self):
+            return np.array(_bb_center(self))
+
+        OpenGLMobject.get_center = _get_center
+
+        # Arcs on Cairo's anchors. Cairo's Arc puts num_components anchors
+        # (num_components - 1 cubic curves); OpenGL's made num_components
+        # quadratic curves, so a circle's 9 curves of 40 degrees had a handle
+        # sticking out at 180 degrees and none at 0: a lopsided bounding box,
+        # and move_to put every circle 3% of its radius right of Cairo's (r05's
+        # and r11's lens ring, 3 px). Twice num_components - 1 curves keep
+        # Cairo's anchors (and add the midpoints), so the bounding box is
+        # Cairo's, and the quadratics stay within 0.08% of the circle (a
+        # 0.72-unit ring: no pixel more than 29 levels from Cairo's).
+        from manim.mobject.geometry.arc import Arc
+
+        def _arc_init_points(self):
+            self.set_points(Arc._create_quadratic_bezier_points(
+                angle=self.angle, start_angle=self.start_angle, n_components=2 * max(1, self.num_components - 1)))
+            self.scale(self.radius, about_point=np.zeros(3))
+            self.shift(self.arc_center)
+
+        Arc.init_points = _arc_init_points
+
+        # Cairo's background stroke. Cairo's set_stroke(background=True) sets
+        # a second stroke, drawn behind the fill (r11's arrows: a dark 10 px
+        # outline under a 5 px one); OpenGL's replaced the stroke itself and
+        # only moved it behind the fill. Here it is kept apart, as
+        # `_bg_stroke` = (rgba, width, the stroke opacity it was set at), and
+        # GLRenderer draws it first. It fades with the stroke, as Cairo's
+        # background stroke does in a FadeIn/FadeOut.
+        _vm_set_stroke = OpenGLVMobject.set_stroke
+
+        def _set_stroke(self, color=None, width=None, opacity=None, background=None, recurse=True):
+            if not background:
+                return _vm_set_stroke(self, color=color, width=width, opacity=opacity, recurse=recurse)
+            for mob in self.get_family(recurse):
+                if not isinstance(mob, OpenGLVMobject):
+                    continue
+                rgba, w, _ = getattr(mob, "_bg_stroke", (np.array([0.0, 0.0, 0.0, 1.0]), 0.0, 1.0))
+                rgba = rgba.copy()
+                if color is not None:
+                    rgba[:3] = color_to_rgba(color)[:3]
+                if opacity is not None:
+                    rgba[3] = opacity
+                w = float(width) if width is not None else w
+                ref = float(np.max(mob.stroke_rgba[:, 3])) if len(mob.stroke_rgba) else 1.0
+                mob._bg_stroke = (rgba, w, ref)
+            return self
+
+        OpenGLVMobject.set_stroke = _set_stroke
         for cls, names in ((OpenGLMobject, ("set_opacity", "set_color")),
                            (OpenGLVMobject, ("set_fill", "set_stroke", "set_opacity", "set_color"))):
             for name in names:
@@ -442,7 +501,25 @@ else:
                 fkey = (m.is_fixed_in_frame, m.is_fixed_orientation, tuple(m.fixed_orientation_center), m.gloss,
                         m.shadow)
                 stroke = m.has_stroke()
-                skey = fkey + (m.joint_type.value, float(m.flat_stroke)) if stroke else None
+                # flat_stroke 0: Cairo is 2D, a stroke's width never depends on its
+                # normal. With it on, the shader scales width by the normal's facing,
+                # and a Transform from a zero-size copy (GrowArrow) interpolates the
+                # normal through tilted values: r11's arrows grew at a third of the width
+                skey = fkey + (m.joint_type.value, 0.0) if stroke else None
+                bg = getattr(m, "_bg_stroke", None)
+                if bg is not None and bg[1] > 0 and len(m.points):
+                    # Cairo's background stroke: first, at its own width and colour,
+                    # faded as the stroke is (Cairo interpolates both in a fade)
+                    rgba, width, ref = bg
+                    now = float(np.max(m.stroke_rgba[:, 3])) if len(m.stroke_rgba) else 1.0
+                    a = rgba[3] * (min(now / ref, 1.0) if ref > 0 else 1.0)
+                    if a > 0:
+                        d = m.get_stroke_shader_data().copy()
+                        d["stroke_width"] = width
+                        d["color"] = (rgba[0], rgba[1], rgba[2], a)
+                        strokes.append(d)
+                        push("stroke", fkey + (m.joint_type.value, 0.0), nsv, len(d))
+                        nsv += len(d)
                 if stroke and m.draw_stroke_behind_fill:
                     d = m.get_stroke_shader_data()
                     strokes.append(d)
