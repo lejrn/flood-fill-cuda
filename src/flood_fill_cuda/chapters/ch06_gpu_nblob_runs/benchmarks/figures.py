@@ -1,4 +1,4 @@
-"""Static figures for the READMEs — rendered, never hand-drawn.
+"""Static figures for the READMEs - rendered, never hand-drawn.
 
 Five files into results/ch06_gpu_nblob_runs/figures/:
 
@@ -16,13 +16,13 @@ a figure can never drift from the numbers the text quotes: re-run this
 after a benchmark session and the pictures follow.
 
 FORMATS: GIF and SVG, because .gitignore excludes *.png and *.jpg. That
-turns out to be the right pair anyway — the output is flat-colour, so an
+turns out to be the right pair anyway - the output is flat-colour, so an
 8-colour GIF is lossless and tiny, and the charts are vector text that
 diffs cleanly in git.
 
 BOTH THEMES: GitHub renders these on white or near-black depending on the
 reader. There is no media query available inside an <img>-embedded SVG on
-GitHub, so every colour here is picked to read on both grounds — mid
+GitHub, so every colour here is picked to read on both grounds - mid
 tones only, never pure black or pure white ink.
 
 Run:  uv run python -m flood_fill_cuda.chapters.ch06_gpu_nblob_runs.benchmarks.figures
@@ -47,7 +47,7 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                           *[".."] * 5))
 INPUT_PNG = os.path.join(_REPO_ROOT, "images", "input", "input_blobs.png")
 
-# Readable on white AND on #0d1117 — the constraint every colour here obeys.
+# Readable on white AND on #0d1117 - the constraint every colour here obeys.
 INK = "#7d8590"          # labels
 INK_STRONG = "#adbac7"   # values; still legible on white at this weight
 RULE = "#8b949e"
@@ -90,7 +90,7 @@ def before_after(crop_w=760, crop_h=380, gap=16):
     """A crop of the real image, and the same crop of the real output.
 
     The recolor runs on the WHOLE 81 Mpx image and the crop is taken
-    afterwards — so the colours are the ones the kernel assigned given
+    afterwards - so the colours are the ones the kernel assigned given
     every blob in the picture, not a re-labelling of a small window.
     """
     from PIL import Image
@@ -147,7 +147,7 @@ def runs_vs_pixels(runs):
     top = rows[0][1]
     W, row_h, lab_w = 720, 34, 168
     H = len(rows) * row_h + 46
-    body = [_text(0, 16, "input_blobs.png — how many things must the "
+    body = [_text(0, 16, "input_blobs.png - how many things must the "
                          "algorithm handle?", 13, INK_STRONG, weight="600")]
     for i, (label, value, colour) in enumerate(rows):
         y = 34 + i * row_h
@@ -158,7 +158,7 @@ def runs_vs_pixels(runs):
         body.append(_text(lab_w + bw + 9, y + 15, f"{value:,}", 12,
                           INK_STRONG, mono=True))
     body.append(_text(0, H - 6, "13.4 million red pixels are only 539,207 "
-                                "runs — 25× fewer items, same "
+                                "runs - 25× fewer items, same "
                                 "information.", 11, INK))
     return _svg(W, H, "\n".join(body), "Pixels versus runs"), rows[2][1]
 
@@ -166,14 +166,14 @@ def runs_vs_pixels(runs):
 # ------------------------------------------------------------------ speedup
 
 def speedup(runs):
-    """ch05 vs ch06 per scene, log axis — the honest spread, noise scene
+    """ch05 vs ch06 per scene, log axis - the honest spread, noise scene
     (where runs barely help) included."""
     import math
     scenes = runs["scenes"]
     series = [("ch05 best", lambda s: s["ch05"]["median_ms"], C_CH05),
-              ("ch06 — rgb in",
+              ("ch06 - rgb in",
                lambda s: s["ch06"]["rgb"]["median_ms"], C_RGB),
-              ("ch06 — packed mask in",
+              ("ch06 - packed mask in",
                lambda s: s["ch06"]["mask"]["median_ms"], C_MASK)]
     vals = [f(s) for s in scenes for _, f, _ in series]
     lo = 10 ** math.floor(math.log10(min(vals)))
@@ -186,7 +186,7 @@ def speedup(runs):
         return lab_w + (math.log10(v) - math.log10(lo)) / (
             math.log10(hi) - math.log10(lo)) * span
 
-    body = [_text(0, 16, "Runtime per scene — lower is better "
+    body = [_text(0, 16, "Runtime per scene - lower is better "
                          "(log scale)", 13, INK_STRONG, weight="600")]
     t = lo
     while t <= hi:
@@ -226,7 +226,7 @@ def speedup(runs):
 # ------------------------------------------------------------------ scaling
 
 def scaling(sc):
-    """Runtime vs megapixels, with the two target lines drawn — the
+    """Runtime vs megapixels, with the two target lines drawn - the
     chapter's question ('did we hit 1 ms?') turned into an answer."""
     rows = sc["rows"]
     series = [("rgb contract", lambda r: r["rgb"]["median_ms"], C_RGB),
@@ -245,7 +245,7 @@ def scaling(sc):
     def py(v):
         return top + ph - v / hi_ms * ph
 
-    body = [_text(0, 16, "Runtime vs image size — where 1 ms and "
+    body = [_text(0, 16, "Runtime vs image size - where 1 ms and "
                          "0.5 ms actually fall", 13, INK_STRONG,
                   weight="600")]
     for tgt, lab in ((1.0, "1 ms"), (0.5, "0.5 ms")):
@@ -288,8 +288,10 @@ def scaling(sc):
 
 # Best variant per stage on the png_blobs row of the grand table. ch01-ch04
 # are single/two-blob kernels, so "doing this job" means one call per blob
-# (per pair for ch04) — measured, not estimated, and the reason they land
-# in seconds. That IS what using that stage would cost.
+# (per pair for ch04). Those four bars are ESTIMATES: overview/bench.py
+# times a sample of blobs and multiplies the median launch by the number
+# of launches (the cell carries est, sample and calls). The chart marks
+# them "est.".
 CHAIN = [
     ("pure Python BFS", "pure_python", "CPU"),
     ("@njit CCL + fill", "njit", "CPU"),
@@ -302,14 +304,18 @@ CHAIN = [
 
 
 def chain(overview, runs):
-    """Every stage of the project on ONE image — the user's own
-    input_blobs.png — from pure Python to ch06.
+    """Every stage of the project on ONE image - the user's own
+    input_blobs.png - from pure Python to ch06.
 
-    Two honesty notes live in the caption, not just here: ch01-ch04 are
-    seeded single/two-blob kernels, so a 2,522-blob picture costs them
-    one launch per blob; and the ch06 bar comes from a different session
-    than the rest (±8% clock spread on this laptop), which cannot touch
-    a conclusion whose smallest gap is 35×.
+    Three honesty notes live in the caption, not just here: ch01-ch04
+    are seeded single/two-blob kernels, so a 2,522-blob picture costs
+    them one launch per blob, and their bars are estimates (a sample of
+    launches, scaled); the two ends of the chart are not one contract
+    (pure Python is a single run from RGB on the host clock, the ch06
+    bars are kernel time by CUDA events), so the chart shows orders of
+    magnitude and no end-to-end ratio is printed; and the ch06 bars come
+    from a different session than the rest (±8% clock spread on this
+    laptop), where the smallest gap, ch05 to ch06 from RGB, is 17×.
     """
     import math
     row = next(r for r in overview["rows"] if r["row"] == "png_blobs")
@@ -320,25 +326,29 @@ def chain(overview, runs):
         cell = row["cells"].get(key)
         ms = cell.get("ms") if isinstance(cell, dict) else cell
         if ms:
+            est = isinstance(cell, dict) and bool(cell.get("est"))
             bars.append((label, variant, float(ms), C_CH05 if "ch" in key
-                         else RULE))
+                         else RULE, est))
     bars.append(("ch06 · N runs", "rgb in",
-                 scene["ch06"]["rgb"]["median_ms"], C_RGB))
+                 scene["ch06"]["rgb"]["median_ms"], C_RGB, False))
     bars.append(("ch06 · N runs", "packed mask in",
-                 scene["ch06"]["mask"]["median_ms"], C_MASK))
+                 scene["ch06"]["mask"]["median_ms"], C_MASK, False))
+    est_cell = next(row["cells"][key] for _, key, _ in CHAIN
+                    if isinstance(row["cells"].get(key), dict)
+                    and row["cells"][key].get("est"))
 
     slowest = bars[0][2]
     lo = 1.0
     hi = 10 ** math.ceil(math.log10(slowest))
     W, row_h, lab_w, pad_r = 720, 30, 132, 96
-    H = len(bars) * row_h + 92
+    H = len(bars) * row_h + 106
     span = W - lab_w - pad_r
 
     def x_of(v):
         return lab_w + (math.log10(max(v, lo)) - math.log10(lo)) / (
             math.log10(hi) - math.log10(lo)) * span
 
-    body = [_text(0, 16, "The whole chain on one image — "
+    body = [_text(0, 16, "The whole chain on one image - "
                          "input_blobs.png, 81 Mpx, 2,522 blobs", 13,
                   INK_STRONG, weight="600")]
     t = lo
@@ -354,23 +364,26 @@ def chain(overview, runs):
     body.append(_text(lab_w + span / 2, len(bars) * row_h + 64,
                       "milliseconds (log)", 10.5, INK, anchor="middle"))
 
-    for i, (label, variant, ms, colour) in enumerate(bars):
+    for i, (label, variant, ms, colour, est) in enumerate(bars):
         y = 32 + i * row_h
         body.append(_text(lab_w - 10, y + 15, label, 11.5, INK, anchor="end"))
         bw = max(2.0, x_of(ms) - lab_w)
         body.append(f'<rect x="{lab_w}" y="{y + 3}" width="{bw:.1f}" '
                     f'height="16" rx="2.5" fill="{colour}"/>')
         txt = f"{ms:,.0f} ms" if ms >= 100 else f"{ms:.2f} ms"
+        if est:
+            txt = f"~{txt} (est.)"
         body.append(_text(lab_w + bw + 8, y + 16, txt, 10.5, INK_STRONG,
                           mono=True))
         body.append(_text(W - 4, y + 16, variant, 10, INK, anchor="end"))
-    fastest = bars[-1][2]
-    body.append(_text(0, H - 8, f"pure Python → ch06: "
-                                f"{slowest / fastest:,.0f}× on the same "
-                                f"picture. ch01–ch04 are seeded "
-                                f"single/two-blob kernels — a 2,522-blob "
-                                f"image costs them one launch per blob.",
+    body.append(_text(0, H - 22, f"ch01-ch04 fill one or two blobs per "
+                                 f"launch. Their bars are estimates: the "
+                                 f"median of {est_cell['sample']} sampled "
+                                 f"launches x {est_cell['calls']:,} launches.",
                       11, INK))
+    body.append(_text(0, H - 8, "The ends are not one contract: pure Python "
+                                "is a single run from RGB, the ch06 bars are "
+                                "kernel time (CUDA events).", 11, INK))
     return _svg(W, H, "\n".join(body), "Every stage on input_blobs.png")
 
 
@@ -378,7 +391,7 @@ def main():
     runs = _newest("runs_*.json")
     sc = _newest("scaling_*.json")
     if runs is None or sc is None:
-        print("missing benchmark JSON — run benchmark.py and scaling.py first")
+        print("missing benchmark JSON - run benchmark.py and scaling.py first")
         return 1
 
     figs = [("runs_vs_pixels.svg", runs_vs_pixels(runs)[0]),
@@ -388,7 +401,7 @@ def main():
     if overview is not None:
         figs.append(("chain.svg", chain(overview, runs)))
     else:
-        print("no overview JSON — chain.svg skipped "
+        print("no overview JSON - chain.svg skipped "
               "(run flood_fill_cuda.overview.bench)")
 
     written = []
