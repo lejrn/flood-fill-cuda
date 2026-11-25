@@ -10,6 +10,8 @@ authors = [
     {name = "TL"}
 ]
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "numba>=0.65.1",

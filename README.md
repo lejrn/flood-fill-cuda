@@ -455,3 +455,16 @@ section.
 - **Losses reported.** Where the CPU wins, the tables say so.
 - **Committed.** Every figure quoted here has a timestamped JSON in
   `results/`.
+
+## License
+
+The code, the tests and the results are under the MIT license: see
+[LICENSE](LICENSE).
+
+Two parts are not:
+
+- `project-page/` is adapted from the Nerfies page and stays under
+  CC BY-SA 4.0. Its bundled files are listed in
+  [project-page/THIRD_PARTY_NOTICES.md](project-page/THIRD_PARTY_NOTICES.md).
+- The opening of the full video uses third-party drone-show footage.
+  It is not in this repository and the license does not cover it.
