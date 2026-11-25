@@ -16,11 +16,21 @@ poetry.lock
 
 # folders
 docs/
-images/
 profiling/
 PyCuda/
+graphify-out/
+.worktrees/
 
-# runtime game state (DEEP FIELD leaderboard) — not a build artifact
+# images/ is scratch, except the two benchmark inputs every chapter is
+# measured on (images/input/README.md has their checksums)
+images/*
+!images/input/
+images/input/*
+!images/input/README.md
+!images/input/input_blobs.png
+!images/input/input_blocks.png
+
+# runtime game state (DEEP FIELD leaderboard) - not a build artifact
 src/flood_fill_cuda/results/service/
 
 __pycache__/
