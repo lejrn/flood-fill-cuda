@@ -57,7 +57,10 @@ GPU context (perf_counter, after the timed block):
 Policy: ch09's (benchmark.py). GPU blocks first, each with a ramp and a
 full-clocks check (nvidia-smi samples); a cooldown; then the CPU passes
 with the idle gate before every round, the thread pools settled before
-every cell, CPU_ROUNDS rounds, the order reversed on odd rounds.
+every cell, CPU_ROUNDS rounds, the order reversed on odd rounds. A CPU
+round during which the rest of the machine was busier than the gate's
+threshold is run again (up to MAX_ROUND_REDOS times), then kept and
+flagged; the session records all_cpu_rounds_quiet.
 
 Checks: every cell's output is compared with cpu_label_components after
 its untimed run and after its last timed run. The project's label maps
@@ -219,10 +222,14 @@ def cpu_cells(img, ref, threads):
 def cpu_pass(cells, args):
     """ch09's rounds: one untimed checked call, one timed first call
     (sets the calls per round), then the rounds, the order reversed on
-    odd rounds; the gate before every round, the pools settled and the
-    cell's own preparation (thread count, image restore) off the clock
-    before every call."""
+    odd rounds. Before every round the idle gate; the pools settled and
+    the cell's own preparation (thread count, image restore) off the
+    clock before every call. The rest of the machine is metered over
+    every round: a round above the gate's threshold is run again (up to
+    MAX_ROUND_REDOS times, the discarded attempts recorded), then kept
+    and flagged "loaded". Returns the rounds' records."""
     max_t = max(c["threads"] for c in cells)
+    threshold = B.gate_threshold(max_t)
 
     def one_call(c):
         if c["prep"]:
@@ -241,24 +248,51 @@ def cpu_pass(cells, args):
         c["calls"] = max(1, min(args.max_calls,
                                 math.ceil(args.round_s * 1000 / ms)))
         c["samples"], c["round_ms"] = [], []
-    gates = []
+    rounds = []
     for r in range(args.cpu_rounds):
-        gates.append(B.wait_quiet(B.QUIET_WAIT_CPU_S, args.gate,
-                                  B.gate_threshold(max_t)))
-        for c in (cells if r % 2 == 0 else cells[::-1]):
-            B.settle_workers()
-            batch, out = [], None
-            for _ in range(c["calls"]):
+        final = r == args.cpu_rounds - 1
+        discarded = []
+        for attempt in range(B.MAX_ROUND_REDOS + 1):
+            gate = B.wait_quiet(B.QUIET_WAIT_CPU_S, args.gate, threshold)
+            meter = B.LoadMeter("round")
+            w0 = time.time()
+            got, ok = {}, {}
+            for c in (cells if r % 2 == 0 else cells[::-1]):
+                B.settle_workers()
+                batch, out = [], None
+                for _ in range(c["calls"]):
+                    del out
+                    ms, out = one_call(c)
+                    batch.append(ms)
+                if final:
+                    ok[c["key"]] = bool(c["check"](out))
                 del out
-                ms, out = one_call(c)
-                batch.append(ms)
-            if r == args.cpu_rounds - 1:
-                c["checks_ok"] = bool(c["checks_ok"] and c["check"](out))
-            del out
-            c["samples"] += batch
-            c["round_ms"].append(float(np.median(batch)))
+                got[c["key"]] = batch
+            load = meter.read()
+            rec = {"round": r, "attempt": attempt,
+                   "seconds": round(time.time() - w0, 2),
+                   "machine_busy_pct": load["machine_pct"],
+                   "others_busy_pct": load["others_pct"],
+                   "threshold_pct": threshold, "quiet_gate": gate}
+            loaded = (load["others_pct"] is not None
+                      and load["others_pct"] > threshold)
+            print(f"    CPU round {r}.{attempt}: {rec['seconds']:.1f} s, "
+                  f"others {load['others_pct']}%"
+                  f"{', LOADED' if loaded else ''}", flush=True)
+            if loaded and args.gate and attempt < B.MAX_ROUND_REDOS:
+                discarded.append(rec)
+                continue
+            break
+        for c in cells:
+            c["samples"] += got[c["key"]]
+            c["round_ms"].append(float(np.median(got[c["key"]])))
+            if final:
+                c["checks_ok"] = bool(c["checks_ok"] and ok[c["key"]])
+        rec["loaded"] = bool(loaded)
+        rec["discarded_attempts"] = discarded
+        rounds.append(rec)
     cv2.setNumThreads(max_t)
-    return gates
+    return rounds
 
 
 def cpu_record(c):
@@ -564,13 +598,14 @@ def main(argv=None):
                   flush=True)
             time.sleep(args.cooldown)
 
-    cpu_gates = {}
+    cpu_rounds = {}
     for row, (name, img) in zip(rows, scenes):
         print(f"  CPU {name}", flush=True)
         ref = reference(img)
         row["n_blobs"] = ref["n_blobs"]
         cells = cpu_cells(img, ref, args.threads)
-        cpu_gates[name] = cpu_pass(cells, args)
+        cpu_rounds[name] = cpu_pass(cells, args)
+        row["loaded_rounds"] = sum(r["loaded"] for r in cpu_rounds[name])
         for c in cells:
             row["cells"][c["key"]] = cpu_record(c)
             print(f"    {c['key']:26s} {row['cells'][c['key']]['ms']:10.3f}"
@@ -586,6 +621,11 @@ def main(argv=None):
     ok = all(r["all_checks_ok"] for r in rows)
     print(f"\nAll checked outputs {'match' if ok else 'DO NOT match'} the "
           "oracle", flush=True)
+    loaded = {r["scene"]: r["loaded_rounds"] for r in rows
+              if r.get("loaded_rounds")}
+    if loaded:
+        print(f"LOADED CPU rounds kept (the machine was not quiet): {loaded}",
+              flush=True)
     session = {
         "session": f"libs_{stamp}", "smoke": bool(args.smoke),
         "host": B._host_info(), "libraries": lib_versions(),
@@ -597,8 +637,12 @@ def main(argv=None):
                      "gpu_rounds_min": args.gpu_rounds, "gate": args.gate,
                      "cooldown_s": args.cooldown, "connectivity": 8,
                      "crop": args.crop, "png_md5": PNG_MD5},
-        "rows": rows, "cpu_gates": cpu_gates, "gpu_blocks": gpu_blocks,
+        "rows": rows, "cpu_rounds": cpu_rounds, "gpu_blocks": gpu_blocks,
         "all_checks_ok": bool(ok),
+        "all_cpu_rounds_quiet": all(r.get("loaded_rounds", 0) == 0
+                                    for r in rows),
+        "all_gpu_blocks_full_clocks": all(
+            b["attempts"][-1]["full_clocks"] for b in gpu_blocks.values()),
         "peak_rss_mb": round(resource.getrusage(
             resource.RUSAGE_SELF).ru_maxrss / 1024)}
     if args.no_save:
