@@ -1,7 +1,7 @@
 """Chapter 6 correctness: the run pipeline against the SAME CPU oracle.
 
-The whole point of keeping ch05's canonicalisation rule — a blob's label
-is the minimum linear index over its pixels — is that changing the
+The whole point of keeping ch05's canonicalisation rule - a blob's label
+is the minimum linear index over its pixels - is that changing the
 carrier (pixels to runs) must not change a single answer. So this suite
 judges ch06 with ch05's `cpu_label_components` unchanged, and demands
 bit-for-bit equality of:
@@ -19,7 +19,7 @@ would catch a merge that silently over- or under-links:
     runs == the numpy run count        the run table is the image's runs
 
 Both contracts run on every scene: "rgb" (pack included) and "mask"
-(packed input). They must agree exactly — a packed mask is a lossless
+(packed input). They must agree exactly - a packed mask is a lossless
 re-encoding, and if the two ever disagree the pack is lying.
 
 The scene battery is deliberately hostile to a run-based method: rows
@@ -43,7 +43,7 @@ RED = (255, 0, 0)
 
 
 def _stripes(width, height, step):
-    """Vertical 1-px red lines every `step` columns — every run has
+    """Vertical 1-px red lines every `step` columns - every run has
     length 1, the run table's densest legitimate shape."""
     img = np.full((width, height, 3), 255, dtype=np.uint8)
     for y in range(0, height, step):
@@ -64,7 +64,7 @@ def _expected_paint(img, label):
 
 
 def _numpy_run_count(img):
-    """Maximal runs of red along y (the contiguous axis) — the run table
+    """Maximal runs of red along y (the contiguous axis) - the run table
     size, computed a completely different way."""
     red = _red_mask(img).astype(np.int8)
     d = np.diff(red, axis=1, prepend=0)
@@ -124,7 +124,7 @@ def test_matches_cpu_oracle(name, contract):
 
 @pytest.mark.parametrize("name", sorted(SCENES))
 def test_run_table_is_the_images_runs(name):
-    """The run table's size is the image's run count, computed by numpy —
+    """The run table's size is the image's run count, computed by numpy -
     an independent witness that emit found every run and invented none."""
     img = _scene(name)
     result = recolor(img, emit_seeds=False, copy_img=False)
@@ -212,7 +212,7 @@ def test_matches_cpu_oracle_at_the_published_size(name, contract):
 
 
 def test_blank_image_is_valid():
-    """Zero blobs is a legal answer, not an error — ch05's rule kept."""
+    """Zero blobs is a legal answer, not an error - ch05's rule kept."""
     img, _ = _scenes.blank_scene(32, 32)
     result = recolor(img, emit_label=True)
     assert (result.n_runs, result.n_blobs, result.seeds) == (0, 0, [])
@@ -235,7 +235,7 @@ def test_pack_is_lossless():
 
 
 def test_padding_bits_are_zero():
-    """Bits past `height` in a row's last word must be 0 — every
+    """Bits past `height` in a row's last word must be 0 - every
     downstream kernel relies on them terminating the row's last run."""
     from numba import cuda
     height = 100                       # 4 words, 28 padding bits
@@ -253,7 +253,7 @@ def test_padding_bits_are_zero():
 
 
 def test_run_capacity_overflow_is_reported_not_silent():
-    """An undersized run table must raise with the count it needed —
+    """An undersized run table must raise with the count it needed -
     never return a wrong answer, and never index out of bounds."""
     img, _ = _scenes.random_blobs_scene(64, 64, 0.4, 5)
     engine = RunRecolor(64, 64, run_capacity=8)
@@ -272,7 +272,7 @@ def test_one_shot_grows_its_own_run_table():
 
 
 def test_engine_reuse_is_repeatable():
-    """A reused engine must give the same answer every time — the
+    """A reused engine must give the same answer every time - the
     benchmark measures steady state, so state must not leak between
     runs (counters, row offsets, parent array)."""
     from numba import cuda
@@ -294,7 +294,7 @@ def test_engine_reuse_is_repeatable():
 
 
 def test_low_level_run_flags_overflow_without_corrupting_memory():
-    """RunRecolor.run() is the raw API and does NOT raise — it sets the
+    """RunRecolor.run() is the raw API and does NOT raise - it sets the
     tripwire and clamps every downstream loop to the capacity, so an
     undersized table gives a wrong answer but never an illegal access.
     (An 80x80 noise scene really does have 1343 runs.)"""
