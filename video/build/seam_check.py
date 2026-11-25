@@ -23,6 +23,7 @@ Writes media/review/seams[_chain_<look>]/<k>_<k+1>.png (A | B | 8x diff) for eve
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -96,6 +97,8 @@ def main() -> int:
     args = ap.parse_args()
 
     sub = "seams" if args.cut == "panes" else f"seams_chain_{args.look}_{args.layout}"
+    if os.environ.get("VIDEO_RENDERER") == "gl":       # assemble.py --renderer gl
+        sub += "_gl"
     out = VIDEO / "media" / "review" / sub
     out.mkdir(parents=True, exist_ok=True)
     clips = [(stem, newest_render(args.layout, stem, cls, args.cut, args.look, args.quality))

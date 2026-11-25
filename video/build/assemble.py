@@ -111,10 +111,19 @@ def clip_list(cut: str = "panes") -> list:
     return clips
 
 
+def gl() -> bool:
+    """True when this run (or the assemble.py that started it) renders on the
+    GPU: --renderer gl sets VIDEO_RENDERER, so seam_check and chain_snapcheck
+    read the same clips."""
+    return os.environ.get("VIDEO_RENDERER", "cairo") == "gl"
+
+
 def media_dir(layout: str, cut: str = "panes", look: str = "flat") -> Path:
+    """GL clips live beside the Cairo ones (chain_<look>_gl), so a cut never
+    mixes the two renderers and a GL render never overwrites a Cairo clip."""
     if cut == "panes":
-        return VIDEO / "media" / layout
-    return VIDEO / "media" / f"chain_{look}" / layout
+        return VIDEO / "media" / (f"{layout}_gl" if gl() else layout)
+    return VIDEO / "media" / f"chain_{look}{'_gl' if gl() else ''}" / layout
 
 
 def voice_dir(voice: str, cut: str = "panes") -> str:
@@ -286,14 +295,16 @@ def main() -> None:
                     help="a command prefix for every render (default: $RENDER_WRAP), e.g. a render-slot script")
     ap.add_argument("--renderer", choices=["cairo", "gl"], default="cairo",
                     help="gl: Manim's OpenGL renderer through scenes/glcompat.py, on the NVIDIA GPU, one clip "
-                         "at a time (only scenes ported to glcompat render correctly)")
+                         "at a time; clips go to media/chain_<look>_gl/, finals to final_chain_<look>_gl_*")
     ap.add_argument("--nvenc", action="store_true",
                     help="with --renderer gl: encode each clip with h264_nvenc (ffmpeg in video/.tools/)")
     args = ap.parse_args()
     if args.nvenc and args.renderer != "gl":
         raise SystemExit("--nvenc needs --renderer gl")
+    os.environ["VIDEO_RENDERER"] = args.renderer     # media_dir() here and in the check scripts
     vdir = voice_dir(args.voice, args.cut)
-    name = f"{args.layout}_{args.voice}" if args.cut == "panes" else f"chain_{args.look}_{args.layout}_{args.voice}"
+    look = f"{args.look}_gl" if args.renderer == "gl" else args.look
+    name = f"{args.layout}_{args.voice}" if args.cut == "panes" else f"chain_{look}_{args.layout}_{args.voice}"
     wrap = shlex.split(args.wrap)
     if args.render and args.jobs > 1 and not wrap:
         print(f"warning: {args.jobs} parallel renders without --wrap: each 1080p render can take over 1 GB",
@@ -352,7 +363,7 @@ def main() -> None:
 
     # 2. narration laid at each scene's measured start
     if args.no_audio:
-        silent = args.layout if args.cut == "panes" else f"chain_{args.look}_{args.layout}"
+        silent = args.layout if args.cut == "panes" else f"chain_{look}_{args.layout}"
         final = OUT / f"final_{silent}_silent.mp4"
         subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-i", str(video_only), "-c:v", "copy",
                         "-movflags", "+faststart", str(final)], check=True)
