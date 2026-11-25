@@ -366,7 +366,7 @@ compares their deterministic outputs on every run.
 ```bash
 uv sync
 uv run pytest                              # 9,292 tests collected
-uv run python -m flood_fill_cuda.dashboard # whole-project dashboard
+uv run python -m flood_fill_cuda.dashboard # dashboard: ch01-ch06 and the Triton twins
 ```
 
 The 9,292, by folder (a collect-only run on 2026-11-25): ch01 48, ch02
@@ -393,7 +393,9 @@ uv run python -m flood_fill_cuda.chapters.ch06_gpu_nblob_runs.benchmarks.scaling
 ```
 
 The one-page overview (abstract, glossary, and the grand table - every
-approach × every shape × scale) is [`site/index.html`](site/index.html):
+approach × every shape × scale) is [`site/index.html`](site/index.html).
+It covers the CPU and chapters 1-5; the later chapters are not in its
+session yet:
 
 ```bash
 uv run python -m flood_fill_cuda.overview.bench    # ~5-10 min GPU session

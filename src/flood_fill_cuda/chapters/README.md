@@ -824,8 +824,9 @@ honest losses, written to a centralized `results/<chapter_id>/` tree via
 `shared/results_paths.py`; interactive dashboards - each chapter's own
 `benchmarks/visualize.py` renders its own section from its own JSON, and
 `dashboard/` (`uv run python -m flood_fill_cuda.dashboard`) assembles
-every chapter's section into one whole-project page at
-`results/dashboard/project_dashboard.html`; **wavefront renders**
+the sections of ch01-ch06 and the Triton twins into one page at
+`results/dashboard/project_dashboard.html` (ch07-ch09 have no renderer
+yet); **wavefront renders**
 (`ch02_gpu_1blob_2block/benchmarks/wavefront.py`,
 `ch03_gpu_1blob_nblock/benchmarks/wavefront.py`) that replay the recorded
 `depth`/`owner` maps as GIFs - the same BFS, but each partitioning's

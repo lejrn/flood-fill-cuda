@@ -1,4 +1,4 @@
-"""Build site/index.html — the project's one-page overview.
+"""Build site/index.html - the project's one-page overview.
 
 Abstract, the evolution chain, a glossary of every metric the project
 measures, and the grand table: every chapter's every variant (columns)
@@ -24,16 +24,16 @@ _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 OUT_PATH = os.path.join(_REPO_ROOT, "site", "index.html")
 
-SKIP_LABELS = {"na": "—", "overflow": "overflow", "capped": "capped",
+SKIP_LABELS = {"na": "-", "overflow": "overflow", "capped": "capped",
                "unsupported": "n/s"}
 SKIP_TIPS = {
-    "na": "ch04's kernel takes exactly two blobs in two components — "
+    "na": "ch04's kernel takes exactly two blobs in two components - "
           "a one-blob scene is outside its input space",
     "overflow": "ch01's shared-memory ring exceeded its 8192-slot "
                 "frontier capacity",
     "capped": "pure Python past the 20M red-pixel cap",
     "unsupported": "ch04 streams deadlocks after ch03's cooperative "
-                   "kernels in the same process — documented, skipped",
+                   "kernels in the same process - documented, skipped",
 }
 
 EXTRA_CSS = """
@@ -42,6 +42,7 @@ EXTRA_CSS = """
   gap: 6px; margin: 18px 0 6px; }
 .chain .stage { border: 1px solid var(--grid); border-radius: 8px;
   padding: 6px 12px; font-weight: 650; white-space: nowrap; }
+.chain .stage.later { border-style: dashed; color: var(--muted); }
 .chain .why { color: var(--muted); font-size: 11.5px; max-width: 110px;
   text-align: center; line-height: 1.25; }
 .chain .arrow { color: var(--muted); }
@@ -65,7 +66,7 @@ dl.gloss dd { margin: 0; color: var(--ink-2); max-width: 90ch; }
 def _load():
     path = results_paths.newest_optional("overview_*.json", RESULTS_DIR)
     if not path:
-        raise SystemExit("no overview_*.json — run "
+        raise SystemExit("no overview_*.json - run "
                          "`python -m flood_fill_cuda.overview.bench` first")
     with open(path) as f:
         return json.load(f), os.path.basename(path)
@@ -77,14 +78,23 @@ def _version():
     return m.group(1) if m else "?"
 
 
+# The grand table's session covers the CPU and chapters 1-5. The later
+# chapters are in the chain for the whole story, drawn dashed.
+IN_TABLE = 6
+
+
 def chain_html():
     stages = ["CPU BFS", "1 block", "2 blocks", "N blocks", "2 blobs",
-              "N blobs"]
+              "N blobs", "N runs", "1 blob, tiles", "N blobs, tiles",
+              "all CPU cores"]
     whys = ["one core is serial", "one SM is ~4% of the GPU",
-            "2 SMs are 8%", "one blob is one BFS", "who finds the seeds?"]
+            "2 SMs are 8%", "one blob is one BFS", "who finds the seeds?",
+            "why move pixels at all?", "one pixel per step?",
+            "many blobs on tiles?", "was one core fair?"]
     parts = ['<div class="chain">']
     for i, s in enumerate(stages):
-        parts.append(f'<span class="stage">{s}</span>')
+        cls = "stage" if i < IN_TABLE else "stage later"
+        parts.append(f'<span class="{cls}">{s}</span>')
         if i < len(whys):
             parts.append(f'<span class="why">{whys[i]}</span>'
                          '<span class="arrow">→</span>')
@@ -93,8 +103,8 @@ def chain_html():
 
 
 GLOSSARY = [
-    ("kernel ms", "Wall time of the GPU kernel(s) only — launch to "
-     "cuda.synchronize — excluding host↔device copies and allocation. "
+    ("kernel ms", "Wall time of the GPU kernel(s) only - launch to "
+     "cuda.synchronize - excluding host↔device copies and allocation. "
      "Every cell in the table. 'total ms' (not shown) would add those "
      "transfers."),
     ("median of N", "Each GPU cell is the median of 5 timed runs after "
@@ -102,12 +112,12 @@ GLOSSARY = [
      "@njit cells are median of 3; pure Python is median of 3 up to "
      "300k px, a single run above."),
     ("blob / component", "A maximal group of red pixels connected to "
-     "each other — the thing one flood fill fills."),
-    ("seed", "A starting pixel handed to the kernel. Chapters 1–4 must "
+     "each other - the thing one flood fill fills."),
+    ("seed", "A starting pixel handed to the kernel. Chapters 1-4 must "
      "be told their seeds; chapter 5's whole point is finding them on "
      "the GPU."),
     ("connectivity 4 / 8", "Which pixels count as neighbors: the 4 "
-     "edge-sharing ones, or those plus the 4 diagonals. Chapters 1–2 "
+     "edge-sharing ones, or those plus the 4 diagonals. Chapters 1-2 "
      "are 4-conn, chapter 3 measures both, chapter 5 is 8-conn. Every "
      "scene in this table forms the same components either way, so the "
      "cells compare the same job."),
@@ -120,11 +130,11 @@ GLOSSARY = [
      "and are the universal worst case."),
     ("cooperative launch", "A CUDA launch mode where every block is "
      "resident on the GPU at once so the whole grid can synchronize "
-     "mid-kernel (grid.sync) — the barrier between BFS levels. Its "
+     "mid-kernel (grid.sync) - the barrier between BFS levels. Its "
      "price: a hard cap on blocks."),
     ("occupancy / coop blocks", "How many blocks the GPU can host "
      "simultaneously. At 256 threads/block the register file allows 2 "
-     "blocks per SM only if a kernel stays ≤128 registers/thread — "
+     "blocks per SM only if a kernel stays ≤128 registers/thread - "
      "the line behind the ch05 'one register cost half the GPU' story "
      "(fused build: 129 regs → 24 blocks; r128/split builds → 48)."),
     ("union-find / canonical label", "Chapter 5 bookkeeping: when two "
@@ -140,25 +150,25 @@ GLOSSARY = [
      "→ fewer levels → shorter fill, until union traffic wins. S8 "
      "proved optimal on big solid shapes."),
     ("interior rule (I)", "A lattice seed only counts if all 8 of its "
-     "neighbors are red — seeds land inside the mass, not on noisy "
+     "neighbors are red - seeds land inside the mass, not on noisy "
      "staircase edges. Wins on rasterized disks."),
-    ("per-blob loop", "A one-blob kernel (ch01–ch03) doing a multi-blob "
+    ("per-blob loop", "A one-blob kernel (ch01-ch03) doing a multi-blob "
      "job runs one call per blob. On two-blob rows the cell is the "
-     "MEASURED sum of both calls — what using that stage would really "
+     "MEASURED sum of both calls - what using that stage would really "
      "cost. Kernel time only; each call would also pay allocation and "
      "copies."),
     ("≈ estimated", "On N-blob rows a full per-blob loop would take "
-     "hours (755k calls), so ch01–ch04 cells are estimates: median "
+     "hours (755k calls), so ch01-ch04 cells are estimates: median "
      "per-call kernel ms over a k-blob sample × the number of calls "
      "(one per blob; one per PAIR for ch04). Italic with '≈'; never "
      "eligible to be a row winner and excluded from the crosscheck."),
-    ("— / overflow / capped / n/s", "'—': the job cannot be expressed "
-     "at all — ch04's kernel takes exactly two blobs in two distinct "
+    ("- / overflow / capped / n/s", "'-': the job cannot be expressed "
+     "at all - ch04's kernel takes exactly two blobs in two distinct "
      "components, so one-blob scenes are outside its input space. "
      "'overflow': ch01's shared-memory ring exceeded its 8192-slot "
      "capacity. 'capped': pure Python past the 20M red-px cap. 'n/s': "
      "ch04's streams mode deadlocks after ch03's cooperative kernels "
-     "have run in the same process — a real cross-chapter finding, "
+     "have run in the same process - a real cross-chapter finding, "
      "documented in the bench source."),
 ]
 
@@ -234,40 +244,47 @@ def main():
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>flood-fill-cuda — the evolution of a flood fill</title>
+<title>flood-fill-cuda - the evolution of a flood fill</title>
 <style>{CSS}{EXTRA_CSS}</style>
 </head>
 <body><div class="viz-root">
 
 <div class="hero">
 <h1>flood-fill-cuda</h1>
-<p class="sub">The same job — find the red blobs in a white image and
-fill them — solved over and over, from a pure-Python BFS to a
+<p class="sub">The same job - find the red blobs in a white image and
+fill them - solved over and over, from a pure-Python BFS to a
 cooperative CUDA kernel that discovers, labels and fills every blob
 with <b>zero seeds given</b>. Each chapter inherits the previous one's
 problems and answers them with a measured experiment; every kernel is
 validated pixel-for-pixel against a compiled CPU oracle.</p>
 {chain_html()}
+<p class="sub"><b>This page covers the CPU and chapters 1 to 5.</b> Its
+table comes from one session, <code>{json_name}</code>. The dashed
+stages came later and are measured in their own sessions: chapter 6
+(runs), chapters 7 and 8 (tiles), chapter 9 (every CPU core), and the
+comparison with OpenCV and CuPy. They are in the
+<a href="../README.md">README</a> and on the project page
+(<code>project-page/index.html</code>).</p>
 <p class="sub">Highlights along the way: 755,000 blobs discovered and
 filled in ~25 ms; a level-synchronous BFS whose worst enemy is a 1-px
 serpentine; a cooperative-launch deadlock lesson that became a fence
-protocol; and a kernel that lost half the GPU to a single register —
+protocol; and a kernel that lost half the GPU to a single register -
 129 where the two-blocks-per-SM line is exactly 128.</p>
 </div>
 
 <div class="card">
-<h2>Glossary — how to read the numbers</h2>
+<h2>Glossary - how to read the numbers</h2>
 {glossary_html()}
 </div>
 
 <div class="card">
-<h2>The grand table — every approach × every shape</h2>
+<h2>The grand table - every approach × every shape</h2>
 <p class="note">Rows: {n_rows} scenes (shape × scale, including two
 external PNG inputs). Columns: {n_cols} approaches in chapter order.
 Cells: median kernel ms on {data['device']} ({data['sm_count']} SMs,
 tpb={data['tpb']}), hover any cell for details. <b>Bold = fastest
 measured GPU approach for that row.</b> Every approach attempts every
-job: one-blob kernels run one call per blob on multi-blob scenes —
+job: one-blob kernels run one call per blob on multi-blob scenes -
 measured sums on the two-blob rows, italic ≈estimates on the N-blob
 rows (a full 755k-call loop would take hours; see the glossary).
 Crosscheck: {ok}/{n_rows} rows with every completed measured approach
@@ -278,9 +295,10 @@ agreeing on the exact filled pixel count.</p>
 <p class="note">Source data: <code>{json_name}</code> · rebuilt with
 <code>python -m flood_fill_cuda.overview.bench</code> then
 <code>python -m flood_fill_cuda.overview.build</code> · v{_version()}
-· {date.today().isoformat()} · full interactive dashboard:
+· {date.today().isoformat()} · interactive dashboard (chapters 1 to 6
+and the Triton twins):
 <code>src/flood_fill_cuda/results/dashboard/project_dashboard.html</code>
-· <a href="https://github.com/lejrn/flood-fill-cuda">github.com/lejrn/flood-fill-cuda</a></p>
+· <a href="../README.md">the repository README</a></p>
 
 </div></body>
 </html>
