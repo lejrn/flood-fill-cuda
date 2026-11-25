@@ -49,6 +49,7 @@ SCENES = VIDEO / "scenes"
 OUT = VIDEO / "out"
 PY = VIDEO / ".venv" / "bin" / "python"
 FFMPEG = VIDEO / ".venv" / "bin" / "ffmpeg"
+NVENC_FFMPEG = VIDEO / ".tools" / "ffmpeg-n8.1" / "bin" / "ffmpeg"     # static, with h264_nvenc (git-ignored)
 
 # (scene file stem, class name, beat name) in narrative order.
 PANES = [
@@ -297,7 +298,8 @@ def main() -> None:
                     help="gl: Manim's OpenGL renderer through scenes/glcompat.py, on the NVIDIA GPU, one clip "
                          "at a time; clips go to media/chain_<look>_gl/, finals to final_chain_<look>_gl_*")
     ap.add_argument("--nvenc", action="store_true",
-                    help="with --renderer gl: encode each clip with h264_nvenc (ffmpeg in video/.tools/)")
+                    help="with --renderer gl: encode each clip, and the cut's concat, with h264_nvenc "
+                         "(ffmpeg in video/.tools/)")
     args = ap.parse_args()
     if args.nvenc and args.renderer != "gl":
         raise SystemExit("--nvenc needs --renderer gl")
@@ -357,9 +359,18 @@ def main() -> None:
     lst = work / "concat.txt"
     lst.write_text("".join(f"file '{p}'\n" for p in clips), encoding="utf-8")
     video_only = work / "video_only.mp4"
-    subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst),
-                    "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-r", "30",
-                    "-an", str(video_only)], check=True)
+    # --nvenc: on the GPU. On the 278 s chain cut, NVENC CQ 18 took 26 s of CPU against libx264's 562 s, at
+    # the same quality (SSIM 0.99947 vs 0.99952 against the concat's source) and a 1.7x larger file
+    if args.nvenc:
+        if not NVENC_FFMPEG.exists():
+            raise SystemExit(f"--nvenc needs the static ffmpeg with NVENC at {_show(NVENC_FFMPEG)} (HANDOFF section 12)")
+        # -bf 0: with B-frames the stream starts at a negative DTS and the mux below lost frames (8351 of 8353)
+        enc, codec = NVENC_FFMPEG, ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "18",
+                                    "-b:v", "0", "-bf", "0"]
+    else:
+        enc, codec = FFMPEG, ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+    subprocess.run([str(enc), "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst),
+                    *codec, "-pix_fmt", "yuv420p", "-r", "30", "-an", str(video_only)], check=True)
 
     # 2. narration laid at each scene's measured start
     if args.no_audio:
@@ -391,10 +402,11 @@ def main() -> None:
     aligned = work / "narration_aligned.wav"
     sf.write(str(aligned), track[: int(np.ceil(total * SR))], SR)
 
-    # 3. mux
+    # 3. mux. No -shortest: the narration is already the cut's length, and -shortest trims at packet
+    # boundaries, which dropped the last frame of an NVENC concat (8352 of 8353)
     final = OUT / f"final_{name}.mp4"
     subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-i", str(video_only), "-i", str(aligned),
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                     str(final)], check=True)
     print(f"->  {final}  ({duration(final):.2f} s)")
 
