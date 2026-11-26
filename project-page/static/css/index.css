@@ -957,3 +957,19 @@ input[type="range"].slider:focus-visible {
 .explainer-video {
   aspect-ratio: 16 / 9;
 }
+
+/* ---- tile clips (chapters 7 and 8): pixel art with a text strip ---- */
+
+.tile-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 1px solid var(--item-border);
+  border-radius: 10px;
+  background: var(--media-bg);
+}
+
+.tile-video.is-square {
+  max-width: 560px;
+}

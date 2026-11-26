@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>flood-fill-cuda: A GPU Flood Fill in Ten Chapters</title>
+  <title>flood-fill-cuda: A GPU Flood Fill, from Pixels to Tiles</title>
   <meta name="description"
-        content="A GPU flood fill in Python and Numba CUDA, built over ten chapters from a CPU breadth-first search to run-based and tile-based labeling, then set beside OpenCV and CuPy. Every red blob in an 81-megapixel image is recolored in 2.96 ms from RGB, or 1.46 ms from a packed 1-bit mask, in kernel time.">
+        content="A breadth-first flood fill on the GPU in Python and Numba CUDA, built over ten chapters from one pixel per step to tiles of 32 by 32. Every red blob in an 81-megapixel image is found and recolored in 2.40 ms of kernel time, and the work is set beside OpenCV and CuPy.">
   <meta name="keywords" content="flood fill, connected components, union-find, BFS, CUDA, Numba, GPU, OpenCV, CuPy">
 
   <!-- Design and code adapted from the Nerfies project page (CC BY-SA 4.0):
@@ -90,7 +90,7 @@
     <div class="container is-max-desktop">
       <div class="columns is-centered">
         <div class="column has-text-centered">
-          <h1 class="title is-1 publication-title">flood-fill-cuda: A GPU Flood Fill in Ten Chapters</h1>
+          <h1 class="title is-1 publication-title">flood-fill-cuda: A GPU Flood Fill, from Pixels to Tiles</h1>
           <div class="is-size-5 publication-authors">
             <span class="author-block">
               <a href="../src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md"
@@ -115,7 +115,7 @@
             <span class="author-block">
               <a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
                  data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
-                 title="Chapter 6">N Runs</a><sup>2</sup>,</span>
+                 title="Chapter 6">N Runs</a><sup>4</sup>,</span>
             <span class="author-block">
               <a href="../src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md"
                  data-repo-path="src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md"
@@ -132,9 +132,10 @@
           </div>
 
           <div class="is-size-5 publication-authors">
-            <span class="author-block"><sup>1</sup>Chapters 1-4 and 7: seeded flood fill,</span>
-            <span class="author-block"><sup>2</sup>Chapters 5, 6 and 8: seedless labeling,</span>
-            <span class="author-block"><sup>3</sup>Chapter 9: both, on the CPU</span>
+            <span class="author-block"><sup>1</sup>Chapters 1-4 and 7: a seeded BFS fill,</span>
+            <span class="author-block"><sup>2</sup>Chapters 5 and 8: BFS labeling with no seeds,</span>
+            <span class="author-block"><sup>3</sup>Chapter 9: both, on the CPU,</span>
+            <span class="author-block"><sup>4</sup>Chapter 6: the reference that is not a BFS</span>
           </div>
 
           <div class="is-size-6 publication-venue has-text-centered mx-auto mt-2">
@@ -271,12 +272,19 @@
           </video>
           <p class="carousel-caption"><span class="chapter-tag">Ch 5</span>Random noise breaks into many tiny blobs. All of them are found and filled at once.</p>
         </div>
-        <div class="item item-runs">
-          <video poster="./static/images/carousel/runs.webp" controls muted loop playsinline preload="none"
-                 width="720" height="720" aria-label="A blob whose 34 runs light up along one line of memory as paint writes them.">
-            <source src="./static/videos/carousel/runs.mp4" type="video/mp4">
+        <div class="item item-tiles">
+          <video poster="./static/images/carousel/tiles.webp" controls muted loop playsinline preload="none"
+                 width="512" height="512" aria-label="A wave of 32 by 32 pixel tiles crossing a solid square, light where it came early and dark where it came late.">
+            <source src="./static/videos/carousel/tiles.mp4" type="video/mp4">
           </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 6</span>Each red span in a row is one run, one unbroken stretch of memory. Paint writes each of this blob's 34 runs as one grouped write.</p>
+          <p class="carousel-caption"><span class="chapter-tag">Ch 7</span>The wave moves a whole 32&nbsp;×&nbsp;32 tile per step. This 64-megapixel square takes 127 rounds, not 4,001 levels.</p>
+        </div>
+        <div class="item item-waves">
+          <video poster="./static/images/carousel/waves.webp" controls muted loop playsinline preload="none"
+                 width="768" height="768" aria-label="A crop of the test image cut into tiles. Colored waves spread from seed pieces, meet, and leave one color per blob.">
+            <source src="./static/videos/carousel/waves.mp4" type="video/mp4">
+          </video>
+          <p class="carousel-caption"><span class="chapter-tag">Ch 8</span>Each tile finds its blob pieces and 36 of them start waves. Where waves meet, the smallest label wins.</p>
         </div>
       </div>
     </div>
@@ -292,9 +300,9 @@
         <h2 class="title is-3">Abstract</h2>
         <div class="content has-text-justified">
           <p>
-            <span class="dnerf">flood-fill-cuda</span> recolors every red blob in an image on the GPU, in Python with Numba CUDA.
-            It starts from a plain CPU breadth-first search (BFS), chapter 0.
-            Nine chapters then rebuild it, each one answering a weakness an earlier one measured.
+            <span class="dnerf">flood-fill-cuda</span> finds every red blob in an image and recolors it on the GPU, in Python with Numba CUDA.
+            It is a breadth-first search (BFS) all the way.
+            It starts from a plain CPU BFS, chapter 0, and each chapter answers a weakness an earlier one measured.
           </p>
           <p>
             Chapters 1 to 3 spread one BFS over one block, then two blocks, then the whole GPU.
@@ -302,20 +310,17 @@
             Chapter 5 finds every blob by itself: 755,577 blobs in 24.8&nbsp;ms on a 16-megapixel noise image, with no seeds given.
           </p>
           <p>
-            Chapter 6 changes the unit of work.
-            A run is an unbroken stretch of red pixels in one row.
-            The 81-megapixel test image, input_blobs.png, holds 13.45 million red pixels but only 539,207 runs.
+            All of them move one pixel per step, and every step ends at a grid-wide barrier.
+            Chapters 7 and 8 keep the BFS and change the step to a tile of 32&nbsp;×&nbsp;32 pixels.
+            A 64-megapixel blob then takes 127 rounds, not 4,001 levels: 3.107&nbsp;ms where the pixel BFS took 70.56&nbsp;ms.
           </p>
           <p>
-            Labeling runs instead of pixels cuts chapter 5's 58.51&nbsp;ms to 2.96&nbsp;ms from RGB.
-            If the image is already packed to one bit per pixel, it takes 1.46&nbsp;ms.
+            Chapter 8 labels many blobs the same way.
+            The 81-megapixel test image, input_blobs.png, has 2,522 blobs.
+            It is recolored in 2.40&nbsp;ms from RGB, where chapter 5's pixel BFS took 47.06&nbsp;ms in the same session.
           </p>
           <p>
-            Chapters 7 and 8 keep the BFS and change its step: a 32&nbsp;×&nbsp;32 tile instead of a pixel.
-            Chapter 8 recolors the same image in 2.40&nbsp;ms, a tie with chapter 6 once both read the image with the same kernel.
-          </p>
-          <p>
-            Chapter 9 takes the same ideas to all 16 CPU threads and labels the image in 21.06&nbsp;ms.
+            Chapter 9 takes the tiles to all 16 CPU threads and labels the image in 21.06&nbsp;ms.
             By kernel time the GPU is still 9.43× faster; counting the copies to and from the GPU, the CPU wins by 2.34×.
           </p>
           <p>
@@ -323,9 +328,13 @@
             Chapter 8 writes a label map 6× faster than CuPy and 24× to 30× faster than OpenCV on 16 threads, in GPU time.
           </p>
           <p>
+            Chapter 6 is the one chapter that is not a BFS.
+            It labels runs of pixels with a union-find, and it stays on this page as a reference.
+            On the test image it ties with chapter 8 once both read the image with the same kernel.
+          </p>
+          <p>
             Every kernel is checked pixel for pixel against a CPU reference, and the reference is checked against OpenCV.
             Every timing comes from a committed benchmark file, and the page shows where the GPU loses too.
-            Memory sets the floor: reading the 243&nbsp;MB RGB image once costs 1.14&nbsp;ms.
           </p>
         </div>
       </div>
@@ -339,47 +348,46 @@
         <div class="publication-video">
           <video controls preload="metadata" playsinline width="1280" height="720"
                  poster="./static/images/explainer_poster.webp"
-                 aria-label="Narrated explainer video of chapters 1 to 6.">
+                 aria-label="Narrated explainer video: flood fill, from pixels to tiles.">
             <source src="./static/videos/explainer.mp4" type="video/mp4">
             <track kind="captions" srclang="en" label="English" src="./static/videos/explainer.en.vtt">
           </video>
         </div>
         <p class="has-text-centered mt-3 is-size-6">
-          A narrated walk through chapters 1 to 6, with a synthetic voice and three panes on screen.
-          The table lights a cell when that chapter's fastest measured kernel beats compiled @njit on that shape.
-          Estimated cells stay dark.
+          A narrated walk from one pixel per step to tiles, with a synthetic voice.
+          It opens on a drone light show: counting every drone in every frame, inside 33&nbsp;ms, is the job.
         </p>
         <p class="has-text-centered mt-2 is-size-6">
-          The spoken headline numbers use chapter 6's packed-mask time.
-          From RGB the image takes 2.96&nbsp;ms, so the closing 16,000× becomes about 8,100×.
+          Every CPU-against-GPU number in the video comes from one session, and the CPU does the same work as the GPU it is set against.
+          GPU times are kernel times; the closing card also says what the copy to the card costs.
         </p>
         <p class="has-text-centered mt-2 is-size-6">
-          Neither ratio is like for like: each sets one pure-Python run on the host clock against kernel time on the GPU.
-          Measured in one session, one CPU core takes 271.5&nbsp;ms and the GPU 2.23&nbsp;ms: 122× by kernel time, 5.5× with the copies.
+          The video's 2.21&nbsp;ms is chapter 8's first version writing labels only.
+          The 2.40&nbsp;ms on this page is today's engine recoloring the image from RGB, in another session.
         </p>
         <details class="video-transcript">
           <summary>Transcript</summary>
           <div class="content mt-3">
 <!-- transcript:start -->
-          <p><em>The table of 17 shapes shows its CPU column, the blob fills pixel by pixel, and the right pane shows a CPU box.</em> A CPU fills a blob one pixel at a time. Pure Python: twenty-four seconds for the real image.</p>
-          <p>Numba: one point three. The table holds the CPU time for seventeen shapes. Every chapter now gets a column, and a shape glows when the GPU wins.</p>
-          <p><em>One blue block fills the blob, one of the 24 SM tiles lights up, and the table's first GPU column glows in five rows.</em> Chapter one. One block of two hundred fifty-six threads floods the whole frontier at once, its queue in shared memory, a spill tier behind it.</p>
-          <p>One block is one of twenty-four SMs: four percent of the GPU. It beats the CPU only on the biggest shapes.</p>
-          <p><em>Blue and green blocks fill the blob in turn, two of the 24 SM tiles light up, and one queue sits in global memory.</em> Chapter two. Two blocks on two SMs share one global queue, with a grid-wide barrier twice per level.</p>
-          <p>Twice as fast as one block on big blobs. The small shapes still belong to the CPU.</p>
-          <p><em>Eight hues speckle the blob, eight SM tiles light up with one warp each, and the table gains another column.</em> Chapter three. Any number of blocks.</p>
-          <p>Every block takes the next pixels from the same queue, and the hue shows who filled what: ownership speckles. Eight blocks here, forty-eight in the benchmark.</p>
-          <p><em>The wave grows as a square, the GPU pane shows the eight-neighbor pattern, and the table gains an 8-conn column.</em> Eight neighbors instead of four.</p>
-          <p>The wave becomes a square and needs half the levels, so half the barriers. On the big disk, eleven times the CPU.</p>
-          <p><em>Two blobs, one blue and one green, fill in one launch while each queue entry carries a label chip.</em> Chapter four. Two blobs in one launch: the label rides inside the queue entry.</p>
-          <p>But on the real image every blob was still its own launch, two and a half thousand launches, and the GPU lost.</p>
-          <p><em>Two waves race down a U-shaped blob and the seam between them is erased, then all 2,522 blobs of the real image appear.</em> Chapter five. No seeds given.</p>
-          <p>Candidate waves start everywhere and colliding waves merge in flight. Two and a half thousand blobs, one launch, fifty-eight milliseconds. Now the real image glows too.</p>
-          <p><em>A pixel row collapses into runs, the real image is recolored, and the table gains a teal column.</em> Chapter six. Why move pixels at all?</p>
-          <p>A red span in a row is one run: twenty-five times fewer things to touch. Seven plain launches, no barrier. Fifty-eight milliseconds becomes one and a half.</p>
-          <p><em>The full blob strip and the full table fill the screen, with the headline numbers in the center.</em> Twenty-four seconds to one and a half milliseconds. Sixteen thousand times.</p>
-          <p>Not a smarter algorithm. A better representation.</p>
-          <p><strong>Three corrections to the narration.</strong> Chapter 4 takes two blobs per launch, so the real image cost it 1,261 launches. The 58&nbsp;ms chapter 5 config runs one cooperative kernel and two plain ones, not a single launch. The closing "sixteen thousand times" divides a pure-Python run on the host clock by a kernel time; the like-for-like figures are under the video.</p>
+          <p><em>Footage of a drone light show, then its filter output beside it: white blobs on black. A stopwatch shows the frame budget, 33 ms.</em> A camera films a drone show; a filter turns each drone into a white blob. Count them all, every frame: thirty-three milliseconds.</p>
+          <p><em>A card for the drone frames: the CPU's bar at 0.679 ms, far inside the budget, and a question mark for the GPU. Then a card for an 81-megapixel frame: the CPU's stopwatch runs past 33 ms to 225 ms.</em> On frames this small, compiled CPU code keeps up. Scale up: eighty-one megapixels, same thirty-three milliseconds. The CPU needs over a fifth of a second. Where does the GPU win? Two places: size and count.</p>
+          <p><em>The picture freezes and zooms into one drone until its pixels show as squares.</em> Freeze. Zoom into one drone until its pixels show.</p>
+          <p><em>Pixels turn from red to painted one at a time, on a CPU board with one core lit. Beside it a GPU board with 24 SM tiles, all dark.</em> On the CPU: paint a pixel, queue its red neighbours, repeat. One pixel per step, on one core, while twenty-four GPU SMs sit idle.</p>
+          <p><em>One SM tile lights up and a whole ring of pixels is painted in one step. A race bar: on one small blob the CPU wins, 4.3× (0.121 against 0.520 ms).</em> So move it onto one SM, its queue in the SM's shared memory: two hundred fifty-six workers, called threads, in one block, paint a whole ring at once. But on one small blob, the CPU still wins. So: size first.</p>
+          <p><em>A giant blob. The block's queue outgrows its 48 KB of shared memory and the rest spills into global memory.</em> On one giant blob, that queue overflows: a block gets only forty-eight kilobytes of shared memory, and this queue needs over a hundred. So the overflow spills to global memory: the card's eight gigabytes.</p>
+          <p><em>One block is 1.1× faster than the CPU. One of the 24 SM tiles is lit.</em> Now one block is a little faster than the CPU. But that's one SM of twenty-four.</p>
+          <p><em>Two blocks, blue and green, on two SMs. The queue moves into global memory. Twice as fast as one block, and 22 SM tiles stay dark.</em> So add a second block on a second SM. Squeezed onto one SM, two blocks ran one point seven times slower. But shared memory is private to its block. So the whole queue moves to global memory: every new pixel's address is written there. On big blobs, measured, that's no slower. Two blocks are twice as fast. But twenty-two SMs stay dark.</p>
+          <p><em>All 24 SMs light up with 48 blocks, one colour per block, and the colours mix into speckle on the blob. 8.5× the CPU. A sweep of other launch shapes gains 15% at best.</em> So use every SM: forty-eight blocks, two on each. Eight and a half times the CPU. Each colour is one block: they share one queue, so their pixels mix, and small rings keep only a few busy. We also tried other threads per block and block counts: on a smaller square, the best gained fifteen percent. We kept forty-eight by two hundred fifty-six.</p>
+          <p><em>A thin winding snake. One block beats 48: a gate closes twice per ring, about 2 microseconds each time.</em> But on a thin snake, forty-eight blocks lose to one. Why? Every ring, the chip stops twice at a gate, two microseconds each.</p>
+          <p><em>The wave becomes a square and needs half the rings. The scoreboard's second row: one huge blob, GPU 11×.</em> So pass fewer gates: step diagonally too. On a square, half the rings, half the gates.</p>
+          <p><em>The 81-megapixel frame with its 2,522 blobs. One launch per blob, about 1,462 ms, an estimate. The CPU, at 202 ms, wins by 7.2×.</em> Size is won. Now count: twenty-five hundred blobs in the big frame, one launch each. Slower than the CPU: we built for size, not count.</p>
+          <p><em>A queue entry with one spare bit as a tag, and two blobs filling in two colours in one launch. About 850 ms: the CPU still wins, by 4.2×.</em> So tag each queue entry with its blob: one spare bit of the entry's word, in global memory. Each new pixel inherits the tag, and the tag picks its colour: its label. One bit tells two blobs apart: two per launch, faster. But still slower than the CPU: only two seeds, each handed in.</p>
+          <p><em>Waves start all over the frame at once. 53.9 ms: 3.8× faster than the CPU, but over the 33 ms budget.</em> So the GPU finds its own seeds: every blob in one fill launch, about fifty milliseconds. Faster than the CPU. But over budget: every red pixel still rides the queue.</p>
+          <p><em>The picture is cut into tiles of 32 by 32 pixels. A close-up of one tile: 32 threads, one row each, fill along the rows, the diagonals and the columns until nothing changes.</em> So the queue carries tiles, not pixels: squares of thirty-two by thirty-two. One warp, thirty-two threads that run in step, takes a tile. Each thread holds one row, one bit per pixel. The row sits in registers: the thread's own memory, closer than shared memory. Fill along every row at once, step diagonally, fill along the columns, and repeat until nothing changes.</p>
+          <p><em>Border bits pass into the neighbouring tiles and the wave crosses the giant square tile by tile. 4,001 rings become 127 rounds, and 101 ms becomes 3.12 ms. Row two: GPU 340×.</em> Only the tile's border bits go out, into the tiles around it, and those join the next round's queue. One gate per round, not two per ring. On the giant square, four thousand rings become a hundred twenty-seven rounds: from a hundred milliseconds to three. But that's one blob, from one seed.</p>
+          <p><em>A 384-pixel crop of the frame: 135 pieces inside its tiles, 36 of them seeds, 8 blobs. Coloured waves spread from piece to piece and meet.</em> So first, every tile finds the blob pieces inside it, in registers, all at once. Some pieces are seeds: each seed sends a wave from piece to piece, one round at a time. Where two waves meet, the meeting is noted, and at the end each blob keeps its smallest label.</p>
+          <p><em>The view pulls back to the whole frame: 11,609 seeds, 6 rounds, 2,522 blobs, 2.21 ms. Row three: GPU 100×.</em> On the big frame: over eleven thousand seeds, six rounds, every blob counted. Two point two milliseconds, once the frame is on the card: inside the budget.</p>
+          <p><em>The scoreboard. One small blob: 0.192 against 0.044 ms, GPU 4.4× in kernel time; with the copy to the card the CPU wins, 3.5×. One huge blob: 1,065 against 3.12 ms, 340×. Many blobs: 225 against 2.21 ms, 100×. The drones return, then the title card: flood fill, from pixels to tiles.</em> One huge blob, or many at once: the GPU. And one small blob? In kernel time, the GPU now; with the copy to the card, still the CPU. Every drone, every frame.</p>
 <!-- transcript:end -->
           </div>
         </details>
@@ -402,6 +410,7 @@
             Each chapter starts from a weakness an earlier one measured.
             The second column names it.
             GPU times are kernel times, with the input already on the GPU.
+            Chapter 6 steps off the BFS line; it is kept as a reference.
           </p>
         </div>
         <div class="table-container">
@@ -459,8 +468,8 @@
               </tr>
               <tr>
                 <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md">6. N runs</a></th>
-                <td data-label="What the last chapter left open">Every kernel still moves pixels.</td>
+                   data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md">6. N runs, not a BFS</a></th>
+                <td data-label="What the last chapter left open">Every kernel still moves pixels. Is a search needed at all?</td>
                 <td data-label="What it built">Run-based labeling: pack the image to one bit per pixel, then six plain kernels.</td>
                 <td data-label="Headline">58.51&nbsp;ms to 2.96&nbsp;ms from RGB, or 1.46&nbsp;ms from a packed mask, on the 81&nbsp;Mpx image. Same session.</td>
               </tr>
@@ -611,190 +620,111 @@
     </div>
     <!--/ Watching. -->
 
-    <!-- Runs. -->
-    <div class="columns is-centered" id="runs">
+    <!-- Tiles. -->
+    <div class="columns is-centered" id="tiles">
       <div class="column is-full-width">
-        <h2 class="title is-3">Runs, Not Pixels</h2>
+        <h2 class="title is-3">Tiles, Not Pixels</h2>
         <div class="content has-text-justified">
           <p>
-            A run is one unbroken span of red inside a row.
-            The 9000&nbsp;×&nbsp;9000 test image has 81 million pixels and 13.45 million red ones, but only 539,207 runs.
-            That is 25× fewer things to label, with the same information.
+            Chapters 1 to 5 spread one pixel per level, and every level ends at grid-wide barriers.
+            Chapter 3 pays two of them per level: 8,002 on a 64-megapixel square.
+          </p>
+          <p>
+            Chapter 7 keeps the BFS and changes its step.
+            It cuts the image into tiles of 32&nbsp;×&nbsp;32 pixels, and one warp of 32 threads takes a tile.
+            Each thread holds one row of the tile as 32 bits in a register.
+          </p>
+          <p>
+            The warp fills along the rows, the diagonals and the columns until nothing changes.
+            Only the tile's border bits go on, into the tiles around it, and those tiles join the next round.
+            Today's kernel needs one barrier per round.
           </p>
         </div>
         <figure class="figure-block">
-          <video class="explainer-video" controls muted loop playsinline preload="none"
-                 width="1280" height="720" poster="./static/images/runs_explainer_poster.webp"
-                 aria-label="One real blob of 301 red pixels goes through chapter 6: its rows become 34 runs stored as contiguous stretches of one line of memory, runs that touch across rows join, and paint writes each run as one grouped write.">
-            <source src="./static/videos/runs_explainer.mp4" type="video/mp4">
+          <video class="tile-video" controls muted loop playsinline preload="none"
+                 width="1552" height="812" poster="./static/images/tiles_ab.webp"
+                 aria-label="Two panes on one step counter. On the left a pixel BFS stays a small square in the middle. On the right the tile BFS crosses the whole square in 127 rounds.">
+            <source src="./static/videos/tiles_ab.mp4" type="video/mp4">
           </video>
           <figcaption>
-            <p>One real blob of the test image, 301 red pixels, goes through chapter 6 step by step. Its rows become 34 runs, and each run is one unbroken stretch of the row-major image in memory.</p>
-            <p>Runs that touch in the next row join one group, all runs at once. Paint then writes each run as one grouped write instead of pixel by pixel.</p>
+            <p>Both panes advance one step per frame, on a solid 8000&nbsp;×&nbsp;8000 square. Right: the tile BFS, each tile colored by the round that first reached it, as the kernel recorded it.</p>
+            <p>Left: a pixel BFS after the same number of steps, drawn from its level rule. When the tiles are done, the pixel wave has filled 0.10% of the square, and it needs 4,001 levels.</p>
           </figcaption>
         </figure>
-        <figure class="figure-block">
-          <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
-<!-- figure:runs_vs_pixels:start -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 159" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-runs_vs_pixels-title" aria-describedby="fig-runs_vs_pixels-desc">
-<title id="fig-runs_vs_pixels-title">Pixels versus runs</title>
-<desc id="fig-runs_vs_pixels-desc">input_blobs.png - how many things must the algorithm handle?; all pixels; 81,000,000; red pixels; 13,451,960; runs  ← ch06 works here; 539,207; blobs; 2,522</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">input_blobs.png - how many things must the algorithm handle?</text>
-<text x="156.0" y="49.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">all pixels</text>
-<rect x="168" y="34" width="456.0" height="21" rx="3" class="fig-grid" />
-<text x="633.0" y="49.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">81,000,000</text>
-<text x="156.0" y="83.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">red pixels</text>
-<rect x="168" y="68" width="75.7" height="21" rx="3" class="fig-red" />
-<text x="252.7" y="83.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">13,451,960</text>
-<text x="156.0" y="117.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">runs  ← ch06 works here</text>
-<rect x="168" y="102" width="3.0" height="21" rx="3" class="fig-teal" />
-<text x="180.0" y="117.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">539,207</text>
-<text x="156.0" y="151.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">blobs</text>
-<rect x="168" y="136" width="2.0" height="21" rx="3" class="fig-blue" />
-<text x="179.0" y="151.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">2,522</text>
-</svg>
-<!-- figure:runs_vs_pixels:end -->
-          </div>
-          <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
-        </figure>
-
-        <div class="content has-text-justified">
-          <p>
-            Chapter 6 accepts the image in two forms, called contracts.
-            With RGB in, it first packs the image to one bit per pixel.
-            With a packed mask in, the caller already holds that mask.
-          </p>
-          <p>
-            Six plain kernels then run in stream order.
-            Only pack and paint touch the RGB image.
-            The five labeling kernels between them take 0.64&nbsp;ms in the RGB run.
-          </p>
-        </div>
-        <div class="pipeline" role="list" aria-label="Chapter 6 pipeline with RGB in, time per phase">
-          <div class="stage is-hot" role="listitem">
-            <span class="stage-name">pack</span><span class="stage-ms">1.67 ms</span>
-            <span class="stage-what">RGB to 1 bit per pixel. The only full read of the image.</span>
-          </div>
-          <div class="stage is-cold" role="listitem">
-            <span class="stage-name">count, scan, emit, merge, flatten</span><span class="stage-ms">0.64 ms</span>
-            <span class="stage-what">Build the run table, union-find over touching runs, name every blob.</span>
-          </div>
-          <div class="stage is-hot" role="listitem">
-            <span class="stage-name">paint</span><span class="stage-ms">0.64 ms</span>
-            <span class="stage-what">One warp per run writes the blob's color. Red pixels only.</span>
-          </div>
-        </div>
-
         <div class="table-container">
           <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs. One session, kernel time, input already on the GPU.</caption>
+            <caption class="has-text-left is-size-6 mb-2">sq_8000: a 64&nbsp;Mpx square, one blob, 8 neighbors. One session, kernel time. Chapter 3 runs at its best grid, 72 blocks of 256 threads.</caption>
             <thead>
               <tr>
-                <th scope="col">Pipeline</th>
-                <th scope="col" class="num">Time</th>
-                <th scope="col" class="num">vs chapter 5</th>
+                <th scope="col"></th>
+                <th scope="col" class="num">Chapter 3, pixels</th>
+                <th scope="col" class="num">Chapter 7, tiles</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td>Chapter 5, best tuned config</td><td class="num">58.51 ms</td><td class="num">1×</td></tr>
-              <tr><td>Chapter 6, RGB in, recolored in place</td><td class="num"><strong>2.96 ms</strong></td><td class="num">19.8×</td></tr>
-              <tr><td>Chapter 6, packed mask in</td><td class="num"><strong>1.46 ms</strong></td><td class="num">40.2×</td></tr>
-              <tr><td>Chapter 6, packed mask in, labeling only</td><td class="num">0.78 ms</td><td class="num"></td></tr>
+              <tr><td>BFS steps</td><td class="num">4,001</td><td class="num">127</td></tr>
+              <tr><td>Time</td><td class="num">70.56 ms</td><td class="num"><strong>3.107 ms</strong></td></tr>
             </tbody>
           </table>
         </div>
         <p class="scrub-note">
-          The five labeling kernels sum to 0.64&nbsp;ms inside the RGB run and 0.78&nbsp;ms in the packed-mask run.
+          Tiles beat the pixel BFS by 22.7×.
         </p>
 
-        <figure class="figure-block">
-          <img class="before-after" src="./static/images/before_after.webp" width="1536" height="380" loading="lazy"
-               alt="Left, a crop of the real input image with red blobs on white. Right, the same crop after the chapter 6 kernel, each blob painted in one of six colors."/>
-          <figcaption>
-            Left, a crop of the real input. Right, the same crop after the chapter 6 kernel ran on the whole image.
-            The paint has only six colors, so unrelated blobs can share one; the label map keeps each blob's identity.
-          </figcaption>
-        </figure>
-
+        <h3 class="title is-4 mt-5">Many blobs: pieces and waves</h3>
         <div class="content has-text-justified">
           <p>
-            Blob shape matters much less now.
-            A BFS needs one level per step along a winding corridor: chapter 3 took 32,641 levels on a 256&nbsp;×&nbsp;256 serpentine.
-            Chapter 6 has no levels at all.
+            Chapter 8 labels many blobs the same way.
+            First every tile finds the blob pieces inside it, in registers, all tiles at once.
           </p>
           <p>
-            On a 2048&nbsp;×&nbsp;2048 serpentine it takes 0.47&nbsp;ms from a packed mask, 39.9× faster than chapter 5.
-            The smallest gains are 3.3× on input_blocks.png, a 1-megapixel image, and 4.0× on pixel-level noise with about 1.4 pixels per run.
+            Some pieces are seeds.
+            Each seed sends a wave from piece to piece, one round at a time.
+            Where two waves meet, the meeting is noted, and at the end each blob keeps its smallest label.
           </p>
         </div>
         <figure class="figure-block">
-          <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
-<!-- figure:speedup:start -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 348" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-speedup-title" aria-describedby="fig-speedup-desc">
-<title id="fig-speedup-title">Runtime per scene, ch05 versus ch06</title>
-<desc id="fig-speedup-desc">Runtime per scene - lower is better (log scale); 0.1; 1; 10; 100; milliseconds; input_blobs; 40×; input_blocks; 3×; blob_grid_100; 44×; random_4000; 4×; disk_r2000; 27×; serpentine_2048; 40×; ch05 best; ch06 - rgb in; ch06 - packed mask in</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">Runtime per scene - lower is better (log scale)</text>
-<line x1="150.0" y1="30" x2="150.0" y2="274" stroke-width="1" stroke-opacity="0.25" class="fig-grid-s" />
-<text x="150.0" y="290.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">0.1</text>
-<line x1="320.0" y1="30" x2="320.0" y2="274" stroke-width="1" stroke-opacity="0.25" class="fig-grid-s" />
-<text x="320.0" y="290.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1</text>
-<line x1="490.0" y1="30" x2="490.0" y2="274" stroke-width="1" stroke-opacity="0.25" class="fig-grid-s" />
-<text x="490.0" y="290.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">10</text>
-<line x1="660.0" y1="30" x2="660.0" y2="274" stroke-width="1" stroke-opacity="0.25" class="fig-grid-s" />
-<text x="660.0" y="290.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">100</text>
-<text x="405.0" y="306.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="middle" font-weight="400" class="fig-muted">milliseconds</text>
-<text x="138.0" y="50.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" font-weight="400" class="fig-muted">input_blobs</text>
-<line x1="150" y1="46.0" x2="660" y2="46.0" stroke-width="1" stroke-opacity="0.15" class="fig-grid-s" />
-<circle cx="620.4" cy="39.0" r="4.5" class="fig-red" />
-<circle cx="400.1" cy="46.0" r="4.5" class="fig-amber" />
-<circle cx="347.7" cy="53.0" r="4.5" class="fig-teal" />
-<text x="668.0" y="50.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" text-anchor="start" font-weight="700" class="fig-teal">40×</text>
-<text x="138.0" y="90.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" font-weight="400" class="fig-muted">input_blocks</text>
-<line x1="150" y1="86.0" x2="660" y2="86.0" stroke-width="1" stroke-opacity="0.15" class="fig-grid-s" />
-<circle cx="342.6" cy="79.0" r="4.5" class="fig-red" />
-<circle cx="262.3" cy="86.0" r="4.5" class="fig-amber" />
-<circle cx="253.9" cy="93.0" r="4.5" class="fig-teal" />
-<text x="668.0" y="90.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" text-anchor="start" font-weight="700" class="fig-teal">3×</text>
-<text x="138.0" y="130.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" font-weight="400" class="fig-muted">blob_grid_100</text>
-<line x1="150" y1="126.0" x2="660" y2="126.0" stroke-width="1" stroke-opacity="0.15" class="fig-grid-s" />
-<circle cx="562.8" cy="119.0" r="4.5" class="fig-red" />
-<circle cx="303.5" cy="126.0" r="4.5" class="fig-amber" />
-<circle cx="284.2" cy="133.0" r="4.5" class="fig-teal" />
-<text x="668.0" y="130.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" text-anchor="start" font-weight="700" class="fig-teal">44×</text>
-<text x="138.0" y="170.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" font-weight="400" class="fig-muted">random_4000</text>
-<line x1="150" y1="166.0" x2="660" y2="166.0" stroke-width="1" stroke-opacity="0.15" class="fig-grid-s" />
-<circle cx="556.2" cy="159.0" r="4.5" class="fig-red" />
-<circle cx="456.2" cy="166.0" r="4.5" class="fig-amber" />
-<circle cx="454.5" cy="173.0" r="4.5" class="fig-teal" />
-<text x="668.0" y="170.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" text-anchor="start" font-weight="700" class="fig-teal">4×</text>
-<text x="138.0" y="210.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" font-weight="400" class="fig-muted">disk_r2000</text>
-<line x1="150" y1="206.0" x2="660" y2="206.0" stroke-width="1" stroke-opacity="0.15" class="fig-grid-s" />
-<circle cx="561.8" cy="199.0" r="4.5" class="fig-red" />
-<circle cx="331.4" cy="206.0" r="4.5" class="fig-amber" />
-<circle cx="319.7" cy="213.0" r="4.5" class="fig-teal" />
-<text x="668.0" y="210.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" text-anchor="start" font-weight="700" class="fig-teal">27×</text>
-<text x="138.0" y="250.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="end" font-weight="400" class="fig-muted">serpentine_2048</text>
-<line x1="150" y1="246.0" x2="660" y2="246.0" stroke-width="1" stroke-opacity="0.15" class="fig-grid-s" />
-<circle cx="536.6" cy="239.0" r="4.5" class="fig-red" />
-<circle cx="268.6" cy="246.0" r="4.5" class="fig-amber" />
-<circle cx="264.4" cy="253.0" r="4.5" class="fig-teal" />
-<text x="668.0" y="250.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" text-anchor="start" font-weight="700" class="fig-teal">40×</text>
-<circle cx="5" cy="336" r="4.5" class="fig-red" />
-<text x="15.0" y="340.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="start" font-weight="400" class="fig-muted">ch05 best</text>
-<circle cx="81.9" cy="336" r="4.5" class="fig-amber" />
-<text x="91.9" y="340.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="start" font-weight="400" class="fig-muted">ch06 - rgb in</text>
-<circle cx="183.2" cy="336" r="4.5" class="fig-teal" />
-<text x="193.2" y="340.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="start" font-weight="400" class="fig-muted">ch06 - packed mask in</text>
-</svg>
-<!-- figure:speedup:end -->
-          </div>
-          <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
+          <video class="tile-video is-square" controls muted loop playsinline preload="none"
+                 width="768" height="812" poster="./static/images/waves_poster.webp"
+                 aria-label="A crop of the test image is cut into tiles and pieces. Seed pieces take a color each, the colors spread from piece to piece over five rounds, and at the end every blob has one color.">
+            <source src="./static/videos/waves.mp4" type="video/mp4">
+          </video>
           <figcaption>
-            <p>Time per scene, with chapter 5 kept at the config tuned for input_blobs.png, so read the ratios as indicative. The teal number at the right is chapter 5's time over chapter 6's packed-mask time.</p>
-            <p>input_blocks is a 1-megapixel image of many small blobs, and blob_grid_100 is a grid of 100 blobs. random_4000 is 4000&nbsp;×&nbsp;4000 pixels of noise; disk_r2000 and serpentine_2048 are single blobs.</p>
+            <p>A 384-pixel crop of the test image, one recorded run: 135 pieces, 36 seeds, 8 blobs.</p>
+            <p>Which wave claims a piece is a race, so the colors can differ from run to run. The rounds and the final labels cannot.</p>
           </figcaption>
         </figure>
+        <div class="content has-text-justified">
+          <p>
+            On the whole 81-megapixel image that is 36,863 pieces, 11,609 seeds and 6 rounds.
+          </p>
+        </div>
+        <div class="table-container">
+          <table class="table is-fullwidth is-hoverable">
+            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs. RGB in, recolored in place. One session, kernel time, medians.</caption>
+            <thead>
+              <tr>
+                <th scope="col">BFS</th>
+                <th scope="col" class="num">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Chapter 5, one pixel per step</td><td class="num">47.06 ms</td></tr>
+              <tr><td>Chapter 8, tile waves</td><td class="num"><strong>2.403 ms</strong></td></tr>
+              <tr><td>Chapter 8, its first version</td><td class="num">2.378 ms</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="content has-text-justified">
+          <p>
+            Memory sets the floor.
+            The RGB image is 243&nbsp;MB, and reading it once at the read peak measured on this GPU, 212.6&nbsp;GB/s, takes 1.14&nbsp;ms.
+            Chapter 8's pack kernel, its one full read of the image, takes 1.18&nbsp;ms.
+          </p>
+        </div>
       </div>
     </div>
-    <!--/ Runs. -->
+    <!--/ Tiles. -->
 
     <!-- Same image. -->
     <div class="columns is-centered" id="chain">
@@ -807,11 +737,11 @@
           <p>
             Pure Python, given the seeds, needs 24,083&nbsp;ms.
             Compiled CPU code (Numba @njit) needs 1,346&nbsp;ms.
-            Chapter 6 needs 2.96&nbsp;ms from RGB, or 1.46&nbsp;ms from a packed mask.
+            Chapter 5 needs 51.03&nbsp;ms and chapter 8 needs 2.40&nbsp;ms.
           </p>
           <p>
             The chart shows orders of magnitude, not one ratio.
-            Its two ends are different contracts: the pure-Python bar is a single run from RGB on the host clock, and the chapter 6 bars are kernel time.
+            Its two ends are different contracts: the pure-Python bar is a single run from RGB on the host clock, and the GPU bars are kernel time.
           </p>
           <p>
             The like-for-like pair comes from chapter 9, in one session.
@@ -823,57 +753,57 @@
           <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
 <!-- figure:chain:start -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 342" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-chain-title" aria-describedby="fig-chain-desc">
-<title id="fig-chain-title">Every stage on input_blobs.png</title>
-<desc id="fig-chain-desc">The whole chain on one image - input_blobs.png, 81 Mpx, 2,522 blobs; 1; 10; 100; 1s; 10s; 100s; milliseconds (log); pure Python BFS; 24,083 ms; CPU; @njit CCL + fill; 1,346 ms; CPU; ch01 · 1 block; ~1,222 ms (est.); ring; ch02 · 2 blocks; ~1,916 ms (est.); dirsplit; ch03 · N blocks; ~2,181 ms (est.); conn8; ch04 · 2 blobs; ~1,368 ms (est.); multisource; ch05 · N blobs; 51.03 ms; split_L8; ch06 · rgb in; 2.96 ms; rgb in; ch06 · packed mask; 1.46 ms; packed mask in</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">The whole chain on one image - input_blobs.png, 81 Mpx, 2,522 blobs</text>
-<line x1="132.0" y1="28" x2="132.0" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
-<text x="132.0" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1</text>
-<line x1="230.4" y1="28" x2="230.4" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
-<text x="230.4" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">10</text>
-<line x1="328.8" y1="28" x2="328.8" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
-<text x="328.8" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">100</text>
-<line x1="427.2" y1="28" x2="427.2" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
-<text x="427.2" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1s</text>
-<line x1="525.6" y1="28" x2="525.6" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
-<text x="525.6" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">10s</text>
+<title id="fig-chain-title">Every BFS stage on input_blobs.png</title>
+<desc id="fig-chain-desc">Every stage on one image - input_blobs.png, 81 Mpx, 2,522 blobs; 1; 10; 100; 1s; 10s; 100s; milliseconds (log); pure Python BFS; 24,083 ms; CPU; @njit CCL + fill; 1,346 ms; CPU; ch01 · 1 block; ~1,222 ms (est.); ring; ch02 · 2 blocks; ~1,916 ms (est.); dirsplit; ch03 · N blocks; ~2,181 ms (est.); conn8; ch04 · 2 blobs; ~1,368 ms (est.); multisource; ch05 · N blobs; 51.03 ms; split_L8; ch08 · N blobs, tiles; 2.40 ms; tile waves; ch06 · runs (reference); 2.57 ms; not a BFS</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">Every stage on one image - input_blobs.png, 81 Mpx, 2,522 blobs</text>
+<line x1="150.0" y1="28" x2="150.0" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="150.0" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1</text>
+<line x1="244.8" y1="28" x2="244.8" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="244.8" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">10</text>
+<line x1="339.6" y1="28" x2="339.6" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="339.6" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">100</text>
+<line x1="434.4" y1="28" x2="434.4" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="434.4" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1s</text>
+<line x1="529.2" y1="28" x2="529.2" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="529.2" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">10s</text>
 <line x1="624.0" y1="28" x2="624.0" y2="302" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
 <text x="624.0" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">100s</text>
-<text x="378.0" y="334.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="middle" font-weight="400" class="fig-muted">milliseconds (log)</text>
-<text x="122.0" y="47.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">pure Python BFS</text>
-<rect x="132" y="35" width="431.2" height="16" rx="2.5" class="fig-grid" />
-<text x="571.2" y="48.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">24,083 ms</text>
+<text x="387.0" y="334.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="middle" font-weight="400" class="fig-muted">milliseconds (log)</text>
+<text x="140.0" y="47.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">pure Python BFS</text>
+<rect x="150" y="35" width="415.4" height="16" rx="2.5" class="fig-grid" />
+<text x="573.4" y="48.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">24,083 ms</text>
 <text x="716.0" y="48.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">CPU</text>
-<text x="122.0" y="77.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">@njit CCL + fill</text>
-<rect x="132" y="65" width="307.9" height="16" rx="2.5" class="fig-grid" />
-<text x="447.9" y="78.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">1,346 ms</text>
+<text x="140.0" y="77.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">@njit CCL + fill</text>
+<rect x="150" y="65" width="296.6" height="16" rx="2.5" class="fig-grid" />
+<text x="454.6" y="78.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">1,346 ms</text>
 <text x="716.0" y="78.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">CPU</text>
-<text x="122.0" y="107.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch01 · 1 block</text>
-<rect x="132" y="95" width="303.8" height="16" rx="2.5" class="fig-red" />
-<text x="443.8" y="108.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~1,222 ms (est.)</text>
+<text x="140.0" y="107.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch01 · 1 block</text>
+<rect x="150" y="95" width="292.6" height="16" rx="2.5" class="fig-red" />
+<text x="450.6" y="108.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~1,222 ms (est.)</text>
 <text x="716.0" y="108.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">ring</text>
-<text x="122.0" y="137.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch02 · 2 blocks</text>
-<rect x="132" y="125" width="323.0" height="16" rx="2.5" class="fig-red" />
-<text x="463.0" y="138.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~1,916 ms (est.)</text>
+<text x="140.0" y="137.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch02 · 2 blocks</text>
+<rect x="150" y="125" width="311.2" height="16" rx="2.5" class="fig-red" />
+<text x="469.2" y="138.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~1,916 ms (est.)</text>
 <text x="716.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">dirsplit</text>
-<text x="122.0" y="167.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch03 · N blocks</text>
-<rect x="132" y="155" width="328.5" height="16" rx="2.5" class="fig-red" />
-<text x="468.5" y="168.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~2,181 ms (est.)</text>
+<text x="140.0" y="167.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch03 · N blocks</text>
+<rect x="150" y="155" width="316.5" height="16" rx="2.5" class="fig-red" />
+<text x="474.5" y="168.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~2,181 ms (est.)</text>
 <text x="716.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">conn8</text>
-<text x="122.0" y="197.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch04 · 2 blobs</text>
-<rect x="132" y="185" width="308.6" height="16" rx="2.5" class="fig-red" />
-<text x="448.6" y="198.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~1,368 ms (est.)</text>
+<text x="140.0" y="197.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch04 · 2 blobs</text>
+<rect x="150" y="185" width="297.3" height="16" rx="2.5" class="fig-red" />
+<text x="455.3" y="198.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">~1,368 ms (est.)</text>
 <text x="716.0" y="198.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">multisource</text>
-<text x="122.0" y="227.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch05 · N blobs</text>
-<rect x="132" y="215" width="168.0" height="16" rx="2.5" class="fig-red" />
-<text x="308.0" y="228.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">51.03 ms</text>
+<text x="140.0" y="227.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch05 · N blobs</text>
+<rect x="150" y="215" width="161.9" height="16" rx="2.5" class="fig-red" />
+<text x="319.9" y="228.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">51.03 ms</text>
 <text x="716.0" y="228.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">split_L8</text>
-<text x="122.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch06 · rgb in</text>
-<rect x="132" y="245" width="46.3" height="16" rx="2.5" class="fig-amber" />
-<text x="186.3" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">2.96 ms</text>
-<text x="716.0" y="258.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">rgb in</text>
-<text x="122.0" y="287.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch06 · packed mask</text>
-<rect x="132" y="275" width="16.0" height="16" rx="2.5" class="fig-teal" />
-<text x="156.0" y="288.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">1.46 ms</text>
-<text x="716.0" y="288.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">packed mask in</text>
+<text x="140.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch08 · N blobs, tiles</text>
+<rect x="150" y="245" width="36.1" height="16" rx="2.5" class="fig-teal" />
+<text x="194.1" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">2.40 ms</text>
+<text x="716.0" y="258.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">tile waves</text>
+<text x="140.0" y="287.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch06 · runs (reference)</text>
+<rect x="150" y="275" width="38.8" height="16" rx="2.5" class="fig-amber" />
+<text x="196.8" y="288.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">2.57 ms</text>
+<text x="716.0" y="288.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">not a BFS</text>
 </svg>
 <!-- figure:chain:end -->
           </div>
@@ -881,177 +811,12 @@
           <figcaption>
             <p>Chapters 1 to 3 fill one seeded blob per launch, so this image costs them 2,522 launches; chapter 4 fills two, so 1,261. Their bars are estimates, priced from six sample launches each.</p>
             <p>That launch count is why more blocks do not help here. The tag at the right of each bar is the chapter's fastest variant on this image; for chapter 2 that is dirsplit, although the plain global queue won at 36&nbsp;Mpx.</p>
-            <p>The chapter 6 bars come from a later session, which measured chapter 5 at 58.51&nbsp;ms instead of 51.03&nbsp;ms. Drift of that size cannot close the smallest gap, chapter 5 against chapter 6 from RGB, which is 17×.</p>
-            <p>The chart stops at chapter 6. Chapters 8 and 9 time the same image in their own sessions, below.</p>
+            <p>The last two bars come from a later session, timed with CUDA events, which measured chapter 5 at 47.06&nbsp;ms instead of 51.03&nbsp;ms. Chapter 7 fills one seeded blob, so it has no bar on this image.</p>
           </figcaption>
         </figure>
       </div>
     </div>
     <!--/ Same image. -->
-
-    <!-- Wall. -->
-    <div class="columns is-centered" id="wall">
-      <div class="column is-full-width">
-        <h2 class="title is-3">The Memory Wall</h2>
-        <div class="content has-text-justified">
-          <p>
-            The RGB image is 243&nbsp;MB. Reading it once at the measured read peak of 212.6&nbsp;GB/s takes 1.14&nbsp;ms.
-            So at the best read rate measured here, the RGB input alone costs more than a millisecond.
-          </p>
-          <p>
-            A packed mask skips that read.
-            On crops of the real image, which roughly keep its run length, red fraction and blob sizes, the packed-mask pipeline stays under 1&nbsp;ms out to about 50 megapixels.
-            The full 81 megapixels take 1.46&nbsp;ms.
-          </p>
-        </div>
-        <figure class="figure-block">
-          <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
-<!-- figure:scaling:start -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-scaling-title" aria-describedby="fig-scaling-desc">
-<title id="fig-scaling-title">Runtime versus image size</title>
-<desc id="fig-scaling-desc">Runtime vs image size - where 1 ms and 0.5 ms actually fall; 1 ms; 0.5 ms; 0; 1; 2; 3; ms; 0; 20; 40; 60; 80; megapixels; rgb contract; packed mask; labeling only</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">Runtime vs image size - where 1 ms and 0.5 ms actually fall</text>
-<line x1="52" y1="190.5" x2="702" y2="190.5" stroke-width="1" stroke-dasharray="5,4" class="fig-grid-s" />
-<text x="702.0" y="185.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">1 ms</text>
-<line x1="52" y1="222.2" x2="702" y2="222.2" stroke-width="1" stroke-dasharray="5,4" class="fig-grid-s" />
-<text x="702.0" y="217.2" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">0.5 ms</text>
-<text x="44.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">0</text>
-<text x="44.0" y="194.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">1</text>
-<text x="44.0" y="131.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">2</text>
-<text x="44.0" y="67.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">3</text>
-<text x="6.0" y="48" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="start" font-weight="400" class="fig-muted">ms</text>
-<text x="52.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">0</text>
-<text x="212.5" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">20</text>
-<text x="373.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">40</text>
-<text x="533.5" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">60</text>
-<text x="694.0" y="274.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">80</text>
-<text x="377.0" y="292.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" text-anchor="middle" font-weight="400" class="fig-muted">megapixels</text>
-<polyline points="60.0,227.7 70.1,228.5 84.1,228.6 124.2,225.6 180.4,208.5 252.6,180.8 340.9,156.3 445.2,126.7 565.6,90.4 702.0,50.3" fill="none" stroke-width="2.2" class="fig-amber-s" />
-<circle cx="60.0" cy="227.7" r="3" class="fig-amber" />
-<circle cx="70.1" cy="228.5" r="3" class="fig-amber" />
-<circle cx="84.1" cy="228.6" r="3" class="fig-amber" />
-<circle cx="124.2" cy="225.6" r="3" class="fig-amber" />
-<circle cx="180.4" cy="208.5" r="3" class="fig-amber" />
-<circle cx="252.6" cy="180.8" r="3" class="fig-amber" />
-<circle cx="340.9" cy="156.3" r="3" class="fig-amber" />
-<circle cx="445.2" cy="126.7" r="3" class="fig-amber" />
-<circle cx="565.6" cy="90.4" r="3" class="fig-amber" />
-<circle cx="702.0" cy="50.3" r="3" class="fig-amber" />
-<text x="696.0" y="42.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="end" font-weight="600" class="fig-amber">rgb contract</text>
-<polyline points="60.0,231.8 70.1,232.5 84.1,230.9 124.2,229.7 180.4,224.9 252.6,212.2 340.9,202.4 445.2,191.5 565.6,173.2 702.0,155.7" fill="none" stroke-width="2.2" class="fig-teal-s" />
-<circle cx="60.0" cy="231.8" r="3" class="fig-teal" />
-<circle cx="70.1" cy="232.5" r="3" class="fig-teal" />
-<circle cx="84.1" cy="230.9" r="3" class="fig-teal" />
-<circle cx="124.2" cy="229.7" r="3" class="fig-teal" />
-<circle cx="180.4" cy="224.9" r="3" class="fig-teal" />
-<circle cx="252.6" cy="212.2" r="3" class="fig-teal" />
-<circle cx="340.9" cy="202.4" r="3" class="fig-teal" />
-<circle cx="445.2" cy="191.5" r="3" class="fig-teal" />
-<circle cx="565.6" cy="173.2" r="3" class="fig-teal" />
-<circle cx="702.0" cy="155.7" r="3" class="fig-teal" />
-<text x="696.0" y="147.7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="end" font-weight="600" class="fig-teal">packed mask</text>
-<polyline points="60.0,237.8 70.1,237.5 84.1,237.2 124.2,236.0 180.4,233.5 252.6,227.9 340.9,225.5 445.2,221.1 565.6,212.3 702.0,203.5" fill="none" stroke-width="2.2" class="fig-blue-s" />
-<circle cx="60.0" cy="237.8" r="3" class="fig-blue" />
-<circle cx="70.1" cy="237.5" r="3" class="fig-blue" />
-<circle cx="84.1" cy="237.2" r="3" class="fig-blue" />
-<circle cx="124.2" cy="236.0" r="3" class="fig-blue" />
-<circle cx="180.4" cy="233.5" r="3" class="fig-blue" />
-<circle cx="252.6" cy="227.9" r="3" class="fig-blue" />
-<circle cx="340.9" cy="225.5" r="3" class="fig-blue" />
-<circle cx="445.2" cy="221.1" r="3" class="fig-blue" />
-<circle cx="565.6" cy="212.3" r="3" class="fig-blue" />
-<circle cx="702.0" cy="203.5" r="3" class="fig-blue" />
-<text x="696.0" y="195.5" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="end" font-weight="600" class="fig-blue">labeling only</text>
-</svg>
-<!-- figure:scaling:end -->
-          </div>
-          <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
-          <figcaption>
-            Centered crops of input_blobs.png, measured in a separate session.
-            Its full-size point reads 1.55&nbsp;ms from a packed mask and 3.21&nbsp;ms from RGB, against 1.46 and 2.96&nbsp;ms in the chain above.
-          </figcaption>
-        </figure>
-      </div>
-    </div>
-    <!--/ Wall. -->
-
-    <!-- Tiles. -->
-    <div class="columns is-centered" id="tiles">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Tiles, Not Pixels</h2>
-        <div class="content has-text-justified">
-          <p>
-            Chapter 6 dropped the BFS. Chapters 7 and 8 keep it and change its step.
-            A pixel BFS spreads one pixel per level, and chapter 3 pays two grid-wide barriers for every level.
-          </p>
-          <p>
-            Chapter 7 cuts the image into 32&nbsp;×&nbsp;32 tiles.
-            One step closes a whole tile in registers, so the wave crosses the image in tile-sized strides.
-            Its default kernel needs one barrier per round.
-          </p>
-        </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">sq_8000: a 64&nbsp;Mpx square, one blob, 8 neighbors. One session, kernel time. Chapter 3 runs at its best grid, 72 blocks of 256 threads.</caption>
-            <thead>
-              <tr>
-                <th scope="col"></th>
-                <th scope="col" class="num">Chapter 3, pixels</th>
-                <th scope="col" class="num">Chapter 7, tiles</th>
-                <th scope="col" class="num">Chapter 6, runs</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>BFS steps</td><td class="num">4,001</td><td class="num">127</td><td class="num">none</td></tr>
-              <tr><td>Time</td><td class="num">70.56 ms</td><td class="num"><strong>3.107 ms</strong></td><td class="num">2.252 ms</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="scrub-note">
-          Tiles beat the pixel BFS by 22.7×. Chapter 6, with no BFS at all, is still faster on this square: chapter 7 runs at 0.73× its speed.
-        </p>
-
-        <div class="content has-text-justified mt-5">
-          <p>
-            Chapter 8 labels many blobs the same way.
-            Its BFS node is a tile component, the part of a blob that lies inside one tile.
-            On the 81-megapixel image that is 36,863 nodes, where chapter 6 handles 539,207 runs.
-          </p>
-        </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs. One session, kernel time, medians. Each ratio is the median of nine per-round ratios, so it need not equal the ratio of the two medians.</caption>
-            <thead>
-              <tr>
-                <th scope="col">Pipeline</th>
-                <th scope="col" class="num">Chapter 6</th>
-                <th scope="col" class="num">Chapter 8</th>
-                <th scope="col" class="num">Chapter 8 / chapter 6</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>RGB in, recolored in place</td><td class="num">2.567 ms</td><td class="num"><strong>2.403 ms</strong></td><td class="num">0.890</td></tr>
-              <tr><td>The same, chapter 6 with chapter 8's pack kernel</td><td class="num">2.402 ms</td><td class="num">2.403 ms</td><td class="num">0.982</td></tr>
-              <tr><td>Labeling only, no pack and no paint</td><td class="num">0.505 ms</td><td class="num"><strong>0.408 ms</strong></td><td class="num">0.807</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="content has-text-justified">
-          <p>
-            In this session chapter 6 runs at its fastest grid for this image and reads 2.567&nbsp;ms, not the 2.96&nbsp;ms of its own chapter.
-          </p>
-          <p>
-            Most of chapter 8's lead is its pack kernel, which reads the RGB image in 1.18&nbsp;ms against chapter 6's 1.45&nbsp;ms.
-            Chapter 6 can use that kernel too, and then the two tie.
-            The labeling alone is where the waves lead.
-          </p>
-          <p>
-            Chapter 6 still wins on long shapes that run along tile borders, and on small images.
-            Chapter 8 takes 1.546× chapter 6's time on a lattice with a zigzag on every tile border, and 1.459× on input_blocks.png.
-          </p>
-        </div>
-      </div>
-    </div>
-    <!--/ Tiles. -->
 
     <!-- CPU. -->
     <div class="columns is-centered" id="cpu">
@@ -1060,7 +825,7 @@
         <div class="content has-text-justified">
           <p>
             Every CPU number above uses one core.
-            Chapter 9 asks the fair question: the same tile ideas on all 16 CPU threads of the laptop, as compiled parallel loops with no atomics.
+            Chapter 9 asks the fair question: the same tiles on all 16 CPU threads of the laptop, as compiled parallel loops with no atomics.
           </p>
           <p>
             The method came first.
@@ -1164,6 +929,97 @@
     </div>
     <!--/ Libraries. -->
 
+    <!-- Runs. -->
+    <div class="columns is-centered" id="runs">
+      <div class="column is-full-width">
+        <h2 class="title is-3">The Reference That Is Not a BFS</h2>
+        <div class="content has-text-justified">
+          <p>
+            Chapter 6 asks a different question: why move pixels at all?
+            It drops the wavefront.
+            A run is one unbroken span of red inside a row, and the test image has 13.45 million red pixels but only 539,207 runs.
+          </p>
+          <p>
+            Chapter 6 builds a table of runs, joins the runs that touch across rows with a union-find, and paints.
+            This is connected-component labeling (CCL), not a search: it has no levels, no frontier and no barrier.
+          </p>
+        </div>
+        <figure class="figure-block">
+          <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
+<!-- figure:runs_vs_pixels:start -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 159" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-runs_vs_pixels-title" aria-describedby="fig-runs_vs_pixels-desc">
+<title id="fig-runs_vs_pixels-title">Pixels versus runs</title>
+<desc id="fig-runs_vs_pixels-desc">input_blobs.png - how many things must the algorithm handle?; all pixels; 81,000,000; red pixels; 13,451,960; runs  ← ch06 works here; 539,207; blobs; 2,522</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">input_blobs.png - how many things must the algorithm handle?</text>
+<text x="156.0" y="49.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">all pixels</text>
+<rect x="168" y="34" width="456.0" height="21" rx="3" class="fig-grid" />
+<text x="633.0" y="49.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">81,000,000</text>
+<text x="156.0" y="83.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">red pixels</text>
+<rect x="168" y="68" width="75.7" height="21" rx="3" class="fig-red" />
+<text x="252.7" y="83.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">13,451,960</text>
+<text x="156.0" y="117.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">runs  ← ch06 works here</text>
+<rect x="168" y="102" width="3.0" height="21" rx="3" class="fig-teal" />
+<text x="180.0" y="117.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">539,207</text>
+<text x="156.0" y="151.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">blobs</text>
+<rect x="168" y="136" width="2.0" height="21" rx="3" class="fig-blue" />
+<text x="179.0" y="151.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">2,522</text>
+</svg>
+<!-- figure:runs_vs_pixels:end -->
+          </div>
+          <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
+        </figure>
+        <figure class="figure-block">
+          <img class="before-after" src="./static/images/before_after.webp" width="1536" height="380" loading="lazy"
+               alt="Left, a crop of the real input image with red blobs on white. Right, the same crop after the chapter 6 kernel, each blob painted in one of six colors."/>
+          <figcaption>
+            Left, a crop of the real input. Right, the same crop after the chapter 6 kernel ran on the whole image.
+            The paint has only six colors, so unrelated blobs can share one; the label map keeps each blob's identity.
+          </figcaption>
+        </figure>
+        <div class="content has-text-justified">
+          <p>
+            It stays here because it is a strong yardstick for the tiles.
+          </p>
+        </div>
+        <div class="table-container">
+          <table class="table is-fullwidth is-hoverable">
+            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs. One session, kernel time, medians. Each ratio is the median of nine per-round ratios, so it need not equal the ratio of the two medians.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Pipeline</th>
+                <th scope="col" class="num">Chapter 6, runs</th>
+                <th scope="col" class="num">Chapter 8, tiles</th>
+                <th scope="col" class="num">Chapter 8 / chapter 6</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>RGB in, recolored in place</td><td class="num">2.567 ms</td><td class="num">2.403 ms</td><td class="num">0.890</td></tr>
+              <tr><td>The same, chapter 6 with chapter 8's pack kernel</td><td class="num">2.402 ms</td><td class="num">2.403 ms</td><td class="num">0.982</td></tr>
+              <tr><td>Labeling only, no pack and no paint</td><td class="num">0.505 ms</td><td class="num">0.408 ms</td><td class="num">0.807</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="content has-text-justified">
+          <p>
+            Most of chapter 8's lead is its pack kernel, which reads the RGB image in 1.18&nbsp;ms against chapter 6's 1.45&nbsp;ms.
+            Chapter 6 can use that kernel too, and then the two tie.
+            The labeling alone is where the waves lead.
+          </p>
+          <p>
+            Chapter 6 still wins in places.
+            On the solid 64&nbsp;Mpx square it takes 2.252&nbsp;ms against chapter 7's 3.107&nbsp;ms.
+            Chapter 8 takes 1.546× its time on a lattice with a zigzag on every tile border, and 1.459× on input_blocks.png, a 1-megapixel image.
+          </p>
+          <p>
+            In its own chapter and session it reads 2.96&nbsp;ms from RGB and 1.46&nbsp;ms from a mask already packed to one bit per pixel.
+            The full account is in
+            <a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
+               data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md">chapter 6's own story</a>.
+          </p>
+        </div>
+      </div>
+    </div>
+    <!--/ Runs. -->
+
     <!-- Measurement. -->
     <div class="columns is-centered" id="method">
       <div class="column is-full-width">
@@ -1174,7 +1030,7 @@
             <li>Correctness comes first. Every kernel is checked against a CPU reference built with Numba @njit. The tests compare depth maps or label maps, not pixel counts.</li>
             <li>The reference has an outside anchor. It is checked against OpenCV's connectedComponents, and against a BFS written as whole-array dilations.</li>
             <li>GPU times are kernel times, with the input already on the GPU. Copies and allocation are not included, unless a line says "with the copies" or "end to end".</li>
-            <li>Chapters 1 to 5 time the launch and synchronize on the host. Chapter 6 uses CUDA events after a clock warm-up (8&nbsp;s per scene, 4&nbsp;s per crop in the size sweep). Chapters 7 to 9 and the library session time their GPU sides with CUDA events too.</li>
+            <li>Chapters 1 to 5 time the launch and synchronize on the host. Chapters 6 to 9 and the library session time their GPU sides with CUDA events, after a clock warm-up.</li>
             <li>The two benchmark images are in the repository, with their checksums.</li>
             <li>Results drift between sessions on this laptop: chapter 5 on input_blobs.png read 51.03&nbsp;ms in one session and 58.51&nbsp;ms in another. So every comparison pairs numbers from one session where it can.</li>
             <li>Every result is a committed JSON file under <code>src/flood_fill_cuda/results/</code>.</li>
@@ -1249,7 +1105,7 @@
       <span id="bibtex-status" class="is-sr-only" role="status"></span>
     </div>
     <pre><code id="bibtex-code">@misc{floodfillcuda2026,
-  title     = {flood-fill-cuda: A GPU Flood Fill in Ten Chapters},
+  title     = {flood-fill-cuda: A GPU Flood Fill, from Pixels to Tiles},
   author    = {{The flood-fill-cuda authors}},
   year      = {2026},
   note      = {Python and Numba CUDA, benchmarked on an NVIDIA GeForce RTX 4060 Laptop GPU},

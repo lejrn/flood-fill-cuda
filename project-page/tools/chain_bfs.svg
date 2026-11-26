@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="342" viewBox="0 0 720 342" role="img" aria-label="Every BFS stage on input_blobs.png">
+<title>Every BFS stage on input_blobs.png</title>
+<text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#adbac7" text-anchor="start" font-weight="600">Every stage on one image - input_blobs.png, 81 Mpx, 2,522 blobs</text>
+<line x1="150.0" y1="28" x2="150.0" y2="302" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="150.0" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">1</text>
+<line x1="244.8" y1="28" x2="244.8" y2="302" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="244.8" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">10</text>
+<line x1="339.6" y1="28" x2="339.6" y2="302" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="339.6" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">100</text>
+<line x1="434.4" y1="28" x2="434.4" y2="302" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="434.4" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">1s</text>
+<line x1="529.2" y1="28" x2="529.2" y2="302" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="529.2" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">10s</text>
+<line x1="624.0" y1="28" x2="624.0" y2="302" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="624.0" y="318.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">100s</text>
+<text x="387.0" y="334.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#7d8590" text-anchor="middle" font-weight="400">milliseconds (log)</text>
+<text x="140.0" y="47.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">pure Python BFS</text>
+<rect x="150" y="35" width="415.4" height="16" rx="2.5" fill="#8b949e"/>
+<text x="573.4" y="48.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">24,083 ms</text>
+<text x="716.0" y="48.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">CPU</text>
+<text x="140.0" y="77.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">@njit CCL + fill</text>
+<rect x="150" y="65" width="296.6" height="16" rx="2.5" fill="#8b949e"/>
+<text x="454.6" y="78.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">1,346 ms</text>
+<text x="716.0" y="78.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">CPU</text>
+<text x="140.0" y="107.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch01 · 1 block</text>
+<rect x="150" y="95" width="292.6" height="16" rx="2.5" fill="#e2645a"/>
+<text x="450.6" y="108.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">~1,222 ms (est.)</text>
+<text x="716.0" y="108.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">ring</text>
+<text x="140.0" y="137.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch02 · 2 blocks</text>
+<rect x="150" y="125" width="311.2" height="16" rx="2.5" fill="#e2645a"/>
+<text x="469.2" y="138.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">~1,916 ms (est.)</text>
+<text x="716.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">dirsplit</text>
+<text x="140.0" y="167.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch03 · N blocks</text>
+<rect x="150" y="155" width="316.5" height="16" rx="2.5" fill="#e2645a"/>
+<text x="474.5" y="168.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">~2,181 ms (est.)</text>
+<text x="716.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">conn8</text>
+<text x="140.0" y="197.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch04 · 2 blobs</text>
+<rect x="150" y="185" width="297.3" height="16" rx="2.5" fill="#e2645a"/>
+<text x="455.3" y="198.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">~1,368 ms (est.)</text>
+<text x="716.0" y="198.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">multisource</text>
+<text x="140.0" y="227.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch05 · N blobs</text>
+<rect x="150" y="215" width="161.9" height="16" rx="2.5" fill="#e2645a"/>
+<text x="319.9" y="228.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">51.03 ms</text>
+<text x="716.0" y="228.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">split_L8</text>
+<text x="140.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch08 · N blobs, tiles</text>
+<rect x="150" y="245" width="36.1" height="16" rx="2.5" fill="#2aa198"/>
+<text x="194.1" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">2.40 ms</text>
+<text x="716.0" y="258.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">tile waves</text>
+<text x="140.0" y="287.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch06 · runs (reference)</text>
+<rect x="150" y="275" width="38.8" height="16" rx="2.5" fill="#d99a2b"/>
+<text x="196.8" y="288.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">2.57 ms</text>
+<text x="716.0" y="288.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">not a BFS</text>
+</svg>

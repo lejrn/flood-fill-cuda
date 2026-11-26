@@ -113,8 +113,8 @@ for row in "${CAROUSEL[@]}"; do
     gif_poster "$RES/$rel" "$IMG/carousel/$name.webp" "$up"
 done
 
-# 3. The ch06 "runs" carousel loop is not built here: it comes from
-#    tools/make_runs_explainer.sh, with the 45 s runs explainer.
+# 3. The tile clips of chapters 7 and 8 (carousel and sections) are not
+#    built here: they come from tools/make_tile_clips.py.
 
 # 4. Still: the ch06 before/after figure, one 1536x380 frame, lossless.
 gif_poster "$RES/ch06_gpu_nblob_runs/figures/before_after.gif" "$IMG/before_after.webp"

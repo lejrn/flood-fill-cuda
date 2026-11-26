@@ -468,5 +468,7 @@ Two parts are not:
 - `project-page/` is adapted from the Nerfies page and stays under
   CC BY-SA 4.0. Its bundled files are listed in
   [project-page/THIRD_PARTY_NOTICES.md](project-page/THIRD_PARTY_NOTICES.md).
-- The opening of the full video uses third-party drone-show footage.
-  It is not in this repository and the license does not cover it.
+- The video opens and closes on drone-show footage by a third party.
+  The page's copy of the video
+  (`project-page/static/videos/explainer.mp4`) carries it, and neither
+  license covers it.

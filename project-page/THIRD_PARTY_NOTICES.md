@@ -54,3 +54,9 @@ SIL OFL 1.1, Code: MIT License). Copyright 2024 Fonticons, Inc.
 
 Google Sans and Noto Sans load from Google Fonts at view time. Both are
 licensed under the SIL Open Font License 1.1.
+
+## Video footage
+
+`static/videos/explainer.mp4` opens and closes on footage of a drone
+light show filmed by a third party. It is not covered by this page's
+CC BY-SA 4.0 license or by the repository's MIT license.

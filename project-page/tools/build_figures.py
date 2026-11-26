@@ -1,9 +1,13 @@
-"""Inline the committed ch06 figures into index.html, re-themed for the page.
+"""Inline the page's figures into index.html, re-themed for the page.
 
-The SVGs in results/ch06_gpu_nblob_runs/figures/ are drawn for GitHub's
-dark theme: light grey text on a transparent background. On a white page
-that text almost vanishes. This script keeps every bar, dot, line and
-number exactly as committed. It changes only what the page needs:
+Two figures: the chain chart (tools/chain_bfs.svg, drawn by
+make_chain_bfs.py: the BFS stages, with chapter 6 as a reference bar) and
+the runs chart of chapter 6 (results/ch06_gpu_nblob_runs/figures/).
+
+The SVGs are drawn for GitHub's dark theme: light grey text on a
+transparent background. On a white page that text almost vanishes. This
+script keeps every bar, dot, line and number exactly as committed. It
+changes only what the page needs:
 
 - the seven hard-coded colors become CSS classes, so the page's light and
   dark tokens decide them;
@@ -52,28 +56,20 @@ ROLES = {
     "#4c8fd6": "blue",  # blobs bar, labeling-only series
 }
 
-NAMES = ["chain", "runs_vs_pixels", "speedup", "scaling"]
+# Figure name -> its source SVG.
+SOURCES = {
+    "chain": Path(__file__).resolve().parent / "chain_bfs.svg",
+    "runs_vs_pixels": FIGURES / "runs_vs_pixels.svg",
+}
+NAMES = list(SOURCES)
 
 # Text edits per figure. Matching is on a <text> element's content
 # (drop: its start; relabel and move: the whole text). No edit touches a
 # number.
 EDITS = {
-    "chain": {
-        # The two footnotes (the estimates, the two contracts) are said
-        # in full by the page text and caption, with the session caveat.
-        "drop": ["ch01-ch04 fill one or two", "The ends are not one contract"],
-        # The two ch06 rows share one label; name the contract instead.
-        "relabel": [("ch06 · N runs", ["ch06 · rgb in", "ch06 · packed mask"])],
-    },
     "runs_vs_pixels": {
         # Repeats the paragraph above it, rounded down to 13.4 million.
         "drop": ["13.4 million red pixels"],
-    },
-    "scaling": {
-        # Repeats the page text, and sits on the x-axis title's baseline.
-        "drop": ["packed mask stays under"],
-        # The y-axis unit sat 8 units under the title; give it room.
-        "move": [("ms", {"y": "48"})],
     },
 }
 
@@ -83,7 +79,7 @@ def _dash_free(text: str) -> str:
 
 
 def themed_svg(name: str) -> str:
-    tree = ET.parse(FIGURES / f"{name}.svg")
+    tree = ET.parse(SOURCES[name])
     root = tree.getroot()
     unknown: set[str] = set()
 
