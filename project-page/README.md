@@ -4,12 +4,21 @@ A one-page site for flood-fill-cuda in the style of the
 [Nerfies](https://nerfies.github.io) project page. It tells the BFS
 story, from one pixel per step (ch00-ch05) to tiles (ch07, ch08), then
 the CPU on every core (ch09) and the session against OpenCV and CuPy.
-ch06, which is not a BFS, has a short reference section. The Triton
-twins are not on it yet.
+ch06, which is not a BFS, is a reference. The Triton twins are not on it
+yet.
+
+There are two pages:
+
+- `index.html`, the short one: per step of the story one or two
+  sentences, a 3D clip, one number, and a few lines of the kernel. About
+  900 words.
+- `full.html`, the long one: every table, every loss and every session.
+  The short page links to it.
 
 ## View it
 
-Open `index.html` in a browser. It needs no build step and no server.
+Open `index.html` (or `full.html`) in a browser. It needs no build step
+and no server.
 
 Links to the repo (the story, the code, the results) are written as
 relative paths, so they work in a local clone. When the page is served
@@ -37,7 +46,8 @@ local paths in it.
 ## Layout
 
 ```
-index.html                 the page
+index.html                 the short page
+full.html                  the long page
 THIRD_PARTY_NOTICES.md     licenses of the bundled CSS, JS and icons
 static/css/                Bulma 0.9.1, bulma-carousel, bulma-slider (MIT), index.css
 static/js/                 bulma-carousel, index.js (no jQuery)
@@ -54,8 +64,11 @@ Every asset comes from a committed result or from the video pipeline.
 
 | what | script | source |
 |---|---|---|
-| the chain chart's SVG (`tools/chain_bfs.svg`) | `tools/make_chain_bfs.py` | the newest overview JSON, ch08 session `dense_20261016T054922Z` |
-| inline figures in `index.html` | `tools/build_figures.py` | `tools/chain_bfs.svg`, `results/ch06_gpu_nblob_runs/figures/runs_vs_pixels.svg` |
+| the two bar charts (`tools/chain_bfs.svg`, `tools/libs.svg`) | `tools/make_chain_bfs.py` | the newest overview JSON, sessions `dense_20261016T054922Z` and `libs_20261125T140827Z` |
+| inline figures in both pages | `tools/build_figures.py` | the two SVGs above, `results/ch06_gpu_nblob_runs/figures/runs_vs_pixels.svg` |
+| code snippets in `index.html` | `tools/build_snippets.py` | the chapters' `kernels.py`, line for line |
+| small recordings for the 3D clips (`tools/small_scenes.npz`) | `tools/record_small.py` (needs the GPU) | the kernels of ch01, ch03 and ch05 on scenes of 36 and 64 px |
+| 3D clips of the short page (`iso_*.mp4`) | `tools/make_iso_clips.py` (renderer in `tools/iso.py`) | `tools/small_scenes.npz`, `video/assets/tiles/*.npz` |
 | teaser, carousel and side-by-side clips | `tools/make_clips.sh` | the chapters' wavefront GIFs |
 | comb scrub frames | `tools/make_scrub_frames.py` | ch05 comb wavefront GIFs |
 | CPU vs GPU race | `tools/make_race.py` (data in `tools/race_spec.json`) | ch03 benchmark JSON, scene `sq_8000_center` |
@@ -69,6 +82,9 @@ Run them from the repo root:
 export PYTHONDONTWRITEBYTECODE=1
 .venv/bin/python project-page/tools/make_chain_bfs.py
 python project-page/tools/build_figures.py
+.venv/bin/python project-page/tools/build_snippets.py
+uv run python project-page/tools/record_small.py          # GPU, only to re-record
+FFMPEG=video/.venv/bin/ffmpeg .venv/bin/python project-page/tools/make_iso_clips.py
 FFMPEG=video/.venv/bin/ffmpeg PYTHON=.venv/bin/python bash project-page/tools/make_clips.sh
 .venv/bin/python project-page/tools/make_scrub_frames.py
 FFMPEG=video/.venv/bin/ffmpeg .venv/bin/python project-page/tools/make_race.py
@@ -99,9 +115,18 @@ hyphens. No bar, dot, line or number changes.
   ch01-ch06 is no longer on the page.
 - The explainer opens and closes on drone-show footage by a third
   party. It is not covered by this folder's license.
-- The page's tile clips are drawn from recorded data. One pane is not a
-  recording: the pixel BFS beside the tile BFS is drawn from its level
-  rule on a solid square, and its caption says so.
+- Every clip is drawn from recorded data. One pane is not a recording:
+  the pixel BFS beside the tile BFS is drawn from its level rule on a
+  solid square, and its caption says so.
+- The 3D clips need scenes small enough to show single pixels, so
+  `record_small.py` runs the real kernels on scenes of 36 and 64 px and
+  checks each result against the CPU oracle. On scenes that small only
+  3 or 4 of chapter 3's 8 blocks get work; the page says so.
+- In a clip a "step" is one loop iteration of that method, never a
+  time. The times are the numbers under the clips.
+- A snippet lists the source lines it shows. `build_snippets.py` fails
+  if one of them is no longer in the kernel, so the page cannot drift
+  from the code.
 - Chapters 1-4 on the 2,522-blob image are estimates (six sample launches
   times the launch count), and the page says so.
 - The video's numbers come from its own session

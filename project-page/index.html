@@ -91,280 +91,60 @@
       <div class="columns is-centered">
         <div class="column has-text-centered">
           <h1 class="title is-1 publication-title">flood-fill-cuda: A GPU Flood Fill, from Pixels to Tiles</h1>
-          <div class="is-size-5 publication-authors">
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md"
-                 title="Chapter 1">One Block</a><sup>1</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/README.md"
-                 title="Chapter 2">Two Blocks</a><sup>1</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/README.md"
-                 title="Chapter 3">N Blocks</a><sup>1</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/README.md"
-                 title="Chapter 4">Two Blobs</a><sup>1</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/README.md"
-                 title="Chapter 5">N Blobs</a><sup>2</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
-                 title="Chapter 6">N Runs</a><sup>4</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md"
-                 title="Chapter 7">One Blob, Tiles</a><sup>1</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/README.md"
-                 title="Chapter 8">N Blobs, Tiles</a><sup>2</sup>,</span>
-            <span class="author-block">
-              <a href="../src/flood_fill_cuda/chapters/ch09_cpu_nthreads/README.md"
-                 data-repo-path="src/flood_fill_cuda/chapters/ch09_cpu_nthreads/README.md"
-                 title="Chapter 9">Every CPU Core</a><sup>3</sup>
+          <p class="lede">
+            Find every red blob in an image and recolor it, as a breadth-first search on the GPU.
+            Python and Numba CUDA, on one laptop GPU.
+          </p>
+          <div class="publication-links">
+            <span class="link-block">
+              <a href="../src/flood_fill_cuda/chapters/README.md"
+                 data-repo-path="src/flood_fill_cuda/chapters/README.md"
+                 class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><svg aria-hidden="true"><use href="#i-book"></use></svg></span>
+                <span>Story</span>
+              </a>
+            </span>
+            <span class="link-block">
+              <a href="../" data-repo-path="" data-repo-kind="tree"
+                 class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><svg aria-hidden="true"><use href="#i-github"></use></svg></span>
+                <span>Code</span>
+              </a>
+            </span>
+            <span class="link-block">
+              <a href="../src/flood_fill_cuda/results/"
+                 data-repo-path="src/flood_fill_cuda/results" data-repo-kind="tree"
+                 class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><svg aria-hidden="true"><use href="#i-database"></use></svg></span>
+                <span>Data</span>
+              </a>
+            </span>
+            <span class="link-block">
+              <a href="./full.html" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><svg aria-hidden="true"><use href="#i-chip"></use></svg></span>
+                <span>Long version</span>
+              </a>
             </span>
           </div>
-
-          <div class="is-size-5 publication-authors">
-            <span class="author-block"><sup>1</sup>Chapters 1-4 and 7: a seeded BFS fill,</span>
-            <span class="author-block"><sup>2</sup>Chapters 5 and 8: BFS labeling with no seeds,</span>
-            <span class="author-block"><sup>3</sup>Chapter 9: both, on the CPU,</span>
-            <span class="author-block"><sup>4</sup>Chapter 6: the reference that is not a BFS</span>
-          </div>
-
-          <div class="is-size-6 publication-venue has-text-centered mx-auto mt-2">
-            Python and Numba CUDA on an NVIDIA GeForce RTX 4060 Laptop GPU (24 SMs).
-            Chapter 0 is the CPU starting point.
-          </div>
-
-          <div class="column has-text-centered">
-            <div class="publication-links">
-              <!-- The story (the living chapters README). -->
-              <span class="link-block">
-                <a href="../src/flood_fill_cuda/chapters/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/README.md"
-                   class="external-link button is-normal is-rounded is-dark">
-                  <span class="icon"><svg aria-hidden="true"><use href="#i-book"></use></svg></span>
-                  <span>Story</span>
-                </a>
-              </span>
-              <!-- Video. -->
-              <span class="link-block">
-                <a href="#video"
-                   class="external-link button is-normal is-rounded is-dark">
-                  <span class="icon"><svg aria-hidden="true"><use href="#i-film"></use></svg></span>
-                  <span>Video</span>
-                </a>
-              </span>
-              <!-- Code. -->
-              <span class="link-block">
-                <a href="../" data-repo-path="" data-repo-kind="tree"
-                   class="external-link button is-normal is-rounded is-dark">
-                  <span class="icon"><svg aria-hidden="true"><use href="#i-github"></use></svg></span>
-                  <span>Code</span>
-                </a>
-              </span>
-              <!-- Data. -->
-              <span class="link-block">
-                <a href="../src/flood_fill_cuda/results/"
-                   data-repo-path="src/flood_fill_cuda/results" data-repo-kind="tree"
-                   class="external-link button is-normal is-rounded is-dark">
-                  <span class="icon"><svg aria-hidden="true"><use href="#i-database"></use></svg></span>
-                  <span>Data</span>
-                </a>
-              </span>
-              <!-- Chapters. -->
-              <span class="link-block">
-                <a href="#chapters"
-                   class="external-link button is-normal is-rounded is-dark">
-                  <span class="icon"><svg aria-hidden="true"><use href="#i-chip"></use></svg></span>
-                  <span>Chapters</span>
-                </a>
-              </span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="hero teaser">
+<section class="section pt-0">
   <div class="container is-max-desktop">
-    <div class="hero-body">
-      <video id="teaser" class="hero-teaser-media" autoplay muted loop playsinline controls
-             width="900" height="900" poster="./static/images/teaser_poster.webp"
-             aria-label="Chapter 5 flooding all 2,522 red blobs of the 81-megapixel test image at once, blobs tinted in many colors, shown at 1/10 scale.">
-        <source src="./static/videos/teaser.mp4" type="video/mp4">
-      </video>
-      <p class="subtitle has-text-centered">
-        <span class="dnerf">flood-fill-cuda</span> finds every red blob in an image and recolors it on the GPU.
-        <span class="footnote">Here chapter 5 floods all 2,522 blobs of an 81-megapixel image in one launch, with no seeds given. A replay of the recorded depth map, at 1/10 scale.</span>
-      </p>
-    </div>
-  </div>
-</section>
-
-
-<section class="hero is-light is-small">
-  <div class="hero-body">
-    <div class="container">
-      <div id="results-carousel" class="carousel results-carousel">
-        <div class="item item-cpu-walk">
-          <video poster="./static/images/carousel/cpu_walk.webp" controls muted loop playsinline preload="none"
-                 width="512" height="512" aria-label="The CPU reference filling a square one pixel at a time.">
-            <source src="./static/videos/carousel/cpu_walk.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">CPU</span>The CPU reference runs a breadth-first search (BFS) one pixel at a time. All the work happens at one point that walks around the ring.</p>
-        </div>
-        <div class="item item-one-block">
-          <video poster="./static/images/carousel/one_block.webp" controls muted loop playsinline preload="none"
-                 width="512" height="512" aria-label="One GPU block filling the same square level by level.">
-            <source src="./static/videos/carousel/one_block.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 1</span>One block of 256 threads fills a whole BFS level at a time. Light is early, dark is late.</p>
-        </div>
-        <div class="item item-two-blocks">
-          <video poster="./static/images/carousel/two_blocks.webp" controls muted loop playsinline preload="none"
-                 width="512" height="512" aria-label="Two GPU blocks sharing one global queue, block 0 in blue and block 1 in green.">
-            <source src="./static/videos/carousel/two_blocks.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 2</span>Blue is block 0, green is block 1, sharing one global queue. The plainest of three designs won.</p>
-        </div>
-        <div class="item item-n-blocks">
-          <video poster="./static/images/carousel/n_blocks.webp" controls muted loop playsinline preload="none"
-                 width="512" height="512" aria-label="Eight GPU blocks sharing one wave, one hue per block.">
-            <source src="./static/videos/carousel/n_blocks.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 3</span>Eight blocks share one wave, one hue per block. Ownership soon scatters into speckle.</p>
-        </div>
-        <div class="item item-conn8">
-          <video poster="./static/images/carousel/conn8.webp" controls muted loop playsinline preload="none"
-                 width="512" height="512" aria-label="The same fill with 8-connectivity: the wave front is a square.">
-            <source src="./static/videos/carousel/conn8.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 3</span>With 8 neighbors the diamond becomes a square, and the fill finishes in about half the levels.</p>
-        </div>
-        <div class="item item-two-blobs">
-          <video poster="./static/images/carousel/two_blobs.webp" controls muted loop playsinline preload="none"
-                 width="768" height="512" aria-label="Two blobs filled in one launch: a big blue square and a small green square.">
-            <source src="./static/videos/carousel/two_blobs.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 4</span>Two blobs, one launch, one clock. The small green blob finishes early and stays light.</p>
-        </div>
-        <div class="item item-merge-u">
-          <video poster="./static/images/carousel/merge_u.webp" controls muted loop playsinline preload="none"
-                 width="576" height="576" aria-label="Two candidate waves racing down the arms of a U shape and meeting at the bridge.">
-            <source src="./static/videos/carousel/merge_u.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 5</span>No seeds given. Two candidate waves race down the U and collide where the arms join.</p>
-        </div>
-        <div class="item item-noise">
-          <video poster="./static/images/carousel/noise.webp" controls muted loop playsinline preload="none"
-                 width="576" height="576" aria-label="Random noise breaking into many small blobs, each filled in its own color.">
-            <source src="./static/videos/carousel/noise.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 5</span>Random noise breaks into many tiny blobs. All of them are found and filled at once.</p>
-        </div>
-        <div class="item item-tiles">
-          <video poster="./static/images/carousel/tiles.webp" controls muted loop playsinline preload="none"
-                 width="512" height="512" aria-label="A wave of 32 by 32 pixel tiles crossing a solid square, light where it came early and dark where it came late.">
-            <source src="./static/videos/carousel/tiles.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 7</span>The wave moves a whole 32&nbsp;×&nbsp;32 tile per step. This 64-megapixel square takes 127 rounds, not 4,001 levels.</p>
-        </div>
-        <div class="item item-waves">
-          <video poster="./static/images/carousel/waves.webp" controls muted loop playsinline preload="none"
-                 width="768" height="768" aria-label="A crop of the test image cut into tiles. Colored waves spread from seed pieces, meet, and leave one color per blob.">
-            <source src="./static/videos/carousel/waves.mp4" type="video/mp4">
-          </video>
-          <p class="carousel-caption"><span class="chapter-tag">Ch 8</span>Each tile finds its blob pieces and 36 of them start waves. Where waves meet, the smallest label wins.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-
-<section class="section">
-  <div class="container is-max-desktop">
-    <!-- Abstract. -->
-    <div class="columns is-centered has-text-centered">
-      <div class="column is-four-fifths">
-        <h2 class="title is-3">Abstract</h2>
-        <div class="content has-text-justified">
-          <p>
-            <span class="dnerf">flood-fill-cuda</span> finds every red blob in an image and recolors it on the GPU, in Python with Numba CUDA.
-            It is a breadth-first search (BFS) all the way.
-            It starts from a plain CPU BFS, chapter 0, and each chapter answers a weakness an earlier one measured.
-          </p>
-          <p>
-            Chapters 1 to 3 spread one BFS over one block, then two blocks, then the whole GPU.
-            Chapter 4 fills two blobs in one launch.
-            Chapter 5 finds every blob by itself: 755,577 blobs in 24.8&nbsp;ms on a 16-megapixel noise image, with no seeds given.
-          </p>
-          <p>
-            All of them move one pixel per step, and every step ends at a grid-wide barrier.
-            Chapters 7 and 8 keep the BFS and change the step to a tile of 32&nbsp;×&nbsp;32 pixels.
-            A 64-megapixel blob then takes 127 rounds, not 4,001 levels: 3.107&nbsp;ms where the pixel BFS took 70.56&nbsp;ms.
-          </p>
-          <p>
-            Chapter 8 labels many blobs the same way.
-            The 81-megapixel test image, input_blobs.png, has 2,522 blobs.
-            It is recolored in 2.40&nbsp;ms from RGB, where chapter 5's pixel BFS took 47.06&nbsp;ms in the same session.
-          </p>
-          <p>
-            Chapter 9 takes the tiles to all 16 CPU threads and labels the image in 21.06&nbsp;ms.
-            By kernel time the GPU is still 9.43× faster; counting the copies to and from the GPU, the CPU wins by 2.34×.
-          </p>
-          <p>
-            One session sets the project beside OpenCV and CuPy.
-            Chapter 8 writes a label map 6× faster than CuPy and 24× to 30× faster than OpenCV on 16 threads, in GPU time.
-          </p>
-          <p>
-            Chapter 6 is the one chapter that is not a BFS.
-            It labels runs of pixels with a union-find, and it stays on this page as a reference.
-            On the test image it ties with chapter 8 once both read the image with the same kernel.
-          </p>
-          <p>
-            Every kernel is checked pixel for pixel against a CPU reference, and the reference is checked against OpenCV.
-            Every timing comes from a committed benchmark file, and the page shows where the GPU loses too.
-          </p>
-        </div>
-      </div>
-    </div>
-    <!--/ Abstract. -->
 
     <!-- Video. -->
-    <div class="columns is-centered has-text-centered" id="video">
-      <div class="column is-four-fifths">
-        <h2 class="title is-3">Video</h2>
-        <div class="publication-video">
-          <video controls preload="metadata" playsinline width="1280" height="720"
-                 poster="./static/images/explainer_poster.webp"
-                 aria-label="Narrated explainer video: flood fill, from pixels to tiles.">
-            <source src="./static/videos/explainer.mp4" type="video/mp4">
-            <track kind="captions" srclang="en" label="English" src="./static/videos/explainer.en.vtt">
-          </video>
-        </div>
-        <p class="has-text-centered mt-3 is-size-6">
-          A narrated walk from one pixel per step to tiles, with a synthetic voice.
-          It opens on a drone light show: counting every drone in every frame, inside 33&nbsp;ms, is the job.
-        </p>
-        <p class="has-text-centered mt-2 is-size-6">
-          Every CPU-against-GPU number in the video comes from one session, and the CPU does the same work as the GPU it is set against.
-          GPU times are kernel times; the closing card also says what the copy to the card costs.
-        </p>
-        <p class="has-text-centered mt-2 is-size-6">
-          The video's 2.21&nbsp;ms is chapter 8's first version writing labels only.
-          The 2.40&nbsp;ms on this page is today's engine recoloring the image from RGB, in another session.
-        </p>
+    <div id="video">
+      <div class="publication-video">
+        <video controls preload="metadata" playsinline width="1280" height="720"
+               poster="./static/images/explainer_poster.webp"
+               aria-label="Narrated explainer video: flood fill, from pixels to tiles.">
+          <source src="./static/videos/explainer.mp4" type="video/mp4">
+          <track kind="captions" srclang="en" label="English" src="./static/videos/explainer.en.vtt">
+        </video>
+      </div>
         <details class="video-transcript">
           <summary>Transcript</summary>
           <div class="content mt-3">
@@ -391,366 +171,228 @@
 <!-- transcript:end -->
           </div>
         </details>
-      </div>
     </div>
     <!--/ Video. -->
-  </div>
-</section>
 
-
-<section class="section pt-0">
-  <div class="container is-max-desktop">
+    <!-- Numbers. -->
+    <div class="stat-row">
+      <p class="stat-tile"><span class="stat-number">2.40 ms</span><span class="stat-text">81 megapixels, 2,522 blobs, GPU kernel time</span></p>
+      <p class="stat-tile"><span class="stat-number">127 rounds</span><span class="stat-text">where a pixel BFS needs 4,001 levels</span></p>
+      <p class="stat-tile"><span class="stat-number">6×</span><span class="stat-text">faster than CuPy, in GPU time</span></p>
+      <p class="stat-tile is-loss"><span class="stat-number">1.6×</span><span class="stat-text">slower than 16 CPU threads, once the copies count</span></p>
+    </div>
+    <!--/ Numbers. -->
 
     <!-- The chain. -->
-    <div class="columns is-centered" id="chapters">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Ten Chapters, One Chain</h2>
-        <div class="content has-text-justified">
-          <p>
-            Each chapter starts from a weakness an earlier one measured.
-            The second column names it.
-            GPU times are kernel times, with the input already on the GPU.
-            Chapter 6 steps off the BFS line; it is kept as a reference.
-          </p>
-        </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable chain-table">
-            <thead>
-              <tr>
-                <th scope="col">Chapter</th>
-                <th scope="col">What the last chapter left open</th>
-                <th scope="col">What it built</th>
-                <th scope="col">Headline</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch00_cpu_baseline/"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch00_cpu_baseline" data-repo-kind="tree">0. CPU BFS</a></th>
-                <td data-label="What the last chapter left open">Nothing yet. This is the starting point.</td>
-                <td data-label="What it built">A pure-Python BFS and a compiled (@njit) BFS, one pixel at a time on one core.</td>
-                <td data-label="Headline">The reference every kernel must match, pixel for pixel.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md">1. One block</a></th>
-                <td data-label="What the last chapter left open">One CPU core is serial.</td>
-                <td data-label="What it built">Level-synchronous BFS in one block, with a shared-memory ring and a global spill tier.</td>
-                <td data-label="Headline">1.8-2.0× compiled CPU code (@njit) on a 36&nbsp;Mpx blob, across two runs.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/README.md">2. Two blocks</a></th>
-                <td data-label="What the last chapter left open">One block uses one SM (streaming multiprocessor), 4% of the GPU.</td>
-                <td data-label="What it built">Two blocks and three ways to share one wave: by space, by one global queue, by direction.</td>
-                <td data-label="Headline">2.10× chapter 1 at 36&nbsp;Mpx. The plain global queue won.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/README.md">3. N blocks</a></th>
-                <td data-label="What the last chapter left open">Two blocks use two SMs, 8%.</td>
-                <td data-label="What it built">One cooperative grid across all 24 SMs, grid-wide barriers, then 8-connectivity.</td>
-                <td data-label="Headline">64&nbsp;Mpx in 100.3&nbsp;ms. Registers cap the timed kernel at 512 threads per SM; a leaner twin without counters fits 768.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/README.md">4. Two blobs</a></th>
-                <td data-label="What the last chapter left open">Each launch fills one blob.</td>
-                <td data-label="What it built">Two blobs in one launch. The label rides in a spare bit of each queue entry.</td>
-                <td data-label="Headline">1.05-2.05× faster than two back-to-back launches (median, four scenes).</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/README.md">5. N blobs</a></th>
-                <td data-label="What the last chapter left open">The caller must supply the seeds.</td>
-                <td data-label="What it built">Seedless discovery: candidate waves plus an atomicMin union-find.</td>
-                <td data-label="Headline">755,577 blobs in 24.8&nbsp;ms on 16&nbsp;Mpx of noise, one launch, no seeds.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md">6. N runs, not a BFS</a></th>
-                <td data-label="What the last chapter left open">Every kernel still moves pixels. Is a search needed at all?</td>
-                <td data-label="What it built">Run-based labeling: pack the image to one bit per pixel, then six plain kernels.</td>
-                <td data-label="Headline">58.51&nbsp;ms to 2.96&nbsp;ms from RGB, or 1.46&nbsp;ms from a packed mask, on the 81&nbsp;Mpx image. Same session.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md">7. One blob, tiles</a></th>
-                <td data-label="What the last chapter left open">A BFS still advances one pixel per step.</td>
-                <td data-label="What it built">One blob, a BFS over 32&nbsp;×&nbsp;32 tiles. Each tile is closed in registers.</td>
-                <td data-label="Headline">A 64&nbsp;Mpx square in 3.107&nbsp;ms, 22.7× chapter 3's best grid. Chapter 6 is still faster there, at 2.252&nbsp;ms.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/README.md">8. N blobs, tiles</a></th>
-                <td data-label="What the last chapter left open">The tiles fill one seeded blob.</td>
-                <td data-label="What it built">Tile components as BFS nodes: waves of labels, one union pass, a path for dense tiles.</td>
-                <td data-label="Headline">The 81&nbsp;Mpx image in 2.403&nbsp;ms, 0.890 of chapter 6's time. With the same pack kernel on both sides it is a tie, 0.982.</td>
-              </tr>
-              <tr>
-                <th scope="row"><a href="../src/flood_fill_cuda/chapters/ch09_cpu_nthreads/README.md"
-                   data-repo-path="src/flood_fill_cuda/chapters/ch09_cpu_nthreads/README.md">9. Every CPU core</a></th>
-                <td data-label="What the last chapter left open">Every CPU number so far used one core.</td>
-                <td data-label="What it built">The ideas of chapters 3, 7 and 8 on all 16 CPU threads, as compiled parallel loops with no atomics.</td>
-                <td data-label="Headline">The 64&nbsp;Mpx square in 21.29&nbsp;ms, 51× one core. The GPU is 6.24× faster by kernel time; with the copies the CPU wins by 1.89×.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+    <div id="chapters" class="story-block">
+      <h2 class="title is-3">Ten Chapters, One Chain</h2>
+      <p class="story-line">Each chapter answers a weakness the one before it measured.</p>
+      <ol class="chain-steps">
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch00_cpu_baseline" data-repo-path="src/flood_fill_cuda/chapters/ch00_cpu_baseline" data-repo-kind="tree"><span class="chain-num">0</span>CPU BFS</a>
+            <span class="chain-why">the starting point</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/README.md"><span class="chain-num">1</span>One block</a>
+            <span class="chain-why">one core is serial</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch02_gpu_1blob_2block/README.md"><span class="chain-num">2</span>Two blocks</a>
+            <span class="chain-why">one SM is 4% of the GPU</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch03_gpu_1blob_nblock/README.md"><span class="chain-num">3</span>All blocks</a>
+            <span class="chain-why">two SMs are 8%</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch04_gpu_2blob_nblock/README.md"><span class="chain-num">4</span>Two blobs</a>
+            <span class="chain-why">one blob per launch</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/README.md"><span class="chain-num">5</span>No seeds</a>
+            <span class="chain-why">who finds the seeds?</span>
+          </li>
+          <li class="chain-step is-aside">
+            <a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"><span class="chain-num">6</span>Runs</a>
+            <span class="chain-why">not a BFS: a reference</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/README.md"><span class="chain-num">7</span>Tiles</a>
+            <span class="chain-why">one pixel per step?</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch08_gpu_nblob_tiles/README.md"><span class="chain-num">8</span>Tile waves</a>
+            <span class="chain-why">many blobs on tiles?</span>
+          </li>
+          <li class="chain-step">
+            <a href="../src/flood_fill_cuda/chapters/ch09_cpu_nthreads/README.md" data-repo-path="src/flood_fill_cuda/chapters/ch09_cpu_nthreads/README.md"><span class="chain-num">9</span>Every CPU core</a>
+            <span class="chain-why">was one core fair?</span>
+          </li>
+      </ol>
     </div>
     <!--/ The chain. -->
 
-    <div class="columns is-centered">
-
-      <!-- Two blobs. -->
-      <div class="column">
-        <div class="content">
-          <h2 class="title is-3">Two Blobs, One Clock</h2>
-          <p>
-            Chapter 4 puts both seeds in one shared queue.
-            The left clip replays the fill as two launches in a row; the right clip is one launch.
-          </p>
-          <p>
-            Both sides spend the same time per BFS level.
-            One launch needs only as many levels as the bigger blob, so it finishes first.
-          </p>
-          <video class="stacked-video" controls muted loop playsinline preload="none"
-                 width="1552" height="512" poster="./static/images/two_blobs_ab.webp"
-                 aria-label="Side by side: the fill replayed as two launches on the left, one shared launch on the right.">
-            <source src="./static/videos/two_blobs_ab.mp4" type="video/mp4">
-          </video>
-          <div class="stacked-labels" aria-hidden="true"><span>Two launches (replay)</span><span>One launch</span></div>
-          <p class="mt-3">
-            Over four scenes, one launch measured 1.05-2.05× faster than two.
-          </p>
-        </div>
-      </div>
-      <!--/ Two blobs. -->
-
-      <!-- Merge. -->
-      <div class="column">
-        <h2 class="title is-3">Seams That Vanish</h2>
-        <div class="columns is-centered">
-          <div class="column content">
-            <p>
-              Chapter 5 gets no seeds.
-              It starts a wave at every candidate, a red pixel with no red neighbor to its left or above.
-            </p>
-            <p>
-              In the U, two waves start in the arms and meet at the bridge.
-              There an atomicMin keeps the smaller label, and one flatten pass makes the whole U one blob.
-            </p>
-            <video class="stacked-video" controls muted loop playsinline preload="none"
-                   width="2336" height="1152" poster="./static/images/merge_ab.webp"
-                   aria-label="Side by side: provisional labels on the left, final labels after the merge on the right.">
-              <source src="./static/videos/merge_ab.mp4" type="video/mp4">
-            </video>
-            <div class="stacked-labels" aria-hidden="true"><span>Before the merge</span><span>After the merge</span></div>
-          </div>
-        </div>
-      </div>
-      <!--/ Merge. -->
-    </div>
-
-    <!-- Watching. -->
-    <div class="columns is-centered">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Watching the Wavefront</h2>
-
-        <!-- Comb merge. -->
-        <h3 class="title is-4">Watching labels merge</h3>
-        <div class="content has-text-justified">
-          <p>
-            A comb with 24 teeth has 24 candidates, one at the tip of each tooth.
-            Use the slider to step through the fill one BFS level at a time.
-            The 24 waves race along the teeth and collide in the spine, where the merge leaves one label.
-          </p>
-        </div>
-        <div class="columns is-vcentered interpolation-panel scrub"
-             data-readout="BFS level {i} of {last}">
-          <div class="column is-3 has-text-centered">
-            <img src="./static/scrub/comb_start.webp" class="interpolation-image"
-                 width="768" height="512" alt="The red comb before the fill, with only the 24 candidate tips claimed."/>
-            <p>Start: 24 candidates</p>
-          </div>
-          <div class="column interpolation-video-column">
-            <div class="scrub-frames" data-base="./static/scrub/comb" data-count="70">
-              <img src="./static/scrub/comb/035.webp" width="768" height="512" draggable="false"
-                   alt="The comb fill at the selected BFS level, one color per provisional label."/>
-            </div>
-            <input class="slider is-fullwidth is-large is-info scrub-slider"
-                   id="comb-slider" aria-label="BFS level of the comb fill"
-                   step="1" min="0" max="69" value="35" type="range">
-            <p class="slider-readout"></p>
-          </div>
-          <div class="column is-3 has-text-centered">
-            <img src="./static/scrub/comb_end.webp" class="interpolation-image"
-                 width="768" height="512" alt="The comb after the merge, one color for the whole blob."/>
-            <p>End: one label</p>
-          </div>
-        </div>
-        <!--/ Comb merge. -->
-
-        <!-- CPU vs GPU. -->
-        <h3 class="title is-4">The CPU walks, the GPU sweeps</h3>
-        <div class="content has-text-justified">
-          <p>
-            The same 8000&nbsp;×&nbsp;8000 square, filled by one CPU core and by the GPU of chapters 1 to 3, on one shared clock.
-            Each lane stops at the time measured for it in one benchmark session; the fill in between is modeled.
-          </p>
-          <p>
-            One block is only 1.9× faster than the CPU, and two blocks 3.9×.
-            With all 24 SMs the GPU finishes in 134&nbsp;ms, 15.3× faster than the CPU's 2,041&nbsp;ms.
-          </p>
-        </div>
-        <video class="race-video" controls muted loop playsinline preload="none"
-               width="1080" height="1362" poster="./static/images/race_poster.webp"
-               aria-label="Four lanes fill the same square on one clock: one CPU core, then the GPU with one block, two blocks and 48 blocks. The 48-block lane finishes first, at 134 ms; the CPU finishes last, at 2,041 ms.">
-          <source src="./static/videos/race.mp4" type="video/mp4">
+    <!-- Pixels. -->
+    <div id="pixels" class="story-block">
+      <p class="story-kicker">Chapters 0 and 1</p>
+      <h2 class="title is-3">One Pixel per Step</h2>
+      <p class="story-line">
+        A CPU paints one pixel, queues its red neighbors, and repeats.
+        One GPU block of 256 threads paints a whole ring per step.
+      </p>
+        <video class="iso-video" controls muted loop playsinline preload="none"
+               width="1520" height="600" poster="./static/images/iso_cpu_gpu.webp"
+               aria-label="The same blob on two floors. On the left one CPU core paints one pixel per step. On the right one GPU block paints a whole ring per step and finishes in 25 steps.">
+          <source src="./static/videos/iso_cpu_gpu.mp4" type="video/mp4">
         </video>
-        <p class="scrub-note">
-          The video plays 6× slower than real time. GPU lanes show kernel time; the CPU lane is the whole call, allocation included.
-        </p>
-        <p class="scrub-note mt-2">
-          Size matters. At a million pixels one block is still slower than the CPU (0.75-0.81×), and it wins in every committed run only from 16 million pixels.
-        </p>
-        <!--/ CPU vs GPU. -->
-      </div>
+      <p class="clip-note">The same blob, recorded from both. A step is one loop iteration, not a time.</p>
+        <p class="stat"><span class="stat-number">25 steps</span><span class="stat-text">instead of 478</span></p>
+        <!-- snippet:bfs_level:start -->
+<figure class="code-block">
+<pre><code><span class="k">while</span> <span class="n">front</span> <span class="o">&lt;</span> <span class="n">rear</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">front</span> <span class="o">+</span> <span class="n">tid</span><span class="p">,</span> <span class="n">rear</span><span class="p">,</span> <span class="n">nthreads</span><span class="p">):</span>
+        <span class="n">pixel</span> <span class="o">=</span> <span class="n">ring</span><span class="p">[</span><span class="n">i</span> <span class="o">&amp;</span> <span class="n">RING_MASK</span><span class="p">]</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">pixel</span> <span class="o">//</span> <span class="n">height</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">pixel</span> <span class="o">%</span> <span class="n">height</span>
+        <span class="n">depth</span><span class="p">[</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">level</span>
+        <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">):</span>
+            <span class="n">nx</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">dx</span><span class="p">[</span><span class="n">d</span><span class="p">]</span>
+            <span class="n">ny</span> <span class="o">=</span> <span class="n">y</span> <span class="o">+</span> <span class="n">dy</span><span class="p">[</span><span class="n">d</span><span class="p">]</span>
+            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">nx</span> <span class="o">&lt;</span> <span class="n">width</span> <span class="ow">and</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">ny</span> <span class="o">&lt;</span> <span class="n">height</span> <span class="ow">and</span> <span class="n">_is_red</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">cuda</span><span class="o">.</span><span class="n">atomic</span><span class="o">.</span><span class="n">cas</span><span class="p">(</span><span class="n">visited</span><span class="p">,</span> <span class="p">(</span><span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">ticket</span> <span class="o">=</span> <span class="n">cuda</span><span class="o">.</span><span class="n">atomic</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">s_rear</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">ticket</span> <span class="o">-</span> <span class="n">front</span> <span class="o">&lt;</span> <span class="n">RING_CAPACITY</span><span class="p">:</span>
+                        <span class="n">ring</span><span class="p">[</span><span class="n">ticket</span> <span class="o">&amp;</span> <span class="n">RING_MASK</span><span class="p">]</span> <span class="o">=</span> <span class="n">nx</span> <span class="o">*</span> <span class="n">height</span> <span class="o">+</span> <span class="n">ny</span>
+    <span class="n">cuda</span><span class="o">.</span><span class="n">syncthreads</span><span class="p">()</span>  <span class="c1"># all enqueues + final s_rear for this level visible</span>
+    <span class="n">level</span> <span class="o">+=</span> <span class="mi">1</span></code></pre>
+<figcaption><a href="../src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/kernels.py" data-repo-path="src/flood_fill_cuda/chapters/ch01_gpu_1blob_1block/kernels.py#L132">ch01_gpu_1blob_1block/kernels.py, line 132</a></figcaption>
+</figure>
+<!-- snippet:bfs_level:end -->
+        <p class="code-note">Chapter 1's kernel. Every thread takes pixels of the ring, claims a red neighbor with one compare-and-swap, and all threads meet at a barrier.</p>
+      <p class="honest">On a blob this small the CPU is still faster. One block wins only from about 16 million pixels.</p>
     </div>
-    <!--/ Watching. -->
+    <!--/ Pixels. -->
+
+    <!-- Blocks. -->
+    <div id="blocks" class="story-block">
+      <p class="story-kicker">Chapters 2 and 3</p>
+      <h2 class="title is-3">The Whole GPU</h2>
+      <p class="story-line">
+        One block uses one of the GPU's 24 SMs.
+        Chapter 3 runs 48 blocks on all of them, sharing one queue.
+        Stepping diagonally too halves the levels.
+      </p>
+        <video class="iso-video" controls muted loop playsinline preload="none"
+               width="1520" height="600" poster="./static/images/iso_blocks.webp"
+               aria-label="One blob filled twice by 8 blocks, one color per block. With 4 neighbors the wave is a diamond and takes 43 levels. With 8 neighbors it is a square and takes 26.">
+          <source src="./static/videos/iso_blocks.mp4" type="video/mp4">
+        </video>
+      <p class="clip-note">One color per block. On a blob this small only 3 or 4 of the 8 blocks get work: a ring must be wide to feed them all.</p>
+        <p class="stat"><span class="stat-number">15.3×</span><span class="stat-text">one CPU core on a 64 megapixel blob: 134 ms against 2,041 ms</span></p>
+    </div>
+    <!--/ Blocks. -->
+
+    <!-- Seeds. -->
+    <div id="seeds" class="story-block">
+      <p class="story-kicker">Chapters 4 and 5</p>
+      <h2 class="title is-3">No Seeds Given</h2>
+      <p class="story-line">
+        So far someone had to say where each blob starts.
+        Chapter 5 starts a wave at every candidate pixel and lets colliding waves merge.
+      </p>
+        <video class="iso-video" controls muted loop playsinline preload="none"
+               width="960" height="640" poster="./static/images/iso_merge.webp"
+               aria-label="A U-shaped blob. Two waves in two colors start at the tips of the arms and meet in the bridge. Then the whole blob takes one color.">
+          <source src="./static/videos/iso_merge.mp4" type="video/mp4">
+        </video>
+      <p class="clip-note">Two waves meet in the bridge of the U. One atomic min keeps the smaller label.</p>
+        <!-- snippet:union:start -->
+<figure class="code-block">
+<pre><code><span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">_find</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">_find</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">a</span> <span class="o">&lt;</span> <span class="n">b</span><span class="p">:</span>
+        <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">b</span><span class="p">,</span> <span class="n">a</span>
+    <span class="n">old</span> <span class="o">=</span> <span class="n">cuda</span><span class="o">.</span><span class="n">atomic</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">old</span> <span class="o">==</span> <span class="n">a</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">old</span></code></pre>
+<figcaption><a href="../src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/kernels.py" data-repo-path="src/flood_fill_cuda/chapters/ch05_gpu_nblob_nblock/kernels.py#L205">ch05_gpu_nblob_nblock/kernels.py, line 205</a></figcaption>
+</figure>
+<!-- snippet:union:end -->
+        <p class="code-note">Chapter 5's union. No locks, and the smallest label of a blob always survives.</p>
+        <p class="stat"><span class="stat-number">755,577 blobs</span><span class="stat-text">in 24.8 ms, on 16 megapixels of noise, in one launch</span></p>
+    </div>
+    <!--/ Seeds. -->
 
     <!-- Tiles. -->
-    <div class="columns is-centered" id="tiles">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Tiles, Not Pixels</h2>
-        <div class="content has-text-justified">
-          <p>
-            Chapters 1 to 5 spread one pixel per level, and every level ends at grid-wide barriers.
-            Chapter 3 pays two of them per level: 8,002 on a 64-megapixel square.
-          </p>
-          <p>
-            Chapter 7 keeps the BFS and changes its step.
-            It cuts the image into tiles of 32&nbsp;×&nbsp;32 pixels, and one warp of 32 threads takes a tile.
-            Each thread holds one row of the tile as 32 bits in a register.
-          </p>
-          <p>
-            The warp fills along the rows, the diagonals and the columns until nothing changes.
-            Only the tile's border bits go on, into the tiles around it, and those tiles join the next round.
-            Today's kernel needs one barrier per round.
-          </p>
-        </div>
-        <figure class="figure-block">
-          <video class="tile-video" controls muted loop playsinline preload="none"
-                 width="1552" height="812" poster="./static/images/tiles_ab.webp"
-                 aria-label="Two panes on one step counter. On the left a pixel BFS stays a small square in the middle. On the right the tile BFS crosses the whole square in 127 rounds.">
-            <source src="./static/videos/tiles_ab.mp4" type="video/mp4">
-          </video>
-          <figcaption>
-            <p>Both panes advance one step per frame, on a solid 8000&nbsp;×&nbsp;8000 square. Right: the tile BFS, each tile colored by the round that first reached it, as the kernel recorded it.</p>
-            <p>Left: a pixel BFS after the same number of steps, drawn from its level rule. When the tiles are done, the pixel wave has filled 0.10% of the square, and it needs 4,001 levels.</p>
-          </figcaption>
-        </figure>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">sq_8000: a 64&nbsp;Mpx square, one blob, 8 neighbors. One session, kernel time. Chapter 3 runs at its best grid, 72 blocks of 256 threads.</caption>
-            <thead>
-              <tr>
-                <th scope="col"></th>
-                <th scope="col" class="num">Chapter 3, pixels</th>
-                <th scope="col" class="num">Chapter 7, tiles</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>BFS steps</td><td class="num">4,001</td><td class="num">127</td></tr>
-              <tr><td>Time</td><td class="num">70.56 ms</td><td class="num"><strong>3.107 ms</strong></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="scrub-note">
-          Tiles beat the pixel BFS by 22.7×.
-        </p>
-
-        <h3 class="title is-4 mt-5">Many blobs: pieces and waves</h3>
-        <div class="content has-text-justified">
-          <p>
-            Chapter 8 labels many blobs the same way.
-            First every tile finds the blob pieces inside it, in registers, all tiles at once.
-          </p>
-          <p>
-            Some pieces are seeds.
-            Each seed sends a wave from piece to piece, one round at a time.
-            Where two waves meet, the meeting is noted, and at the end each blob keeps its smallest label.
-          </p>
-        </div>
-        <figure class="figure-block">
-          <video class="tile-video is-square" controls muted loop playsinline preload="none"
-                 width="768" height="812" poster="./static/images/waves_poster.webp"
-                 aria-label="A crop of the test image is cut into tiles and pieces. Seed pieces take a color each, the colors spread from piece to piece over five rounds, and at the end every blob has one color.">
-            <source src="./static/videos/waves.mp4" type="video/mp4">
-          </video>
-          <figcaption>
-            <p>A 384-pixel crop of the test image, one recorded run: 135 pieces, 36 seeds, 8 blobs.</p>
-            <p>Which wave claims a piece is a race, so the colors can differ from run to run. The rounds and the final labels cannot.</p>
-          </figcaption>
-        </figure>
-        <div class="content has-text-justified">
-          <p>
-            On the whole 81-megapixel image that is 36,863 pieces, 11,609 seeds and 6 rounds.
-          </p>
-        </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs. RGB in, recolored in place. One session, kernel time, medians.</caption>
-            <thead>
-              <tr>
-                <th scope="col">BFS</th>
-                <th scope="col" class="num">Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>Chapter 5, one pixel per step</td><td class="num">47.06 ms</td></tr>
-              <tr><td>Chapter 8, tile waves</td><td class="num"><strong>2.403 ms</strong></td></tr>
-              <tr><td>Chapter 8, its first version</td><td class="num">2.378 ms</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="content has-text-justified">
-          <p>
-            Memory sets the floor.
-            The RGB image is 243&nbsp;MB, and reading it once at the read peak measured on this GPU, 212.6&nbsp;GB/s, takes 1.14&nbsp;ms.
-            Chapter 8's pack kernel, its one full read of the image, takes 1.18&nbsp;ms.
-          </p>
-        </div>
-      </div>
+    <div id="tiles" class="story-block">
+      <p class="story-kicker">Chapter 7</p>
+      <h2 class="title is-3">Tiles, Not Pixels</h2>
+      <p class="story-line">
+        Every step so far moved one pixel and ended at a grid-wide barrier.
+        Chapter 7 keeps the BFS and makes the step a tile of 32&nbsp;×&nbsp;32 pixels.
+        One warp of 32 threads closes a tile in registers: each thread holds one row as 32 bits.
+      </p>
+        <video class="iso-video" controls muted loop playsinline preload="none"
+               width="960" height="640" poster="./static/images/iso_tile.webp"
+               aria-label="One tile of 32 by 32 pixels. A few entry pixels on one edge spread along the rows, then diagonally, then along the columns, sweep after sweep, until all 543 red pixels are reached.">
+          <source src="./static/videos/iso_tile.mp4" type="video/mp4">
+        </video>
+      <p class="clip-note">One real tile of the test image, sweep by sweep, replayed on the GPU by the kernel's own functions.</p>
+        <!-- snippet:row_fill:start -->
+<figure class="code-block">
+<pre><code><span class="n">g</span> <span class="o">=</span> <span class="n">f</span>
+<span class="n">p</span> <span class="o">=</span> <span class="n">m</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">g</span> <span class="o">|</span> <span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">g</span> <span class="o">&lt;&lt;</span> <span class="n">S1</span><span class="p">)))</span>
+<span class="n">p</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">p</span> <span class="o">&lt;&lt;</span> <span class="n">S1</span><span class="p">))</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">g</span> <span class="o">|</span> <span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">g</span> <span class="o">&lt;&lt;</span> <span class="n">S2</span><span class="p">)))</span>
+<span class="n">p</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">p</span> <span class="o">&lt;&lt;</span> <span class="n">S2</span><span class="p">))</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">g</span> <span class="o">|</span> <span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">g</span> <span class="o">&lt;&lt;</span> <span class="n">S4</span><span class="p">)))</span>
+<span class="n">p</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">p</span> <span class="o">&lt;&lt;</span> <span class="n">S4</span><span class="p">))</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">g</span> <span class="o">|</span> <span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">g</span> <span class="o">&lt;&lt;</span> <span class="n">S8</span><span class="p">)))</span>
+<span class="n">p</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">p</span> <span class="o">&lt;&lt;</span> <span class="n">S8</span><span class="p">))</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">g</span> <span class="o">|</span> <span class="p">(</span><span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">g</span> <span class="o">&lt;&lt;</span> <span class="n">S16</span><span class="p">)))</span></code></pre>
+<figcaption><a href="../src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/kernels.py" data-repo-path="src/flood_fill_cuda/chapters/ch07_gpu_1blob_tiles/kernels.py#L198">ch07_gpu_1blob_tiles/kernels.py, line 198</a></figcaption>
+</figure>
+<!-- snippet:row_fill:end -->
+        <p class="code-note">Filling along a row takes five steps. <code>f</code> is the row's reached bits and <code>m</code> its red bits, so a bit travels through red pixels only.</p>
+        <video class="iso-video" controls muted loop playsinline preload="none"
+               width="1520" height="600" poster="./static/images/iso_tiles_ab.webp"
+               aria-label="Two floors on one step counter. On the left a pixel BFS is still one small box in the middle. On the right the tile BFS has covered the whole window of 41 by 41 tiles.">
+          <source src="./static/videos/iso_tiles_ab.mp4" type="video/mp4">
+        </video>
+      <p class="clip-note">A window of 41&nbsp;×&nbsp;41 tiles on a solid square. Right: as recorded. Left: a pixel BFS after the same number of steps, drawn from its level rule.</p>
+        <p class="stat"><span class="stat-number">127 rounds</span><span class="stat-text">instead of 4,001 levels: 3.107 ms against 70.56 ms on a 64 megapixel blob</span></p>
     </div>
     <!--/ Tiles. -->
 
+    <!-- Waves. -->
+    <div id="waves" class="story-block">
+      <p class="story-kicker">Chapter 8</p>
+      <h2 class="title is-3">Many Blobs on Tiles</h2>
+      <p class="story-line">
+        Each tile finds the blob pieces inside it.
+        Some pieces are seeds and send a wave from piece to piece.
+        Where two waves meet, the smallest label wins.
+      </p>
+        <video class="iso-video" controls muted loop playsinline preload="none"
+               width="960" height="700" poster="./static/images/iso_waves.webp"
+               aria-label="A crop of the test image cut into tiles. Seed pieces take a color each, the colors spread from piece to piece over five rounds, and at the end every blob has one color.">
+          <source src="./static/videos/iso_waves.mp4" type="video/mp4">
+        </video>
+      <p class="clip-note">A 384-pixel crop of the test image, one recorded run, drawn at a quarter of its resolution.</p>
+        <p class="stat"><span class="stat-number">2.40 ms</span><span class="stat-text">for 81 megapixels and 2,522 blobs, from RGB. Chapter 5's pixel BFS took 47.06 ms.</span></p>
+    </div>
+    <!--/ Waves. -->
+
     <!-- Same image. -->
-    <div class="columns is-centered" id="chain">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Every Stage on the Same Image</h2>
-        <div class="content has-text-justified">
-          <p>
-            Every stage ran on the same image, input_blobs.png: 81 million pixels and 2,522 red blobs.
-          </p>
-          <p>
-            Pure Python, given the seeds, needs 24,083&nbsp;ms.
-            Compiled CPU code (Numba @njit) needs 1,346&nbsp;ms.
-            Chapter 5 needs 51.03&nbsp;ms and chapter 8 needs 2.40&nbsp;ms.
-          </p>
-          <p>
-            The chart shows orders of magnitude, not one ratio.
-            Its two ends are different contracts: the pure-Python bar is a single run from RGB on the host clock, and the GPU bars are kernel time.
-          </p>
-          <p>
-            The like-for-like pair comes from chapter 9, in one session.
-            One CPU core labels the image in 271.5&nbsp;ms and the GPU in 2.23&nbsp;ms by kernel time, 122×.
-            With the copies to and from the GPU it takes 49.3&nbsp;ms, 5.5×.
-          </p>
-        </div>
-        <figure class="figure-block">
-          <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
+    <div id="chain" class="story-block">
+      <h2 class="title is-3">Every Stage on One Image</h2>
+      <figure class="figure-block">
+        <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
 <!-- figure:chain:start -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 342" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-chain-title" aria-describedby="fig-chain-desc">
 <title id="fig-chain-title">Every BFS stage on input_blobs.png</title>
@@ -806,225 +448,126 @@
 <text x="716.0" y="288.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">not a BFS</text>
 </svg>
 <!-- figure:chain:end -->
-          </div>
-          <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
-          <figcaption>
-            <p>Chapters 1 to 3 fill one seeded blob per launch, so this image costs them 2,522 launches; chapter 4 fills two, so 1,261. Their bars are estimates, priced from six sample launches each.</p>
-            <p>That launch count is why more blocks do not help here. The tag at the right of each bar is the chapter's fastest variant on this image; for chapter 2 that is dirsplit, although the plain global queue won at 36&nbsp;Mpx.</p>
-            <p>The last two bars come from a later session, timed with CUDA events, which measured chapter 5 at 47.06&nbsp;ms instead of 51.03&nbsp;ms. Chapter 7 fills one seeded blob, so it has no bar on this image.</p>
-          </figcaption>
-        </figure>
-      </div>
+        </div>
+        <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
+      </figure>
+      <p class="story-line">
+        The chart shows orders of magnitude, not one ratio: the Python bar is a host-clock run, the GPU bars are kernel time.
+      </p>
+      <p class="honest">
+        Like for like, in one session: one CPU core takes 271.5&nbsp;ms and the GPU 2.23&nbsp;ms by kernel time, 122×.
+        With the copies to and from the GPU it is 49.3&nbsp;ms, 5.5×.
+        The bars of chapters 1 to 4 are estimates: those kernels fill one or two blobs per launch.
+      </p>
     </div>
     <!--/ Same image. -->
 
     <!-- CPU. -->
-    <div class="columns is-centered" id="cpu">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Back to the CPU</h2>
-        <div class="content has-text-justified">
-          <p>
-            Every CPU number above uses one core.
-            Chapter 9 asks the fair question: the same tiles on all 16 CPU threads of the laptop, as compiled parallel loops with no atomics.
-          </p>
-          <p>
-            The method came first.
-            On the square, tiles on one thread are already 12.2× faster than the one-core BFS, and 16 threads add 4.18×.
-          </p>
-        </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">One session, medians in milliseconds, 8 neighbors. The GPU side is chapter 7 on the square and the serpentine, and chapter 8's first version on the image. Copies are pageable, in and out.</caption>
-            <thead>
-              <tr>
-                <th scope="col">Scene</th>
-                <th scope="col" class="num">One core</th>
-                <th scope="col" class="num">Chapter 9, 16 threads</th>
-                <th scope="col" class="num">GPU, kernel time</th>
-                <th scope="col" class="num">GPU, with copies</th>
-                <th scope="col">Faster, kernel time</th>
-                <th scope="col">Faster, with copies</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>64&nbsp;Mpx square, one blob</td><td class="num">1,087.4</td><td class="num"><strong>21.29</strong></td><td class="num">3.411</td><td class="num">40.31</td><td>GPU, 6.24×</td><td>CPU, 1.89×</td></tr>
-              <tr><td>input_blobs.png, 81&nbsp;Mpx</td><td class="num">271.5</td><td class="num"><strong>21.06</strong></td><td class="num">2.232</td><td class="num">49.30</td><td>GPU, 9.43×</td><td>CPU, 2.34×</td></tr>
-              <tr><td>256&nbsp;×&nbsp;256 serpentine</td><td class="num">0.470</td><td class="num">0.214</td><td class="num">2.962</td><td class="num">3.698</td><td>CPU, 13.8×</td><td>CPU, 17.3×</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="content has-text-justified">
-          <p>
-            By kernel time the GPU still leads on the big scenes.
-            When the image starts and ends in host memory, the copies alone cost more than the CPU's whole run, and the CPU wins both.
-          </p>
-          <p>
-            A corridor one tile wide leaves one tile in the front per round.
-            Such a serpentine belongs to the CPU at any thread count.
-          </p>
-        </div>
-      </div>
+    <div id="cpu" class="story-block">
+      <p class="story-kicker">Chapter 9</p>
+      <h2 class="title is-3">Was One Core Fair?</h2>
+      <p class="story-line">
+        Chapter 9 runs the same tiles on all 16 CPU threads.
+        Each thread owns the memory it writes, so there are no atomics.
+      </p>
+        <!-- snippet:prange:start -->
+<figure class="code-block">
+<pre><code><span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">prange</span><span class="p">(</span><span class="n">nch</span><span class="p">):</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">n</span> <span class="o">*</span> <span class="n">c</span> <span class="o">//</span> <span class="n">nch</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">n</span> <span class="o">*</span> <span class="p">(</span><span class="n">c</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="n">nch</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">_expand_pixels</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">visited</span><span class="p">,</span> <span class="n">front</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">raw</span><span class="p">,</span> <span class="n">k</span> <span class="o">*</span> <span class="n">a</span><span class="p">,</span>
+                       <span class="n">c</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">conn8</span><span class="p">)</span>
+    <span class="n">counts</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span></code></pre>
+<figcaption><a href="../src/flood_fill_cuda/chapters/ch09_cpu_nthreads/kernels.py" data-repo-path="src/flood_fill_cuda/chapters/ch09_cpu_nthreads/kernels.py#L512">ch09_cpu_nthreads/kernels.py, line 512</a></figcaption>
+</figure>
+<!-- snippet:prange:end -->
+        <p class="code-note">Chapter 9: each chunk of the front goes to one thread.</p>
+        <p class="stat"><span class="stat-number">21.06 ms</span><span class="stat-text">for the 81 megapixel image on 16 threads</span></p>
+      <p class="honest">By kernel time the GPU is 9.43× faster. Counting the copies to and from the GPU, the CPU wins by 2.34×.</p>
     </div>
     <!--/ CPU. -->
 
     <!-- Libraries. -->
-    <div class="columns is-centered" id="libraries">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Against the Libraries</h2>
-        <div class="content has-text-justified">
-          <p>
-            Chapters 1 to 9 compare the GPU with code written in this project.
-            One session runs the same work through two libraries:
-            <a href="https://docs.opencv.org/4.x/d3/dc0/group__imgproc__shape.html">OpenCV's connectedComponents</a> on the CPU and
-            <a href="https://docs.cupy.dev/en/stable/reference/generated/cupyx.scipy.ndimage.label.html">CuPy's ndimage.label</a> on the GPU.
-          </p>
-          <p>
-            Each column is one contract, and numbers compare only inside a column.
-            A label map is a full 32-bit image, 324&nbsp;MB here.
-          </p>
+    <div id="libraries" class="story-block">
+      <h2 class="title is-3">Against the Libraries</h2>
+      <p class="story-line">
+        The same work through OpenCV on the CPU and CuPy on the GPU, in one session.
+      </p>
+      <figure class="figure-block">
+        <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
+<!-- figure:libs:start -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 282" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-libs-title" aria-describedby="fig-libs-desc">
+<title id="fig-libs-title">The project beside OpenCV and CuPy on input_blobs.png</title>
+<desc id="fig-libs-desc">RGB in, label map out - input_blobs.png, 81 Mpx, one session; 1; 10; 100; 1s; milliseconds (log); one-core BFS (reference); 309 ms; CPU; OpenCV · 1 thread; 175 ms; CPU; OpenCV · 16 threads; 110 ms; CPU; ch08 · with the copies; 59.98 ms; GPU, host to host; ch09 · 16 threads; 38.42 ms; CPU; CuPy; 22.43 ms; GPU; ch08 · tile waves; 3.64 ms; GPU</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">RGB in, label map out - input_blobs.png, 81 Mpx, one session</text>
+<line x1="168.0" y1="28" x2="168.0" y2="242" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="168.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1</text>
+<line x1="320.0" y1="28" x2="320.0" y2="242" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="320.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">10</text>
+<line x1="472.0" y1="28" x2="472.0" y2="242" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="472.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">100</text>
+<line x1="624.0" y1="28" x2="624.0" y2="242" stroke-width="1" stroke-opacity="0.22" class="fig-grid-s" />
+<text x="624.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" text-anchor="middle" font-weight="400" class="fig-muted">1s</text>
+<text x="396.0" y="274.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" text-anchor="middle" font-weight="400" class="fig-muted">milliseconds (log)</text>
+<text x="158.0" y="47.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">one-core BFS (reference)</text>
+<rect x="168" y="35" width="378.5" height="16" rx="2.5" class="fig-grid" />
+<text x="554.5" y="48.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">309 ms</text>
+<text x="716.0" y="48.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">CPU</text>
+<text x="158.0" y="77.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">OpenCV · 1 thread</text>
+<rect x="168" y="65" width="340.9" height="16" rx="2.5" class="fig-grid" />
+<text x="516.9" y="78.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">175 ms</text>
+<text x="716.0" y="78.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">CPU</text>
+<text x="158.0" y="107.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">OpenCV · 16 threads</text>
+<rect x="168" y="95" width="310.1" height="16" rx="2.5" class="fig-grid" />
+<text x="486.1" y="108.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">110 ms</text>
+<text x="716.0" y="108.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">CPU</text>
+<text x="158.0" y="137.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch08 · with the copies</text>
+<rect x="168" y="125" width="270.3" height="16" rx="2.5" class="fig-amber" />
+<text x="446.3" y="138.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">59.98 ms</text>
+<text x="716.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">GPU, host to host</text>
+<text x="158.0" y="167.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch09 · 16 threads</text>
+<rect x="168" y="155" width="240.8" height="16" rx="2.5" class="fig-blue" />
+<text x="416.8" y="168.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">38.42 ms</text>
+<text x="716.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">CPU</text>
+<text x="158.0" y="197.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">CuPy</text>
+<rect x="168" y="185" width="205.3" height="16" rx="2.5" class="fig-grid" />
+<text x="381.3" y="198.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">22.43 ms</text>
+<text x="716.0" y="198.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">GPU</text>
+<text x="158.0" y="227.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" text-anchor="end" font-weight="400" class="fig-muted">ch08 · tile waves</text>
+<rect x="168" y="215" width="85.3" height="16" rx="2.5" class="fig-teal" />
+<text x="261.3" y="228.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" text-anchor="start" font-weight="400" class="fig-ink">3.64 ms</text>
+<text x="716.0" y="228.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" text-anchor="end" font-weight="400" class="fig-muted">GPU</text>
+</svg>
+<!-- figure:libs:end -->
         </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs, 8 neighbors. One session, every output checked against the reference. GPU rows are kernel time. An empty cell means the code has no such contract.</caption>
-            <thead>
-              <tr>
-                <th scope="col"></th>
-                <th scope="col" class="num">Mask in, label map out</th>
-                <th scope="col" class="num">RGB in, label map out</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>The one-core BFS of chapters 1 to 8 (the reference)</td><td class="num"></td><td class="num">309.0 ms</td></tr>
-              <tr><td>OpenCV, 1 thread</td><td class="num">119.5 ms</td><td class="num">174.9 ms</td></tr>
-              <tr><td>OpenCV, 16 threads</td><td class="num">59.34 ms</td><td class="num">109.7 ms</td></tr>
-              <tr><td>Chapter 9 (CPU), 1 thread</td><td class="num"></td><td class="num">146.0 ms</td></tr>
-              <tr><td>Chapter 9 (CPU), 16 threads</td><td class="num"></td><td class="num">38.42 ms</td></tr>
-              <tr><td>CuPy (GPU)</td><td class="num">15.10 ms</td><td class="num">22.43 ms</td></tr>
-              <tr><td>Chapter 6 (GPU)</td><td class="num">2.784 ms</td><td class="num"></td></tr>
-              <tr><td>Chapter 8 (GPU)</td><td class="num"><strong>2.487 ms</strong></td><td class="num"><strong>3.639 ms</strong></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="content">
-          <ul class="measure-list">
-            <li>Against a GPU library: chapter 8 is 6.1× faster than CuPy from a mask and 6.2× from RGB.</li>
-            <li>Against OpenCV on 16 threads: chapter 8 is 24× faster from a mask and 30× from RGB, in GPU time.</li>
-            <li>With the copies: a host image to a host label map through chapter 8 takes 59.98&nbsp;ms. That is 1.8× faster than OpenCV on 16 threads and 1.6× slower than chapter 9.</li>
-            <li>On the CPU: chapter 9 on 16 threads is 2.9× faster than OpenCV on 16. On one thread it is 1.2× faster.</li>
-            <li>The old baseline: the one-core BFS is 1.8× slower than OpenCV's one thread on this image, and 6.7× slower on a solid 64&nbsp;Mpx square. A "× the CPU" in chapters 1 to 8 is against that BFS, not against the best CPU code.</li>
-          </ul>
-        </div>
-        <div class="content has-text-justified">
-          <p>
-            The project also loses, or only ties, in that session.
-          </p>
-          <ul class="measure-list">
-            <li>On 16&nbsp;Mpx of noise, OpenCV on 16 threads (24.83&nbsp;ms from RGB) beats chapter 9 (27.63&nbsp;ms). On one thread it is twice as fast.</li>
-            <li>On the same noise, chapter 6 (6.033&nbsp;ms) is barely ahead of CuPy (7.342&nbsp;ms).</li>
-            <li>On the 1&nbsp;Mpx image the copies decide: chapter 8 end to end takes 1.61&nbsp;ms, OpenCV 1.154&nbsp;ms and chapter 9 0.735&nbsp;ms.</li>
-            <li>Chapter 6 beats chapter 8 on the solid square, 2.357 against 2.738&nbsp;ms.</li>
-          </ul>
-        </div>
-      </div>
+        <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
+      </figure>
+      <ul class="short-list">
+        <li>In GPU time, chapter 8 is 6.2× faster than CuPy and 30× faster than OpenCV on 16 threads.</li>
+        <li>With the copies, it is 1.8× faster than OpenCV and 1.6× slower than chapter 9 on the CPU.</li>
+        <li>On pixel noise OpenCV wins: 24.83&nbsp;ms on 16 threads against chapter 9's 27.63&nbsp;ms.</li>
+      </ul>
     </div>
     <!--/ Libraries. -->
 
-    <!-- Runs. -->
-    <div class="columns is-centered" id="runs">
-      <div class="column is-full-width">
-        <h2 class="title is-3">The Reference That Is Not a BFS</h2>
-        <div class="content has-text-justified">
+    <!-- More. -->
+    <div id="more" class="story-block">
+      <h2 class="title is-3">The Fine Print</h2>
+      <details class="more">
+        <summary>Chapter 6: the reference that is not a BFS</summary>
+        <div class="content mt-3">
           <p>
-            Chapter 6 asks a different question: why move pixels at all?
-            It drops the wavefront.
-            A run is one unbroken span of red inside a row, and the test image has 13.45 million red pixels but only 539,207 runs.
+            Chapter 6 drops the wavefront. It labels runs, unbroken spans of red in a row, with a union-find: connected-component labeling, not a search.
           </p>
           <p>
-            Chapter 6 builds a table of runs, joins the runs that touch across rows with a union-find, and paints.
-            This is connected-component labeling (CCL), not a search: it has no levels, no frontier and no barrier.
-          </p>
-        </div>
-        <figure class="figure-block">
-          <div class="figure-scroll" role="group" tabindex="0" aria-label="Chart, scrolls sideways on narrow screens">
-<!-- figure:runs_vs_pixels:start -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 159" role="img" class="figure-svg" focusable="false" aria-labelledby="fig-runs_vs_pixels-title" aria-describedby="fig-runs_vs_pixels-desc">
-<title id="fig-runs_vs_pixels-title">Pixels versus runs</title>
-<desc id="fig-runs_vs_pixels-desc">input_blobs.png - how many things must the algorithm handle?; all pixels; 81,000,000; red pixels; 13,451,960; runs  ← ch06 works here; 539,207; blobs; 2,522</desc><text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" text-anchor="start" font-weight="600" class="fig-ink">input_blobs.png - how many things must the algorithm handle?</text>
-<text x="156.0" y="49.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">all pixels</text>
-<rect x="168" y="34" width="456.0" height="21" rx="3" class="fig-grid" />
-<text x="633.0" y="49.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">81,000,000</text>
-<text x="156.0" y="83.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">red pixels</text>
-<rect x="168" y="68" width="75.7" height="21" rx="3" class="fig-red" />
-<text x="252.7" y="83.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">13,451,960</text>
-<text x="156.0" y="117.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">runs  ← ch06 works here</text>
-<rect x="168" y="102" width="3.0" height="21" rx="3" class="fig-teal" />
-<text x="180.0" y="117.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">539,207</text>
-<text x="156.0" y="151.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" text-anchor="end" font-weight="400" class="fig-muted">blobs</text>
-<rect x="168" y="136" width="2.0" height="21" rx="3" class="fig-blue" />
-<text x="179.0" y="151.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" text-anchor="start" font-weight="400" class="fig-ink">2,522</text>
-</svg>
-<!-- figure:runs_vs_pixels:end -->
-          </div>
-          <p class="figure-hint" aria-hidden="true">Swipe the chart sideways to see all of it.</p>
-        </figure>
-        <figure class="figure-block">
-          <img class="before-after" src="./static/images/before_after.webp" width="1536" height="380" loading="lazy"
-               alt="Left, a crop of the real input image with red blobs on white. Right, the same crop after the chapter 6 kernel, each blob painted in one of six colors."/>
-          <figcaption>
-            Left, a crop of the real input. Right, the same crop after the chapter 6 kernel ran on the whole image.
-            The paint has only six colors, so unrelated blobs can share one; the label map keeps each blob's identity.
-          </figcaption>
-        </figure>
-        <div class="content has-text-justified">
-          <p>
-            It stays here because it is a strong yardstick for the tiles.
+            It is a strong yardstick. On the test image it ties with chapter 8 once both read the image with the same kernel (0.982), and on a solid 64&nbsp;Mpx square it wins, 2.252&nbsp;ms against chapter 7's 3.107&nbsp;ms.
+            See <a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
+                   data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md">chapter 6's own story</a>.
           </p>
         </div>
-        <div class="table-container">
-          <table class="table is-fullwidth is-hoverable">
-            <caption class="has-text-left is-size-6 mb-2">input_blobs.png, 81&nbsp;Mpx, 2,522 blobs. One session, kernel time, medians. Each ratio is the median of nine per-round ratios, so it need not equal the ratio of the two medians.</caption>
-            <thead>
-              <tr>
-                <th scope="col">Pipeline</th>
-                <th scope="col" class="num">Chapter 6, runs</th>
-                <th scope="col" class="num">Chapter 8, tiles</th>
-                <th scope="col" class="num">Chapter 8 / chapter 6</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>RGB in, recolored in place</td><td class="num">2.567 ms</td><td class="num">2.403 ms</td><td class="num">0.890</td></tr>
-              <tr><td>The same, chapter 6 with chapter 8's pack kernel</td><td class="num">2.402 ms</td><td class="num">2.403 ms</td><td class="num">0.982</td></tr>
-              <tr><td>Labeling only, no pack and no paint</td><td class="num">0.505 ms</td><td class="num">0.408 ms</td><td class="num">0.807</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="content has-text-justified">
-          <p>
-            Most of chapter 8's lead is its pack kernel, which reads the RGB image in 1.18&nbsp;ms against chapter 6's 1.45&nbsp;ms.
-            Chapter 6 can use that kernel too, and then the two tie.
-            The labeling alone is where the waves lead.
-          </p>
-          <p>
-            Chapter 6 still wins in places.
-            On the solid 64&nbsp;Mpx square it takes 2.252&nbsp;ms against chapter 7's 3.107&nbsp;ms.
-            Chapter 8 takes 1.546× its time on a lattice with a zigzag on every tile border, and 1.459× on input_blocks.png, a 1-megapixel image.
-          </p>
-          <p>
-            In its own chapter and session it reads 2.96&nbsp;ms from RGB and 1.46&nbsp;ms from a mask already packed to one bit per pixel.
-            The full account is in
-            <a href="../src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md"
-               data-repo-path="src/flood_fill_cuda/chapters/ch06_gpu_nblob_runs/README.md">chapter 6's own story</a>.
-          </p>
-        </div>
-      </div>
-    </div>
-    <!--/ Runs. -->
-
-    <!-- Measurement. -->
-    <div class="columns is-centered" id="method">
-      <div class="column is-full-width">
-        <h2 class="title is-3">How the Numbers Were Measured</h2>
-        <div class="content">
+      </details>
+      <details class="more">
+        <summary>How the numbers were measured</summary>
+        <div class="content mt-3">
           <ul class="measure-list">
             <li>One machine: an NVIDIA GeForce RTX 4060 Laptop GPU with 24 SMs and an Intel Core i9-13900H, under WSL2 with 16 CPU threads.</li>
             <li>Correctness comes first. Every kernel is checked against a CPU reference built with Numba @njit. The tests compare depth maps or label maps, not pixel counts.</li>
@@ -1036,14 +579,9 @@
             <li>Every result is a committed JSON file under <code>src/flood_fill_cuda/results/</code>.</li>
           </ul>
         </div>
-      </div>
-    </div>
-    <!--/ Measurement. -->
-
-    <!-- Related. -->
-    <div class="columns is-centered">
-      <div class="column is-full-width">
-        <h2 class="title is-3">Related Links</h2>
+      </details>
+      <details class="more">
+        <summary>Related work</summary>
         <div class="content has-text-justified">
           <p>
             Breadth-first search on the GPU goes back to
@@ -1087,9 +625,12 @@
             Every kernel is written in Python with <a href="https://numba.readthedocs.io/en/stable/cuda/index.html">Numba for CUDA GPUs</a>.
           </p>
         </div>
-      </div>
+      </details>
+      <p class="story-line mt-4">
+        Every table, every loss and every session is in <a href="./full.html">the long version of this page</a>.
+      </p>
     </div>
-    <!--/ Related. -->
+    <!--/ More. -->
 
   </div>
 </section>

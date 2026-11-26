@@ -38,7 +38,7 @@ from pathlib import Path
 PAGE = Path(__file__).resolve().parents[1]
 REPO = PAGE.parent
 FIGURES = REPO / "src/flood_fill_cuda/results/ch06_gpu_nblob_runs/figures"
-INDEX = PAGE / "index.html"
+PAGES = [p for p in (PAGE / "index.html", PAGE / "full.html") if p.exists()]
 
 SVG_NS = "http://www.w3.org/2000/svg"
 TEXT = f"{{{SVG_NS}}}text"
@@ -59,6 +59,7 @@ ROLES = {
 # Figure name -> its source SVG.
 SOURCES = {
     "chain": Path(__file__).resolve().parent / "chain_bfs.svg",
+    "libs": Path(__file__).resolve().parent / "libs.svg",
     "runs_vs_pixels": FIGURES / "runs_vs_pixels.svg",
 }
 NAMES = list(SOURCES)
@@ -153,18 +154,23 @@ def themed_svg(name: str) -> str:
 
 
 def main() -> None:
-    html = INDEX.read_text(encoding="utf-8")
-    for name in NAMES:
-        pattern = re.compile(
-            rf"(<!-- figure:{name}:start -->)(.*?)(<!-- figure:{name}:end -->)",
-            re.S,
-        )
-        if not pattern.search(html):
-            sys.exit(f"index.html has no markers for figure '{name}'")
-        svg = themed_svg(name)
-        html = pattern.sub(lambda m: f"{m.group(1)}\n{svg}\n{m.group(3)}", html)
-        print(f"inlined {name}.svg ({len(svg):,} chars)")
-    INDEX.write_text(html, encoding="utf-8")
+    """Inline every figure a page has markers for. index.html is the short
+    page and full.html the long one; they do not carry the same figures."""
+    for page in PAGES:
+        html = page.read_text(encoding="utf-8")
+        done = []
+        for name in NAMES:
+            pattern = re.compile(
+                rf"(<!-- figure:{name}:start -->)(.*?)(<!-- figure:{name}:end -->)",
+                re.S,
+            )
+            if not pattern.search(html):
+                continue
+            svg = themed_svg(name)
+            html = pattern.sub(lambda m: f"{m.group(1)}\n{svg}\n{m.group(3)}", html)
+            done.append(f"{name} ({len(svg):,} chars)")
+        page.write_text(html, encoding="utf-8")
+        print(f"{page.name}: inlined {', '.join(done) or 'nothing'}")
 
 
 if __name__ == "__main__":

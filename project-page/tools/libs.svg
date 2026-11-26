@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="282" viewBox="0 0 720 282" role="img" aria-label="The project beside OpenCV and CuPy on input_blobs.png">
+<title>The project beside OpenCV and CuPy on input_blobs.png</title>
+<text x="0.0" y="16.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#adbac7" text-anchor="start" font-weight="600">RGB in, label map out - input_blobs.png, 81 Mpx, one session</text>
+<line x1="168.0" y1="28" x2="168.0" y2="242" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="168.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">1</text>
+<line x1="320.0" y1="28" x2="320.0" y2="242" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="320.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">10</text>
+<line x1="472.0" y1="28" x2="472.0" y2="242" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="472.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">100</text>
+<line x1="624.0" y1="28" x2="624.0" y2="242" stroke="#8b949e" stroke-width="1" stroke-opacity="0.22"/>
+<text x="624.0" y="258.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10" fill="#7d8590" text-anchor="middle" font-weight="400">1s</text>
+<text x="396.0" y="274.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#7d8590" text-anchor="middle" font-weight="400">milliseconds (log)</text>
+<text x="158.0" y="47.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">one-core BFS (reference)</text>
+<rect x="168" y="35" width="378.5" height="16" rx="2.5" fill="#8b949e"/>
+<text x="554.5" y="48.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">309 ms</text>
+<text x="716.0" y="48.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">CPU</text>
+<text x="158.0" y="77.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">OpenCV · 1 thread</text>
+<rect x="168" y="65" width="340.9" height="16" rx="2.5" fill="#8b949e"/>
+<text x="516.9" y="78.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">175 ms</text>
+<text x="716.0" y="78.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">CPU</text>
+<text x="158.0" y="107.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">OpenCV · 16 threads</text>
+<rect x="168" y="95" width="310.1" height="16" rx="2.5" fill="#8b949e"/>
+<text x="486.1" y="108.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">110 ms</text>
+<text x="716.0" y="108.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">CPU</text>
+<text x="158.0" y="137.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch08 · with the copies</text>
+<rect x="168" y="125" width="270.3" height="16" rx="2.5" fill="#d99a2b"/>
+<text x="446.3" y="138.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">59.98 ms</text>
+<text x="716.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">GPU, host to host</text>
+<text x="158.0" y="167.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch09 · 16 threads</text>
+<rect x="168" y="155" width="240.8" height="16" rx="2.5" fill="#4c8fd6"/>
+<text x="416.8" y="168.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">38.42 ms</text>
+<text x="716.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">CPU</text>
+<text x="158.0" y="197.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">CuPy</text>
+<rect x="168" y="185" width="205.3" height="16" rx="2.5" fill="#8b949e"/>
+<text x="381.3" y="198.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">22.43 ms</text>
+<text x="716.0" y="198.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">GPU</text>
+<text x="158.0" y="227.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#7d8590" text-anchor="end" font-weight="400">ch08 · tile waves</text>
+<rect x="168" y="215" width="85.3" height="16" rx="2.5" fill="#2aa198"/>
+<text x="261.3" y="228.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#adbac7" text-anchor="start" font-weight="400">3.64 ms</text>
+<text x="716.0" y="228.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#7d8590" text-anchor="end" font-weight="400">GPU</text>
+</svg>

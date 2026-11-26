@@ -1,0 +1,103 @@
+{
+  "facts": {
+    "blob": {
+      "size": [
+        36,
+        36
+      ],
+      "seed": [
+        18,
+        18
+      ],
+      "red_pixels": 478,
+      "levels_4": 25,
+      "levels_8": 15,
+      "ch01": {
+        "threads_per_block": 256,
+        "levels": 25
+      },
+      "ch03": {
+        "blocks": 8,
+        "threads_per_block": 32,
+        "levels": 25,
+        "blocks_that_worked": 2,
+        "pixels_per_block": [
+          461,
+          17,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "ch03_conn8": {
+        "levels": 15,
+        "blocks_that_worked": 2
+      }
+    },
+    "big": {
+      "size": [
+        64,
+        64
+      ],
+      "seed": [
+        32,
+        32
+      ],
+      "red_pixels": 1511,
+      "levels_4": 43,
+      "levels_8": 26,
+      "ch03": {
+        "blocks": 8,
+        "threads_per_block": 32,
+        "blocks_that_worked": 3,
+        "pixels_per_block": [
+          1082,
+          410,
+          19,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "ch03_conn8": {
+        "blocks_that_worked": 4,
+        "pixels_per_block": [
+          717,
+          497,
+          272,
+          25,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "u": {
+      "size": [
+        36,
+        30
+      ],
+      "red_pixels": 400,
+      "blobs": 1,
+      "candidates": 2,
+      "unions": 1,
+      "levels": 22,
+      "provisional_labels": 2
+    }
+  },
+  "checks": {
+    "cpu order covers the blob": true,
+    "ch01 depth equals the oracle": true,
+    "ch03 depth equals the oracle": true,
+    "ch03 8-neighbour depth equals the oracle": true,
+    "ch03 depth on the big blob equals the oracle": true,
+    "ch03 8-neighbour depth on the big blob equals the oracle": true,
+    "ch05 labels equal the oracle": true
+  }
+}

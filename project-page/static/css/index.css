@@ -973,3 +973,225 @@ input[type="range"].slider:focus-visible {
 .tile-video.is-square {
   max-width: 560px;
 }
+
+/* ---- the short page: one idea per block ---- */
+
+.lede {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.5;
+  color: var(--fg);
+  max-width: 44rem;
+  margin: 0 auto 1.25rem;
+}
+
+.story-block {
+  margin-top: 4.5rem;
+}
+
+.story-kicker {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.story-line {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  max-width: 46rem;
+  margin-bottom: 1.25rem;
+}
+
+.clip-note,
+.code-note,
+.honest {
+  font-size: 0.9rem;
+  color: var(--muted);
+  max-width: 46rem;
+  margin-top: 0.5rem;
+}
+
+.honest {
+  border-left: 3px solid var(--item-border);
+  padding-left: 0.75rem;
+  margin-top: 1rem;
+}
+
+.code-note code {
+  background: var(--code-bg);
+  color: var(--code-fg);
+}
+
+/* 3D clips: the video's dark stage, on any theme */
+.iso-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 12px;
+  background: #0b0f14;
+}
+
+/* one big number per block */
+.stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.9rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.stat-number {
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--heading);
+  white-space: nowrap;
+}
+
+.stat-text {
+  font-size: 1.05rem;
+  color: var(--muted);
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 2rem;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--item-border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.stat-tile .stat-number {
+  font-size: 2rem;
+}
+
+.stat-tile .stat-text {
+  font-size: 0.9rem;
+}
+
+.stat-tile.is-loss {
+  border-style: dashed;
+  background: transparent;
+}
+
+/* the ten chapters as a strip of steps */
+.chain-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.6rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chain-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--item-border);
+  border-radius: 10px;
+}
+
+.chain-step a {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.chain-step a:hover {
+  color: var(--link);
+}
+
+.chain-num {
+  display: inline-block;
+  min-width: 1.4em;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.chain-why {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.chain-step.is-aside {
+  border-style: dashed;
+}
+
+/* code from the kernels, highlighted at build time (Pygments classes) */
+.code-block {
+  margin: 1.25rem 0 0;
+}
+
+.code-block pre {
+  background: #0b0f14;
+  color: #e6edf3;
+  border-radius: 12px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.code-block pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+}
+
+.code-block figcaption {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  margin-top: 0.35rem;
+  text-align: right;
+}
+
+.code-block .k, .code-block .kn, .code-block .ow, .code-block .kc { color: #ff7b72; }
+.code-block .nb, .code-block .bp, .code-block .mi, .code-block .mf, .code-block .mh { color: #79c0ff; }
+.code-block .nf, .code-block .nn { color: #d2a8ff; }
+.code-block .c1, .code-block .c { color: #8b949e; font-style: italic; }
+.code-block .s1, .code-block .s2 { color: #a5d6ff; }
+.code-block .o, .code-block .p { color: #c9d1d9; }
+
+.short-list {
+  list-style: disc;
+  padding-left: 1.25rem;
+  max-width: 46rem;
+}
+
+.short-list li + li {
+  margin-top: 0.4rem;
+}
+
+details.more {
+  border-top: 1px solid var(--hairline);
+  padding: 0.75rem 0;
+}
+
+details.more summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--heading);
+}
+
+.story-block .iso-video {
+  margin-top: 1.25rem;
+}

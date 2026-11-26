@@ -5,7 +5,7 @@ script writes:
 
 - static/videos/explainer.en.vtt: one cue per sentence or clause, timed
   on the narration's own word times;
-- the transcript in index.html, between the markers
+- the transcript in index.html and full.html, between the markers
   <!-- transcript:start --> and <!-- transcript:end -->: one paragraph
   per beat, a line on what the screen shows (SHOWS below, written by
   hand from video/HANDOFF.md) and then the narration.
@@ -50,7 +50,7 @@ SCRIPT = VIDEO / "narration" / "script_chain.md"
 VOICE = VIDEO / "out" / "kokoro_paced_chain"
 CONCAT = VIDEO / "out" / "work_chain_iso_gl_landscape_kokoro_paced" / "concat.txt"
 VTT = PAGE / "static" / "videos" / "explainer.en.vtt"
-INDEX = PAGE / "index.html"
+PAGES = [p for p in (PAGE / "index.html", PAGE / "full.html") if p.exists()]
 
 # The clip that holds two beats; every other clip holds the beat it is named after.
 CLIP_BEATS = {"intro": ["i0_problem", "i1_compare"]}
@@ -205,13 +205,14 @@ def main() -> None:
             sys.exit(f"no SHOWS line for beat {name}")
         paragraphs.append(f"          <p><em>{html.escape(SHOWS[name], quote=False)}</em> "
                           f"{html.escape(text, quote=False)}</p>")
-    page = INDEX.read_text(encoding="utf-8")
     pattern = re.compile(r"(<!-- transcript:start -->\n)(.*?)(<!-- transcript:end -->)", re.S)
-    if not pattern.search(page):
-        sys.exit("index.html has no transcript markers")
     block = "\n".join(paragraphs) + "\n"
-    INDEX.write_text(pattern.sub(lambda m: m.group(1) + block + m.group(3), page), encoding="utf-8")
-    print(f"index.html: transcript of {len(paragraphs)} beats")
+    for path in PAGES:                       # the short page and the long one
+        page = path.read_text(encoding="utf-8")
+        if not pattern.search(page):
+            sys.exit(f"{path.name} has no transcript markers")
+        path.write_text(pattern.sub(lambda m: m.group(1) + block + m.group(3), page), encoding="utf-8")
+        print(f"{path.name}: transcript of {len(paragraphs)} beats")
 
 
 if __name__ == "__main__":
